@@ -7,7 +7,7 @@
 ---
 
 ## 1. Executive Summary & Note
-**Book Keeper** is a lightweight, offline-first desktop accounting and inventory management application designed for a small retail shop. It replaces complex, bloated enterprise billing software (e.g., VedBill) with a streamlined, fast, and reliable workflow focused on core operational realities: tracking inward stock purchases, outward sales, customer/vendor credit dues, inventory valuation using **FIFO (First-In, First-Out)**, and instant low-stock visibility.
+**Book Keeper** is a lightweight, offline-first desktop accounting and inventory management application designed for a small retail shop. It replaces complex, bloated enterprise billing software with a streamlined, fast, and reliable workflow focused on core operational realities: tracking inward stock purchases, outward sales, customer/vendor credit dues, bill-level partial payments, inventory valuation using **FIFO (First-In, First-Out)**, and instant low-stock visibility.
 
 The system runs locally on a Windows laptop without requiring any standalone database servers or continuous internet connectivity. It uses an embedded relational database (SQLite) ensuring data portability, zero maintenance, simple file-copy backups, and standard schema evolution.
 
@@ -19,11 +19,11 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 
 * **FR-01: Inward Stock & Purchase Management**
   * The user can record purchases of items into stock with item name, quantity, unit cost (₹), purchase date, and optional vendor details.
-  * The user can specify whether the purchase was paid immediately in **Cash** or bought on **Credit** (payable later).
+  * The user can specify the payment status: **Cash** (`PAID`), **Credit** (`UNPAID`), or **Partial** (`PARTIAL`) with an upfront `paid_amount` and remaining `balance_due`.
 * **FR-02: Outward Sales Management**
   * The user can record sales of items with quantity, selling price (₹), sale date, and optional customer details.
   * The user can record multi-item sales under a single transaction (cart-style billing).
-  * The user can specify whether the sale was paid in **Cash** or taken on **Credit** (due later).
+  * The user can specify the payment status: **Cash** (`PAID`), **Credit** (`UNPAID`), or **Partial** (`PARTIAL`) with an upfront `paid_amount` and remaining `balance_due`.
 * **FR-03: Strict FIFO Stock Depletion**
   * When an item is sold, the system automatically depletes inventory from the **oldest available purchase batch** (First-In, First-Out).
   * When inventory for an item spans multiple batches with different purchase costs, the system splits depletion across batches and calculates the exact Cost of Goods Sold (COGS).
@@ -33,9 +33,9 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * The system flags any item as "Low Stock" when its total aggregated stock across all batches drops below **5 units** (`current_stock < 5`).
   * Low stock items are surfaced on the Home / Dashboard screen.
 * **FR-06: Symmetrical Credit & Dues Management**
-  * **Customer Receivables**: The user can view total outstanding dues owed by customers from credit sales.
-  * **Vendor Payables**: The user can view total outstanding dues owed by the shop to suppliers from credit purchases.
-  * **Due Settlement**: The user can mark credit transactions as settled (`PAID`) with a dedicated settlement log recording the exact date money was received/paid.
+  * **Customer Receivables**: The user can view total outstanding dues owed by customers ($\sum \text{balance\_due}$ on unpaid and partial sales).
+  * **Vendor Payables**: The user can view total outstanding dues owed by the shop to suppliers ($\sum \text{balance\_due}$ on unpaid and partial purchases).
+  * **Due Settlement**: The user can record subsequent payments against specific bills. Each settlement decreases `balance_due` and logs the exact settlement date for daily cash register balancing.
 * **FR-07: Returns & Replacements**
   * **Customer Sales Return**: Returning sold items for cash refunds or credit due reduction, with restockable items re-entering inventory.
   * **Defective Item Replacement**: Swapping a defective sold item with a fresh one without disrupting monetary ledgers.
@@ -68,7 +68,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **NFR-03: Transaction Immutability & Audit Integrity**
   * Transactions cannot be deleted or overwritten once committed. Corrections and reversals must occur via formal returns, settlements, or stock adjustments.
 * **NFR-04: Clean Schema Evolution**
-  * Future schema enhancements (e.g., taxes, discounts, brands) are introduced via explicit, typed migrations (`ALTER TABLE ADD COLUMN`) rather than untyped JSON blobs, preserving clean 1-to-1 Excel/CSV mappings.
+  * Future schema enhancements are introduced via explicit, typed migrations (`ALTER TABLE ADD COLUMN`) rather than untyped JSON blobs, preserving clean 1-to-1 Excel/CSV mappings.
 * **NFR-05: Modularity & Pluggable Stock Strategy**
   * The inventory allocation engine is decoupled such that the depletion strategy (currently FIFO) can be swapped for LIFO or Weighted Average without database restructuring.
 
@@ -81,19 +81,20 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 2. **Party Management**: Directory for Customers and Vendors (Name, Phone, Notes); completely optional for walk-in transactions.
 3. **Purchases (Inward Batches)**: Multi-item purchase entry, tracking remaining quantities per line for FIFO stock lots.
 4. **Sales (Outward Billing)**: Multi-item sales entry, auto-depleting oldest purchase lots, preventing negative stock.
-5. **Credit & Settlements**: Binary `PAID` / `UNPAID` status on transactions; dedicated `PaymentSettlement` records capturing the exact settlement date for daily cash register balancing.
-6. **Returns & Swaps**: Customer returns, defective swaps, and vendor returns.
-7. **Physical Stock Adjustments**: Fast item lookup for damaged/expired write-offs.
-8. **Reports & Dashboard**: Low-stock widget ($< 5$), Total Stock Value, Customer Dues, Vendor Dues, Period-based Sales & Purchases (Day/Week/Month/Year), Net Profit calculation.
-9. **Import / Export**: CSV/Excel support for Items and Transactions.
-10. **Local Backup**: Direct database snapshot copy to local or removable drive.
-11. **Shop Profile**: 1-row configuration table storing shop details for future invoice printing.
+5. **Bill-Level Partial Payments**: Support for Cash, Credit, or Partial payments with upfront `paid_amount` and tracked `balance_due`.
+6. **Due Settlements**: Dedicated `PaymentSettlement` records capturing date-accurate cash inflows and outflows as credit is cleared over time.
+7. **Returns & Swaps**: Customer returns, defective swaps, and vendor returns.
+8. **Physical Stock Adjustments**: Fast item lookup for damaged/expired write-offs.
+9. **Reports & Dashboard**: Low-stock widget ($< 5$), Total Stock Value, Customer Dues, Vendor Dues, Period-based Sales & Purchases (Day/Week/Month/Year), Net Profit calculation.
+10. **Import / Export**: CSV/Excel support for Items and Transactions.
+11. **Local Backup**: Direct database snapshot copy to local or removable drive.
+12. **Shop Profile**: 1-row configuration table storing shop details for future invoice printing.
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Cloud Backups & Remote Synchronization**: Cloud sync (Google Drive, AWS S3, or remote API) is deferred; v1 is strictly local-first.
-2. **Partial Payments & Split Tenders**: Split payments (e.g., ₹200 Cash + ₹300 Credit on the same bill) or incremental balance payments are deferred. In v1, a transaction is either 100% Cash or 100% Credit, and settlements clear specific bills in full.
+2. **Item-Level Partial Payments**: Partial payments are handled strictly at the bill/transaction level; mapping partial money to individual line items is out of scope.
 3. **Complex Multi-Tier Tax Engine**: Comprehensive Indian GST slabs (CGST, SGST, IGST), HSN-based automated tax reports, and e-way bill generation.
-4. **Pricing Tiers**: Wholesale, distributor, and customer-specific price rules (VedBill multi-price toggle).
+4. **Pricing Tiers**: Wholesale, distributor, and customer-specific price rules.
 5. **Back-Ordering & Negative Stock**: Sales when physical or entered stock is $\le 0$.
 6. **Transaction Deletion**: Hard deletion of historical transaction records.
 7. **Multi-Store / Multi-Branch**: Centralized inventory across multiple physical locations.
@@ -104,12 +105,13 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 ## 4. Key Assumptions & Decisions
 
 1. **Currency**: All monetary values are strictly denominated in **Indian Rupees (₹)**.
-2. **Manual Delayed Entry**: The shopkeeper may make physical cash/credit sales first and enter records into the system at the end of the day or when convenient.
-3. **Stock Valuation Formula**:
+2. **Bill-Level Partial Payments**: A transaction has `payment_status` as `PAID` (fully paid), `PARTIAL` (partially paid upfront), or `UNPAID` (full credit). Subsequent settlements reduce `balance_due` until 0. Money is fungible; partial payments apply to the total bill, never to specific individual items.
+3. **Manual Delayed Entry**: The shopkeeper may make physical cash/credit sales first and enter records into the system at the end of the day or when convenient.
+4. **Stock Valuation Formula**:
    $$\text{Total Stock Value} = \sum_{\text{active lots}} (\text{Remaining Quantity} \times \text{Batch Unit Cost})$$
-4. **Universal Low Stock Level**: An item is considered running low when its total physical stock across all available batches is strictly less than **5 units** (`current_stock < 5`).
-5. **Optional Parties**: Retail cash customers or petty-cash supplier runs do not require customer/vendor profile creation; `party_id` is nullable.
-6. **Settlement Cash Flow Integrity**: Modifying an unpaid transaction's status to `PAID` must be paired with a `PAYMENT_SETTLEMENT` entry bearing the current date, guaranteeing that daily cash drawer totals reflect actual cash collected that day.
+5. **Universal Low Stock Level**: An item is considered running low when its total physical stock across all available batches is strictly less than **5 units** (`current_stock < 5`).
+6. **Optional Parties**: Retail cash customers or petty-cash supplier runs do not require customer/vendor profile creation; `party_id` is nullable.
+7. **Settlement Cash Flow Integrity**: Every payment received or made to clear dues is recorded in `PAYMENT_SETTLEMENT` with the settlement date, guaranteeing that daily cash drawer totals reflect actual cash collected that day.
 
 ---
 
@@ -117,52 +119,38 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 
 ![System Architecture](images/system_architecture.svg)
 
-<details>
-<summary><b>View System Architecture Flowchart (Mermaid)</b></summary>
-
 ```mermaid
 flowchart TD
-    subgraph UI ["Desktop User Interface (Windows)"]
-        Dashboard["Home Dashboard<br/>- Low Stock Alerts (&lt; 5)<br/>- Stock Valuation (₹)<br/>- Dues (Receivables/Payables)<br/>- Revenue &amp; Profit"]
-        SalesModule["Sales Billing Screen<br/>- Multi-Item Cart<br/>- Cash vs Credit<br/>- Optional Customer"]
-        PurchaseModule["Purchase Entry Screen<br/>- Inward Batches<br/>- Cost &amp; Supplier<br/>- Cash vs Credit"]
-        SettlementModule["Dues &amp; Settlements<br/>- Customer Dues List<br/>- Vendor Payables List<br/>- 1-Click Settlement"]
-        ReturnModule["Returns &amp; Adjustments<br/>- Customer Returns / Swaps<br/>- Vendor Returns<br/>- Stock Adjustments"]
-        ReportsModule["Reports &amp; Analytics<br/>- Day / Week / Month / Year<br/>- Excel/CSV Export"]
+    subgraph UI ["Windows Desktop UI"]
+        Home["Home Dashboard<br/>(Low Stock &lt; 5, Total Stock Value, Dues, Sales)"]
+        PurchaseScreen["Add Purchase<br/>(Item, Qty, Cost, Cash/Credit/Partial)"]
+        SaleScreen["Add Sale<br/>(Item, Qty, Price, Cash/Credit/Partial)"]
+        ReportsScreen["Reports<br/>(Day / Week / Month / Year)"]
     end
 
-    subgraph CoreEngine ["Local Business Logic Layer"]
-        StockValidator["Stock Validator<br/>(Prevents Negative Stock)"]
-        FIFOEngine["FIFO Depletion Engine<br/>(Depletes Oldest Inward Batches)"]
-        MetricsAggregator["Financial Aggregator<br/>(COGS, Profit, Valuations)"]
-        SettlementManager["Settlement &amp; Cash Manager"]
-        BackupEngine["Backup &amp; CSV Parser"]
+    subgraph Logic ["Business Logic"]
+        FIFO["FIFO Engine<br/>(Finds oldest purchase with remaining_qty &gt; 0)"]
+        StockCheck["Stock Validator<br/>(Prevents negative stock)"]
+        Aggregator["Metrics Calculator<br/>(Stock Value, Receivables, Payables, Profit)"]
+        SettlementManager["Settlement Manager<br/>(Clears Partial &amp; Credit Dues)"]
     end
 
-    subgraph LocalStorage ["Embedded Storage (SQLite: shop.db)"]
-        T_Item[("Item<br/>(Cached Stock, Low Stock Flag)")]
+    subgraph DB ["Local Embedded SQLite (shop.db)"]
+        T_Item[("Item<br/>(Stock &amp; Low Stock Flag)")]
         T_Party[("Party<br/>(Customers &amp; Vendors)")]
-        T_Purchase[("PurchaseTransaction<br/>&amp; PurchaseItem (FIFO Lots)")]
-        T_Sale[("SaleTransaction<br/>&amp; SaleItem")]
-        T_Alloc[("SaleStockAllocation<br/>(FIFO Audit &amp; COGS)")]
+        T_Purchase[("Purchase<br/>(Transaction Header &amp; FIFO Lots)")]
+        T_Sale[("Sale<br/>(Transaction Header &amp; Lines)")]
+        T_Depletion[("SaleStockAllocation<br/>(FIFO Audit &amp; Cost Tracking)")]
         T_Settlement[("PaymentSettlement<br/>(Date-Accurate Cash Logs)")]
-        T_Return[("ReturnTransaction<br/>&amp; ReturnItem")]
-        T_Adjustment[("StockAdjustment<br/>(Damaged/Audit Logs)")]
-        T_Setting[("ShopSetting<br/>(Shop Profile &amp; Invoicing)")]
     end
 
-    SalesModule --> StockValidator --> FIFOEngine --> T_Sale
-    FIFOEngine --> T_Alloc
-    FIFOEngine -.->|Deducts remaining_qty| T_Purchase
-    PurchaseModule --> T_Purchase
-    SettlementModule --> SettlementManager --> T_Settlement
-    ReturnModule --> T_Return
-    ReturnModule --> T_Adjustment
-    LocalStorage --> MetricsAggregator --> Dashboard
-    LocalStorage --> ReportsModule
-    BackupEngine -.-> LocalDisk["Local Disk / USB Backup (.bak / .sqlite)"]
+    PurchaseScreen --> T_Purchase
+    SaleScreen --> StockCheck --> FIFO --> T_Sale
+    FIFO --> T_Depletion
+    FIFO -.->|Deducts remaining_qty| T_Purchase
+    ReportsScreen --> Aggregator
+    DB --> Aggregator --> Home
 ```
-</details>
 
 ---
 
@@ -171,9 +159,6 @@ flowchart TD
 ### 6.1. Entity-Relationship Diagram
 
 ![Entity Relationship Diagram](images/entity_relationship_diagram.svg)
-
-<details>
-<summary><b>View Entity-Relationship Diagram (Mermaid)</b></summary>
 
 ```mermaid
 erDiagram
@@ -195,46 +180,48 @@ erDiagram
     ITEM ||--o{ RETURN_ITEM : "returned_as"
     ITEM ||--o{ STOCK_ADJUSTMENT : "adjusted_via"
 
-    PURCHASE_TRANSACTION ||--|{ PURCHASE_ITEM : "contains"
-    PURCHASE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "cleared_by"
+    PURCHASE_TRANSACTION ||--|{ PURCHASE_ITEM : "has_lines"
+    PURCHASE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "settled_by"
     PURCHASE_TRANSACTION ||--o{ RETURN_TRANSACTION : "returned_via"
 
-    SALE_TRANSACTION ||--|{ SALE_ITEM : "contains"
-    SALE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "cleared_by"
+    SALE_TRANSACTION ||--|{ SALE_ITEM : "has_lines"
+    SALE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "settled_by"
     SALE_TRANSACTION ||--o{ RETURN_TRANSACTION : "returned_via"
 
     PURCHASE_ITEM ||--o{ SALE_STOCK_ALLOCATION : "depleted_by"
     SALE_ITEM ||--o{ SALE_STOCK_ALLOCATION : "allocates_from"
 
-    RETURN_TRANSACTION ||--|{ RETURN_ITEM : "contains"
+    RETURN_TRANSACTION ||--|{ RETURN_ITEM : "has_lines"
 
     ITEM {
         int id PK
-        string name "Unique Item Name"
-        string category "Category Name"
-        string barcode "Optional Barcode SKU"
-        string unit "PCS BOX KG LTR"
-        decimal default_sale_price "Standard selling rate"
-        decimal current_stock "Cached total across batches"
-        boolean is_low_stock "1 if stock under 5 else 0"
+        string name "Item Name (Unique)"
+        string category "Category"
+        string barcode "Optional Barcode"
+        string unit "PCS, BOX, KG, LTR"
+        decimal default_sale_price "Default selling rate"
+        decimal current_stock "Cached total"
+        boolean is_low_stock "1 if stock under 5"
     }
 
     PARTY {
         int id PK
         string name "Customer or Vendor Name"
-        string phone "Contact phone number"
+        string phone "Phone number"
         string party_type "CUSTOMER or VENDOR"
         string notes "Remarks"
     }
 
     PURCHASE_TRANSACTION {
         int id PK
-        string transaction_code "Unique PUR Code"
-        date transaction_date "ISO Date"
+        string transaction_code "e.g. PUR-1001"
+        date transaction_date "Date"
         int party_id FK "Optional Vendor"
         string payment_mode "CASH or CREDIT"
-        string payment_status "PAID or UNPAID"
-        decimal total_amount "Total bill amount"
+        string payment_status "PAID, PARTIAL, UNPAID"
+        decimal total_amount "Total amount"
+        decimal paid_amount "Paid upfront"
+        decimal balance_due "Remaining payable"
         string notes "Remarks"
     }
 
@@ -245,17 +232,19 @@ erDiagram
         decimal quantity "Purchased Qty"
         decimal unit_cost "Cost per unit"
         decimal total_amount "Total cost"
-        decimal remaining_quantity "Decremented by FIFO"
+        decimal remaining_quantity "Decrements via FIFO"
     }
 
     SALE_TRANSACTION {
         int id PK
-        string transaction_code "Unique SAL Code"
-        date transaction_date "ISO Date"
+        string transaction_code "e.g. SAL-1001"
+        date transaction_date "Date"
         int party_id FK "Optional Customer"
         string payment_mode "CASH or CREDIT"
-        string payment_status "PAID or UNPAID"
-        decimal total_amount "Total bill amount"
+        string payment_status "PAID, PARTIAL, UNPAID"
+        decimal total_amount "Total amount"
+        decimal paid_amount "Paid upfront"
+        decimal balance_due "Remaining due"
         string notes "Remarks"
     }
 
@@ -264,28 +253,28 @@ erDiagram
         int sale_transaction_id FK
         int item_id FK
         decimal quantity "Sold Qty"
-        decimal unit_price "Price per unit"
-        decimal total_amount "Total price"
+        decimal unit_price "Selling price"
+        decimal total_amount "Line total"
     }
 
     SALE_STOCK_ALLOCATION {
         int id PK
         int sale_item_id FK
         int purchase_item_id FK
-        decimal quantity_depleted "Consumed quantity"
-        decimal unit_cost "Cost price of batch"
+        decimal quantity_depleted "Deducted qty"
+        decimal unit_cost "Purchase cost"
     }
 
     RETURN_TRANSACTION {
         int id PK
-        string return_code "Unique RET Code"
-        date return_date "ISO Date"
+        string return_code "e.g. RET-1001"
+        date return_date "Date"
         string return_type "CUSTOMER or VENDOR"
         int party_id FK "Optional Party"
-        int original_transaction_id FK "Optional Link"
-        string settlement_type "REFUND DUE REPLACEMENT"
-        decimal total_amount "Refund or credit value"
-        string reason "Reason code"
+        int original_transaction_id FK "Optional link"
+        string settlement_type "REFUND, DUE, REPLACEMENT"
+        decimal total_amount "Total value"
+        string reason "Reason"
         string notes "Remarks"
     }
 
@@ -294,32 +283,31 @@ erDiagram
         int return_transaction_id FK
         int item_id FK
         decimal quantity "Returned Qty"
-        decimal unit_price "Unit rate"
-        decimal total_amount "Total amount"
+        decimal unit_price "Rate"
+        decimal total_amount "Amount"
         string condition "RESTOCKABLE or SCRAP"
     }
 
     PAYMENT_SETTLEMENT {
         int id PK
-        date settlement_date "ISO Date"
+        date settlement_date "Date"
         int party_id FK "Optional Party"
-        string transaction_type "Settlement Type"
-        int transaction_id FK "References Transaction"
-        decimal amount_paid "Cleared amount"
+        string transaction_type "SALE or PURCHASE"
+        int transaction_id FK "Transaction ID"
+        decimal amount_paid "Amount cleared"
         string payment_mode "CASH or BANK"
         string notes "Remarks"
     }
 
     STOCK_ADJUSTMENT {
         int id PK
-        date adjustment_date "ISO Date"
-        int item_id FK "Direct item reference"
+        date adjustment_date "Date"
+        int item_id FK "Item lookup"
         decimal quantity "Positive or Negative"
-        string reason "Reason code"
+        string reason "DAMAGED, EXPIRED, COUNT"
         string notes "Remarks"
     }
 ```
-</details>
 
 ---
 
@@ -356,9 +344,11 @@ erDiagram
 | `transaction_code` | TEXT | NOT NULL, UNIQUE | Human-readable code (e.g., "PUR-1001"). |
 | `transaction_date` | TEXT (ISO) | NOT NULL | Date purchase was recorded. |
 | `party_id` | INTEGER | NULLABLE, FK -> `PARTY(id)` | Supplier/vendor reference (null for walk-in). |
-| `payment_mode` | TEXT | CHECK IN ('CASH', 'CREDIT') | How transaction was funded. |
-| `payment_status` | TEXT | CHECK IN ('PAID', 'UNPAID') | Settlement status. |
+| `payment_mode` | TEXT | CHECK IN ('CASH', 'CREDIT') | Upfront funding mode. |
+| `payment_status` | TEXT | CHECK IN ('PAID', 'PARTIAL', 'UNPAID') | Settlement status. |
 | `total_amount` | REAL | NOT NULL | Sum of all purchase line items in ₹. |
+| `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount paid upfront in ₹. |
+| `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining payable in ₹ (`total_amount - paid_amount`). |
 | `notes` | TEXT | NULLABLE | Supplier invoice reference or remarks. |
 
 #### 4. `PURCHASE_ITEM` (The FIFO Stock Lot)
@@ -381,9 +371,11 @@ erDiagram
 | `transaction_code` | TEXT | NOT NULL, UNIQUE | Bill/Invoice number (e.g., "SAL-1001"). |
 | `transaction_date` | TEXT (ISO) | NOT NULL | Date sale was recorded. |
 | `party_id` | INTEGER | NULLABLE, FK -> `PARTY(id)` | Customer reference (null for cash walk-in). |
-| `payment_mode` | TEXT | CHECK IN ('CASH', 'CREDIT') | Cash or Credit. |
-| `payment_status` | TEXT | CHECK IN ('PAID', 'UNPAID') | Paid or Due later. |
+| `payment_mode` | TEXT | CHECK IN ('CASH', 'CREDIT') | Upfront payment mode. |
+| `payment_status` | TEXT | CHECK IN ('PAID', 'PARTIAL', 'UNPAID') | Paid, Partial, or Due later. |
 | `total_amount` | REAL | NOT NULL | Total bill value in ₹. |
+| `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount received upfront in ₹. |
+| `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining due in ₹ (`total_amount - paid_amount`). |
 | `notes` | TEXT | NULLABLE | Customer or delivery notes. |
 
 #### 6. `SALE_ITEM`
@@ -413,8 +405,9 @@ erDiagram
 * `RETURN_ITEM`: Item, returned quantity, unit price, and `condition` (`RESTOCKABLE` to re-enter stock or `DAMAGED_SCRAP`).
 
 #### 9. `PAYMENT_SETTLEMENT`
-*Logs day-of-settlement cash transactions for credit clearing.*
-* Stores `settlement_date`, `transaction_type` (`SALE_SETTLEMENT` [Cash In] or `PURCHASE_SETTLEMENT` [Cash Out]), `transaction_id`, and `amount_paid`. Ensures daily cash register reconciliation is accurate regardless of when the credit sale/purchase originated.
+*Logs subsequent partial and full settlement payments against bills.*
+* Stores `settlement_date`, `transaction_type` (`SALE_SETTLEMENT` [Cash In] or `PURCHASE_SETTLEMENT` [Cash Out]), `transaction_id`, and `amount_paid`.
+* Decrements the `balance_due` on the target transaction. When `balance_due` reaches 0, updates `payment_status` to `'PAID'`.
 
 #### 10. `STOCK_ADJUSTMENT`
 *Direct physical stock count corrections.*
@@ -432,11 +425,11 @@ erDiagram
 | :--- | :--- |
 | **Instant Low Stock List** | `SELECT * FROM ITEM WHERE is_low_stock = 1 ORDER BY current_stock ASC;` |
 | **Total Stock Valuation** | `SELECT SUM(remaining_quantity * unit_cost) FROM PURCHASE_ITEM WHERE remaining_quantity > 0;` |
-| **Customer Receivables (Dues)** | `SELECT SUM(total_amount) FROM SALE_TRANSACTION WHERE payment_status = 'UNPAID';` |
-| **Vendor Payables (Dues)** | `SELECT SUM(total_amount) FROM PURCHASE_TRANSACTION WHERE payment_status = 'UNPAID';` |
+| **Customer Receivables (Dues)** | `SELECT SUM(balance_due) FROM SALE_TRANSACTION WHERE payment_status IN ('UNPAID', 'PARTIAL');` |
+| **Vendor Payables (Dues)** | `SELECT SUM(balance_due) FROM PURCHASE_TRANSACTION WHERE payment_status IN ('UNPAID', 'PARTIAL');` |
 | **Period Sales (Gross Revenue)** | `SELECT SUM(total_amount) FROM SALE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
 | **Period Purchases** | `SELECT SUM(total_amount) FROM PURCHASE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
 | **Period COGS** | `SELECT SUM(a.quantity_depleted * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` |
 | **Period Net Profit** | $\text{Period Gross Sales} - \text{Period COGS}$ |
 | **FIFO Depletion Query** | `SELECT id, remaining_quantity, unit_cost FROM PURCHASE_ITEM WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC;` |
-| **Daily Cash Flow (Drawer Total)**| `(Cash Sales Today + Customer Settlements Today) - (Cash Purchases Today + Vendor Settlements Today + Cash Refunds Today)` |
+| **Daily Cash Flow (Drawer Total)**| `(Upfront Cash from Sales Today + Customer Settlements Today) - (Upfront Cash for Purchases Today + Vendor Settlements Today + Cash Refunds Today)` |
