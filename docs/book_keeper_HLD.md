@@ -115,35 +115,40 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 
 ## 5. System Architecture Overview
 
+![System Architecture](images/system_architecture.svg)
+
+<details>
+<summary><b>View System Architecture Flowchart (Mermaid)</b></summary>
+
 ```mermaid
 flowchart TD
     subgraph UI ["Desktop User Interface (Windows)"]
-        Dashboard["Dashboard\n- Low Stock (< 5)\n- Stock Value\n- Dues (Receivables & Payables)\n- Revenue & Profit"]
-        SalesModule["Sales Billing Screen\n- Multi-Item Cart\n- Cash vs Credit\n- Optional Customer"]
-        PurchaseModule["Purchase Entry Screen\n- Inward Batches\n- Cost & Supplier\n- Cash vs Credit"]
-        SettlementModule["Dues & Settlements\n- Customer Dues List\n- Vendor Payables List\n- 1-Click Settlement"]
-        ReturnModule["Returns & Adjustments\n- Customer Returns / Swaps\n- Vendor Returns\n- Stock Adjustments"]
-        ReportsModule["Reports & Analytics\n- Day / Week / Month / Year\n- Excel/CSV Export"]
+        Dashboard["Home Dashboard<br/>- Low Stock Alerts (&lt; 5)<br/>- Stock Valuation (₹)<br/>- Dues (Receivables/Payables)<br/>- Revenue &amp; Profit"]
+        SalesModule["Sales Billing Screen<br/>- Multi-Item Cart<br/>- Cash vs Credit<br/>- Optional Customer"]
+        PurchaseModule["Purchase Entry Screen<br/>- Inward Batches<br/>- Cost &amp; Supplier<br/>- Cash vs Credit"]
+        SettlementModule["Dues &amp; Settlements<br/>- Customer Dues List<br/>- Vendor Payables List<br/>- 1-Click Settlement"]
+        ReturnModule["Returns &amp; Adjustments<br/>- Customer Returns / Swaps<br/>- Vendor Returns<br/>- Stock Adjustments"]
+        ReportsModule["Reports &amp; Analytics<br/>- Day / Week / Month / Year<br/>- Excel/CSV Export"]
     end
 
     subgraph CoreEngine ["Local Business Logic Layer"]
-        StockValidator["Stock Validator\n(Prevents Negative Stock)"]
-        FIFOEngine["FIFO Depletion Engine\n(Depletes Oldest Inward Batches)"]
-        MetricsAggregator["Financial Aggregator\n(COGS, Profit, Valuations)"]
-        SettlementManager["Settlement & Cash Manager"]
-        BackupEngine["Backup & CSV Parser"]
+        StockValidator["Stock Validator<br/>(Prevents Negative Stock)"]
+        FIFOEngine["FIFO Depletion Engine<br/>(Depletes Oldest Inward Batches)"]
+        MetricsAggregator["Financial Aggregator<br/>(COGS, Profit, Valuations)"]
+        SettlementManager["Settlement &amp; Cash Manager"]
+        BackupEngine["Backup &amp; CSV Parser"]
     end
 
     subgraph LocalStorage ["Embedded Storage (SQLite: shop.db)"]
-        T_Item[("Item\n(Cached Stock, Low Stock Flag)")]
-        T_Party[("Party\n(Customers & Vendors)")]
-        T_Purchase[("PurchaseTransaction\n& PurchaseItem (FIFO Lots)")]
-        T_Sale[("SaleTransaction\n& SaleItem")]
-        T_Alloc[("SaleStockAllocation\n(FIFO Audit & COGS)")]
-        T_Settlement[("PaymentSettlement\n(Date-Accurate Cash Logs)")]
-        T_Return[("ReturnTransaction\n& ReturnItem")]
-        T_Adjustment[("StockAdjustment\n(Damaged/Audit Logs)")]
-        T_Setting[("ShopSetting\n(Shop Profile & Invoicing)")]
+        T_Item[("Item<br/>(Cached Stock, Low Stock Flag)")]
+        T_Party[("Party<br/>(Customers &amp; Vendors)")]
+        T_Purchase[("PurchaseTransaction<br/>&amp; PurchaseItem (FIFO Lots)")]
+        T_Sale[("SaleTransaction<br/>&amp; SaleItem")]
+        T_Alloc[("SaleStockAllocation<br/>(FIFO Audit &amp; COGS)")]
+        T_Settlement[("PaymentSettlement<br/>(Date-Accurate Cash Logs)")]
+        T_Return[("ReturnTransaction<br/>&amp; ReturnItem")]
+        T_Adjustment[("StockAdjustment<br/>(Damaged/Audit Logs)")]
+        T_Setting[("ShopSetting<br/>(Shop Profile &amp; Invoicing)")]
     end
 
     SalesModule --> StockValidator --> FIFOEngine --> T_Sale
@@ -157,12 +162,18 @@ flowchart TD
     LocalStorage --> ReportsModule
     BackupEngine -.-> LocalDisk["Local Disk / USB Backup (.bak / .sqlite)"]
 ```
+</details>
 
 ---
 
 ## 6. Entity Design & Data Model
 
 ### 6.1. Entity-Relationship Diagram
+
+![Entity Relationship Diagram](images/entity_relationship_diagram.svg)
+
+<details>
+<summary><b>View Entity-Relationship Diagram (Mermaid)</b></summary>
 
 ```mermaid
 erDiagram
@@ -176,55 +187,55 @@ erDiagram
 
     PARTY ||--o{ PURCHASE_TRANSACTION : "supplies"
     PARTY ||--o{ SALE_TRANSACTION : "places"
-    PARTY ||--o{ RETURN_TRANSACTION : "involved in"
-    PARTY ||--o{ PAYMENT_SETTLEMENT : "settles with"
+    PARTY ||--o{ RETURN_TRANSACTION : "involved_in"
+    PARTY ||--o{ PAYMENT_SETTLEMENT : "settles_with"
 
-    ITEM ||--o{ PURCHASE_ITEM : "stocked as"
-    ITEM ||--o{ SALE_ITEM : "sold as"
-    ITEM ||--o{ RETURN_ITEM : "returned as"
-    ITEM ||--o{ STOCK_ADJUSTMENT : "adjusted via"
+    ITEM ||--o{ PURCHASE_ITEM : "stocked_as"
+    ITEM ||--o{ SALE_ITEM : "sold_as"
+    ITEM ||--o{ RETURN_ITEM : "returned_as"
+    ITEM ||--o{ STOCK_ADJUSTMENT : "adjusted_via"
 
     PURCHASE_TRANSACTION ||--|{ PURCHASE_ITEM : "contains"
-    PURCHASE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "cleared by"
-    PURCHASE_TRANSACTION ||--o{ RETURN_TRANSACTION : "returned via"
+    PURCHASE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "cleared_by"
+    PURCHASE_TRANSACTION ||--o{ RETURN_TRANSACTION : "returned_via"
 
     SALE_TRANSACTION ||--|{ SALE_ITEM : "contains"
-    SALE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "cleared by"
-    SALE_TRANSACTION ||--o{ RETURN_TRANSACTION : "returned via"
+    SALE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "cleared_by"
+    SALE_TRANSACTION ||--o{ RETURN_TRANSACTION : "returned_via"
 
-    PURCHASE_ITEM ||--o{ SALE_STOCK_ALLOCATION : "depleted by"
-    SALE_ITEM ||--o{ SALE_STOCK_ALLOCATION : "allocates from"
+    PURCHASE_ITEM ||--o{ SALE_STOCK_ALLOCATION : "depleted_by"
+    SALE_ITEM ||--o{ SALE_STOCK_ALLOCATION : "allocates_from"
 
     RETURN_TRANSACTION ||--|{ RETURN_ITEM : "contains"
 
     ITEM {
         int id PK
         string name "Unique Item Name"
-        string category "e.g. Stationery, Snacks"
-        string barcode "Optional Barcode / SKU"
-        string unit "PCS, BOX, KG, LTR"
-        decimal default_sale_price "₹ Standard selling rate"
-        decimal current_stock "Cached total across active batches"
-        boolean is_low_stock "1 if current_stock < 5, else 0"
+        string category "Category Name"
+        string barcode "Optional Barcode SKU"
+        string unit "PCS BOX KG LTR"
+        decimal default_sale_price "Standard selling rate"
+        decimal current_stock "Cached total across batches"
+        boolean is_low_stock "1 if stock under 5 else 0"
     }
 
     PARTY {
         int id PK
         string name "Customer or Vendor Name"
         string phone "Contact phone number"
-        string party_type "CUSTOMER | VENDOR"
+        string party_type "CUSTOMER or VENDOR"
         string notes "Remarks"
     }
 
     PURCHASE_TRANSACTION {
         int id PK
-        string transaction_code "e.g. PUR-1001"
-        date transaction_date
+        string transaction_code "Unique PUR Code"
+        date transaction_date "ISO Date"
         int party_id FK "Optional Vendor"
-        string payment_mode "CASH | CREDIT"
-        string payment_status "PAID | UNPAID"
-        decimal total_amount "₹ Total bill amount"
-        string notes "Vendor bill remarks"
+        string payment_mode "CASH or CREDIT"
+        string payment_status "PAID or UNPAID"
+        decimal total_amount "Total bill amount"
+        string notes "Remarks"
     }
 
     PURCHASE_ITEM {
@@ -232,20 +243,20 @@ erDiagram
         int purchase_transaction_id FK
         int item_id FK
         decimal quantity "Purchased Qty"
-        decimal unit_cost "₹ Cost per unit"
-        decimal total_amount "₹ (quantity * unit_cost)"
-        decimal remaining_quantity "Decremented by FIFO sales"
+        decimal unit_cost "Cost per unit"
+        decimal total_amount "Total cost"
+        decimal remaining_quantity "Decremented by FIFO"
     }
 
     SALE_TRANSACTION {
         int id PK
-        string transaction_code "e.g. SAL-1001"
-        date transaction_date
+        string transaction_code "Unique SAL Code"
+        date transaction_date "ISO Date"
         int party_id FK "Optional Customer"
-        string payment_mode "CASH | CREDIT"
-        string payment_status "PAID | UNPAID"
-        decimal total_amount "₹ Total bill amount"
-        string notes "Customer remarks"
+        string payment_mode "CASH or CREDIT"
+        string payment_status "PAID or UNPAID"
+        decimal total_amount "Total bill amount"
+        string notes "Remarks"
     }
 
     SALE_ITEM {
@@ -253,29 +264,29 @@ erDiagram
         int sale_transaction_id FK
         int item_id FK
         decimal quantity "Sold Qty"
-        decimal unit_price "₹ Price per unit"
-        decimal total_amount "₹ (quantity * unit_price)"
+        decimal unit_price "Price per unit"
+        decimal total_amount "Total price"
     }
 
     SALE_STOCK_ALLOCATION {
         int id PK
         int sale_item_id FK
         int purchase_item_id FK
-        decimal quantity_depleted "Quantity deducted from batch"
-        decimal unit_cost "₹ Cost price of that batch"
+        decimal quantity_depleted "Consumed quantity"
+        decimal unit_cost "Cost price of batch"
     }
 
     RETURN_TRANSACTION {
         int id PK
-        string return_code "e.g. RET-1001"
-        date return_date
-        string return_type "CUSTOMER_RETURN | VENDOR_RETURN"
-        int party_id FK "Optional"
-        int original_transaction_id FK "Optional link to Sale or Purchase"
-        string settlement_type "CASH_REFUND | REDUCE_DUE | REPLACEMENT"
-        decimal total_amount "₹ Refund or Credit value"
-        string reason "DEFECTIVE | WRONG_ITEM | DAMAGED"
-        string notes
+        string return_code "Unique RET Code"
+        date return_date "ISO Date"
+        string return_type "CUSTOMER or VENDOR"
+        int party_id FK "Optional Party"
+        int original_transaction_id FK "Optional Link"
+        string settlement_type "REFUND DUE REPLACEMENT"
+        decimal total_amount "Refund or credit value"
+        string reason "Reason code"
+        string notes "Remarks"
     }
 
     RETURN_ITEM {
@@ -283,31 +294,32 @@ erDiagram
         int return_transaction_id FK
         int item_id FK
         decimal quantity "Returned Qty"
-        decimal unit_price "₹ Rate"
-        decimal total_amount "₹"
-        string condition "RESTOCKABLE | DAMAGED_SCRAP"
+        decimal unit_price "Unit rate"
+        decimal total_amount "Total amount"
+        string condition "RESTOCKABLE or SCRAP"
     }
 
     PAYMENT_SETTLEMENT {
         int id PK
-        date settlement_date "Date when payment occurred"
+        date settlement_date "ISO Date"
         int party_id FK "Optional Party"
-        string transaction_type "SALE_SETTLEMENT | PURCHASE_SETTLEMENT | RETURN_REFUND"
-        int transaction_id FK "References Sale or Purchase Transaction"
-        decimal amount_paid "₹ Amount cleared"
-        string payment_mode "CASH | BANK"
-        string notes
+        string transaction_type "Settlement Type"
+        int transaction_id FK "References Transaction"
+        decimal amount_paid "Cleared amount"
+        string payment_mode "CASH or BANK"
+        string notes "Remarks"
     }
 
     STOCK_ADJUSTMENT {
         int id PK
-        date adjustment_date
-        int item_id FK "Direct item lookup"
-        decimal quantity "Positive or Negative adjustment"
-        string reason "DAMAGED | EXPIRED | COUNT_CORRECTION"
-        string notes
+        date adjustment_date "ISO Date"
+        int item_id FK "Direct item reference"
+        decimal quantity "Positive or Negative"
+        string reason "Reason code"
+        string notes "Remarks"
     }
 ```
+</details>
 
 ---
 
