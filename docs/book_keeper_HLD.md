@@ -33,8 +33,8 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * The system flags any item as "Low Stock" when its total aggregated stock across all batches drops below **5 units** (`current_stock < 5`).
   * Low stock items are surfaced on the Home / Dashboard screen.
 * **FR-06: Symmetrical Credit & Dues Management**
-  * **Customer Receivables**: The user can view total outstanding dues owed by customers ($\sum \text{balance\_due}$ on unpaid and partial sales).
-  * **Vendor Payables**: The user can view total outstanding dues owed by the shop to suppliers ($\sum \text{balance\_due}$ on unpaid and partial purchases).
+  * **Customer Receivables**: The user can view total outstanding dues owed by customers (sum of `balance_due` on unpaid and partial sales).
+  * **Vendor Payables**: The user can view total outstanding dues owed by the shop to suppliers (sum of `balance_due` on unpaid and partial purchases).
   * **Due Settlement**: The user can record subsequent payments against specific bills. Each settlement decreases `balance_due` and logs the exact settlement date for daily cash register balancing.
 * **FR-07: Returns & Replacements**
   * **Customer Sales Return**: Returning sold items for cash refunds or credit due reduction, with restockable items re-entering inventory.
@@ -47,8 +47,8 @@ The system runs locally on a Windows laptop without requiring any standalone dat
     * Total Sales (Gross Revenue)
     * Total Purchases
     * Cash Flow (Actual cash collected vs. cash paid out)
-    * Total Stock Valuation ($\sum \text{Remaining Batch Qty} \times \text{Batch Unit Cost}$)
-    * Net Profit ($\text{Sales Revenue} - \text{COGS}$)
+    * Total Stock Valuation: Sum of (Remaining Batch Qty × Batch Unit Cost) across all active lots
+    * Net Profit: Period Gross Sales - Period COGS
 * **FR-10: Lists & Operational Views**
   * Complete, filterable lists of all Sales, all Purchases, Pending Customer Dues (Receivables), and Pending Vendor Dues (Payables).
 * **FR-11: Data Portability & Local Backup**
@@ -64,7 +64,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * Must run on a standard Windows laptop without requiring background database services (e.g., PostgreSQL, MySQL, Docker).
   * Database engine: Embedded **SQLite** (`shop.db`).
 * **NFR-02: Fast Query & Dashboard Latency**
-  * Instant load times ($< 100\text{ms}$) for the Home Screen and Low Stock widget by maintaining cached stock counts (`current_stock`) and a boolean flag (`is_low_stock`) on the item record.
+  * Instant load times (< 100ms) for the Home Screen and Low Stock widget by maintaining cached stock counts (`current_stock`) and a boolean flag (`is_low_stock`) on the item record.
 * **NFR-03: Transaction Immutability & Audit Integrity**
   * Transactions cannot be deleted or overwritten once committed. Corrections and reversals must occur via formal returns, settlements, or stock adjustments.
 * **NFR-04: Clean Schema Evolution**
@@ -85,7 +85,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 6. **Due Settlements**: Dedicated `PaymentSettlement` records capturing date-accurate cash inflows and outflows as credit is cleared over time.
 7. **Returns & Swaps**: Customer returns, defective swaps, and vendor returns.
 8. **Physical Stock Adjustments**: Fast item lookup for damaged/expired write-offs.
-9. **Reports & Dashboard**: Low-stock widget ($< 5$), Total Stock Value, Customer Dues, Vendor Dues, Period-based Sales & Purchases (Day/Week/Month/Year), Net Profit calculation.
+9. **Reports & Dashboard**: Low-stock widget (< 5 items), Total Stock Value, Customer Dues, Vendor Dues, Period-based Sales & Purchases (Day/Week/Month/Year), Net Profit calculation.
 10. **Import / Export**: CSV/Excel support for Items and Transactions.
 11. **Local Backup**: Direct database snapshot copy to local or removable drive.
 12. **Shop Profile**: 1-row configuration table storing shop details for future invoice printing.
@@ -95,7 +95,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 2. **Item-Level Partial Payments**: Partial payments are handled strictly at the bill/transaction level; mapping partial money to individual line items is out of scope.
 3. **Complex Multi-Tier Tax Engine**: Comprehensive Indian GST slabs (CGST, SGST, IGST), HSN-based automated tax reports, and e-way bill generation.
 4. **Pricing Tiers**: Wholesale, distributor, and customer-specific price rules.
-5. **Back-Ordering & Negative Stock**: Sales when physical or entered stock is $\le 0$.
+5. **Back-Ordering & Negative Stock**: Sales when physical or entered stock is <= 0.
 6. **Transaction Deletion**: Hard deletion of historical transaction records.
 7. **Multi-Store / Multi-Branch**: Centralized inventory across multiple physical locations.
 8. **Multi-User Role-Based Access Control (RBAC)**: User roles, permissions, and shift-management logins.
@@ -107,8 +107,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 1. **Currency**: All monetary values are strictly denominated in **Indian Rupees (₹)**.
 2. **Bill-Level Partial Payments**: A transaction has `payment_status` as `PAID` (fully paid), `PARTIAL` (partially paid upfront), or `UNPAID` (full credit). Subsequent settlements reduce `balance_due` until 0. Money is fungible; partial payments apply to the total bill, never to specific individual items.
 3. **Manual Delayed Entry**: The shopkeeper may make physical cash/credit sales first and enter records into the system at the end of the day or when convenient.
-4. **Stock Valuation Formula**:
-   $$\text{Total Stock Value} = \sum_{\text{active lots}} (\text{Remaining Quantity} \times \text{Batch Unit Cost})$$
+4. **Stock Valuation Formula**: Total Stock Value = Sum of (Remaining Quantity × Batch Unit Cost) across all active lots.
 5. **Universal Low Stock Level**: An item is considered running low when its total physical stock across all available batches is strictly less than **5 units** (`current_stock < 5`).
 6. **Optional Parties**: Retail cash customers or petty-cash supplier runs do not require customer/vendor profile creation; `party_id` is nullable.
 7. **Settlement Cash Flow Integrity**: Every payment received or made to clear dues is recorded in `PAYMENT_SETTLEMENT` with the settlement date, guaranteeing that daily cash drawer totals reflect actual cash collected that day.
@@ -116,8 +115,6 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 ---
 
 ## 5. System Architecture Overview
-
-![System Architecture](images/system_architecture.svg)
 
 ```mermaid
 flowchart TD
@@ -157,8 +154,6 @@ flowchart TD
 ## 6. Entity Design & Data Model
 
 ### 6.1. Entity-Relationship Diagram
-
-![Entity Relationship Diagram](images/entity_relationship_diagram.svg)
 
 ```mermaid
 erDiagram
@@ -360,7 +355,7 @@ erDiagram
 | `item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)` | Product purchased. |
 | `quantity` | REAL | NOT NULL | Initial quantity purchased. |
 | `unit_cost` | REAL | NOT NULL | Inward cost per unit in ₹. |
-| `total_amount` | REAL | NOT NULL | $quantity \times unit\_cost$ in ₹. |
+| `total_amount` | REAL | NOT NULL | quantity * unit_cost in ₹. |
 | `remaining_quantity`| REAL | NOT NULL | Stock left in this lot; decremented via FIFO sales. |
 
 #### 5. `SALE_TRANSACTION`
@@ -387,7 +382,7 @@ erDiagram
 | `item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)` | Product sold. |
 | `quantity` | REAL | NOT NULL | Quantity sold. |
 | `unit_price` | REAL | NOT NULL | Selling rate per unit in ₹. |
-| `total_amount` | REAL | NOT NULL | $quantity \times unit\_price$ in ₹. |
+| `total_amount` | REAL | NOT NULL | quantity * unit_price in ₹. |
 
 #### 7. `SALE_STOCK_ALLOCATION`
 *FIFO audit bridge recording exact batch depletion and cost allocation.*
@@ -430,6 +425,6 @@ erDiagram
 | **Period Sales (Gross Revenue)** | `SELECT SUM(total_amount) FROM SALE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
 | **Period Purchases** | `SELECT SUM(total_amount) FROM PURCHASE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
 | **Period COGS** | `SELECT SUM(a.quantity_depleted * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` |
-| **Period Net Profit** | $\text{Period Gross Sales} - \text{Period COGS}$ |
+| **Period Net Profit** | Period Gross Sales - Period COGS |
 | **FIFO Depletion Query** | `SELECT id, remaining_quantity, unit_cost FROM PURCHASE_ITEM WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC;` |
 | **Daily Cash Flow (Drawer Total)**| `(Upfront Cash from Sales Today + Customer Settlements Today) - (Upfront Cash for Purchases Today + Vendor Settlements Today + Cash Refunds Today)` |
