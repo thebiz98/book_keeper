@@ -428,3 +428,19 @@ erDiagram
 | **Period Net Profit** | Period Gross Sales - Period COGS |
 | **FIFO Depletion Query** | `SELECT id, remaining_quantity, unit_cost FROM PURCHASE_ITEM WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC;` |
 | **Daily Cash Flow (Drawer Total)**| `(Upfront Cash from Sales Today + Customer Settlements Today) - (Upfront Cash for Purchases Today + Vendor Settlements Today + Cash Refunds Today)` |
+
+---
+
+## 8. Technology Stack Decision
+
+* **Shell & Desktop Framework:** **Tauri v2**
+* **Frontend UI:** **React (TypeScript, Vite, Tailwind CSS)**
+* **Backend & Business Logic:** **Rust**
+* **Database Engine:** **Embedded SQLite (`rusqlite` / `sqlx-sqlite`)**
+* **Packaging & Distribution:** **Native Windows Executable & NSIS Installer (`.exe`)**
+
+### Rationale for Selection
+1. **Zero-Network In-Process IPC:** Communicates between React and Rust via native OS IPC (Windows WebView2 message bridge). No local HTTP servers, open ports, or firewall warnings.
+2. **Minimal Resource Footprint:** Leverages the OS-provided Edge WebView2 engine instead of bundling Chromium. Results in a ~10–15 MB installer and ~40–60 MB idle RAM footprint.
+3. **Turnkey Native Packaging:** Native generation of self-contained `.exe` installers via NSIS with desktop shortcuts and isolated `%APPDATA%` data persistence.
+4. **Future-Proof Extensibility:** The Rust core (FIFO depletion engine, transaction validation) and React UI are cleanly decoupled. This allows future expansion to macOS/Linux, dedicated databases (e.g., PostgreSQL), or remote cloud web hosting with minimal architectural rework.
