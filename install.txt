@@ -1,0 +1,155 @@
+================================================================================
+BOOK KEEPER - ENVIRONMENT SETUP & INSTALLATION GUIDE
+================================================================================
+System Architecture: Offline-First Desktop Accounting & Inventory Management
+Platforms Supported: Windows (ARM64 & x86_64), Linux / WSL2 (Ubuntu/Debian)
+Core Tech Stack: Tauri v2 + React 19 + TypeScript + Rust + Embedded SQLite
+================================================================================
+
+TABLE OF CONTENTS:
+1. Understanding Windows Smart App Control vs. Windows Defender Antivirus
+2. Option 1: Native Windows Setup (ARM64 & x64 - Recommended)
+3. Option 2: WSL2 Setup (For Windows with Smart App Control Kept ON)
+4. Option 3: Pure Native Linux Setup (Ubuntu/Debian/Fedora)
+5. Verifying Your Installation
+6. Project Initialization & Running the App
+
+================================================================================
+1. WINDOWS SMART APP CONTROL VS. WINDOWS DEFENDER ANTIVIRUS
+================================================================================
+* What is Smart App Control (SAC)?
+  SAC is a consumer cloud-reputation whitelist introduced in Windows 11.
+  It blocks ANY executable that is not recognized by Microsoft's cloud catalog,
+  even harmless "Hello World" programs or newly compiled local code.
+  Because compilers (Rust, C++) generate new .exe files locally that have zero
+  cloud history, SAC blocks them with "os error 4551".
+
+* Does turning off Smart App Control create a security risk?
+  NO. Windows Defender Antivirus remains 100% active, running, and scanning.
+  Real-time scanning, cloud-delivered malware protection, ransomware guards,
+  behavior monitoring, and network firewalls remain fully armed.
+  Turning off SAC simply stops Windows from blocking unsigned developer tools
+  (Cargo, Rust, newly compiled local binaries). Millions of software developers
+  have SAC turned off by default.
+
+================================================================================
+2. OPTION 1: NATIVE WINDOWS SETUP (ARM64 & x86_64)
+================================================================================
+Prerequisites: Open PowerShell as Administrator.
+
+--- STEP 1: Turn Off Smart App Control (Developer Requirement) ---
+1. Open Windows Start Menu -> Search "Smart App Control".
+2. Click "App & browser control" -> "Smart App Control settings".
+3. Toggle to "Off".
+
+--- STEP 2: Install Microsoft Visual Studio 2022 C++ Build Tools (MSVC) ---
+Run in Administrator PowerShell:
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" --accept-package-agreements --accept-source-agreements
+
+(Alternative via Browser):
+Download from https://visualstudio.microsoft.com/visual-cpp-build-tools/
+Run the installer and check: "Desktop development with C++".
+
+--- STEP 3: Install Node.js (LTS) ---
+Method A: Portable Clean Install (Bypasses all MSI installer permission issues):
+# Run in PowerShell:
+curl.exe -L -o "$env:TEMP\node.zip" "https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-arm64.zip"
+Expand-Archive -Path "$env:TEMP\node.zip" -DestinationPath "$env:LOCALAPPDATA\Programs" -Force
+Rename-Item -Path "$env:LOCALAPPDATA\Programs\node-v22.11.0-win-arm64" -NewName "nodejs" -Force
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\Programs\nodejs", "User")
+
+(For x86_64 Intel/AMD machines, replace "win-arm64.zip" with "win-x64.zip").
+
+Method B: Via Winget:
+winget install OpenJS.NodeJS.LTS
+
+--- STEP 4: Install Rust & Cargo Toolchain ---
+Run in Administrator PowerShell:
+winget install Rustlang.Rustup
+
+(Alternative via direct download):
+For ARM64: curl.exe -o "$env:TEMP\rustup-init.exe" "https://win.rustup.rs/aarch64"
+For x86_64: curl.exe -o "$env:TEMP\rustup-init.exe" "https://win.rustup.rs/x86_64"
+Start-Process -Wait "$env:TEMP\rustup-init.exe" -ArgumentList "-y"
+
+--- STEP 5: Microsoft Edge WebView2 Runtime ---
+Pre-installed on Windows 10/11 by default.
+If missing: winget install Microsoft.EdgeWebView2Runtime
+
+================================================================================
+3. OPTION 2: WSL2 SETUP (KEEPING SMART APP CONTROL "ON" ON WINDOWS)
+================================================================================
+If your Windows 11 machine must keep Smart App Control strictly ON:
+Run Rust inside WSL2 (Linux). Windows SAC does not inspect or block Linux binaries.
+On Windows 11, WSLg automatically forwards the Linux GUI window onto your Windows desktop.
+
+--- STEP 1: Enable & Launch WSL2 (Ubuntu) ---
+In Windows PowerShell:
+wsl --install -d Ubuntu
+
+--- STEP 2: Install Linux C/C++ Build Essentials & Tauri Linux Dependencies ---
+Inside your Ubuntu terminal:
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y build-essential curl wget file libssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+
+--- STEP 3: Install Node.js LTS in WSL ---
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+
+--- STEP 4: Install Rust & Cargo in WSL ---
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
+--- STEP 5: Database Path Configuration ---
+By default, SQLite creates the database in Linux: ~/.local/share/book_keeper/shop.db
+If you want the database stored on your Windows C: drive accessible via File Explorer, set:
+export BOOK_KEEPER_DB_PATH="/mnt/c/Users/<YourWindowsUsername>/AppData/Roaming/book_keeper/shop.db"
+
+================================================================================
+4. OPTION 3: PURE NATIVE LINUX SETUP (Ubuntu / Debian / Arch / Fedora)
+================================================================================
+--- Ubuntu / Debian ---
+sudo apt update
+sudo apt install -y build-essential curl wget file libssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
+--- Fedora ---
+sudo dnf groupinstall "C Development Tools and Libraries"
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl
+sudo dnf install nodejs
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+--- Arch Linux ---
+sudo pacman -Syu --needed base-devel webkit2gtk-4.1 openssl curl nodejs npm rustup
+rustup default stable
+
+================================================================================
+5. VERIFYING YOUR INSTALLATION
+================================================================================
+Open a FRESH terminal window and run:
+
+node -v        # Should output v20.x or v22.x
+npm -v         # Should output 10.x+
+cargo --version # Should output cargo 1.8x.x+
+rustc --version # Should output rustc 1.8x.x+
+
+If all four commands return version numbers without error, you are ready!
+
+================================================================================
+6. PROJECT INITIALIZATION & RUNNING THE APP
+================================================================================
+Navigate to the project root directory:
+cd /path/to/book_keeper
+
+--- First Time Initialization ---
+# 1. Install frontend dependencies
+npm install
+
+# 2. Run in Development Mode (Live Hot Module Reloading)
+npm run tauri dev
+
+# 3. Compile Production Installer (.exe on Windows, .deb/.AppImage on Linux)
+npm run tauri build
+================================================================================

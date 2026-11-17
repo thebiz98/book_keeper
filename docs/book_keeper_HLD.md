@@ -565,6 +565,21 @@ erDiagram
 3. **Turnkey Native Packaging:** Native generation of self-contained `.exe` installers via NSIS with desktop shortcuts and isolated `%APPDATA%` data persistence.
 4. **Future-Proof Extensibility:** The Rust core (FIFO depletion engine, transaction validation) and React UI are cleanly decoupled. This allows future expansion to macOS/Linux, dedicated databases (e.g., PostgreSQL), or remote cloud web hosting with minimal architectural rework.
 
+### 8.2. Dual Execution Strategy: Native Windows & WSL2 (Smart App Control Compatibility)
+To support diverse Windows 11 security configurations (such as environments enforcing **Smart App Control (SAC)**), the architecture natively supports two distinct operational modes:
+
+1. **Native Windows Execution (Primary Production & Development Target):**
+   * Operates as a native Windows desktop app (`book_keeper.exe`) using WebView2.
+   * For local native development on Windows, Smart App Control is disabled (the standard developer setup), allowing `cargo`, `rustc`, and development binaries to run without kernel-level code-signing blocks (`os error 4551`).
+2. **WSL2 Execution Mode (For Environments with Smart App Control Kept ON):**
+   * In environments where Smart App Control must remain active in Enforcement mode, users and contributors can run the application inside **WSL2 (Linux kernel)**.
+   * Because Smart App Control enforces policies strictly on Windows PE binaries (`.exe`/`.dll`), Linux ELF binaries running inside the WSL2 Hyper-V container are completely exempt from SAC blocks.
+   * Leveraging Windows 11 **WSLg (GUI forwarding)**, launching the app inside WSL2 seamlessly projects the graphical window directly onto the host Windows desktop with native window controls, animations, and taskbar integration.
+3. **Architectural Enablers in the Codebase:**
+   * **Decoupled Rust Core (`book_keeper_core`):** The accounting logic, FIFO lot allocator, and SQLite queries are maintained in a clean, platform-agnostic module (`src-tauri/src/core/`) isolated from Tauri IPC macros.
+   * **Configurable Database Path (`BOOK_KEEPER_DB_PATH`):** Resolves by default to `%APPDATA%\book_keeper\shop.db` on Windows and `~/.local/share/book_keeper/shop.db` on Linux/WSL, but supports an environment variable override allowing a WSL instance to read/write directly to Windows folders (e.g., `/mnt/c/Users/<user>/AppData/...`).
+   * **Zero Win32-Specific Coupling:** All foundational crates (`rusqlite`, `chrono`, `serde`) are strictly cross-platform.
+
 ---
 
 ## 9. Tauri v2 IPC Command API Contracts & Architecture
