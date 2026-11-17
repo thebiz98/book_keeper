@@ -1,7 +1,7 @@
 # BookKeeper - Data Import, Export & VedBill Migration Study
 **Document Version:** 1.0.0  
 **Status:** Approved for Low-Level Design (LLD) Phase  
-**Target Architecture:** Desktop (Windows 10/11 x64) | Tauri v2 + Rust (rusqlite) + React 18 / TypeScript  
+**Target Architecture:** Desktop (Windows 10/11 x64) | Tauri v2 + Rust (rusqlite) + React 19 / TypeScript  
 
 ---
 

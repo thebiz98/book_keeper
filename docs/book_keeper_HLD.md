@@ -801,11 +801,13 @@ interface PartyDueSummary {
 
 // Command: settle_bill_payment
 // Input: { payload: SettlePaymentPayload }
-// Records PAYMENT_SETTLEMENT, decrements balance_due on oldest unpaid transactions (FIFO settlement), 
-// and transitions payment_status to 'PAID' when balance_due reaches 0.
+// Records PAYMENT_SETTLEMENT. If transaction_id is provided, settles that specific bill;
+// if transaction_id is null, decrements balance_due on oldest unpaid transactions (FIFO settlement).
+// Transitions payment_status to 'PAID' when balance_due reaches 0.
 interface SettlePaymentPayload {
   party_id: number;
   transaction_type: "SALE" | "PURCHASE";
+  transaction_id?: number | null;     // specific bill (or null for FIFO settlement)
   settlement_date: string;            // "YYYY-MM-DD"
   amount_paid: number;
   notes: string | null;
@@ -823,6 +825,7 @@ interface SettlePaymentPayload {
 interface CustomerReturnPayload {
   original_sale_id: number | null;
   party_id: number | null;
+  return_date: string;
   settlement_type: "CASH_REFUND" | "REDUCE_DUE" | "DEFECTIVE_REPLACEMENT";
   notes: string | null;
   items: Array<{
@@ -831,6 +834,24 @@ interface CustomerReturnPayload {
     quantity: number;                 // returned base units
     unit_price: number;
     condition: "RESTOCKABLE" | "DAMAGED_SCRAP";
+  }>;
+}
+
+// Command: create_vendor_return
+// Input: { payload: VendorReturnPayload }
+// Decrements purchase lot remaining_quantity and active stock, reduces balance_due or logs refund
+interface VendorReturnPayload {
+  original_purchase_id: number | null;
+  party_id: number | null;
+  return_date: string;
+  settlement_type: "CASH_REFUND" | "REDUCE_DUE";
+  reason: string | null;
+  notes: string | null;
+  items: Array<{
+    item_id: number;
+    purchase_item_id: number | null;  // specific lot being returned (or null for FIFO)
+    quantity: number;                 // returned base units
+    unit_cost: number;
   }>;
 }
 
