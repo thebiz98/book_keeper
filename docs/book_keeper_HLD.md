@@ -3,6 +3,7 @@
 **Target Environment:** Windows Laptop (Single-Node, Embedded Database)  
 **Currency:** Indian Rupees (₹)  
 **Status:** Approved Requirements & Entity Design Baseline  
+**UI/UX Companion Document:** [UI/UX Specification](file:///c:/custom_apps/book_keeper/docs/book_keeper_UI_UX_Specification.md)  
 
 ---
 
@@ -37,11 +38,12 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Vendor Payables**: The user can view total outstanding dues owed by the shop to suppliers (sum of `balance_due` on unpaid and partial purchases).
   * **Due Settlement**: The user can record subsequent payments against specific bills. Each settlement decreases `balance_due` and logs the exact settlement date for daily cash register balancing.
 * **FR-07: Returns & Replacements**
-  * **Customer Sales Return**: Returning sold items for cash refunds or credit due reduction, with restockable items re-entering inventory.
+  * **Customer Sales Return**: Returning sold items for cash refunds or credit due reduction. When items are marked **Restockable**, the system automatically restores `remaining_quantity` on the original inward `PURCHASE_ITEM` lots (traced via `SALE_STOCK_ALLOCATION`), re-entering inventory at their original inward cost.
   * **Defective Item Replacement**: Swapping a defective sold item with a fresh one without disrupting monetary ledgers.
   * **Vendor Purchase Return**: Returning damaged/unsold stock to suppliers, reducing vendor payables or logging cash refunds.
-* **FR-08: Standalone Stock Adjustments**
-  * The user can adjust stock quantities directly via item search (name or barcode) without referencing a sale or invoice ID, specifying reasons such as `DAMAGED`, `EXPIRED`, or `COUNT_CORRECTION`.
+* **FR-08: Standalone Stock Adjustments with FIFO Depletion**
+  * The user can adjust stock quantities directly via item search (name or barcode) without referencing a sale or invoice ID, specifying reasons such as `DAMAGED`, `EXPIRED`, `THEFT_LOST`, or `COUNT_CORRECTION`.
+  * **FIFO Depletion Linkage**: When an adjustment is negative (e.g. -5 damaged units), the system automatically triggers the FIFO allocation engine to deduct `remaining_quantity` from the oldest available purchase lots, preventing phantom inventory lots and logging inventory write-off losses accurately.
 * **FR-09: Financial Aggregations & Reports**
   * Periodic totals (Day, Week, Month, Year) for:
     * Total Sales (Gross Revenue)
@@ -63,6 +65,10 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Dual Entry Points for Bundle Creation**:
     1. *Dedicated Item Master Screen*: Configured during initial item creation or editing (cold start).
     2. *Inline on the Fly*: An inline `[+ New Bundle]` option / shortcut (`Alt + B`) in the billing/purchase unit dropdown opens a quick modal dialog to define a new bundle name, multiplier, and default price without leaving the screen.
+  * **Dynamic, Self-Learning Presets (Zero UI Hardcoding)**:
+    * The system dynamically queries distinct `(bundle_name, units_per_bundle)` combinations from `ITEM_BUNDLE` ordered by usage frequency.
+    * When creating a bundle for any item, typing or focusing the bundle field displays contextual suggestions showing both the name and historical size (e.g., `Box (10 units)`, `Box (20 units)`, `Dozen (12 units)`). Selecting a suggestion auto-fills both the label and multiplier while still allowing full custom typing.
+    * As new packaging types are introduced by the shopkeeper, they immediately become available as presets for all items without requiring UI code changes.
 * **FR-14: High-Speed Typeahead Search (SQLite FTS5)**
   * Instant auto-fill suggestions powered by an inverted index via SQLite FTS5 matching across item name, category, and barcode.
   * Sub-millisecond query responses supporting prefix typing (`pen*`) and tokenized multi-word search (`blue gel`).
@@ -80,6 +86,10 @@ The system runs locally on a Windows laptop without requiring any standalone dat
     * Cash Received & Change to Return
   * Pressing `Enter` on the summary dialog dismisses it and resets the screen to a fresh, blank bill ready for the next customer.
   * *Note*: This is strictly an on-screen dialog; physical receipt printing and PDF/image export are deferred to future versions.
+* **FR-16: Optional Maximum Retail Price (MRP)**
+  * The system supports recording an optional Maximum Retail Price (MRP in ₹) on items and bundles. This serves as a printed reference price distinct from the shop's actual selling price (`default_sale_price`), allowing price-to-MRP comparisons.
+* **FR-17: Soft-Deletion & Archival Integrity**
+  * Items and Parties cannot be hard-deleted if they are linked to historical transactions. Deletion acts as a soft archive (`is_active = 0`), hiding them from active search and selection lists while maintaining complete referential integrity for past bills, audit trails, and financial reports.
 
 ### 2.2. Non-Functional Requirements (NFR)
 
@@ -143,6 +153,11 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 6. **Universal Low Stock Level**: An item is considered running low when its total physical stock across all available batches is strictly less than **5 units** (`current_stock < 5`).
 7. **Optional Parties**: Retail cash customers or petty-cash supplier runs do not require customer/vendor profile creation; `party_id` is nullable.
 8. **Settlement Cash Flow Integrity**: Every payment received or made to clear dues is recorded in `PAYMENT_SETTLEMENT` with the settlement date, guaranteeing that daily cash drawer totals reflect actual cash collected that day.
+9. **Deferred Payment Mode (Null in v1 UI)**: The UI minimizes counter friction by not asking for payment instruments (UPI, Card, Net Banking). All upfront cash collections and cash settlements flow directly into the daily cash drawer register. The database retains `payment_mode` as `NULLABLE` for future version extensibility.
+10. **Restockable Returns FIFO Lot Restoration**: When a customer returns an item marked as `RESTOCKABLE`, the system traces the sale via `SALE_STOCK_ALLOCATION` and restores `remaining_quantity` directly to the original inward `PURCHASE_ITEM` lots (in reverse order of depletion). This brings the item back into active stock at its exact historical purchase cost.
+11. **Negative Stock Adjustment FIFO Depletion**: When a stock adjustment decreases physical inventory (e.g., write-off for `DAMAGED` or `EXPIRED` goods), the FIFO allocation engine immediately consumes the oldest available `PURCHASE_ITEM` lots. This prevents discarded goods from persisting as phantom inventory lots and records inventory loss accurately.
+12. **Optional MRP Tracking**: `mrp` is stored as an optional reference attribute on `ITEM` and `ITEM_BUNDLE`, representing printed pack pricing distinct from the shop's actual selling price.
+13. **Soft-Delete Archiving**: Inward/outward transactions link foreign keys to items and parties. To preserve relational integrity and immutable financial history, `ITEM` and `PARTY` utilize an `is_active` flag (`1` active, `0` archived) instead of hard SQL `DELETE`.
 
 ---
 
@@ -188,6 +203,8 @@ flowchart TD
     ReportsScreen --> Aggregator
     DB --> Aggregator --> Home
 ```
+
+*For comprehensive page-by-page screen layouts, button actions, and keyboard navigation flows, refer to the [UI/UX Specification Document](file:///c:/custom_apps/book_keeper/docs/book_keeper_UI_UX_Specification.md).*
 
 ---
 
@@ -238,9 +255,12 @@ erDiagram
         string category "Category"
         string barcode "Optional Barcode"
         string base_unit "Smallest unit: PCS, SHEET, KG"
+        decimal mrp "Optional printed MRP"
         decimal default_sale_price "Default base rate"
         decimal current_stock "Cached total in base units"
         boolean is_low_stock "1 if stock under 5 base units"
+        boolean is_active "1 if active, 0 if archived"
+        datetime created_at "Creation timestamp"
     }
 
     ITEM_BUNDLE {
@@ -248,6 +268,7 @@ erDiagram
         int item_id FK
         string bundle_name "e.g. Box, Dozen, Rim, Carton"
         decimal units_per_bundle "Multiplier relative to base unit"
+        decimal mrp "Optional bundle MRP"
         decimal default_bundle_price "Optional preset price"
         string barcode "Optional packaging barcode"
     }
@@ -258,6 +279,8 @@ erDiagram
         string phone "Phone number"
         string party_type "CUSTOMER or VENDOR"
         string notes "Remarks"
+        boolean is_active "1 if active, 0 if archived"
+        datetime created_at "Creation timestamp"
     }
 
     PURCHASE_TRANSACTION {
@@ -265,12 +288,13 @@ erDiagram
         string transaction_code "e.g. PUR-1001"
         date transaction_date "Date"
         int party_id FK "Optional Vendor"
-        string payment_mode "CASH or CREDIT"
+        string payment_mode "Optional / NULL in v1"
         string payment_status "PAID, PARTIAL, UNPAID"
         decimal total_amount "Total amount"
         decimal paid_amount "Paid upfront"
         decimal balance_due "Remaining payable"
         string notes "Remarks"
+        datetime created_at "Creation timestamp"
     }
 
     PURCHASE_ITEM {
@@ -290,12 +314,13 @@ erDiagram
         string transaction_code "e.g. SAL-1001"
         date transaction_date "Date"
         int party_id FK "Optional Customer"
-        string payment_mode "CASH or CREDIT"
+        string payment_mode "Optional / NULL in v1"
         string payment_status "PAID, PARTIAL, UNPAID"
         decimal total_amount "Total amount"
         decimal paid_amount "Paid upfront"
         decimal balance_due "Remaining due"
         string notes "Remarks"
+        datetime created_at "Creation timestamp"
     }
 
     SALE_ITEM {
@@ -334,6 +359,7 @@ erDiagram
         int id PK
         int return_transaction_id FK
         int item_id FK
+        int sale_item_id FK "Optional link to restore FIFO lot"
         decimal quantity "Returned Qty"
         decimal unit_price "Rate"
         decimal total_amount "Amount"
@@ -347,8 +373,9 @@ erDiagram
         string transaction_type "SALE or PURCHASE"
         int transaction_id FK "Transaction ID"
         decimal amount_paid "Amount cleared"
-        string payment_mode "CASH or BANK"
+        string payment_mode "Optional / NULL in v1"
         string notes "Remarks"
+        datetime created_at "Creation timestamp"
     }
 
     STOCK_ADJUSTMENT {
@@ -358,6 +385,7 @@ erDiagram
         decimal quantity "Positive or Negative"
         string reason "DAMAGED, EXPIRED, COUNT"
         string notes "Remarks"
+        datetime created_at "Creation timestamp"
     }
 ```
 
@@ -374,9 +402,12 @@ erDiagram
 | `category` | TEXT | NULLABLE | Product category (e.g., "Stationery", "Snacks"). |
 | `barcode` | TEXT | NULLABLE, INDEXED | Base unit barcode / SKU for instant scanner lookup. |
 | `base_unit` | TEXT | NOT NULL DEFAULT 'PCS' | Smallest indivisible unit ('PCS', 'SHEET', 'KG', 'LTR'). |
+| `mrp` | REAL | NULLABLE | Optional printed Maximum Retail Price in ₹. |
 | `default_sale_price`| REAL | NOT NULL DEFAULT 0.0 | Suggested selling price per base unit in ₹. |
 | `current_stock` | REAL | NOT NULL DEFAULT 0.0 | Cached sum of all active batch quantities (in base units). |
 | `is_low_stock` | INTEGER | NOT NULL DEFAULT 0 | Fast-lookup flag: `1` if `current_stock < 5` base units, else `0`. |
+| `is_active` | INTEGER | NOT NULL DEFAULT 1 | Soft-delete status: `1` active, `0` archived. |
+| `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
 
 #### 2. `ITEM_BUNDLE`
 *Packaging tiers and multi-UOM definitions for items (Box, Dozen, Rim, Carton).*
@@ -386,6 +417,7 @@ erDiagram
 | `item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)` | Parent item. |
 | `bundle_name` | TEXT | NOT NULL | Packaging label (e.g., "Box of 10", "Dozen", "Carton"). |
 | `units_per_bundle` | REAL | NOT NULL | Multiplier: number of base units in this bundle (e.g., 10, 12, 100). |
+| `mrp` | REAL | NULLABLE | Optional bundle MRP in ₹. |
 | `default_bundle_price`| REAL | NULLABLE | Optional bundle selling price in ₹ (e.g., ₹90 instead of 10x₹10). |
 | `barcode` | TEXT | NULLABLE, INDEXED | Optional outer box barcode. |
 
@@ -403,6 +435,8 @@ erDiagram
 | `phone` | TEXT | NULLABLE | Contact telephone number. |
 | `party_type` | TEXT | CHECK IN ('CUSTOMER', 'VENDOR') | Role classification. |
 | `notes` | TEXT | NULLABLE | Contact details, address, or credit remarks. |
+| `is_active` | INTEGER | NOT NULL DEFAULT 1 | Soft-delete status: `1` active, `0` archived. |
+| `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
 
 #### 5. `PURCHASE_TRANSACTION`
 *Header for inward stock purchase orders and bills.*
@@ -412,12 +446,13 @@ erDiagram
 | `transaction_code` | TEXT | NOT NULL, UNIQUE | Human-readable code (e.g., "PUR-1001"). |
 | `transaction_date` | TEXT (ISO) | NOT NULL | Date purchase was recorded. |
 | `party_id` | INTEGER | NULLABLE, FK -> `PARTY(id)` | Supplier/vendor reference (null for walk-in). |
-| `payment_mode` | TEXT | CHECK IN ('CASH', 'CREDIT') | Upfront funding mode. |
+| `payment_mode` | TEXT | NULLABLE | Upfront payment mode (deferred in v1 UI; defaults to cash drawer). |
 | `payment_status` | TEXT | CHECK IN ('PAID', 'PARTIAL', 'UNPAID') | Settlement status. |
 | `total_amount` | REAL | NOT NULL | Sum of all purchase line items in ₹. |
 | `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount paid upfront in ₹. |
 | `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining payable in ₹ (`total_amount - paid_amount`). |
 | `notes` | TEXT | NULLABLE | Supplier invoice reference or remarks. |
+| `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
 
 #### 6. `PURCHASE_ITEM` (The FIFO Stock Lot)
 *Line item representing specific inward batches at specific costs.*
@@ -441,12 +476,13 @@ erDiagram
 | `transaction_code` | TEXT | NOT NULL, UNIQUE | Bill/Invoice number (e.g., "SAL-1001"). |
 | `transaction_date` | TEXT (ISO) | NOT NULL | Date sale was recorded. |
 | `party_id` | INTEGER | NULLABLE, FK -> `PARTY(id)` | Customer reference (null for cash walk-in). |
-| `payment_mode` | TEXT | CHECK IN ('CASH', 'CREDIT') | Upfront payment mode. |
+| `payment_mode` | TEXT | NULLABLE | Upfront payment mode (deferred in v1 UI; defaults to cash drawer). |
 | `payment_status` | TEXT | CHECK IN ('PAID', 'PARTIAL', 'UNPAID') | Paid, Partial, or Due later. |
 | `total_amount` | REAL | NOT NULL | Total bill value in ₹. |
 | `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount received upfront in ₹. |
 | `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining due in ₹ (`total_amount - paid_amount`). |
 | `notes` | TEXT | NULLABLE | Customer or delivery notes. |
+| `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
 
 #### 8. `SALE_ITEM`
 *Line item representing products sold in a transaction.*
@@ -474,16 +510,18 @@ erDiagram
 #### 10. `RETURN_TRANSACTION` & `RETURN_ITEM`
 *Handles Customer Returns, Defective Swaps, and Vendor Returns.*
 * `RETURN_TRANSACTION`: Contains `return_code`, `return_date`, `return_type` (`CUSTOMER_RETURN`, `VENDOR_RETURN`), `settlement_type` (`CASH_REFUND`, `REDUCE_DUE`, `REPLACEMENT`), `total_amount`, and optional links to parties or original bills.
-* `RETURN_ITEM`: Item, returned quantity (in base units), unit price, and `condition` (`RESTOCKABLE` to re-enter stock or `DAMAGED_SCRAP`).
+* `RETURN_ITEM`: Item, returned quantity (in base units), unit price, `condition` (`RESTOCKABLE` or `DAMAGED_SCRAP`), and optional `sale_item_id` FK.
+  * **Restocking Logic:** When `condition = 'RESTOCKABLE'` and `sale_item_id` is linked, the system queries `SALE_STOCK_ALLOCATION` for that line and increments `remaining_quantity` directly on the original `PURCHASE_ITEM` lot(s). This restores active inventory at the exact original purchase cost.
 
 #### 11. `PAYMENT_SETTLEMENT`
 *Logs subsequent partial and full settlement payments against bills.*
-* Stores `settlement_date`, `transaction_type` (`SALE_SETTLEMENT` [Cash In] or `PURCHASE_SETTLEMENT` [Cash Out]), `transaction_id`, and `amount_paid`.
+* Stores `settlement_date`, `party_id`, `transaction_type` (`SALE_SETTLEMENT` [Cash In] or `PURCHASE_SETTLEMENT` [Cash Out]), `transaction_id`, `amount_paid`, `payment_mode` (nullable), `notes`, and `created_at`.
 * Decrements the `balance_due` on the target transaction. When `balance_due` reaches 0, updates `payment_status` to `'PAID'`.
 
 #### 12. `STOCK_ADJUSTMENT`
 *Direct physical stock count corrections (in base units).*
-* Stores `adjustment_date`, `item_id` (via direct search/barcode), `quantity` (+/- base units), and `reason` (`DAMAGED`, `EXPIRED`, `COUNT_CORRECTION`). Completely independent of sale/invoice IDs.
+* Stores `adjustment_date`, `item_id` (via direct search/barcode), `quantity` (+/- base units), `reason` (`DAMAGED`, `EXPIRED`, `COUNT_CORRECTION`, `THEFT_LOST`), `notes`, and `created_at`.
+* **FIFO Depletion on Negative Adjustments:** When `quantity < 0`, the engine executes FIFO depletion against the oldest available `PURCHASE_ITEM` lots, decrementing `remaining_quantity` and logging the inventory write-off loss. When `quantity > 0` (found stock), a new adjustment inward lot is created using the item's latest purchase unit cost.
 
 #### 13. `SHOP_SETTING`
 *Single-row shop profile.*
@@ -495,8 +533,8 @@ erDiagram
 
 | Business Objective | Underlying SQL / Engine Logic |
 | :--- | :--- |
-| **Instant Low Stock List** | `SELECT * FROM ITEM WHERE is_low_stock = 1 ORDER BY current_stock ASC;` |
-| **Typeahead Auto-Fill (FTS5)** | `SELECT item_id, name, category, barcode, default_sale_price FROM item_search_fts WHERE item_search_fts MATCH ? LIMIT 8;` |
+| **Instant Low Stock List** | `SELECT * FROM ITEM WHERE is_active = 1 AND is_low_stock = 1 ORDER BY current_stock ASC;` |
+| **Typeahead Auto-Fill (FTS5)** | `SELECT item_id, name, category, barcode, mrp, default_sale_price FROM item_search_fts JOIN ITEM ON item_search_fts.item_id = ITEM.id WHERE ITEM.is_active = 1 AND item_search_fts MATCH ? LIMIT 8;` |
 | **Bundle to Base Unit Conversion** | `quantity = bundle_quantity * units_per_bundle; unit_price = bundle_total / quantity;` |
 | **Total Stock Valuation** | `SELECT SUM(remaining_quantity * unit_cost) FROM PURCHASE_ITEM WHERE remaining_quantity > 0;` |
 | **Customer Receivables (Dues)** | `SELECT SUM(balance_due) FROM SALE_TRANSACTION WHERE payment_status IN ('UNPAID', 'PARTIAL');` |
@@ -506,6 +544,9 @@ erDiagram
 | **Period COGS** | `SELECT SUM(a.quantity_depleted * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` |
 | **Period Net Profit** | Period Gross Sales - Period COGS |
 | **FIFO Depletion Query** | `SELECT id, remaining_quantity, unit_cost FROM PURCHASE_ITEM WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC;` |
+| **Restockable Return Lot Restoration** | `UPDATE PURCHASE_ITEM SET remaining_quantity = remaining_quantity + ? WHERE id = ?;` (using allocation lots in reverse order) |
+| **Negative Stock Adjustment Depletion**| Runs FIFO depletion loop deducting from oldest `PURCHASE_ITEM.remaining_quantity` and logging loss value |
+| **Dynamic Bundle Presets & Sizes** | `SELECT bundle_name, units_per_bundle, COUNT(*) as usage_count FROM ITEM_BUNDLE GROUP BY bundle_name, units_per_bundle ORDER BY usage_count DESC;` |
 | **Daily Cash Flow (Drawer Total)**| `(Upfront Cash from Sales Today + Customer Settlements Today) - (Upfront Cash for Purchases Today + Vendor Settlements Today + Cash Refunds Today)` |
 
 ---
@@ -523,3 +564,312 @@ erDiagram
 2. **Minimal Resource Footprint:** Leverages the OS-provided Edge WebView2 engine instead of bundling Chromium. Results in a ~10–15 MB installer and ~40–60 MB idle RAM footprint.
 3. **Turnkey Native Packaging:** Native generation of self-contained `.exe` installers via NSIS with desktop shortcuts and isolated `%APPDATA%` data persistence.
 4. **Future-Proof Extensibility:** The Rust core (FIFO depletion engine, transaction validation) and React UI are cleanly decoupled. This allows future expansion to macOS/Linux, dedicated databases (e.g., PostgreSQL), or remote cloud web hosting with minimal architectural rework.
+
+---
+
+## 9. Tauri v2 IPC Command API Contracts & Architecture
+
+### 9.1. Architectural Overview
+Communication between the React frontend and the Rust backend uses Tauri v2's native in-process IPC (`@tauri-apps/api/core` -> `invoke`). There is zero HTTP or loopback network overhead. All requests are deserialized into typed Rust structs via `serde` and return `Result<T, AppError>`.
+
+### 9.2. Consolidated vs. Granular Payloads & Backend Concurrency
+* **Embedded SQLite Characteristics:** SQLite operates in-process with a single-file store (`shop.db`) in WAL mode. Firing multiple concurrent IPC commands from the UI across 7-8 separate calls creates unnecessary serialization overhead, IPC message round-trips, and temporary reader contention.
+* **Consolidated Dashboard Metrics:** The `get_dashboard_metrics` API returns all home screen KPI numbers (sales, purchases, profit, stock valuation, customer dues, vendor dues, cash in drawer) in a **single payload**. The Rust backend computes these metrics in a single coordinated query (or via internal parallel `rayon`/`tokio` tasks) in `< 2 milliseconds`, eliminating UI layout shifts and visual "pop-in".
+* **Separation of Heavyweight Time-Series:** Computationally heavier multi-point queries (such as `get_sales_purchase_trend`) are kept in dedicated APIs to allow instant KPI rendering while charts load asynchronously.
+
+---
+
+### 9.3. IPC Command Catalog by Operational Domain
+
+#### 1. Dashboard Domain (`dashboard_api`)
+
+```typescript
+// Command: get_dashboard_metrics
+// Input: none
+interface DashboardMetrics {
+  today_sales_amount: number;
+  today_sales_count: number;
+  today_purchase_amount: number;
+  today_purchase_count: number;
+  today_net_profit: number;           // Today's Sales - Today's COGS
+  total_stock_valuation: number;      // Sum of (remaining_qty * unit_cost)
+  customer_receivables: number;       // Total outstanding customer dues
+  vendor_payables: number;            // Total outstanding vendor dues
+  live_cash_in_drawer: number;        // Physical cash balancing formula
+}
+
+// Command: get_low_stock_alerts
+// Input: none
+interface LowStockItem {
+  id: number;
+  name: string;
+  category: string | null;
+  base_unit: string;
+  current_stock: number;              // strictly < 5
+  default_sale_price: number;
+  mrp: number | null;
+}
+
+// Command: get_sales_purchase_trend
+// Input: { period: "7d" | "30d" | "1y" }
+interface TrendDataPoint {
+  date: string;                       // "YYYY-MM-DD"
+  sales_amount: number;
+  purchase_amount: number;
+}
+```
+
+#### 2. Counter Billing & Sales Domain (`sale_api`)
+
+```typescript
+// Command: get_next_sale_code -> returns string (e.g. "SAL-1043")
+
+// Command: create_sale
+// Input: { payload: CreateSalePayload }
+// Atomic transaction: Validates stock across lots -> Inserts SALE_TRANSACTION -> 
+// Inserts SALE_ITEM lines -> Executes FIFO depletion -> Inserts SALE_STOCK_ALLOCATION -> Updates ITEM cached stock
+interface CreateSalePayload {
+  transaction_date: string;           // "YYYY-MM-DD"
+  party_id: number | null;            // null for walk-in
+  payment_status: "PAID" | "PARTIAL" | "UNPAID";
+  paid_amount: number;
+  notes: string | null;
+  items: Array<{
+    item_id: number;
+    bundle_id: number | null;         // null if sold in base units
+    bundle_quantity: number;          // quantity in selected unit/bundle
+    unit_price: number;               // effective rate charged per bundle/unit
+  }>;
+}
+
+// Returned response to immediately populate On-Screen Sale Summary Dialog:
+interface SaleSummaryResponse {
+  sale_id: number;
+  transaction_code: string;
+  total_amount: number;
+  paid_amount: number;
+  balance_due: number;
+  payment_status: "PAID" | "PARTIAL" | "UNPAID";
+}
+
+// Command: get_sales_history
+// Input: { filter: SalesHistoryFilter }
+interface SalesHistoryFilter {
+  start_date?: string;
+  end_date?: string;
+  payment_status?: "PAID" | "PARTIAL" | "UNPAID" | "ALL";
+  party_id?: number;
+  search_query?: string;
+  page: number;
+  limit: number;
+}
+
+// Command: get_sale_details
+// Input: { sale_id: number }
+// Returns sale header, line items with bundle details, and FIFO depletion cost breakdown.
+```
+
+#### 3. Inward Purchases & FIFO Lots Domain (`purchase_api`)
+
+```typescript
+// Command: get_next_purchase_code -> returns string (e.g. "PUR-2015")
+
+// Command: create_purchase
+// Input: { payload: CreatePurchasePayload }
+// Atomic transaction: Inserts PURCHASE_TRANSACTION -> Inserts PURCHASE_ITEM lots 
+// (remaining_quantity = normalized base quantity) -> Increments ITEM.current_stock & updates is_low_stock
+interface CreatePurchasePayload {
+  transaction_date: string;           // "YYYY-MM-DD"
+  party_id: number | null;            // supplier reference
+  supplier_invoice_ref: string | null;
+  payment_status: "PAID" | "PARTIAL" | "UNPAID";
+  paid_amount: number;
+  notes: string | null;
+  items: Array<{
+    item_id: number;
+    bundle_id: number | null;
+    bundle_quantity: number;
+    unit_cost: number;                // inward cost per bundle or base unit
+  }>;
+}
+
+// Command: get_purchases_history
+// Input: { filter: PurchaseHistoryFilter }
+
+// Command: get_purchase_details
+// Input: { purchase_id: number }
+// Returns header, lines, and remaining FIFO units per line.
+```
+
+#### 4. Inventory, Bundles & Typeahead Domain (`inventory_api`)
+
+```typescript
+// Command: search_items_fts
+// Input: { query: string, limit?: number }
+// High-speed inverted-index search across Name, Barcode, Category
+interface ItemSearchResult {
+  id: number;
+  name: string;
+  category: string | null;
+  barcode: string | null;
+  base_unit: string;
+  mrp: number | null;
+  default_sale_price: number;
+  current_stock: number;
+  is_low_stock: boolean;
+  bundles: Array<{
+    id: number;
+    bundle_name: string;
+    units_per_bundle: number;
+    mrp: number | null;
+    default_bundle_price: number | null;
+  }>;
+}
+
+// Command: get_items_catalog
+// Input: { category?: string, show_low_stock_only?: boolean, page: number, limit: number }
+
+// Command: create_item
+// Input: { payload: CreateItemPayload }
+interface CreateItemPayload {
+  name: string;
+  category: string | null;
+  barcode: string | null;
+  base_unit: string;
+  mrp: number | null;
+  default_sale_price: number;
+}
+
+// Command: update_item
+// Input: { item_id: number, payload: UpdateItemPayload }
+
+// Command: archive_item
+// Input: { item_id: number } (Soft-deletes: sets is_active = 0)
+
+// Command: get_bundle_suggestions
+// Input: none
+// Returns dynamic, distinct packaging presets and multipliers derived from existing ITEM_BUNDLE data
+interface BundleSuggestion {
+  bundle_name: string;                // e.g. "Box", "Dozen", "Carton", "Strip"
+  units_per_bundle: number;           // e.g. 10, 20, 12
+  usage_count: number;                // frequency of use across inventory
+}
+
+// Command: create_bundle
+// Input: { payload: CreateBundlePayload }
+// Called from Item Master as well as inline billing shortcut [Alt + B]
+interface CreateBundlePayload {
+  item_id: number;
+  bundle_name: string;                // e.g. "Box of 10", "Dozen"
+  units_per_bundle: number;           // multiplier > 1
+  mrp: number | null;
+  default_bundle_price: number | null;
+  barcode: string | null;
+}
+```
+
+#### 5. Credit & Dues Management Domain (`dues_api`)
+
+```typescript
+// Command: get_party_dues_summary
+// Input: { party_type: "CUSTOMER" | "VENDOR" }
+interface PartyDueSummary {
+  party_id: number;
+  party_name: string;
+  phone: string | null;
+  unsettled_bills_count: number;
+  earliest_bill_date: string;
+  total_invoiced: number;
+  total_paid: number;
+  balance_due: number;                // current net outstanding
+}
+
+// Command: settle_bill_payment
+// Input: { payload: SettlePaymentPayload }
+// Records PAYMENT_SETTLEMENT, decrements balance_due on oldest unpaid transactions (FIFO settlement), 
+// and transitions payment_status to 'PAID' when balance_due reaches 0.
+interface SettlePaymentPayload {
+  party_id: number;
+  transaction_type: "SALE" | "PURCHASE";
+  settlement_date: string;            // "YYYY-MM-DD"
+  amount_paid: number;
+  notes: string | null;
+}
+```
+
+#### 6. Returns & Physical Adjustments Domain (`returns_adjustments_api`)
+
+```typescript
+// Command: create_customer_return
+// Input: { payload: CustomerReturnPayload }
+// Atomic transaction: Inserts RETURN_TRANSACTION & RETURN_ITEM lines.
+// If condition is 'RESTOCKABLE', restores remaining_quantity in original PURCHASE_ITEM lot(s).
+// Applies settlement: CASH_REFUND (drawer outflow) or REDUCE_DUE (credit adjustment).
+interface CustomerReturnPayload {
+  original_sale_id: number | null;
+  party_id: number | null;
+  settlement_type: "CASH_REFUND" | "REDUCE_DUE" | "DEFECTIVE_REPLACEMENT";
+  notes: string | null;
+  items: Array<{
+    item_id: number;
+    sale_item_id: number | null;      // linked sale item for lot restoration
+    quantity: number;                 // returned base units
+    unit_price: number;
+    condition: "RESTOCKABLE" | "DAMAGED_SCRAP";
+  }>;
+}
+
+// Command: create_stock_adjustment
+// Input: { payload: StockAdjustmentPayload }
+// If quantity < 0: triggers FIFO depletion loop deducting from oldest active PURCHASE_ITEM lots.
+// If quantity > 0: creates an adjustment inward lot. Updates ITEM.current_stock & is_low_stock.
+interface StockAdjustmentPayload {
+  item_id: number;
+  quantity: number;                   // positive (+) to add, negative (-) to write off
+  reason: "DAMAGED" | "EXPIRED" | "COUNT_CORRECTION" | "THEFT_LOST";
+  notes: string | null;
+}
+```
+
+#### 7. Financial Reports & Backup Domain (`reports_api`, `settings_api`)
+
+```typescript
+// Command: get_pnl_report
+// Input: { from_date: string, to_date: string }
+interface PnLReport {
+  gross_sales: number;
+  cogs: number;                       // Total FIFO Cost of Goods Sold
+  net_profit: number;                 // gross_sales - cogs
+}
+
+// Command: get_stock_valuation_report
+// Input: none
+interface StockValuationReport {
+  total_valuation: number;            // Sum of (remaining_quantity * unit_cost)
+  active_lots_count: number;
+  categories_breakdown: Array<{
+    category: string;
+    items_count: number;
+    valuation: number;
+  }>;
+}
+
+// Command: get_cash_flow_report
+// Input: { from_date: string, to_date: string }
+interface CashFlowReport {
+  sales_cash_inflow: number;
+  customer_settlements_inflow: number;
+  purchase_cash_outflow: number;
+  vendor_settlements_outflow: number;
+  refunds_cash_outflow: number;
+  net_cash_balance: number;
+}
+
+// Command: backup_database
+// Input: { destination_path: string }
+// Creates a clean SQLite online snapshot copy of shop.db to destination folder or USB.
+```
+
+### 9.4. Atomic Transaction & Concurrency Controls
+* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_stock_adjustment`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
+* This guarantees that FIFO lot allocation and inventory decrement operate in complete isolation, preventing double-depletion or race conditions even under rapid scanning.
