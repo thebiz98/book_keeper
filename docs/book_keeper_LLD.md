@@ -1,10 +1,10 @@
 # Low-Level Design (LLD) Document: Book Keeper
 **System:** Offline-First Retail Accounting & Inventory Management Desktop Application  
 **Target Environment:** Windows Desktop (Tauri v2 + Rust + SQLite / Pluggable PostgreSQL + React 19)  
-**Parent Document:** [High-Level Design (HLD)](file:///c:/custom_apps/book_keeper/docs/book_keeper_HLD.md)  
-**UI/UX Companion Document:** [UI/UX Specification](file:///c:/custom_apps/book_keeper/docs/book_keeper_UI_UX_Specification.md)  
-**Migration Specification:** [Data Import, Export & Migration](file:///c:/custom_apps/book_keeper/docs/book_keeper_data_import_export_and_migration.md)  
-**Status:** Approved Architectural Low-Level Design Baseline  
+**Parent Document:** [High-Level Design (HLD)](file:///data/data/com.termux/files/home/book_keeper/docs/book_keeper_HLD.md)  
+**UI/UX Companion Document:** [UI/UX Specification](file:///data/data/com.termux/files/home/book_keeper/docs/book_keeper_UI_UX_Specification.md)  
+**Migration Specification:** [Data Import, Export & Migration](file:///data/data/com.termux/files/home/book_keeper/docs/book_keeper_data_import_export_and_migration.md)  
+**Status:** Approved Architectural Low-Level Design Baseline (v2 — Service Layer Redesign)  
 
 ---
 
@@ -23,15 +23,21 @@ This Low-Level Design (LLD) document translates the business requirements, data 
    * v1 ships with **Embedded SQLite** (`rusqlite` in WAL mode) and **SQLite FTS5** for sub-millisecond offline desktop search.
    * The system can be swapped to **PostgreSQL** or **Elasticsearch / Meilisearch / Tantivy** simply by providing alternative implementations bound to the same interface contracts without modifying any service or controller code.
 3. **Strict Granularity & Single Responsibility (SRP)**:
-   * Rather than monolithic service objects, business logic is split into cohesive units:
-     * `FifoService`: Pure lot allocation, depletion, and restoration mechanics.
-     * `SaleService`: Counter checkout orchestration, pricing, and bill summaries.
-     * `PurchaseService`: Inward batch generation and supplier bills.
-     * `DuesSettlementService`: Receivables/payables, balance decrements, and cash logging.
-     * `ReturnService`: Customer/vendor returns and defective item swaps.
-     * `StockAdjustmentService`: Physical count adjustments and write-offs.
-     * `ReportService`: Fast consolidated KPI aggregations and financial statements.
-     * `MigrationService`: Ingestion of legacy VedBill (`.vb`) archives.
+   * Rather than monolithic service objects, business logic is split into cohesive units with decoupled concerns:
+     * `InventoryAllocationStrategy` (`FifoStrategy`): Pure lot allocation, depletion, and restoration mechanics behind a strategy interface (FIFO by default, pluggable for LIFO/Weighted Average).
+     * `InventoryService`: Centralized single source of truth for stock levels (`current_stock`, `is_low_stock`), lot lifecycle, physical adjustments, and synthetic lot creation.
+     * `ItemService`: Item and bundle catalog master data, search index sync, and item validation (master data only, no stock mutations).
+     * `PaymentService`: Transactional payment recording (`PaymentSettlement` rows), transaction balance updates (`balance_due`, `payment_status`), and refund execution.
+     * `AccountingService`: Analytical dues aggregation, bill settlement ordering (specific bill or FIFO across oldest unpaid), party ledgers, and cash drawer reconciliation.
+     * `SaleService`: Counter checkout orchestration, pricing, and bill summaries (delegates stock operations to `InventoryService` and payments to `PaymentService`).
+     * `PurchaseService`: Inward batch generation and supplier bills (delegates stock addition to `InventoryService` and payments to `PaymentService`).
+     * `ReturnService`: Customer/vendor returns and defective item swaps (delegates stock operations to `InventoryService` and refunds/adjustments to `PaymentService`).
+     * `ReportService`: Fast consolidated KPI aggregations and financial statements (pure read-only).
+     * `PartyService`: Customer & supplier directory master data and validation.
+     * `ShopSettingService`: Single-row shop configuration and profile settings.
+     * `BackupService`: Zero-downtime database snapshots via SQLite Online Backup API.
+     * `MigrationService`: Ingestion and validation of legacy VedBill (`.vb`) archives.
+     * `DataExportImportService`: Excel import and export for catalog items and transaction history.
 4. **Decoupled Unit of Work / Transaction Abstraction**:
    * Multi-table operations (e.g., checkout inserting sales, updating purchase lot remainders, logging allocations, and refreshing item stock cache) run inside an atomic `UnitOfWork` transaction boundary, preventing partial writes and race conditions.
 
@@ -46,9 +52,9 @@ src-tauri/src/
 │   ├── sale_controller.rs         # Checkout, sale codes, sales history
 │   ├── purchase_controller.rs     # Inward purchase orders, purchase history
 │   ├── item_controller.rs         # Master catalog, bundles, bundle suggestions
-│   ├── dues_controller.rs         # Customer/Vendor dues & payment settlements
+│   ├── dues_controller.rs         # Customer/Vendor dues & payment settlements (calls AccountingService)
 │   ├── return_controller.rs       # Customer & vendor returns, swaps
-│   ├── adjustment_controller.rs   # Physical stock adjustments & write-offs
+│   ├── adjustment_controller.rs   # Physical stock adjustments & write-offs (calls InventoryService)
 │   ├── report_controller.rs       # Dashboard KPIs, PnL, cash flow, stock valuation
 │   ├── party_controller.rs        # Customer & supplier directory
 │   ├── migration_controller.rs    # VedBill (.vb) discovery and import
@@ -65,51 +71,60 @@ src-tauri/src/
 │   │   ├── sale.rs                # SaleTransaction, SaleItem, SaleStockAllocation
 │   │   ├── settlement.rs          # PaymentSettlement
 │   │   ├── stock_return.rs        # ReturnTransaction & ReturnItem
-│   │   ├── adjustment.rs          # StockAdjustment
+│   │   ├── adjustment.rs          # StockAdjustment & AdjustmentStockAllocation
 │   │   └── shop_setting.rs        # Shop profile settings
 │   ├── value_objects/             # Immutable value objects
 │   │   ├── mod.rs
 │   │   ├── transaction_code.rs    # SAL-XXXX, PUR-XXXX, RET-XXXX
 │   │   ├── payment_status.rs      # PAID, PARTIAL, UNPAID
-│   │   └── party_type.rs          # CUSTOMER, VENDOR
+│   │   ├── party_type.rs          # CUSTOMER, VENDOR
+│   │   └── allocation_method.rs   # NEW: AllocationMethod enum { Fifo }
 │   └── dtos/                      # Request / Response Transfer Objects
 │       ├── mod.rs
 │       ├── sale_dto.rs            # CreateSalePayload, SaleSummaryResponse, SalesFilter
 │       ├── purchase_dto.rs        # CreatePurchasePayload, PurchaseFilter
 │       ├── item_dto.rs            # CreateItemPayload, ItemSearchResult, BundleSuggestion
 │       ├── dues_dto.rs            # PartyDueSummary, SettlePaymentPayload
-│       ├── return_dto.rs          # CustomerReturnPayload, StockAdjustmentPayload
+│       ├── payment_dto.rs         # NEW: RecordPaymentPayload, RecordRefundPayload
+│       ├── return_dto.rs          # CustomerReturnPayload, VendorReturnPayload
+│       ├── adjustment_dto.rs      # StockAdjustmentPayload
 │       ├── report_dto.rs          # DashboardMetrics, PnLReport, CashFlowReport
 │       └── migration_dto.rs       # MigrationPreview, MigrationResult
 │
 ├── services/                      # [Service Layer] Business Rules & Orchestration
 │   ├── mod.rs
 │   ├── contracts/                 # Service Interfaces (Traits)
-│   │   ├── fifo_service.rs
+│   │   ├── inventory_allocation_strategy.rs # Strategy trait for lot allocation (replaces fifo_service.rs)
+│   │   ├── inventory_service.rs             # Centralized stock & adjustments (replaces adjustment_service.rs)
+│   │   ├── payment_service.rs               # Transactional payments & refunds (split from dues_service)
+│   │   ├── accounting_service.rs            # Dues aggregation & bill settlement (replaces dues_service.rs)
 │   │   ├── sale_service.rs
 │   │   ├── purchase_service.rs
-│   │   ├── item_service.rs
-│   │   ├── dues_service.rs
+│   │   ├── item_service.rs                  # Master data only
 │   │   ├── return_service.rs
-│   │   ├── adjustment_service.rs
 │   │   ├── report_service.rs
 │   │   ├── party_service.rs
 │   │   ├── migration_service.rs
-│   │   └── backup_service.rs
+│   │   ├── import_export_service.rs
+│   │   ├── backup_service.rs
+│   │   └── shop_setting_service.rs
 │   └── impl/                      # Concrete Service Implementations
-│       ├── fifo_service_impl.rs
+│       ├── fifo_strategy.rs                 # FIFO lot allocation algorithm
+│       ├── inventory_service_impl.rs        # Inventory operations & stock cache
+│       ├── payment_service_impl.rs          # Payment record persistence & balances
+│       ├── accounting_service_impl.rs       # Dues calculation & FIFO bill settlement
 │       ├── sale_service_impl.rs
 │       ├── purchase_service_impl.rs
 │       ├── item_service_impl.rs
-│       ├── dues_service_impl.rs
 │       ├── return_service_impl.rs
-│       ├── adjustment_service_impl.rs
 │       ├── report_service_impl.rs
 │       ├── party_service_impl.rs
 │       ├── migration_service_impl.rs
-│       └── backup_service_impl.rs
+│       ├── import_export_service_impl.rs
+│       ├── backup_service_impl.rs
+│       └── shop_setting_service_impl.rs
 │
-├── data/                          # [Data Access Layer] Storage & Reverse Index
+├── data/                          # [Data Access Layer] Storage & Reverse Index (UNCHANGED)
 │   ├── mod.rs
 │   ├── contracts/                 # Storage & Search Interfaces (Traits)
 │   │   ├── unit_of_work.rs        # Atomic transaction manager abstraction
@@ -122,6 +137,7 @@ src-tauri/src/
 │   │   ├── settlement_repository.rs
 │   │   ├── return_repository.rs
 │   │   ├── adjustment_repository.rs
+│   │   ├── adjustment_allocation_repository.rs
 │   │   ├── report_repository.rs
 │   │   ├── setting_repository.rs
 │   │   └── search_indexer.rs      # Reverse search trait (FTS5 / Elasticsearch)
@@ -149,6 +165,14 @@ src-tauri/src/
 ### 3.1 Value Objects & Enums
 
 ```rust
+// core/value_objects/allocation_method.rs
+/// Enum selecting the inventory allocation strategy at DI wiring time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AllocationMethod {
+    Fifo,
+    // Future: Lifo, WeightedAverage
+}
+
 // core/value_objects/payment_status.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PaymentStatus {
@@ -383,6 +407,32 @@ pub struct ShopSetting {
 }
 ```
 
+### 3.3 Payment Transfer Objects (`core/dtos/payment_dto.rs`)
+
+```rust
+// core/dtos/payment_dto.rs
+
+pub struct RecordPaymentPayload {
+    pub party_id: Option<i64>,
+    pub transaction_type: String,    // "SALE" or "PURCHASE"
+    pub transaction_id: i64,
+    pub settlement_date: String,     // "YYYY-MM-DD"
+    pub amount_paid: f64,
+    pub payment_mode: Option<String>,
+    pub notes: Option<String>,
+}
+
+pub struct RecordRefundPayload {
+    pub party_id: Option<i64>,
+    pub transaction_type: String,    // "SALE" or "PURCHASE"
+    pub transaction_id: Option<i64>,
+    pub refund_date: String,
+    pub amount: f64,
+    pub payment_mode: Option<String>,
+    pub notes: Option<String>,
+}
+```
+
 ---
 
 ## 4. Reverse Search & Inverted Index Abstraction (`data/contracts/search_indexer.rs`)
@@ -610,13 +660,65 @@ pub trait ReportRepository: Send + Sync {
 
 ## 6. Granular Service Layer (`services/`)
 
-Each service has a single responsibility, depends on repository traits and `UnitOfWork`, and implements a dedicated service interface.
+### 6.1 Architecture Overview & Service Responsibility Matrix
 
-### 6.1 FIFO Inventory Allocation Service (`FifoService`)
-The mathematical core of stock depletion and lot integrity.
+The service layer is structured to guarantee clean separation of concerns, single-responsibility compliance, and pluggable algorithm extensibility:
+
+| Service | Owns | Does NOT do |
+|---|---|---|
+| **`InventoryAllocationStrategy`** (`FifoStrategy`) | Lot depletion/restoration algorithms, allocation record creation | Stock cache updates, business validation, transaction orchestration |
+| **`InventoryService`** | Stock levels (`current_stock`, `is_low_stock`), lot lifecycle, physical adjustments, synthetic lot creation | Item master data, payment recording, dues logic |
+| **`ItemService`** | Item + Bundle CRUD, search index sync, item validation | Stock mutations, payment logic |
+| **`PaymentService`** | `PaymentSettlement` records, `balance_due`/`payment_status` updates on transactions | Deciding *which* bills to pay, dues aggregation, stock |
+| **`AccountingService`** | Dues aggregation, FIFO bill settlement ordering, party ledgers, reconciliation | Executing payment records (delegates to `PaymentService`) |
+| **`SaleService`** | Checkout orchestration, pricing, bill summary generation | Stock mutations (delegates to `InventoryService`), payment recording (delegates to `PaymentService`) |
+| **`PurchaseService`** | Inward batch orchestration, cost normalization, lot creation | Stock cache updates (delegates to `InventoryService`), payment recording (delegates to `PaymentService`) |
+| **`ReturnService`** | Return orchestration, condition assessment, replacement logic | Stock mutations (delegates to `InventoryService`), payment/refund recording (delegates to `PaymentService`) |
+| **`ReportService`** | Read-only KPI aggregations, P&L, cash flow, stock valuation | Everything — pure reads |
+| **`PartyService`** | Customer/vendor master data CRUD, search, archive guards | Everything else |
+
+```mermaid
+graph TD
+    SaleService --> InventoryService
+    SaleService --> PaymentService
+    SaleService --> ItemService
+
+    PurchaseService --> InventoryService
+    PurchaseService --> PaymentService
+    PurchaseService --> ItemService
+
+    ReturnService --> InventoryService
+    ReturnService --> PaymentService
+    ReturnService --> ItemService
+
+    AccountingService --> PaymentService
+
+    InventoryService --> InventoryAllocationStrategy
+    InventoryService --> ItemService
+
+    subgraph Strategy["Strategy Pattern"]
+        InventoryAllocationStrategy["InventoryAllocationStrategy (trait)"]
+        FifoStrategy["FifoStrategy (impl)"]
+        FifoStrategy -.-> InventoryAllocationStrategy
+    end
+
+    subgraph Standalone["Standalone Services"]
+        ReportService
+        PartyService
+        BackupService
+        MigrationService
+        ShopSettingService
+    end
+```
+
+---
+
+### 6.2 Inventory Allocation Strategy (`InventoryAllocationStrategy` Trait & `FifoStrategy`)
+
+The mathematical core of stock lot depletion and restoration is isolated behind the Strategy pattern (`InventoryAllocationStrategy`). Implementations contain zero business orchestration; they operate strictly on lots via the `TransactionContext` repositories. This allows future allocation methods (LIFO, Weighted Average) to be plugged in seamlessly.
 
 ```rust
-// services/contracts/fifo_service.rs
+// services/contracts/inventory_allocation_strategy.rs
 
 #[derive(Debug, Clone)]
 pub struct DepletionResult {
@@ -625,24 +727,27 @@ pub struct DepletionResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct LotRestorationItem {
-    pub purchase_item_id: i64,
-    pub quantity_to_restore: f64,
+pub struct AdjustmentDepletionResult {
+    pub total_loss_value: f64,
+    pub allocations: Vec<AdjustmentStockAllocation>,
 }
 
-pub trait FifoService: Send + Sync {
+/// Strategy interface for inventory lot allocation algorithms.
+/// Implementations are pure algorithmic — they operate on lots via the
+/// TransactionContext repositories and contain zero business orchestration.
+pub trait InventoryAllocationStrategy: Send + Sync {
     /// Validates that total active stock across lots >= required_base_qty.
     /// Returns InsufficientStockError if unavailable.
     fn validate_stock_availability(
-        &self, 
-        uow: &mut dyn TransactionContext, 
-        item_id: i64, 
-        required_base_qty: f64
+        &self,
+        uow: &mut dyn TransactionContext,
+        item_id: i64,
+        required_base_qty: f64,
     ) -> Result<(), AppError>;
 
-    /// Depletes lots in strict First-In, First-Out order.
-    /// Decrements `remaining_quantity` on purchase lots and logs allocations.
-    fn deplete_lots_for_sale_item(
+    /// Depletes lots in strategy-defined order (FIFO = oldest first).
+    /// Decrements `remaining_quantity` on purchase lots and logs sale allocations.
+    fn deplete_lots_for_sale(
         &self,
         uow: &mut dyn TransactionContext,
         sale_item_id: i64,
@@ -650,7 +755,7 @@ pub trait FifoService: Send + Sync {
         required_base_qty: f64,
     ) -> Result<DepletionResult, AppError>;
 
-    /// Restores remaining_quantity in original purchase lots in reverse order for customer returns.
+    /// Restores lots in reverse strategy order for customer returns.
     fn restore_lots_for_return(
         &self,
         uow: &mut dyn TransactionContext,
@@ -658,20 +763,33 @@ pub trait FifoService: Send + Sync {
         quantity_to_restore: f64,
     ) -> Result<(), AppError>;
 
-    /// Depletes oldest lots for a negative stock adjustment (damaged/expired write-off).
+    /// Depletes lots for negative stock adjustments (damaged/expired write-offs).
     /// Creates `AdjustmentStockAllocation` records for audit trail.
-    /// Returns the exact financial inventory write-off value (loss in ₹).
     fn deplete_lots_for_adjustment(
         &self,
         uow: &mut dyn TransactionContext,
         stock_adjustment_id: i64,
         item_id: i64,
         write_off_qty: f64,
-    ) -> Result<f64, AppError>;
+    ) -> Result<AdjustmentDepletionResult, AppError>;
 }
 ```
 
-#### Detailed Depletion Algorithm
+```rust
+// services/impl/fifo_strategy.rs
+
+/// FIFO (First-In, First-Out) implementation of InventoryAllocationStrategy.
+/// Depletes oldest purchase lots first (ORDER BY id ASC).
+/// Restores in reverse order (latest depleted lot first, ORDER BY id DESC).
+pub struct FifoStrategy;
+
+impl InventoryAllocationStrategy for FifoStrategy {
+    // Depletion: SELECT * FROM purchase_item WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC
+    // Restoration: SELECT * FROM sale_stock_allocation WHERE sale_item_id = ? ORDER BY id DESC
+}
+```
+
+#### Detailed FIFO Depletion Algorithm
 ```
 Input: item_id, required_base_qty
 1. Fetch active purchase lots: SELECT * FROM purchase_item WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC.
@@ -690,7 +808,237 @@ Input: item_id, required_base_qty
 
 ---
 
-### 6.2 Counter Billing & Sales Service (`SaleService`)
+### 6.3 Centralized Inventory Service (`InventoryService`)
+
+`InventoryService` is the centralized, authoritative single source of truth for all inventory mutations. No other service modifies `ITEM.current_stock`, `ITEM.is_low_stock`, or `PURCHASE_ITEM.remaining_quantity` directly. It absorbs physical stock adjustments and coordinates lot allocation through the pluggable strategy.
+
+```rust
+// services/contracts/inventory_service.rs
+
+pub trait InventoryService: Send + Sync {
+    /// Validates that sufficient stock exists for the given item.
+    fn validate_stock_availability(
+        &self,
+        uow: &mut dyn TransactionContext,
+        item_id: i64,
+        required_base_qty: f64,
+    ) -> Result<(), AppError>;
+
+    /// Depletes lots via the allocation strategy and updates ITEM.current_stock.
+    /// Called by SaleService during checkout for each sale line.
+    fn deplete_stock_for_sale(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        item_id: i64,
+        required_base_qty: f64,
+    ) -> Result<DepletionResult, AppError>;
+
+    /// Creates a new purchase lot and increments ITEM.current_stock.
+    /// Called by PurchaseService for each inward line.
+    fn add_stock_for_purchase(
+        &self,
+        uow: &mut dyn TransactionContext,
+        purchase_item: &PurchaseItem,
+    ) -> Result<(), AppError>;
+
+    /// Restores lots via the allocation strategy and increments ITEM.current_stock.
+    /// Called by ReturnService for restockable customer returns.
+    fn restore_stock_for_return(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        item_id: i64,
+        quantity_to_restore: f64,
+    ) -> Result<(), AppError>;
+
+    /// Depletes lots and decrements ITEM.current_stock for vendor returns.
+    /// Called by ReturnService when sending goods back to vendor.
+    fn remove_stock_for_vendor_return(
+        &self,
+        uow: &mut dyn TransactionContext,
+        item_id: i64,
+        purchase_item_id: Option<i64>,
+        quantity: f64,
+    ) -> Result<(), AppError>;
+
+    /// Executes a physical stock adjustment (positive or negative).
+    /// Negative: FIFO depletion via strategy + audit trail.
+    /// Positive: Creates synthetic purchase lot at latest known cost.
+    fn create_adjustment(
+        &self,
+        payload: StockAdjustmentPayload,
+    ) -> Result<i64, AppError>;
+
+    /// Lists historical stock adjustments.
+    fn list_adjustments(
+        &self,
+        item_id: Option<i64>,
+        page: usize,
+        limit: usize,
+    ) -> Result<PaginatedList<StockAdjustment>, AppError>;
+}
+```
+
+#### Stock Cache Update Logic (Owned Exclusively by `InventoryService`):
+```
+After any stock mutation:
+  new_stock = compute_new_stock(item_id, delta)
+  is_low = new_stock < 5.0
+  item_repo.update_stock_cache(item_id, new_stock, is_low)
+```
+
+#### Physical Stock Adjustment Execution Logic:
+
+**Negative Adjustment (`quantity < 0`) — Write-Off / Loss:**
+1. `uow.begin_transaction()`
+2. Validate available stock: `ITEM.current_stock >= abs(quantity)`. Reject with `InsufficientStockError` if not.
+3. Persist `StockAdjustment` record → returns `adjustment_id`.
+4. Delegate to `allocation_strategy.deplete_lots_for_adjustment(uow, adjustment_id, item_id, abs(quantity))`:
+   * Runs the strategy depletion loop against oldest `PURCHASE_ITEM` lots.
+   * Creates `AdjustmentStockAllocation` records (audit trail linking adjustment to specific lots and costs consumed).
+   * Returns `AdjustmentDepletionResult` containing `total_loss_value` (₹) = `SUM(depleted_qty × unit_cost)`.
+5. Decrement `ITEM.current_stock` by `abs(quantity)`.
+6. Recalculate `is_low_stock = current_stock < 5.0`.
+7. `uow.commit()`
+
+**Positive Adjustment (`quantity > 0`) — Found Stock / Count Correction:**
+1. `uow.begin_transaction()`
+2. Persist `StockAdjustment` record → returns `adjustment_id`.
+3. **Create a synthetic `PurchaseTransaction`** with:
+   * `transaction_code = "ADJ-XXXX"` (auto-generated adjustment code).
+   * `transaction_date = adjustment_date`.
+   * `party_id = NULL`, `payment_status = Paid`, `total_amount = 0`, `paid_amount = 0`, `balance_due = 0`.
+   * `notes = "Auto-generated for stock adjustment #<adjustment_id>: <reason>"`.
+4. Create a `PurchaseItem` lot under this synthetic transaction:
+   * `remaining_quantity = quantity` (the positive adjustment amount).
+   * `unit_cost` = latest available purchase cost for this item (queried from most recent `PURCHASE_ITEM` lot with `remaining_quantity >= 0`). If no prior lots exist, uses `ITEM.default_sale_price` as fallback cost.
+5. Increment `ITEM.current_stock` by `quantity`.
+6. Recalculate `is_low_stock = current_stock < 5.0`.
+7. `uow.commit()`
+
+> **Design Rationale — Synthetic Purchase Transaction for Positive Adjustments:**
+> A positive stock adjustment must create a valid FIFO-depletable lot. Without a `PURCHASE_ITEM` record, the allocation engine would find fewer base units in purchase lots than `ITEM.current_stock` claims, causing data inconsistency on future sales. By wrapping the adjustment in a synthetic purchase transaction (`ADJ-XXXX`), we maintain full FIFO integrity while keeping the existing schema unchanged. The synthetic transaction has zero monetary value (`total_amount = 0`) so it does not affect financial reports or vendor payables.
+
+---
+
+### 6.4 Payment Service (`PaymentService`)
+
+`PaymentService` takes exclusive ownership of the transactional side of money movements. It executes payment settlements, maintains balance due on transaction headers, and records customer refunds. It is called during checkout (upfront payment), standalone dues settlements, and customer/vendor returns.
+
+```rust
+// services/contracts/payment_service.rs
+
+pub trait PaymentService: Send + Sync {
+    /// Records a payment against a specific sale or purchase transaction.
+    /// Inserts a PaymentSettlement record and updates balance_due / payment_status
+    /// on the target transaction.
+    /// Returns the created settlement ID.
+    fn record_payment(
+        &self,
+        uow: &mut dyn TransactionContext,
+        payload: RecordPaymentPayload,
+    ) -> Result<i64, AppError>;
+
+    /// Records a cash refund (negative payment / outflow from drawer).
+    /// Used by ReturnService for CashRefund settlement type.
+    fn record_refund(
+        &self,
+        uow: &mut dyn TransactionContext,
+        payload: RecordRefundPayload,
+    ) -> Result<i64, AppError>;
+
+    /// Reduces balance_due on a transaction without creating a PaymentSettlement
+    /// (used for ReduceDue returns where the due is simply forgiven/offset).
+    fn reduce_transaction_balance(
+        &self,
+        uow: &mut dyn TransactionContext,
+        transaction_type: &str,     // "SALE" or "PURCHASE"
+        transaction_id: i64,
+        reduction_amount: f64,
+    ) -> Result<(), AppError>;
+}
+```
+
+---
+
+### 6.5 Accounting & Dues Service (`AccountingService`)
+
+`AccountingService` owns the analytical and bookkeeping concern of party ledgers and dues. It determines *what* to pay (which bills, in what order) and delegates the actual *execution* of payments to `PaymentService`.
+
+```rust
+// services/contracts/accounting_service.rs
+
+pub trait AccountingService: Send + Sync {
+    /// Aggregates all outstanding dues for customers or vendors.
+    fn get_party_dues_summary(
+        &self,
+        party_type: PartyType,
+    ) -> Result<Vec<PartyDueSummary>, AppError>;
+
+    /// Orchestrates bill settlement: determines which bills to apply against
+    /// (specific bill or FIFO across oldest unpaid), then delegates to
+    /// PaymentService.record_payment() for each.
+    fn settle_bill_payment(
+        &self,
+        payload: SettlePaymentPayload,
+    ) -> Result<(), AppError>;
+
+    /// Returns transaction-level ledger history for a party.
+    fn get_party_ledger(
+        &self,
+        party_id: i64,
+    ) -> Result<PartyLedgerView, AppError>;
+}
+```
+
+#### Settlement Execution Logic:
+1. `uow.begin_transaction()`
+2. **If `transaction_id` is provided (Specific Bill Settlement):**
+   * Fetch target transaction and validate `balance_due >= amount_paid`.
+   * Delegate to `PaymentService.record_payment(uow, payload)` for the target bill.
+3. **If `transaction_id` is `None` (FIFO Bill Settlement):**
+   * Fetch all open (Unpaid/Partial) transactions for the party, ordered by `transaction_date ASC, id ASC`.
+   * `remaining_to_settle = amount_paid`.
+   * Loop through bills oldest-first:
+     * `apply = MIN(bill.balance_due, remaining_to_settle)`.
+     * Delegate to `PaymentService.record_payment(uow, ...)` for this bill with `amount_paid = apply`.
+     * `remaining_to_settle -= apply`.
+     * If `remaining_to_settle == 0`: BREAK.
+   * If `remaining_to_settle > 0` after all bills: return `ValidationError("Settlement amount exceeds total outstanding dues")`.
+4. `uow.commit()`
+
+---
+
+### 6.6 Item Catalog & Bundles Master Data Service (`ItemService`)
+
+`ItemService` is strictly a **master data management service**. It owns item and bundle definitions, catalog search indexing, and validation. It does **not** perform any stock mutations — that is `InventoryService`'s exclusive domain.
+
+```rust
+// services/contracts/item_service.rs
+
+pub trait ItemService: Send + Sync {
+    fn get_catalog(&self, category: Option<String>, low_stock_only: bool, page: usize, limit: usize) -> Result<PaginatedList<Item>, AppError>;
+    fn create_item(&self, payload: CreateItemPayload) -> Result<i64, AppError>;
+    fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError>;
+    fn archive_item(&self, item_id: i64) -> Result<(), AppError>; // Soft-deletes is_active = 0
+    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<i64, AppError>;
+    fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError>;
+}
+```
+
+* **Used by**:
+  * `InventoryService` — to validate items are active and resolve bundle multipliers.
+  * `SaleService` — to validate items and resolve bundle multipliers during checkout line processing.
+  * `PurchaseService` — to validate items and resolve bundle multipliers during inward line processing.
+* **Dynamic Bundle Suggestions**: Queries distinct packaging names and multipliers ordered by historical usage frequency (`SELECT bundle_name, units_per_bundle, COUNT(*) FROM item_bundle GROUP BY bundle_name, units_per_bundle ORDER BY 3 DESC`).
+* **Search Index Sync**: Automatically calls `indexer.index_item()` or `indexer.remove_item()` upon item mutations.
+
+---
+
+### 6.7 Counter Billing & Sales Service (`SaleService`)
+
+`SaleService` orchestrates the checkout counter flow. It validates cart lines, calculates pricing and totals, persists sale transactions, delegates stock depletion to `InventoryService`, and delegates payment recording to `PaymentService`.
 
 ```rust
 // services/contracts/sale_service.rs
@@ -742,54 +1090,41 @@ pub struct SaleSummaryResponse {
 }
 ```
 
-#### Detailed Pricing, Stock Keeping & Atomic Checkout Execution:
+#### Detailed Atomic Checkout Execution Workflow:
 1. `uow.begin_transaction()`
 2. **Empty Cart & Basic Validation**: Reject if `payload.items` is empty. If `payment_status != PaymentStatus::Paid`, assert `party_id.is_some()` (unpaid credit balances cannot be assigned to walk-ins).
 3. **Line-Item Resolution & Pre-Validation**:
    * For each line:
-     * Fetch `Item` from repo. Reject if `!item.is_active` (`ValidationError("Item archived")`).
-     * If `bundle_id` provided: fetch `ItemBundle` and verify `bundle.item_id == item.id`. Set `multiplier = bundle.units_per_bundle`.
-     * If `bundle_id` is null: set `multiplier = 1.0`.
-     * **Normalized Base Quantity**: `base_qty = line.bundle_quantity * multiplier`.
-     * **Line Total Calculation**: `line_total = line.bundle_quantity * line.unit_price`.
-     * **Effective Base Unit Price**: `effective_base_price = line_total / base_qty`.
-     * **Stock Availability Check**: Call `fifo_service.validate_stock_availability(uow, line.item_id, base_qty)`. If available active lots have `SUM(remaining_quantity) < base_qty`, immediately abort with `AppError::InsufficientStockError`.
+     * Fetch `Item` via `ItemService`. Reject if `!item.is_active` (`ValidationError("Item archived")`).
+     * Resolve bundle multiplier via `ItemService` (if `bundle_id` provided: verify `bundle.item_id == item.id`, `multiplier = bundle.units_per_bundle`; else `multiplier = 1.0`).
+     * `base_qty = line.bundle_quantity * multiplier`.
+     * `line_total = line.bundle_quantity * line.unit_price`.
+     * `effective_base_price = line_total / base_qty`.
+     * **Stock Availability Check**: Call `inventory_service.validate_stock_availability(uow, line.item_id, base_qty)`. If available active lots have `SUM(remaining_quantity) < base_qty`, immediately abort with `AppError::InsufficientStockError`.
 4. **Bill Total & Payment Resolution**:
    * `total_amount = round_to_2_decimals(SUM(line_total))`.
    * **Payment Reconciliation**:
-     * If `paid_amount >= total_amount`:
-       * `balance_due = 0.0`.
-       * `actual_paid_for_bill = total_amount`.
-       * `change_amount = paid_amount - total_amount`.
-       * `resolved_status = PaymentStatus::Paid`.
-     * If `paid_amount < total_amount` and `paid_amount > 0.0`:
-       * `balance_due = total_amount - paid_amount`.
-       * `actual_paid_for_bill = paid_amount`.
-       * `change_amount = 0.0`.
-       * `resolved_status = PaymentStatus::Partial`.
-     * If `paid_amount == 0.0`:
-       * `balance_due = total_amount`.
-       * `actual_paid_for_bill = 0.0`.
-       * `change_amount = 0.0`.
-       * `resolved_status = PaymentStatus::Unpaid`.
+     * If `paid_amount >= total_amount`: `balance_due = 0.0`, `actual_paid_for_bill = total_amount`, `change_amount = paid_amount - total_amount`, `resolved_status = PaymentStatus::Paid`.
+     * If `paid_amount < total_amount` and `paid_amount > 0.0`: `balance_due = total_amount - paid_amount`, `actual_paid_for_bill = paid_amount`, `change_amount = 0.0`, `resolved_status = PaymentStatus::Partial`.
+     * If `paid_amount == 0.0`: `balance_due = total_amount`, `actual_paid_for_bill = 0.0`, `change_amount = 0.0`, `resolved_status = PaymentStatus::Unpaid`.
 5. **Persist Transaction Header**:
    * Generate `next_code = sale_repo.get_next_transaction_code()`.
    * Insert `SaleTransaction` with `total_amount`, `paid_amount = actual_paid_for_bill`, `balance_due`, `payment_status = resolved_status`.
-6. **Line Insertion, FIFO Depletion & Stock Cache Update**:
+6. **Line Insertion & Stock Depletion**:
    * For each line:
      * Insert `SaleItem` with `quantity = base_qty`, `unit_price = effective_base_price`, `total_amount = line_total`.
-     * Call `fifo_service.deplete_lots_for_sale_item(uow, sale_item_id, item.id, base_qty)`.
-       * This consumes lots in ascending chronological order (`ORDER BY id ASC`), decrements each lot's `remaining_quantity`, and creates `SaleStockAllocation` records storing `(sale_item_id, purchase_item_id, quantity_depleted, unit_cost)`.
-     * **Stock Keeping Cache**:
-       * `new_stock = item.current_stock - base_qty`.
-       * `is_low = new_stock < 5.0`.
-       * Update `ITEM` row: `current_stock = new_stock`, `is_low_stock = is_low`, `updated_at = CURRENT_TIMESTAMP`.
-7. `uow.commit()`
-8. Return `SaleSummaryResponse { sale_id, transaction_code, total_amount, paid_amount: actual_paid_for_bill, balance_due, change_amount, payment_status: resolved_status }`.
+     * Call `inventory_service.deplete_stock_for_sale(uow, sale_item_id, item.id, base_qty)`.
+       * `InventoryService` internally delegates to `InventoryAllocationStrategy.deplete_lots_for_sale()` and updates `ITEM.current_stock` and `is_low_stock`.
+7. **Payment Recording**:
+   * If `actual_paid_for_bill > 0`: Call `payment_service.record_payment(uow, RecordPaymentPayload { party_id, transaction_type: "SALE", transaction_id: sale_id, settlement_date, amount_paid: actual_paid_for_bill, payment_mode, notes })`.
+8. `uow.commit()`
+9. Return `SaleSummaryResponse { sale_id, transaction_code, total_amount, paid_amount: actual_paid_for_bill, balance_due, change_amount, payment_status: resolved_status }`.
 
 ---
 
-### 6.3 Inward Purchases Service (`PurchaseService`)
+### 6.8 Inward Purchases Service (`PurchaseService`)
+
+`PurchaseService` coordinates inward stock receipt from suppliers. It normalizes unit costs, persists purchase transactions and inward lots, delegates stock cache increments to `InventoryService`, and delegates supplier payments to `PaymentService`.
 
 ```rust
 // services/contracts/purchase_service.rs
@@ -824,114 +1159,35 @@ pub struct CreatePurchaseItemPayload {
 }
 ```
 
-#### Detailed Inward Stock Ingestion, Cost Normalization & Lot Creation:
+#### Detailed Inward Stock Ingestion Execution Workflow:
 1. `uow.begin_transaction()`
-2. **Validation**: Reject if `payload.items` is empty. If `payment_status != PaymentStatus::Paid`, assert `party_id.is_some()` (unpaid vendor dues require a supplier profile).
+2. **Validation**: Reject if `payload.items` is empty. If `payment_status != PaymentStatus::Paid`, assert `party_id.is_some()`.
 3. **Line Calculations & Cost Normalization**:
    * For each inward line:
-     * If `bundle_id` provided: fetch `ItemBundle`, `multiplier = bundle.units_per_bundle`.
-     * If `bundle_id` null: `multiplier = 1.0`.
-     * **Normalized Base Quantity**: `base_qty = line.bundle_quantity * multiplier`.
-     * **Line Total Calculation**: `line_total = line.bundle_quantity * line.unit_cost`.
-     * **Effective Base Unit Cost**: `unit_cost_base = line_total / base_qty`.
+     * Resolve bundle multiplier via `ItemService` (`multiplier = bundle.units_per_bundle` if bundle specified, else `1.0`).
+     * `base_qty = line.bundle_quantity * multiplier`.
+     * `line_total = line.bundle_quantity * line.unit_cost`.
+     * `unit_cost_base = line_total / base_qty`.
 4. **Header Settlement**:
    * `total_amount = round_to_2_decimals(SUM(line_total))`.
    * `balance_due = total_amount - paid_amount`.
    * `resolved_status = if balance_due == 0.0 { PaymentStatus::Paid } else if paid_amount > 0.0 { PaymentStatus::Partial } else { PaymentStatus::Unpaid }`.
    * Insert `PurchaseTransaction` header.
-5. **Inward FIFO Lot Storage & Stock Cache Increment**:
+5. **Inward Lot Storage & Stock Cache**:
    * For each line:
-     * Insert `PurchaseItem` with:
-       * `bundle_id = line.bundle_id`.
-       * `bundle_quantity = line.bundle_quantity`.
-       * `quantity = base_qty`.
-       * `unit_cost = unit_cost_base` (cost per base unit stored with high precision).
-       * `total_amount = line_total`.
-       * `remaining_quantity = base_qty` (active FIFO lot available for sales depletion).
-     * **Stock Keeping Cache**:
-       * Increment `item.current_stock` by `base_qty`.
-       * `new_stock = item.current_stock + base_qty`.
-       * `is_low = new_stock < 5.0`.
-       * Update `ITEM` row: `current_stock = new_stock`, `is_low_stock = is_low`, `updated_at = CURRENT_TIMESTAMP`.
-6. `uow.commit()`
-7. Return `purchase_id`.
+     * Insert `PurchaseItem` with `remaining_quantity = base_qty`.
+     * Call `inventory_service.add_stock_for_purchase(uow, &purchase_item)`.
+       * `InventoryService` internally increments `ITEM.current_stock` and recalculates `is_low_stock`.
+6. **Payment Recording**:
+   * If `paid_amount > 0`: Call `payment_service.record_payment(uow, RecordPaymentPayload { party_id, transaction_type: "PURCHASE", transaction_id: purchase_id, settlement_date, amount_paid: paid_amount, payment_mode: None, notes })`.
+7. `uow.commit()`
+8. Return `purchase_id`.
 
 ---
 
-### 6.4 Item Catalog & Bundles Service (`ItemService`)
+### 6.9 Returns & Replacements Service (`ReturnService`)
 
-```rust
-// services/contracts/item_service.rs
-
-pub trait ItemService: Send + Sync {
-    fn get_catalog(&self, category: Option<String>, low_stock_only: bool, page: usize, limit: usize) -> Result<PaginatedList<Item>, AppError>;
-    fn create_item(&self, payload: CreateItemPayload) -> Result<i64, AppError>;
-    fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError>;
-    fn archive_item(&self, item_id: i64) -> Result<(), AppError>; // Soft-deletes is_active = 0
-    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<i64, AppError>;
-    fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError>;
-}
-```
-* **Dynamic Bundle Suggestions**: Queries distinct packaging names and multipliers ordered by historical usage frequency (`SELECT bundle_name, units_per_bundle, COUNT(*) FROM item_bundle GROUP BY bundle_name, units_per_bundle ORDER BY 3 DESC`).
-* **Search Index Sync**: Automatically calls `indexer.index_item()` or `indexer.remove_item()` upon item mutations.
-
----
-
-### 6.5 Symmetrical Dues & Settlement Service (`DuesSettlementService`)
-
-```rust
-// services/contracts/dues_service.rs
-
-pub trait DuesSettlementService: Send + Sync {
-    /// Aggregates all outstanding dues for customers or vendors.
-    fn get_party_dues_summary(&self, party_type: PartyType) -> Result<Vec<PartyDueSummary>, AppError>;
-
-    /// Records a cash payment clearing a specific bill or oldest unpaid bills (FIFO settlement).
-    fn settle_bill_payment(&self, payload: SettlePaymentPayload) -> Result<(), AppError>;
-
-    /// Returns transaction-level ledger history for a party.
-    fn get_party_ledger(&self, party_id: i64) -> Result<PartyLedgerView, AppError>;
-}
-```
-
-#### `SettlePaymentPayload` Design:
-```rust
-// core/dtos/dues_dto.rs
-
-pub struct SettlePaymentPayload {
-    pub party_id: i64,
-    pub transaction_type: String,          // "SALE" or "PURCHASE"
-    pub transaction_id: Option<i64>,       // Specific bill to settle (None = FIFO across oldest bills)
-    pub settlement_date: String,           // "YYYY-MM-DD"
-    pub amount_paid: f64,
-    pub notes: Option<String>,
-}
-```
-
-#### Settlement Execution Logic:
-1. `uow.begin_transaction()`
-2. **If `transaction_id` is provided (Specific Bill Settlement):**
-   * Fetch target transaction and validate `balance_due >= amount_paid`.
-   * Create `PaymentSettlement` record linked to the target `transaction_id`.
-   * Decrement `balance_due` on the target transaction.
-   * If `balance_due` reaches `0.0`: update `payment_status` to `Paid`.
-   * If `balance_due > 0.0` and status was `Unpaid`: transition to `Partial`.
-3. **If `transaction_id` is `None` (FIFO Bill Settlement):**
-   * Fetch all open (Unpaid/Partial) transactions for the party, ordered by `transaction_date ASC, id ASC`.
-   * `remaining_to_settle = amount_paid`.
-   * Loop through bills oldest-first:
-     * `apply = MIN(bill.balance_due, remaining_to_settle)`.
-     * Create `PaymentSettlement` record for this bill.
-     * Decrement `bill.balance_due` by `apply`.
-     * If `bill.balance_due == 0`: set `payment_status = Paid`.
-     * `remaining_to_settle -= apply`.
-     * If `remaining_to_settle == 0`: BREAK.
-   * If `remaining_to_settle > 0` after all bills: return `ValidationError("Settlement amount exceeds total outstanding dues")`.
-4. `uow.commit()`
-
----
-
-### 6.6 Returns & Replacements Service (`ReturnService`)
+`ReturnService` handles customer returns and vendor returns. It delegates inventory movements to `InventoryService` and financial adjustments/refunds to `PaymentService`.
 
 ```rust
 // services/contracts/return_service.rs
@@ -943,65 +1199,22 @@ pub trait ReturnService: Send + Sync {
 }
 ```
 
-#### `CustomerReturnPayload`:
-```rust
-pub struct CustomerReturnPayload {
-    pub original_sale_id: Option<i64>,
-    pub party_id: Option<i64>,
-    pub return_date: String,
-    pub settlement_type: SettlementType,  // CashRefund, ReduceDue, or DefectiveReplacement
-    pub reason: Option<String>,
-    pub notes: Option<String>,
-    pub items: Vec<CustomerReturnItemPayload>,
-}
-
-pub struct CustomerReturnItemPayload {
-    pub item_id: i64,
-    pub sale_item_id: Option<i64>,        // Linked sale line for FIFO lot restoration
-    pub quantity: f64,                    // Returned base units
-    pub unit_price: f64,
-    pub condition: StockCondition,        // Restockable or DamagedScrap
-}
-```
-
 #### Customer Return Execution Workflow:
 1. `uow.begin_transaction()`
 2. Generate next return code (`RET-XXXX`).
 3. Persist `ReturnTransaction` header with `return_type = ReturnType::Customer`.
 4. For each return line item:
    * Persist `ReturnItem` record.
-   * **If `condition == Restockable` and `sale_item_id` is provided:**
-     * Delegate to `FifoService.restore_lots_for_return(sale_item_id, quantity)`.
-     * This queries `SALE_STOCK_ALLOCATION` in reverse order and increments `PURCHASE_ITEM.remaining_quantity` on the original inward lots.
-     * Increment `ITEM.current_stock` by returned quantity.
-     * Recalculate `is_low_stock` flag.
-   * **If `condition == DamagedScrap`:** No inventory restoration. Item is logged as scrap.
-5. **Settlement Resolution:**
-   * `CashRefund`: Creates a `PaymentSettlement` record logging cash outflow from the drawer.
-   * `ReduceDue`: Decrements `balance_due` on the original `SaleTransaction`.
-   * `DefectiveReplacement`: Triggers FIFO depletion for a fresh unit of the same item (net zero monetary movement). The fresh unit's depletion is recorded via `SaleStockAllocation` linked to the original `sale_item_id`.
+   * If `condition == Restockable` and `sale_item_id` is provided:
+     * Call `inventory_service.restore_stock_for_return(uow, sale_item_id, item.id, quantity)`.
+       * `InventoryService` internally delegates to `InventoryAllocationStrategy.restore_lots_for_return()` and increments `ITEM.current_stock`.
+   * If `condition == DamagedScrap`: No inventory restoration. Item is logged as scrap.
+5. **Settlement Resolution**:
+   * `CashRefund`: Call `payment_service.record_refund(uow, RecordRefundPayload { party_id, transaction_type: "SALE", transaction_id: original_sale_id, refund_date, amount, payment_mode: None, notes })`.
+   * `ReduceDue`: Call `payment_service.reduce_transaction_balance(uow, "SALE", original_sale_id, amount)`.
+   * `DefectiveReplacement`: Call `inventory_service.deplete_stock_for_sale(uow, sale_item_id, item.id, replacement_qty)` for the replacement unit.
 6. `uow.commit()`
 7. Return generated `return_code`.
-
-#### `VendorReturnPayload`:
-```rust
-pub struct VendorReturnPayload {
-    pub original_purchase_id: Option<i64>,
-    pub party_id: Option<i64>,
-    pub return_date: String,
-    pub settlement_type: SettlementType,  // CashRefund or ReduceDue
-    pub reason: Option<String>,
-    pub notes: Option<String>,
-    pub items: Vec<VendorReturnItemPayload>,
-}
-
-pub struct VendorReturnItemPayload {
-    pub item_id: i64,
-    pub purchase_item_id: Option<i64>,    // Specific inward lot being returned
-    pub quantity: f64,                    // Returned base units
-    pub unit_cost: f64,                   // Cost rate for valuation
-}
-```
 
 #### Vendor Return Execution Workflow:
 1. `uow.begin_transaction()`
@@ -1009,64 +1222,17 @@ pub struct VendorReturnItemPayload {
 3. Persist `ReturnTransaction` header with `return_type = ReturnType::Vendor`.
 4. For each return line item:
    * Persist `ReturnItem` record.
-   * **If `purchase_item_id` is provided:** Decrement `remaining_quantity` on that specific `PURCHASE_ITEM` lot.
-   * **If `purchase_item_id` is null:** Trigger FIFO depletion (oldest lots first) to remove the returned quantity from active inventory.
-   * Decrement `ITEM.current_stock` by returned quantity.
-   * Recalculate `is_low_stock` flag.
-5. **Settlement Resolution:**
-   * `CashRefund`: Logs cash refund received from vendor (positive cash inflow to drawer).
-   * `ReduceDue`: Decrements `balance_due` on the original `PurchaseTransaction` and transitions `payment_status` if fully settled.
+   * Call `inventory_service.remove_stock_for_vendor_return(uow, item.id, purchase_item_id, quantity)`.
+     * `InventoryService` internally handles lot depletion and decrements `ITEM.current_stock`.
+5. **Settlement Resolution**:
+   * `CashRefund`: Call `payment_service.record_payment(uow, RecordPaymentPayload { party_id, transaction_type: "PURCHASE", transaction_id: original_purchase_id, settlement_date, amount_paid: amount, payment_mode: None, notes })` logging cash inflow from vendor.
+   * `ReduceDue`: Call `payment_service.reduce_transaction_balance(uow, "PURCHASE", original_purchase_id, amount)`.
 6. `uow.commit()`
 7. Return generated `return_code`.
 
 ---
 
-### 6.7 Physical Stock Adjustment Service (`StockAdjustmentService`)
-
-```rust
-// services/contracts/adjustment_service.rs
-
-pub trait StockAdjustmentService: Send + Sync {
-    fn create_adjustment(&self, payload: StockAdjustmentPayload) -> Result<i64, AppError>;
-    fn list_adjustments(&self, item_id: Option<i64>, page: usize, limit: usize) -> Result<PaginatedList<StockAdjustment>, AppError>;
-}
-```
-
-#### Stock Adjustment Execution Logic:
-
-**Negative Adjustment (`quantity < 0`) — Write-Off / Loss:**
-1. `uow.begin_transaction()`
-2. Validate available stock: `ITEM.current_stock >= abs(quantity)`. Reject with `InsufficientStockError` if not.
-3. Persist `StockAdjustment` record → returns `adjustment_id`.
-4. Delegate to `FifoService.deplete_lots_for_adjustment(uow, adjustment_id, item_id, abs(quantity))`:
-   * Runs the standard FIFO depletion loop against oldest `PURCHASE_ITEM` lots.
-   * For each lot consumed, creates an `AdjustmentStockAllocation` record (audit trail linking the adjustment to the specific lots and costs consumed).
-   * Returns total loss value (₹) = `SUM(depleted_qty × unit_cost)`.
-5. Decrement `ITEM.current_stock` by `abs(quantity)`.
-6. Recalculate `is_low_stock` flag.
-7. `uow.commit()`
-
-**Positive Adjustment (`quantity > 0`) — Found Stock / Count Correction:**
-1. `uow.begin_transaction()`
-2. Persist `StockAdjustment` record → returns `adjustment_id`.
-3. **Create a synthetic `PurchaseTransaction`** with:
-   * `transaction_code = "ADJ-XXXX"` (auto-generated adjustment code).
-   * `transaction_date = adjustment_date`.
-   * `party_id = NULL`, `payment_status = Paid`, `total_amount = 0`, `paid_amount = 0`, `balance_due = 0`.
-   * `notes = "Auto-generated for stock adjustment #<adjustment_id>: <reason>"`.
-4. Create a `PurchaseItem` lot under this synthetic transaction:
-   * `remaining_quantity = quantity` (the positive adjustment amount).
-   * `unit_cost` = latest available purchase cost for this item (queried from most recent `PURCHASE_ITEM` lot with `remaining_quantity >= 0`). If no prior lots exist, uses `ITEM.default_sale_price` as fallback cost.
-5. Increment `ITEM.current_stock` by `quantity`.
-6. Recalculate `is_low_stock` flag.
-7. `uow.commit()`
-
-> **Design Rationale — Synthetic Purchase Transaction for Positive Adjustments:**
-> A positive stock adjustment must create a valid FIFO-depletable lot. Without a `PURCHASE_ITEM` record, the FIFO engine would find fewer base units in purchase lots than `ITEM.current_stock` claims, causing data inconsistency on future sales. By wrapping the adjustment in a synthetic purchase transaction (identifiable via its `ADJ-XXXX` code prefix), we maintain full FIFO integrity while keeping the existing schema unchanged. The synthetic transaction has zero monetary value (`total_amount = 0`) so it does not affect financial reports or vendor payables.
-
----
-
-### 6.8 Consolidated Reporting & Telemetry Service (`ReportService`)
+### 6.10 Consolidated Reporting & Telemetry Service (`ReportService`)
 
 ```rust
 // services/contracts/report_service.rs
@@ -1084,7 +1250,7 @@ pub trait ReportService: Send + Sync {
 
 ---
 
-### 6.9 Party Directory Service (`PartyService`)
+### 6.11 Party Directory Service (`PartyService`)
 
 ```rust
 // services/contracts/party_service.rs
@@ -1104,7 +1270,7 @@ pub trait PartyService: Send + Sync {
 
 ---
 
-### 6.10 Shop Settings Service (`ShopSettingService`)
+### 6.12 Shop Settings Service (`ShopSettingService`)
 
 ```rust
 // services/contracts/shop_setting_service.rs
@@ -1119,7 +1285,7 @@ pub trait ShopSettingService: Send + Sync {
 
 ---
 
-### 6.11 Database Backup Service (`BackupService`)
+### 6.13 Database Backup Service (`BackupService`)
 
 ```rust
 // services/contracts/backup_service.rs
@@ -1140,7 +1306,7 @@ pub trait BackupService: Send + Sync {
 
 ---
 
-### 6.12 Migration & Data Portability Services
+### 6.14 Migration & Data Portability Services (`MigrationService`, `DataExportImportService`)
 
 ```rust
 // services/contracts/migration_service.rs
@@ -1169,6 +1335,10 @@ pub trait DataExportImportService: Send + Sync {
 ## 7. Controller Layer (`api/controllers`)
 
 Controllers expose Tauri v2 IPC command functions (`#[tauri::command]`). They receive the shared application state container `tauri::State<'_, AppState>` and remain strictly stateless and thin.
+
+> **Controller Mapping Notes**:
+> - `dues_controller.rs` retains its existing IPC endpoint signatures for frontend compatibility, but internally delegates to `AccountingService`.
+> - `adjustment_controller.rs` retains its existing IPC endpoint signatures for frontend compatibility, but internally delegates to `InventoryService`.
 
 ### 7.1 Sale Controller Implementation Example
 
@@ -1234,13 +1404,14 @@ The `AppState` container binds trait objects (`Arc<dyn Trait>`) at application s
 pub struct AppState {
     pub unit_of_work: Arc<dyn UnitOfWork>,
     pub search_indexer: Arc<dyn ItemSearchIndexer>,
-    pub fifo_service: Arc<dyn FifoService>,
+    pub inventory_allocation_strategy: Arc<dyn InventoryAllocationStrategy>,
+    pub inventory_service: Arc<dyn InventoryService>,
+    pub item_service: Arc<dyn ItemService>,
     pub sale_service: Arc<dyn SaleService>,
     pub purchase_service: Arc<dyn PurchaseService>,
-    pub item_service: Arc<dyn ItemService>,
-    pub dues_service: Arc<dyn DuesSettlementService>,
+    pub payment_service: Arc<dyn PaymentService>,
+    pub accounting_service: Arc<dyn AccountingService>,
     pub return_service: Arc<dyn ReturnService>,
-    pub adjustment_service: Arc<dyn StockAdjustmentService>,
     pub report_service: Arc<dyn ReportService>,
     pub party_service: Arc<dyn PartyService>,
     pub migration_service: Arc<dyn MigrationService>,
@@ -1251,6 +1422,7 @@ pub struct AppState {
 ```
 
 ### 8.1 SQLite v1 Bootstrapping Wiring
+
 ```rust
 pub fn build_sqlite_app_state(db_path: &Path) -> Result<AppState, AppError> {
     let pool = SqliteConnectionPool::new(db_path)?;
@@ -1258,14 +1430,32 @@ pub fn build_sqlite_app_state(db_path: &Path) -> Result<AppState, AppError> {
 
     let uow: Arc<dyn UnitOfWork> = Arc::new(SqliteUnitOfWork::new(pool.clone()));
     let search_indexer: Arc<dyn ItemSearchIndexer> = Arc::new(SqliteFts5SearchIndexer::new(pool.clone()));
-    
-    let fifo_service: Arc<dyn FifoService> = Arc::new(FifoServiceImpl::new());
+
+    // Strategy: FIFO allocation (swap this line for LIFO/WeightedAverage in the future)
+    let allocation_strategy: Arc<dyn InventoryAllocationStrategy> = Arc::new(FifoStrategy);
+
+    // Core services
     let item_service: Arc<dyn ItemService> = Arc::new(ItemServiceImpl::new(uow.clone(), search_indexer.clone()));
-    let dues_service: Arc<dyn DuesSettlementService> = Arc::new(DuesSettlementServiceImpl::new(uow.clone()));
-    let return_service: Arc<dyn ReturnService> = Arc::new(ReturnServiceImpl::new(uow.clone(), fifo_service.clone()));
-    let adjustment_service: Arc<dyn StockAdjustmentService> = Arc::new(StockAdjustmentServiceImpl::new(uow.clone(), fifo_service.clone()));
-    let purchase_service: Arc<dyn PurchaseService> = Arc::new(PurchaseServiceImpl::new(uow.clone(), item_service.clone()));
-    let sale_service: Arc<dyn SaleService> = Arc::new(SaleServiceImpl::new(uow.clone(), fifo_service.clone(), item_service.clone()));
+    let inventory_service: Arc<dyn InventoryService> = Arc::new(InventoryServiceImpl::new(
+        uow.clone(), allocation_strategy.clone(), item_service.clone()
+    ));
+    let payment_service: Arc<dyn PaymentService> = Arc::new(PaymentServiceImpl::new(uow.clone()));
+    let accounting_service: Arc<dyn AccountingService> = Arc::new(AccountingServiceImpl::new(
+        uow.clone(), payment_service.clone()
+    ));
+
+    // Orchestration services
+    let sale_service: Arc<dyn SaleService> = Arc::new(SaleServiceImpl::new(
+        uow.clone(), inventory_service.clone(), payment_service.clone(), item_service.clone()
+    ));
+    let purchase_service: Arc<dyn PurchaseService> = Arc::new(PurchaseServiceImpl::new(
+        uow.clone(), inventory_service.clone(), payment_service.clone(), item_service.clone()
+    ));
+    let return_service: Arc<dyn ReturnService> = Arc::new(ReturnServiceImpl::new(
+        uow.clone(), inventory_service.clone(), payment_service.clone(), item_service.clone()
+    ));
+
+    // Standalone services
     let report_service: Arc<dyn ReportService> = Arc::new(ReportServiceImpl::new(pool.clone()));
     let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone()));
     let migration_service: Arc<dyn MigrationService> = Arc::new(MigrationServiceImpl::new(uow.clone(), search_indexer.clone()));
@@ -1276,13 +1466,14 @@ pub fn build_sqlite_app_state(db_path: &Path) -> Result<AppState, AppError> {
     Ok(AppState {
         unit_of_work: uow,
         search_indexer,
-        fifo_service,
+        inventory_allocation_strategy: allocation_strategy,
+        inventory_service,
+        item_service,
         sale_service,
         purchase_service,
-        item_service,
-        dues_service,
+        payment_service,
+        accounting_service,
         return_service,
-        adjustment_service,
         report_service,
         party_service,
         migration_service,
@@ -1297,7 +1488,7 @@ pub fn build_sqlite_app_state(db_path: &Path) -> Result<AppState, AppError> {
 
 ## 9. Sequence Diagrams for Critical Workflows
 
-### 9.1 High-Speed Sale Billing Checkout Flow
+### 9.1 High-Speed Sale Billing Checkout Flow (Revised)
 
 ```mermaid
 sequenceDiagram
@@ -1306,32 +1497,43 @@ sequenceDiagram
     participant UI as React Frontend
     participant SC as SaleController
     participant SS as SaleService
-    participant FS as FifoService
+    participant IS as InventoryService
+    participant FS as FifoStrategy
+    participant PS as PaymentService
     participant UOW as UnitOfWork (Tx)
     participant DB as SQLite / DB
-    participant SI as ItemSearchIndexer
 
     Cashier->>UI: Types Item + Qty + Enter -> Press Enter/Ctrl+Enter to Pay
     UI->>SC: invoke("create_sale", payload)
     SC->>SS: create_sale(payload)
     SS->>UOW: begin_transaction()
-    
+
     loop For each line item
-        SS->>FS: validate_stock_availability(tx, item_id, base_qty)
+        SS->>IS: validate_stock_availability(tx, item_id, base_qty)
+        IS->>FS: validate_stock_availability(tx, item_id, base_qty)
         FS->>DB: Query active lots (remaining_quantity > 0)
         DB-->>FS: Active lots
-        FS-->>SS: Stock Validated
+        FS-->>IS: Stock Validated
+        IS-->>SS: Stock Validated
     end
 
     SS->>DB: Insert SALE_TRANSACTION header
-    
+
     loop For each line item
         SS->>DB: Insert SALE_ITEM line
-        SS->>FS: deplete_lots_for_sale_item(tx, sale_item_id, item_id, base_qty)
+        SS->>IS: deplete_stock_for_sale(tx, sale_item_id, item_id, base_qty)
+        IS->>FS: deplete_lots_for_sale(tx, sale_item_id, item_id, base_qty)
         FS->>DB: Decrement PURCHASE_ITEM.remaining_quantity
         FS->>DB: Insert SALE_STOCK_ALLOCATION record
-        FS-->>SS: Depletion Result (COGS)
-        SS->>DB: Update ITEM.current_stock & is_low_stock
+        FS-->>IS: DepletionResult (COGS)
+        IS->>DB: Update ITEM.current_stock & is_low_stock
+        IS-->>SS: DepletionResult
+    end
+
+    opt paid_amount > 0
+        SS->>PS: record_payment(tx, sale_id, paid_amount)
+        PS->>DB: Insert PAYMENT_SETTLEMENT
+        PS->>DB: Update SALE_TRANSACTION balance_due & payment_status
     end
 
     SS->>UOW: commit()
@@ -1343,7 +1545,7 @@ sequenceDiagram
 
 ---
 
-### 9.2 Restockable Customer Return & FIFO Lot Restoration
+### 9.2 Restockable Customer Return & FIFO Lot Restoration (Revised)
 
 ```mermaid
 sequenceDiagram
@@ -1352,7 +1554,9 @@ sequenceDiagram
     participant UI as React Frontend
     participant RC as ReturnController
     participant RS as ReturnService
-    participant FS as FifoService
+    participant IS as InventoryService
+    participant FS as FifoStrategy
+    participant PS as PaymentService
     participant UOW as UnitOfWork (Tx)
     participant DB as SQLite / DB
 
@@ -1361,16 +1565,26 @@ sequenceDiagram
     RC->>RS: create_customer_return(payload)
     RS->>UOW: begin_transaction()
     RS->>DB: Insert RETURN_TRANSACTION & RETURN_ITEM
-    
-    RS->>FS: restore_lots_for_return(tx, sale_item_id, return_qty)
+
+    RS->>IS: restore_stock_for_return(tx, sale_item_id, item_id, return_qty)
+    IS->>FS: restore_lots_for_return(tx, sale_item_id, return_qty)
     FS->>DB: SELECT * FROM SALE_STOCK_ALLOCATION WHERE sale_item_id = ? ORDER BY id DESC
     DB-->>FS: Allocation lots used
-    
+
     loop For each allocation lot (in reverse order)
         FS->>DB: UPDATE PURCHASE_ITEM SET remaining_quantity = remaining_quantity + restored_qty
     end
-    
-    RS->>DB: UPDATE ITEM SET current_stock = current_stock + return_qty
+
+    IS->>DB: UPDATE ITEM SET current_stock = current_stock + return_qty, recalculate is_low_stock
+
+    alt settlement_type == CashRefund
+        RS->>PS: record_refund(tx, refund_payload)
+        PS->>DB: Insert PAYMENT_SETTLEMENT (cash outflow)
+    else settlement_type == ReduceDue
+        RS->>PS: reduce_transaction_balance(tx, "SALE", original_sale_id, amount)
+        PS->>DB: Update SALE_TRANSACTION balance_due & payment_status
+    end
+
     RS->>UOW: commit()
     UOW->>DB: COMMIT TRANSACTION
     RS-->>RC: return_code
@@ -1379,7 +1593,7 @@ sequenceDiagram
 
 ---
 
-### 9.3 Negative Stock Adjustment (Damaged / Expired Write-Off)
+### 9.3 Negative Stock Adjustment — Damaged / Expired Write-Off (Revised)
 
 ```mermaid
 sequenceDiagram
@@ -1387,27 +1601,65 @@ sequenceDiagram
     actor Cashier
     participant UI as React Frontend
     participant AC as AdjustmentController
-    participant AS as StockAdjustmentService
-    participant FS as FifoService
+    participant IS as InventoryService
+    participant FS as FifoStrategy
     participant UOW as UnitOfWork (Tx)
     participant DB as SQLite / DB
 
     Cashier->>UI: Adjust Item: -5 Units, Reason: DAMAGED
     UI->>AC: invoke("create_stock_adjustment", payload)
-    AC->>AS: create_adjustment(payload)
-    AS->>UOW: begin_transaction()
-    AS->>DB: Insert STOCK_ADJUSTMENT record
-    
-    AS->>FS: deplete_lots_for_adjustment(tx, item_id, 5.0)
+    AC->>IS: create_adjustment(payload)
+    IS->>UOW: begin_transaction()
+    IS->>DB: Insert STOCK_ADJUSTMENT record
+
+    IS->>FS: deplete_lots_for_adjustment(tx, adjustment_id, item_id, 5.0)
     FS->>DB: Query oldest purchase lots for item
     FS->>DB: Decrement remaining_quantity on oldest lots
-    FS-->>AS: Inventory loss value (₹)
-    
-    AS->>DB: UPDATE ITEM SET current_stock = current_stock - 5.0, is_low_stock = (current_stock < 5)
+    FS->>DB: Insert ADJUSTMENT_STOCK_ALLOCATION records
+    FS-->>IS: AdjustmentDepletionResult (loss value ₹)
+
+    IS->>DB: UPDATE ITEM SET current_stock = current_stock - 5.0, is_low_stock = (current_stock < 5)
+    IS->>UOW: commit()
+    UOW->>DB: COMMIT TRANSACTION
+    IS-->>AC: adjustment_id
+    AC-->>UI: Success
+```
+
+---
+
+### 9.4 Dues Settlement Flow (New)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Owner
+    participant UI as React Frontend
+    participant DC as DuesController
+    participant AS as AccountingService
+    participant PS as PaymentService
+    participant UOW as UnitOfWork (Tx)
+    participant DB as SQLite / DB
+
+    Owner->>UI: Settles ₹500 for Customer X (no specific bill = FIFO)
+    UI->>DC: invoke("settle_bill_payment", payload)
+    DC->>AS: settle_bill_payment(payload)
+    AS->>UOW: begin_transaction()
+
+    AS->>DB: Fetch open bills for Customer X ORDER BY date ASC, id ASC
+    DB-->>AS: [SAL-1001 (due: 300), SAL-1005 (due: 400)]
+
+    AS->>PS: record_payment(tx, SAL-1001, amount=300)
+    PS->>DB: Insert PAYMENT_SETTLEMENT for SAL-1001
+    PS->>DB: Update SAL-1001: balance_due=0, status=Paid
+
+    AS->>PS: record_payment(tx, SAL-1005, amount=200)
+    PS->>DB: Insert PAYMENT_SETTLEMENT for SAL-1005
+    PS->>DB: Update SAL-1005: balance_due=200, status=Partial
+
     AS->>UOW: commit()
     UOW->>DB: COMMIT TRANSACTION
-    AS-->>AC: adjustment_id
-    AC-->>UI: Success
+    AS-->>DC: Success
+    DC-->>UI: Settlement confirmed
 ```
 
 ---
@@ -1451,12 +1703,11 @@ pub enum AppError {
 
 ### 10.2 Concurrency & Atomic Locking (SQLite WAL + `BEGIN IMMEDIATE`)
 1. **WAL Mode**: SQLite runs with `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = NORMAL`. This ensures readers never block writers and writers never block readers.
-2. **Immediate Lock Escalation**: Any state-mutating service method (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_stock_adjustment`) calls `uow.begin_transaction()`, which executes:
+2. **Immediate Lock Escalation**: Any state-mutating service method (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_adjustment`) calls `uow.begin_transaction()`, which executes:
    ```sql
    BEGIN IMMEDIATE TRANSACTION;
    ```
    This acquires an exclusive write lock immediately at the start of the transaction, completely preventing `SQLITE_BUSY` deadlocks during rapid barcode scans or parallel background migrations.
-
 
 ---
 
@@ -1474,34 +1725,62 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 
 ---
 
-### 11.2 FIFO Allocation Engine Test Suite (`fifo_service_test.rs`)
+### 11.2 Inventory Allocation Strategy Test Suite (`fifo_strategy_test.rs`)
 
 | Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
 | :--- | :--- | :--- | :--- | :--- |
-| **TC-FIFO-001** | Single Lot Full Depletion | Lot #1 has `remaining_quantity = 10`, `unit_cost = 5.0` | `deplete_lots_for_sale_item(qty = 10)` | • Lot #1 `remaining_quantity` becomes `0.0`.<br>• Allocations: 1 record (`qty = 10`, `unit_cost = 5.0`).<br>• Returned COGS = `50.0`. |
-| **TC-FIFO-002** | Multi-Lot Split Depletion with Differing Costs | Lot #1: `qty = 5`, `cost = 4.0`<br>Lot #2: `qty = 10`, `cost = 6.0` | `deplete_lots_for_sale_item(qty = 8)` | • Depletes 5 from Lot #1 (`remaining = 0`).<br>• Depletes 3 from Lot #2 (`remaining = 7`).<br>• Returned COGS = `(5 * 4.0) + (3 * 6.0) = 38.0`.<br>• 2 `SALE_STOCK_ALLOCATION` rows created. |
+| **TC-FIFO-001** | Single Lot Full Depletion | Lot #1 has `remaining_quantity = 10`, `unit_cost = 5.0` | `deplete_lots_for_sale(qty = 10)` | • Lot #1 `remaining_quantity` becomes `0.0`.<br>• Allocations: 1 record (`qty = 10`, `unit_cost = 5.0`).<br>• Returned COGS = `50.0`. |
+| **TC-FIFO-002** | Multi-Lot Split Depletion with Differing Costs | Lot #1: `qty = 5`, `cost = 4.0`<br>Lot #2: `qty = 10`, `cost = 6.0` | `deplete_lots_for_sale(qty = 8)` | • Depletes 5 from Lot #1 (`remaining = 0`).<br>• Depletes 3 from Lot #2 (`remaining = 7`).<br>• Returned COGS = `(5 * 4.0) + (3 * 6.0) = 38.0`.<br>• 2 `SALE_STOCK_ALLOCATION` rows created. |
 | **TC-FIFO-003** | Insufficient Stock Rejection (Negative Stock Prevention) | Lot #1 has `remaining_quantity = 4.0` | `validate_stock_availability(qty = 5.0)` | • Fails with `AppError::InsufficientStockError`.<br>• `required = 5.0`, `available = 4.0`.<br>• Zero database mutations occur (Tx rolled back). |
 | **TC-FIFO-004** | Restockable Return Lot Restoration in Reverse Order | Sale depleted:<br>• 2 from Lot #1<br>• 3 from Lot #2 | `restore_lots_for_return(qty = 4)` | • Restores 3 to Lot #2 (latest depleted first).<br>• Restores 1 to Lot #1.<br>• Lot #1 and Lot #2 `remaining_quantity` updated accurately. |
 | **TC-FIFO-005** | Scrap Return Zero Lot Restoration | Sale depleted 5 units | `create_customer_return(condition = DAMAGED_SCRAP)` | • Restores 0 units to purchase lots.<br>• Active inventory remains unchanged.<br>• Damaged item logged in `RETURN_ITEM`. |
-| **TC-FIFO-006** | Negative Stock Adjustment FIFO Depletion | Lot #1: `qty = 10`, `cost = 12.0` | `deplete_lots_for_adjustment(qty = 3.0)` | • Lot #1 `remaining_quantity` becomes `7.0`.<br>• Computes loss value: `3.0 * 12.0 = 36.0 ₹`. |
+| **TC-FIFO-006** | Negative Stock Adjustment FIFO Depletion | Lot #1: `qty = 10`, `cost = 12.0` | `deplete_lots_for_adjustment(qty = 3.0)` | • Lot #1 `remaining_quantity` becomes `7.0`.<br>• Computes loss value: `3.0 * 12.0 = 36.0 ₹`.<br>• `AdjustmentStockAllocation` audit record created. |
 
 ---
 
-### 11.3 Counter Billing & Sales Service Test Suite (`sale_service_test.rs`)
+### 11.3 Payment Service Test Suite (`payment_service_test.rs`)
 
 | Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
 | :--- | :--- | :--- | :--- | :--- |
-| **TC-SALE-001** | Full Cash Sale (PAID) | Item has stock = 20, rate = 15.0 | `create_sale` with 2 base units, `paid_amount = 30.0` | • `payment_status` = `Paid`.<br>• `balance_due` = `0.0`.<br>• `SaleSummaryResponse` returns `total = 30.0, paid = 30.0, balance_due = 0.0`.<br>• Item `current_stock` updated to 18.0. |
+| **TC-PAY-001** | Record full payment clears balance | Bill with `balance_due = 250.0` | `record_payment(sale_id, amount = 250.0)` | • `PaymentSettlement` created.<br>• `balance_due` → `0.0`.<br>• `payment_status` → `Paid`. |
+| **TC-PAY-002** | Record partial payment updates status | Bill with `balance_due = 500.0` | `record_payment(sale_id, amount = 100.0)` | • `PaymentSettlement` created.<br>• `balance_due` → `400.0`.<br>• `payment_status` → `Partial`. |
+| **TC-PAY-003** | Overpayment rejected | Bill with `balance_due = 500.0` | `record_payment(sale_id, amount = 600.0)` | • `ValidationError("Payment exceeds outstanding balance")`.<br>• No DB mutations. |
+| **TC-PAY-004** | Record refund creates outflow settlement | Return requires ₹50 refund | `record_refund(sale_id, amount = 50.0)` | • `PaymentSettlement` created with negative-sense cash flow record. |
+
+---
+
+### 11.4 Inventory Service Test Suite (`inventory_service_test.rs`)
+
+| Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
+| :--- | :--- | :--- | :--- | :--- |
+| **TC-INV-001** | Deplete stock updates cache atomically | Item with `current_stock = 25.0` | `deplete_stock_for_sale(item_id, qty = 10)` | • FIFO lots depleted.<br>• `current_stock` → `15.0`.<br>• `is_low_stock` → `false`. |
+| **TC-INV-002** | Add stock increments cache | Item with `current_stock = 0.0` | `add_stock_for_purchase(purchase_item)` with `base_qty = 100` | • Lot created with `remaining_quantity = 100`.<br>• `current_stock` → `100.0`.<br>• `is_low_stock` → `false`. |
+| **TC-INV-003** | Restore stock for return increments cache | Item with `current_stock = 20.0` | `restore_stock_for_return(sale_item_id, item_id, qty = 5)` | • Lots restored via strategy.<br>• `current_stock` → `25.0`. |
+| **TC-INV-004** | Negative adjustment creates audit trail | Item with active lots | `create_adjustment(item_id, qty = -3, reason = Damaged)` | • `StockAdjustment` + `AdjustmentStockAllocation` records created.<br>• `current_stock` decremented.<br>• Loss value computed. |
+| **TC-INV-005** | Positive adjustment creates synthetic lot | Item with prior purchase lots | `create_adjustment(item_id, qty = +10, reason = CountCorrection)` | • Synthetic `PurchaseTransaction` (`ADJ-XXXX`) + `PurchaseItem` lot created.<br>• `current_stock` incremented. |
+| **TC-INV-006** | Low stock flag transition | Item `current_stock = 6.0` | `deplete_stock_for_sale` depletes 2 units | • `current_stock` transitions `6.0` → `4.0`.<br>• `is_low_stock` transitions `false` → `true`. |
+
+---
+
+### 11.5 Counter Billing & Sales Service Test Suite (`sale_service_test.rs`)
+
+*(Note: Internal implementation delegates stock operations to `InventoryService` and payments to `PaymentService`)*
+
+| Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
+| :--- | :--- | :--- | :--- | :--- |
+| **TC-SALE-001** | Full Cash Sale (PAID) | Item has stock = 20, rate = 15.0 | `create_sale` with 2 base units, `paid_amount = 30.0` | • `payment_status` = `Paid`.<br>• `balance_due` = `0.0`.<br>• `SaleSummaryResponse` returns `total = 30.0, paid = 30.0, balance_due = 0.0`.<br>• Item `current_stock` updated to 18.0 via `InventoryService`. |
 | **TC-SALE-002** | Partial Payment Sale (PARTIAL) | Item has stock = 10, rate = 100.0 | `create_sale` with 1 base unit, `paid_amount = 40.0` | • `payment_status` = `Partial`.<br>• `balance_due` = `60.0`.<br>• `SaleSummaryResponse` returns `balance_due = 60.0`. |
 | **TC-SALE-003** | Full Credit Sale (UNPAID) | Customer Party linked, item stock = 50 | `create_sale` with 5 units @ 20.0, `paid_amount = 0.0` | • `payment_status` = `Unpaid`.<br>• `balance_due` = `100.0`.<br>• Customer receivables increased by 100.0. |
-| **TC-SALE-004** | Bundle Unit Sale Multiplier Conversion | Bundle "Box of 10", multiplier = 10.0, rate = 90.0 | `create_sale` with 2 Boxes | • Converts to 20 base units.<br>• Validates and depletes 20 base units via FIFO.<br>• Item `current_stock` decrements by 20. |
+| **TC-SALE-004** | Bundle Unit Sale Multiplier Conversion | Bundle "Box of 10", multiplier = 10.0, rate = 90.0 | `create_sale` with 2 Boxes | • Converts to 20 base units.<br>• Validates and depletes 20 base units via `InventoryService`.<br>• Item `current_stock` decrements by 20. |
 | **TC-SALE-005** | Low Stock Flag Transition (`current_stock < 5`) | Item initial stock = 6.0, `is_low_stock = false` | `create_sale` with 2 units | • New `current_stock` = 4.0.<br>• `is_low_stock` transitions to `true`.<br>• Appears immediately in Low Stock API query. |
 | **TC-SALE-006** | Empty Cart Validation | No items provided | `create_sale` with empty items array | • Fails with `AppError::ValidationError("items cannot be empty")`. |
 | **TC-SALE-007** | Sequential Transaction Code Generation | Latest sale code is `SAL-1005` | `get_next_sale_code()` | • Returns `SAL-1006`. |
 
 ---
 
-### 11.4 Inward Purchase Service Test Suite (`purchase_service_test.rs`)
+### 11.6 Inward Purchase Service Test Suite (`purchase_service_test.rs`)
+
+*(Note: Internal implementation delegates stock lot addition to `InventoryService` and payments to `PaymentService`)*
 
 | Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1511,7 +1790,7 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 
 ---
 
-### 11.5 Item Master & Reverse Search Indexer Test Suite (`search_indexer_test.rs`)
+### 11.7 Item Master & Reverse Search Indexer Test Suite (`search_indexer_test.rs`)
 
 | Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1522,17 +1801,19 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 
 ---
 
-### 11.6 Dues Settlement & Khata Test Suite (`dues_service_test.rs`)
+### 11.8 Accounting & Dues Settlement Test Suite (`accounting_service_test.rs`)
+
+*(Note: Settlement internally delegates payment execution to `PaymentService`)*
 
 | Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
 | :--- | :--- | :--- | :--- | :--- |
-| **TC-DUES-001** | Full Due Settlement | Sale `SAL-1001` has `balance_due = 250.0`, `status = Partial` | `settle_bill_payment(amount = 250.0)` | • Creates `PAYMENT_SETTLEMENT` record.<br>• `SAL-1001` `balance_due` becomes `0.0`.<br>• `payment_status` transitions to `Paid`. |
+| **TC-DUES-001** | Full Due Settlement | Sale `SAL-1001` has `balance_due = 250.0`, `status = Partial` | `settle_bill_payment(amount = 250.0)` | • Creates `PAYMENT_SETTLEMENT` record via `PaymentService`.<br>• `SAL-1001` `balance_due` becomes `0.0`.<br>• `payment_status` transitions to `Paid`. |
 | **TC-DUES-002** | Incremental Partial Settlement | Sale `SAL-1002` has `balance_due = 500.0` | `settle_bill_payment(amount = 200.0)` | • `SAL-1002` `balance_due` becomes `300.0`.<br>• `payment_status` remains `Partial`. |
 | **TC-DUES-003** | Daily Cash Drawer Settlement Reconciliation | Today: upfront sales cash = 1,000, customer dues settled = 400 | `get_dashboard_metrics()` | • `live_cash_in_drawer` includes both upfront sales cash and settled dues (`1,400 ₹`). |
 
 ---
 
-### 11.7 Financial Reporting & KPI Telemetry Test Suite (`report_service_test.rs`)
+### 11.9 Financial Reporting & KPI Telemetry Test Suite (`report_service_test.rs`)
 
 | Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1542,7 +1823,7 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 
 ---
 
-### 11.8 Migration Engine Test Suite (`migration_service_test.rs`)
+### 11.10 Migration Engine Test Suite (`migration_service_test.rs`)
 
 | Test ID | Test Case Name | Preconditions / Setup | Input / Action | Expected Result & Assertions |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1552,15 +1833,15 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 
 ---
 
-### 11.9 End-to-End (E2E) Integration Lifecycle Scenario
+### 11.11 End-to-End (E2E) Integration Lifecycle Scenario
 
 ```mermaid
 flowchart TD
-    Step1["Step 1: Purchase 100 Pencils @ ₹5/pc<br/>(Creates Lot #1: remaining = 100)"]
-    Step2["Step 2: Purchase 50 Pencils @ ₹6/pc<br/>(Creates Lot #2: remaining = 50)"]
-    Step3["Step 3: Sale 120 Pencils @ ₹10/pc<br/>(FIFO Depletion: 100 from Lot #1, 20 from Lot #2)<br/>COGS = (100*5) + (20*6) = ₹620<br/>Revenue = ₹1,200 | Profit = ₹580"]
-    Step4["Step 4: Customer Returns 10 Pencils (Restockable)<br/>(FIFO Lot Restoration: 10 restored to Lot #2)<br/>Lot #2 remaining becomes 40"]
-    Step5["Step 5: Verify Valuation & Dashboard Metrics<br/>Stock: 40 @ ₹6 = ₹240 Valuation<br/>Cash Drawer reconciled"]
+    Step1["Step 1: Purchase 100 Pencils @ ₹5/pc<br/>(Creates Lot #1: remaining = 100 via InventoryService)"]
+    Step2["Step 2: Purchase 50 Pencils @ ₹6/pc<br/>(Creates Lot #2: remaining = 50 via InventoryService)"]
+    Step3["Step 3: Sale 120 Pencils @ ₹10/pc<br/>(FIFO Depletion: 100 from Lot #1, 20 from Lot #2 via InventoryService + FifoStrategy)<br/>COGS = (100*5) + (20*6) = ₹620<br/>Revenue = ₹1,200 | Profit = ₹580"]
+    Step4["Step 4: Customer Returns 10 Pencils (Restockable)<br/>(FIFO Lot Restoration: 10 restored to Lot #2 via InventoryService + FifoStrategy)<br/>Lot #2 remaining becomes 40"]
+    Step5["Step 5: Verify Valuation & Dashboard Metrics<br/>Stock: 40 @ ₹6 = ₹240 Valuation<br/>Cash Drawer reconciled via PaymentService"]
 
     Step1 --> Step2 --> Step3 --> Step4 --> Step5
 ```
