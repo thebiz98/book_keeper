@@ -1,4 +1,4 @@
-use crate::core::entities::{AdjustmentStockAllocation, SaleStockAllocation};
+use crate::core::entities::{StockOutflowAllocation, SaleStockAllocation};
 use crate::core::error::AppError;
 use crate::data::contracts::unit_of_work::TransactionContext;
 
@@ -11,7 +11,7 @@ pub struct DepletionResult {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdjustmentDepletionResult {
     pub total_loss_value: f64,
-    pub allocations: Vec<AdjustmentStockAllocation>,
+    pub allocations: Vec<StockOutflowAllocation>,
 }
 
 /// Strategy interface for inventory lot allocation algorithms.

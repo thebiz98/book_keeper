@@ -6,7 +6,7 @@ use crate::core::error::AppError;
 use crate::data::contracts::allocation_repository::AllocationRepository;
 use crate::data::sqlite::SqliteConn;
 
-const COLS: &str = "id, sale_item_id, purchase_item_id, quantity_depleted, unit_cost";
+const COLS: &str = "id, sale_item_id, purchase_item_id, quantity_depleted, returned_quantity, unit_cost";
 
 fn map(r: &Row<'_>) -> rusqlite::Result<SaleStockAllocation> {
     Ok(SaleStockAllocation {
@@ -14,7 +14,8 @@ fn map(r: &Row<'_>) -> rusqlite::Result<SaleStockAllocation> {
         sale_item_id: r.get(1)?,
         purchase_item_id: r.get(2)?,
         quantity_depleted: r.get(3)?,
-        unit_cost: r.get(4)?,
+        returned_quantity: r.get(4)?,
+        unit_cost: r.get(5)?,
     })
 }
 
@@ -37,10 +38,10 @@ impl SqliteAllocationRepository {
 impl AllocationRepository for SqliteAllocationRepository {
     fn create_allocation(&mut self, a: &SaleStockAllocation) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO sale_stock_allocations ({COLS}) VALUES (?1,?2,?3,?4,?5)"),
+            &format!("INSERT INTO sale_stock_allocations ({COLS}) VALUES (?1,?2,?3,?4,?5,?6)"),
             params![
                 if a.id > 0 { Some(a.id) } else { None },
-                a.sale_item_id, a.purchase_item_id, a.quantity_depleted, a.unit_cost
+                a.sale_item_id, a.purchase_item_id, a.quantity_depleted, a.returned_quantity, a.unit_cost
             ],
         )?;
         Ok(self.conn.last_insert_rowid())

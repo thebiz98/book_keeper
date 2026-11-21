@@ -34,7 +34,7 @@ impl UnitOfWork for SqliteUnitOfWork {
             settlements: SqliteSettlementRepository::new(conn.clone()),
             returns: SqliteReturnRepository::new(conn.clone()),
             adjustments: SqliteAdjustmentRepository::new(conn.clone()),
-            adjustment_allocations: SqliteAdjustmentAllocationRepository::new(conn.clone()),
+            outflow_allocations: SqliteOutflowAllocationRepository::new(conn.clone()),
             settings: SqliteSettingRepository::new(conn.clone()),
             parties: SqlitePartyRepository::new(conn.clone()),
             conn,
@@ -54,7 +54,7 @@ pub struct SqliteTransactionContext {
     settlements: SqliteSettlementRepository,
     returns: SqliteReturnRepository,
     adjustments: SqliteAdjustmentRepository,
-    adjustment_allocations: SqliteAdjustmentAllocationRepository,
+    outflow_allocations: SqliteOutflowAllocationRepository,
     settings: SqliteSettingRepository,
     parties: SqlitePartyRepository,
 }
@@ -91,7 +91,7 @@ impl TransactionContext for SqliteTransactionContext {
     fn settlements(&mut self) -> &mut dyn SettlementRepository { &mut self.settlements }
     fn returns(&mut self) -> &mut dyn ReturnRepository { &mut self.returns }
     fn adjustments(&mut self) -> &mut dyn AdjustmentRepository { &mut self.adjustments }
-    fn adjustment_allocations(&mut self) -> &mut dyn AdjustmentAllocationRepository { &mut self.adjustment_allocations }
+    fn outflow_allocations(&mut self) -> &mut dyn OutflowAllocationRepository { &mut self.outflow_allocations }
     fn settings(&mut self) -> &mut dyn SettingRepository { &mut self.settings }
     fn parties(&mut self) -> &mut dyn PartyRepository { &mut self.parties }
 }

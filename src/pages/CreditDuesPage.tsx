@@ -9,7 +9,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Button } from '@/components/ui/Button';
 
 export const CreditDuesPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<PartyType>('Customer');
+  const [activeTab, setActiveTab] = useState<PartyType>('CUSTOMER');
   const [duesList, setDuesList] = useState<PartyBalance[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -46,7 +46,7 @@ export const CreditDuesPage: React.FC = () => {
   }, 0);
 
   const handleSettled = (settledAmount: number) => {
-    if (activeTab === 'Customer') {
+    if (activeTab === 'CUSTOMER') {
       recordCashFlow({ customerDuesSettled: settledAmount });
     } else {
       recordCashFlow({ vendorDuesSettled: settledAmount });
@@ -62,9 +62,9 @@ export const CreditDuesPage: React.FC = () => {
           <div className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs">
             <button
               type="button"
-              onClick={() => setActiveTab('Customer')}
+              onClick={() => setActiveTab('CUSTOMER')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                activeTab === 'Customer'
+                activeTab === 'CUSTOMER'
                   ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
@@ -75,9 +75,9 @@ export const CreditDuesPage: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setActiveTab('Vendor')}
+              onClick={() => setActiveTab('VENDOR')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                activeTab === 'Vendor'
+                activeTab === 'VENDOR'
                   ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
@@ -92,7 +92,7 @@ export const CreditDuesPage: React.FC = () => {
         <div className="flex items-center gap-4">
           <div className="flex flex-col text-right">
             <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              {activeTab === 'Customer' ? 'Total Receivables Owed' : 'Total Payables Due'}
+              {activeTab === 'CUSTOMER' ? 'Total Receivables Owed' : 'Total Payables Due'}
             </span>
             <div className="text-xl font-bold font-mono text-rose-600 dark:text-rose-400">
               <CurrencyDisplay amount={totalOutstanding} size="xl" colored />

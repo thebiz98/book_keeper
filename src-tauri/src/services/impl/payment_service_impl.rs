@@ -1,7 +1,7 @@
 use crate::core::dtos::{RecordPaymentPayload, RecordRefundPayload};
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
-use crate::core::value_objects::PaymentStatus;
+use crate::core::value_objects::{PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::TransactionContext;
 use crate::services::contracts::payment_service::PaymentService;
 
@@ -27,7 +27,7 @@ impl PaymentService for PaymentServiceImpl {
             });
         }
 
-        let (current_balance, _) = if payload.transaction_type == "SALE" {
+        let (current_balance, _) = if payload.transaction_type == TransactionType::Sale {
             let sale = uow
                 .sales()
                 .find_by_id(payload.transaction_id)?
@@ -61,7 +61,7 @@ impl PaymentService for PaymentServiceImpl {
             PaymentStatus::Partial
         };
 
-        if payload.transaction_type == "SALE" {
+        if payload.transaction_type == TransactionType::Sale {
             uow.sales()
                 .update_balance_due(payload.transaction_id, new_balance, new_status)?;
         } else {
@@ -73,8 +73,10 @@ impl PaymentService for PaymentServiceImpl {
             id: 0,
             settlement_date: payload.settlement_date,
             party_id: payload.party_id,
+            kind: payload.kind,
             transaction_type: payload.transaction_type,
-            transaction_id: payload.transaction_id,
+            transaction_id: Some(payload.transaction_id),
+            return_id: None,
             amount_paid: payload.amount_paid,
             payment_mode: payload.payment_mode,
             notes: payload.notes,
@@ -88,13 +90,27 @@ impl PaymentService for PaymentServiceImpl {
         uow: &mut dyn TransactionContext,
         payload: RecordRefundPayload,
     ) -> Result<i64, AppError> {
+        if payload.amount <= 0.0 {
+            return Err(AppError::ValidationError {
+                field: "amount".to_string(),
+                message: format!("Refund amount must be positive, got {}", payload.amount),
+            });
+        }
+        // Cash direction: customer refund goes out, vendor refund comes in. Refund rows never
+        // touch a bill balance (DD-01).
+        let kind = match payload.transaction_type {
+            TransactionType::Sale => PaymentKind::RefundOut,
+            TransactionType::Purchase => PaymentKind::RefundIn,
+        };
         let settlement = PaymentSettlement {
             id: 0,
             settlement_date: payload.refund_date,
             party_id: payload.party_id,
-            transaction_type: format!("{}_REFUND", payload.transaction_type),
-            transaction_id: payload.transaction_id.unwrap_or(0),
-            amount_paid: -payload.amount.abs(),
+            kind,
+            transaction_type: payload.transaction_type,
+            transaction_id: payload.transaction_id,
+            return_id: payload.return_id,
+            amount_paid: payload.amount,
             payment_mode: payload.payment_mode,
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -105,11 +121,11 @@ impl PaymentService for PaymentServiceImpl {
     fn reduce_transaction_balance(
         &self,
         uow: &mut dyn TransactionContext,
-        transaction_type: &str,
+        transaction_type: TransactionType,
         transaction_id: i64,
         reduction_amount: f64,
     ) -> Result<(), AppError> {
-        if transaction_type == "SALE" {
+        if transaction_type == TransactionType::Sale {
             let sale = uow
                 .sales()
                 .find_by_id(transaction_id)?

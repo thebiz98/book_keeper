@@ -233,7 +233,7 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(1),
-        settlement_type: SettlementType::CashRefund,
+        settlement_type: SettlementType::Refund,
         reason: Some("Unused in packaging".to_string()),
         notes: None,
         items: vec![CustomerReturnItemPayload {
@@ -260,7 +260,7 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(1),
-        settlement_type: SettlementType::DefectiveReplacement,
+        settlement_type: SettlementType::Replacement,
         reason: Some("Keypad unresponsive".to_string()),
         notes: None,
         items: vec![CustomerReturnItemPayload {

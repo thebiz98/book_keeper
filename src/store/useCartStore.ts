@@ -12,7 +12,7 @@ export type { CartItem, ItemInput, BundleInput, CustomerInput, CartState };
 
 function computeTotals(
   items: CartItem[],
-  status: 'Paid' | 'Partial' | 'Unpaid',
+  status: 'PAID' | 'PARTIAL' | 'UNPAID',
   paidAmount: number
 ) {
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
@@ -20,11 +20,11 @@ function computeTotals(
   const totalItems = items.length;
 
   let balanceDue = 0;
-  if (status === 'Paid') {
+  if (status === 'PAID') {
     balanceDue = 0;
-  } else if (status === 'Partial') {
+  } else if (status === 'PARTIAL') {
     balanceDue = Math.max(0, subtotal - paidAmount);
-  } else if (status === 'Unpaid') {
+  } else if (status === 'UNPAID') {
     balanceDue = subtotal;
   }
 
@@ -37,7 +37,7 @@ const initialState = {
   totalBaseUnits: 0,
   totalItems: 0,
   selectedCustomer: null as CustomerInput | null,
-  paymentStatus: 'Paid' as PaymentStatus,
+  paymentStatus: 'PAID' as PaymentStatus,
   paidAmount: 0,
   balanceDue: 0,
 };
@@ -226,15 +226,15 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   setPaymentStatus: (
-    status: 'Paid' | 'Partial' | 'Unpaid',
+    status: 'PAID' | 'PARTIAL' | 'UNPAID',
     paidAmount?: number
   ): void => {
     const { subtotal } = get();
     let currentPaid = get().paidAmount;
 
-    if (status === 'Paid') {
+    if (status === 'PAID') {
       set({ paymentStatus: status, balanceDue: 0 });
-    } else if (status === 'Partial') {
+    } else if (status === 'PARTIAL') {
       if (paidAmount !== undefined) {
         currentPaid = paidAmount;
       }
@@ -243,7 +243,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         paidAmount: currentPaid,
         balanceDue: Math.max(0, subtotal - currentPaid),
       });
-    } else if (status === 'Unpaid') {
+    } else if (status === 'UNPAID') {
       set({
         paymentStatus: status,
         paidAmount: 0,
@@ -255,11 +255,11 @@ export const useCartStore = create<CartState>((set, get) => ({
   setPaidAmount: (amount: number): void => {
     const { subtotal, paymentStatus } = get();
     let balanceDue = 0;
-    if (paymentStatus === 'Paid') {
+    if (paymentStatus === 'PAID') {
       balanceDue = 0;
-    } else if (paymentStatus === 'Partial') {
+    } else if (paymentStatus === 'PARTIAL') {
       balanceDue = Math.max(0, subtotal - amount);
-    } else if (paymentStatus === 'Unpaid') {
+    } else if (paymentStatus === 'UNPAID') {
       balanceDue = subtotal;
     }
     set({ paidAmount: amount, balanceDue });

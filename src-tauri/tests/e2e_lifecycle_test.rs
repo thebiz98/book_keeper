@@ -161,7 +161,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(1),
-        settlement_type: SettlementType::CashRefund,
+        settlement_type: SettlementType::Refund,
         reason: Some("Customer overbought".to_string()),
         notes: None,
         items: vec![CustomerReturnItemPayload {
@@ -189,9 +189,11 @@ fn test_e2e_5_step_lifecycle_scenario() {
         let item = tx.items().find_by_id(1).unwrap().unwrap();
         assert_eq!(item.current_stock, 40.0, "Stock increments from 30 to 40");
 
-        let refunds = tx.settlements().list_by_transaction("SALE_REFUND", 1).unwrap();
+        let refunds: Vec<_> = tx.settlements().list_by_transaction(TransactionType::Sale, 1).unwrap()
+            .into_iter().filter(|s| s.kind == PaymentKind::RefundOut).collect();
         assert_eq!(refunds.len(), 1);
-        assert_eq!(refunds[0].amount_paid, -100.0, "Outflow cash refund logged as -₹100");
+        assert_eq!(refunds[0].kind, PaymentKind::RefundOut);
+        assert_eq!(refunds[0].amount_paid, 100.0, "REFUND_OUT row logged with a positive ₹100");
     }
 
     // STEP 5: Valuation & Telemetry Audit

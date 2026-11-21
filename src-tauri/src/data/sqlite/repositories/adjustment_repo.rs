@@ -6,7 +6,7 @@ use crate::core::error::AppError;
 use crate::data::contracts::adjustment_repository::AdjustmentRepository;
 use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
 
-const COLS: &str = "id, adjustment_date, item_id, quantity, reason, notes, created_at";
+const COLS: &str = "id, adjustment_date, item_id, quantity, unit_cost, reason, notes, created_at";
 
 fn map(r: &Row<'_>) -> rusqlite::Result<StockAdjustment> {
     Ok(StockAdjustment {
@@ -14,9 +14,10 @@ fn map(r: &Row<'_>) -> rusqlite::Result<StockAdjustment> {
         adjustment_date: r.get(1)?,
         item_id: r.get(2)?,
         quantity: r.get(3)?,
-        reason: enum_col(r, 4)?,
-        notes: r.get(5)?,
-        created_at: r.get(6)?,
+        unit_cost: r.get(4)?,
+        reason: enum_col(r, 5)?,
+        notes: r.get(6)?,
+        created_at: r.get(7)?,
     })
 }
 
@@ -33,10 +34,10 @@ impl SqliteAdjustmentRepository {
 impl AdjustmentRepository for SqliteAdjustmentRepository {
     fn create_adjustment(&mut self, a: &StockAdjustment) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO stock_adjustments ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7)"),
+            &format!("INSERT INTO stock_adjustments ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"),
             params![
                 if a.id > 0 { Some(a.id) } else { None },
-                a.adjustment_date, a.item_id, a.quantity, enum_to_sql(&a.reason), a.notes, a.created_at
+                a.adjustment_date, a.item_id, a.quantity, a.unit_cost, enum_to_sql(&a.reason)?, a.notes, a.created_at
             ],
         )?;
         Ok(self.conn.last_insert_rowid())

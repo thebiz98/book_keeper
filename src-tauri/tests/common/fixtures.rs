@@ -92,8 +92,11 @@ pub fn create_test_purchase_tx(
     PurchaseTransaction {
         id,
         transaction_code: code.to_string(),
+        source: LotSource::Purchase,
+        supplier_invoice_ref: None,
         transaction_date: date.to_string(),
         party_id,
+        party_name: None,
         payment_mode: Some("CASH".to_string()),
         payment_status,
         total_amount: total,
@@ -104,12 +107,14 @@ pub fn create_test_purchase_tx(
     }
 }
 
-/// Factory helper for creating test PurchaseItem lots (FIFO Lots)
+/// Factory helper for creating test PurchaseItem lots (FIFO Lots).
+/// `_bundle_id` is accepted for call-site compatibility but ignored: bill lines no longer
+/// reference bundles (DD-28); `pack_quantity` is the entered pack quantity, `pack_label` None.
 pub fn create_test_purchase_lot(
     id: i64,
     purchase_tx_id: i64,
     item_id: i64,
-    bundle_id: Option<i64>,
+    _bundle_id: Option<i64>,
     bundle_quantity: f64,
     normalized_qty: f64,
     unit_cost: f64,
@@ -119,8 +124,9 @@ pub fn create_test_purchase_lot(
         id,
         purchase_transaction_id: purchase_tx_id,
         item_id,
-        bundle_id,
-        bundle_quantity,
+        item_name: format!("Item {item_id}"),
+        pack_label: None,
+        pack_quantity: bundle_quantity,
         quantity: normalized_qty,
         unit_cost,
         total_amount: normalized_qty * unit_cost,
@@ -151,6 +157,7 @@ pub fn create_test_sale_tx(
         transaction_code: code.to_string(),
         transaction_date: date.to_string(),
         party_id,
+        party_name: None,
         payment_mode: Some("CASH".to_string()),
         payment_status,
         total_amount: total,
@@ -161,12 +168,12 @@ pub fn create_test_sale_tx(
     }
 }
 
-/// Factory helper for creating test SaleItem lines
+/// Factory helper for creating test SaleItem lines (`_bundle_id` ignored, see DD-28).
 pub fn create_test_sale_item(
     id: i64,
     sale_tx_id: i64,
     item_id: i64,
-    bundle_id: Option<i64>,
+    _bundle_id: Option<i64>,
     bundle_quantity: f64,
     quantity: f64,
     unit_price: f64,
@@ -175,8 +182,9 @@ pub fn create_test_sale_item(
         id,
         sale_transaction_id: sale_tx_id,
         item_id,
-        bundle_id,
-        bundle_quantity,
+        item_name: format!("Item {item_id}"),
+        pack_label: None,
+        pack_quantity: bundle_quantity,
         quantity,
         unit_price,
         total_amount: quantity * unit_price,
@@ -196,11 +204,13 @@ pub fn create_test_allocation(
         sale_item_id,
         purchase_item_id,
         quantity_depleted,
+        returned_quantity: 0.0,
         unit_cost,
     }
 }
 
-/// Factory helper for creating test PaymentSettlement rows
+/// Factory helper for creating test PaymentSettlement rows (`transaction_type` is "SALE" or
+/// "PURCHASE"; the row is a dues `SETTLEMENT`; `amount_paid` must be > 0).
 pub fn create_test_settlement(
     id: i64,
     party_id: Option<i64>,
@@ -213,8 +223,14 @@ pub fn create_test_settlement(
         id,
         settlement_date: date.to_string(),
         party_id,
-        transaction_type: transaction_type.to_string(),
-        transaction_id,
+        kind: PaymentKind::Settlement,
+        transaction_type: match transaction_type {
+            "SALE" => TransactionType::Sale,
+            "PURCHASE" => TransactionType::Purchase,
+            other => panic!("unknown transaction_type {other}"),
+        },
+        transaction_id: Some(transaction_id),
+        return_id: None,
         amount_paid,
         payment_mode: Some("CASH".to_string()),
         notes: None,
@@ -235,6 +251,7 @@ pub fn create_test_adjustment(
         adjustment_date: date.to_string(),
         item_id,
         quantity,
+        unit_cost: None,
         reason,
         notes: None,
         created_at: format!("{}T14:00:00Z", date),
@@ -279,10 +296,10 @@ pub fn seed_sale_line(tx: &mut dyn TransactionContext, sale_item_id: i64, item_i
     tx.sales().create_sale_item(&line).expect("seed sale line");
 }
 
-/// Creates a stock adjustment header with `adjustment_id` for `item_id`.
+/// Creates a stock adjustment header with `adjustment_id` for `item_id` (quantity must be non-zero).
 pub fn seed_adjustment(tx: &mut dyn TransactionContext, adjustment_id: i64, item_id: i64) {
     ensure_item(tx, item_id);
-    let adj = create_test_adjustment(adjustment_id, item_id, 0.0, AdjustmentReason::DamageWriteOff, "2026-01-01");
+    let adj = create_test_adjustment(adjustment_id, item_id, -1.0, AdjustmentReason::Damaged, "2026-01-01");
     tx.adjustments().create(&adj).expect("seed adjustment");
 }
 

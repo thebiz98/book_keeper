@@ -1,8 +1,8 @@
-pub mod adjustment_allocation_repository;
 pub mod adjustment_repository;
 pub mod allocation_repository;
 pub mod bundle_repository;
 pub mod item_repository;
+pub mod outflow_allocation_repository;
 pub mod party_repository;
 pub mod purchase_repository;
 pub mod report_repository;
@@ -13,11 +13,11 @@ pub mod setting_repository;
 pub mod settlement_repository;
 pub mod unit_of_work;
 
-pub use adjustment_allocation_repository::AdjustmentAllocationRepository;
 pub use adjustment_repository::AdjustmentRepository;
 pub use allocation_repository::AllocationRepository;
 pub use bundle_repository::BundleRepository;
 pub use item_repository::ItemRepository;
+pub use outflow_allocation_repository::OutflowAllocationRepository;
 pub use party_repository::PartyRepository;
 pub use purchase_repository::PurchaseRepository;
 pub use report_repository::ReportRepository;

@@ -46,7 +46,7 @@ export const NewPurchasePage: React.FC = () => {
   const [items, setItems] = useState<PurchaseLineItem[]>([]);
 
   // Payment status
-  const [paymentStatus, setPaymentStatus] = useState<'Paid' | 'Partial' | 'Unpaid'>('Paid');
+  const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'PARTIAL' | 'UNPAID'>('PAID');
   const [paidAmount, setPaidAmount] = useState<number>(0);
 
   const [isBundleModalOpen, setIsBundleModalOpen] = useState<boolean>(false);
@@ -65,9 +65,9 @@ export const NewPurchasePage: React.FC = () => {
   const totalCost = items.reduce((acc, it) => acc + it.lineTotal, 0);
 
   useEffect(() => {
-    if (paymentStatus === 'Paid') {
+    if (paymentStatus === 'PAID') {
       setPaidAmount(totalCost);
-    } else if (paymentStatus === 'Unpaid') {
+    } else if (paymentStatus === 'UNPAID') {
       setPaidAmount(0);
     }
   }, [totalCost, paymentStatus]);
@@ -133,7 +133,7 @@ export const NewPurchasePage: React.FC = () => {
       notes: vendorInvoiceRef
         ? `Supplier Inv #${vendorInvoiceRef}. ${notes}`.trim()
         : notes.trim() || null,
-      paidAmount: paymentStatus === 'Unpaid' ? 0 : paidAmount,
+      paidAmount: paymentStatus === 'UNPAID' ? 0 : paidAmount,
       paymentMode: 'CASH',
       // No catalog bundle is selected on this screen, so lines go inward in base units.
       items: items.map((it) => ({
@@ -148,7 +148,7 @@ export const NewPurchasePage: React.FC = () => {
       await api.createPurchase(payload);
 
       // Record physical cash outflow if paid from cash drawer
-      const actualPaid = paymentStatus === 'Unpaid' ? 0 : paidAmount;
+      const actualPaid = paymentStatus === 'UNPAID' ? 0 : paidAmount;
       if (actualPaid > 0) {
         recordCashFlow({ purchaseCash: actualPaid });
       }
@@ -204,7 +204,7 @@ export const NewPurchasePage: React.FC = () => {
 
         <div className="w-72">
           <PartySelector
-            partyType="Vendor"
+            partyType="VENDOR"
             selectedPartyId={vendorId}
             onSelectParty={(party) => setVendorId(party ? party.id : null)}
             allowWalkIn
@@ -367,7 +367,7 @@ export const NewPurchasePage: React.FC = () => {
 
         <div className="flex items-center gap-3">
           <div className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs">
-            {(['Paid', 'Partial', 'Unpaid'] as const).map((st) => (
+            {(['PAID', 'PARTIAL', 'UNPAID'] as const).map((st) => (
               <button
                 key={st}
                 type="button"
@@ -383,7 +383,7 @@ export const NewPurchasePage: React.FC = () => {
             ))}
           </div>
 
-          {paymentStatus === 'Partial' && (
+          {paymentStatus === 'PARTIAL' && (
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs">
               <span className="text-slate-400">Paid: ₹</span>
               <input

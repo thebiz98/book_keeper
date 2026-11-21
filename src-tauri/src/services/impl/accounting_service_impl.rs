@@ -3,7 +3,7 @@ use crate::core::dtos::{
     PartyDueSummary, PartyLedgerView, RecordPaymentPayload, SettlePaymentPayload,
 };
 use crate::core::error::AppError;
-use crate::core::value_objects::PartyType;
+use crate::core::value_objects::{PartyType, PaymentKind, TransactionType};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::payment_service::PaymentService;
@@ -41,22 +41,23 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
                     continue;
                 }
 
-                match s.transaction_type.as_str() {
-                    "SALE" | "CUSTOMER_SETTLEMENT" => {
-                        drawer += s.amount_paid.abs();
-                        settled_sales.insert(s.transaction_id);
+                // TODO(F3, DD-01/DD-13): the drawer should be derived purely from the ledger.
+                match (s.transaction_type, s.kind) {
+                    (TransactionType::Sale, PaymentKind::Upfront | PaymentKind::Settlement) => {
+                        drawer += s.amount_paid;
+                        if let Some(id) = s.transaction_id {
+                            settled_sales.insert(id);
+                        }
                     }
-                    "PURCHASE" | "VENDOR_SETTLEMENT" => {
-                        drawer -= s.amount_paid.abs();
-                        settled_purchases.insert(s.transaction_id);
+                    (TransactionType::Purchase, PaymentKind::Upfront | PaymentKind::Settlement) => {
+                        drawer -= s.amount_paid;
+                        if let Some(id) = s.transaction_id {
+                            settled_purchases.insert(id);
+                        }
                     }
-                    "SALE_REFUND" => {
-                        drawer -= s.amount_paid.abs();
-                    }
-                    "PURCHASE_REFUND" => {
-                        drawer += s.amount_paid.abs();
-                    }
-                    _ => {}
+                    (_, PaymentKind::RefundOut) => drawer -= s.amount_paid,
+                    (_, PaymentKind::RefundIn) => drawer += s.amount_paid,
+                    (_, PaymentKind::ReturnCredit) => {} // non-cash
                 }
             }
         }
@@ -126,7 +127,8 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
         if let Some(sale_id) = payload.specific_bill_id {
             let payment_payload = RecordPaymentPayload {
                 party_id: Some(payload.party_id),
-                transaction_type: "SALE".to_string(),
+                transaction_type: TransactionType::Sale,
+                kind: PaymentKind::Settlement,
                 transaction_id: sale_id,
                 settlement_date: payload.settlement_date,
                 amount_paid: payload.amount,
@@ -145,7 +147,8 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
                 let settle_amount = bill.balance_due.min(remaining);
                 let payment_payload = RecordPaymentPayload {
                     party_id: Some(payload.party_id),
-                    transaction_type: "SALE".to_string(),
+                    transaction_type: TransactionType::Sale,
+                    kind: PaymentKind::Settlement,
                     transaction_id: bill.id,
                     settlement_date: payload.settlement_date.clone(),
                     amount_paid: settle_amount,

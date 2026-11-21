@@ -33,7 +33,7 @@ export const SalesHistoryPage: React.FC = () => {
       .catch(() => setSales([]))
       .finally(() => setIsLoading(false));
     api
-      .listParties('Customer', false)
+      .listParties('CUSTOMER', false)
       .then((rows) => setCustomerNames(Object.fromEntries(rows.map((c) => [c.id, c.name]))))
       .catch(() => setCustomerNames({}));
   };
@@ -112,7 +112,7 @@ export const SalesHistoryPage: React.FC = () => {
 
         {/* Status Filter */}
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-md text-xs font-medium">
-          {(['ALL', 'Paid', 'Partial', 'Unpaid'] as const).map((st) => (
+          {(['ALL', 'PAID', 'PARTIAL', 'UNPAID'] as const).map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}

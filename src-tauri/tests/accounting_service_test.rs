@@ -46,7 +46,7 @@ fn test_tc_dues_001_full_due_settlement() {
     assert_eq!(updated_sale.balance_due, 0.0);
     assert_eq!(updated_sale.payment_status, PaymentStatus::Paid);
 
-    let settlements = check_tx.settlements().list_by_transaction("SALE", 1).expect("settlements");
+    let settlements = check_tx.settlements().list_by_transaction(TransactionType::Sale, 1).expect("settlements");
     assert_eq!(settlements.len(), 1);
     assert_eq!(settlements[0].amount_paid, 250.0);
 }

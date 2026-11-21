@@ -23,7 +23,7 @@ impl PaymentService for PaymentServiceImpl {
         uow: &mut dyn TransactionContext,
         payload: RecordPaymentPayload,
     ) -> Result<i64, AppError> {
-        let (current_balance, _current_status) = if payload.transaction_type == "SALE" {
+        let (current_balance, _current_status) = if payload.transaction_type == TransactionType::Sale {
             let sale = uow.sales().find_by_id(payload.transaction_id)?
                 .ok_or_else(|| AppError::NotFound { entity: "SaleTransaction".to_string(), id: payload.transaction_id.to_string() })?;
             (sale.balance_due, sale.payment_status)
@@ -47,7 +47,7 @@ impl PaymentService for PaymentServiceImpl {
             PaymentStatus::Partial
         };
 
-        if payload.transaction_type == "SALE" {
+        if payload.transaction_type == TransactionType::Sale {
             uow.sales().update_balance_due(payload.transaction_id, new_balance, new_status)?;
         } else {
             uow.purchases().update_balance_due(payload.transaction_id, new_balance, new_status)?;
@@ -57,8 +57,10 @@ impl PaymentService for PaymentServiceImpl {
             id: 0,
             settlement_date: payload.settlement_date,
             party_id: payload.party_id,
+            kind: payload.kind,
             transaction_type: payload.transaction_type,
-            transaction_id: payload.transaction_id,
+            transaction_id: Some(payload.transaction_id),
+            return_id: None,
             amount_paid: payload.amount_paid,
             payment_mode: payload.payment_mode,
             notes: payload.notes,
@@ -77,9 +79,14 @@ impl PaymentService for PaymentServiceImpl {
             id: 0,
             settlement_date: payload.refund_date,
             party_id: payload.party_id,
-            transaction_type: format!("{}_REFUND", payload.transaction_type),
-            transaction_id: payload.transaction_id.unwrap_or(0),
-            amount_paid: -payload.amount.abs(), // Negative cash flow sense
+            kind: match payload.transaction_type {
+                TransactionType::Sale => PaymentKind::RefundOut,
+                TransactionType::Purchase => PaymentKind::RefundIn,
+            },
+            transaction_type: payload.transaction_type,
+            transaction_id: payload.transaction_id,
+            return_id: payload.return_id,
+            amount_paid: payload.amount.abs(), // Ledger amounts are always positive (DD-01)
             payment_mode: payload.payment_mode,
             notes: payload.notes,
             created_at: "2026-11-20T12:00:00Z".to_string(),
@@ -91,11 +98,11 @@ impl PaymentService for PaymentServiceImpl {
     fn reduce_transaction_balance(
         &self,
         uow: &mut dyn TransactionContext,
-        transaction_type: &str,
+        transaction_type: TransactionType,
         transaction_id: i64,
         reduction_amount: f64,
     ) -> Result<(), AppError> {
-        if transaction_type == "SALE" {
+        if transaction_type == TransactionType::Sale {
             let sale = uow.sales().find_by_id(transaction_id)?
                 .ok_or_else(|| AppError::NotFound { entity: "SaleTransaction".to_string(), id: transaction_id.to_string() })?;
             let new_balance = (sale.balance_due - reduction_amount).max(0.0);
@@ -125,7 +132,8 @@ fn test_tc_pay_001_record_full_payment_clears_balance() {
     let payment_service = PaymentServiceImpl;
     let payload = RecordPaymentPayload {
         party_id: None,
-        transaction_type: "SALE".to_string(),
+        transaction_type: TransactionType::Sale,
+        kind: PaymentKind::Settlement,
         transaction_id: 1,
         settlement_date: "2026-11-20".to_string(),
         amount_paid: 250.0,
@@ -142,7 +150,7 @@ fn test_tc_pay_001_record_full_payment_clears_balance() {
     assert_eq!(updated_sale.payment_status, PaymentStatus::Paid);
 
     // PaymentSettlement row exists
-    let settlements = tx.settlements().list_by_transaction("SALE", 1).expect("list settlements");
+    let settlements = tx.settlements().list_by_transaction(TransactionType::Sale, 1).expect("list settlements");
     assert_eq!(settlements.len(), 1);
     assert_eq!(settlements[0].amount_paid, 250.0);
 }
@@ -160,7 +168,8 @@ fn test_tc_pay_002_record_partial_payment_updates_status() {
     let payment_service = PaymentServiceImpl;
     let payload = RecordPaymentPayload {
         party_id: None,
-        transaction_type: "SALE".to_string(),
+        transaction_type: TransactionType::Sale,
+        kind: PaymentKind::Settlement,
         transaction_id: 2,
         settlement_date: "2026-11-20".to_string(),
         amount_paid: 100.0,
@@ -189,7 +198,8 @@ fn test_tc_pay_003_overpayment_rejected() {
     let payment_service = PaymentServiceImpl;
     let payload = RecordPaymentPayload {
         party_id: None,
-        transaction_type: "SALE".to_string(),
+        transaction_type: TransactionType::Sale,
+        kind: PaymentKind::Settlement,
         transaction_id: 3,
         settlement_date: "2026-11-20".to_string(),
         amount_paid: 600.0,
@@ -209,7 +219,7 @@ fn test_tc_pay_003_overpayment_rejected() {
     // Zero mutations: balance remains 500.0
     let unmodified_sale = tx.sales().find_by_id(3).expect("find sale").expect("sale exists");
     assert_eq!(unmodified_sale.balance_due, 500.0);
-    let settlements = tx.settlements().list_by_transaction("SALE", 3).expect("list settlements");
+    let settlements = tx.settlements().list_by_transaction(TransactionType::Sale, 3).expect("list settlements");
     assert!(settlements.is_empty(), "No settlements should be logged");
 }
 
@@ -222,8 +232,9 @@ fn test_tc_pay_004_record_refund_creates_outflow_settlement() {
     let payment_service = PaymentServiceImpl;
     let payload = RecordRefundPayload {
         party_id: None,
-        transaction_type: "SALE".to_string(),
+        transaction_type: TransactionType::Sale,
         transaction_id: Some(1),
+        return_id: None,
         refund_date: "2026-11-20".to_string(),
         amount: 50.0,
         payment_mode: Some("CASH".to_string()),
@@ -232,8 +243,9 @@ fn test_tc_pay_004_record_refund_creates_outflow_settlement() {
     let settlement_id = payment_service.record_refund(&mut *tx, payload).expect("record refund");
     assert!(settlement_id > 0);
 
-    // Assert: Settlement logged with negative cash flow sense (-50.0)
-    let settlements = tx.settlements().list_by_transaction("SALE_REFUND", 1).expect("list settlements");
+    // Assert: REFUND_OUT row with a positive amount (DD-01: ledger amounts are always > 0)
+    let settlements = tx.settlements().list_by_transaction(TransactionType::Sale, 1).expect("list settlements");
     assert_eq!(settlements.len(), 1);
-    assert_eq!(settlements[0].amount_paid, -50.0, "Refund must be recorded with negative amount for cash drawer deduction");
+    assert_eq!(settlements[0].kind, PaymentKind::RefundOut);
+    assert_eq!(settlements[0].amount_paid, 50.0, "Refund rows carry a positive amount; direction comes from kind");
 }

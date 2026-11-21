@@ -33,7 +33,7 @@ export const PurchaseHistoryPage: React.FC = () => {
       .catch(() => setPurchases([]))
       .finally(() => setIsLoading(false));
     api
-      .listParties('Vendor', false)
+      .listParties('VENDOR', false)
       .then((rows) => setVendorNames(Object.fromEntries(rows.map((v) => [v.id, v.name]))))
       .catch(() => setVendorNames({}));
   };
@@ -116,7 +116,7 @@ export const PurchaseHistoryPage: React.FC = () => {
 
         {/* Status Filter */}
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-md text-xs font-medium">
-          {(['ALL', 'Paid', 'Partial', 'Unpaid'] as const).map((st) => (
+          {(['ALL', 'PAID', 'PARTIAL', 'UNPAID'] as const).map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}

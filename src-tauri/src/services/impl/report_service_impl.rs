@@ -4,6 +4,7 @@ use crate::core::dtos::{
     CashFlowReport, DashboardMetrics, LowStockItem, PnLReport, StockValuationReport, TrendDataPoint,
 };
 use crate::core::error::AppError;
+use crate::core::value_objects::{PaymentKind, TransactionType};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::report_service::ReportService;
 
@@ -88,21 +89,14 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
 
         let refunds_cash: f64 = settlements
             .iter()
-            .filter(|s| s.transaction_type == "SALE_REFUND" && s.payment_mode.as_deref() == Some("CASH"))
-            .map(|s| s.amount_paid.abs())
+            .filter(|s| s.kind == PaymentKind::RefundOut && s.payment_mode.as_deref() == Some("CASH"))
+            .map(|s| s.amount_paid)
             .sum();
 
-        let customer_dues_cash: f64 = settlements
-            .iter()
-            .filter(|s| s.transaction_type == "CUSTOMER_SETTLEMENT" && s.payment_mode.as_deref() == Some("CASH"))
-            .map(|s| s.amount_paid.abs())
-            .sum();
-
-        let vendor_dues_cash: f64 = settlements
-            .iter()
-            .filter(|s| s.transaction_type == "VENDOR_SETTLEMENT" && s.payment_mode.as_deref() == Some("CASH"))
-            .map(|s| s.amount_paid.abs())
-            .sum();
+        // TODO(F5, DD-13): derive the drawer purely from the ledger. Header paid_amount already
+        // includes dues payments on today's bills, so these stay 0 as before the schema rewrite.
+        let customer_dues_cash = 0.0_f64;
+        let vendor_dues_cash = 0.0_f64;
 
         let live_cash_in_drawer = sales_cash - pur_cash - refunds_cash + customer_dues_cash - vendor_dues_cash;
 
@@ -210,10 +204,12 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
         let mut total_outflow = 0.0;
         for s in settlements {
             if s.settlement_date.as_str() >= from_date && s.settlement_date.as_str() <= to_date {
-                if s.amount_paid > 0.0 {
-                    total_inflow += s.amount_paid;
-                } else {
-                    total_outflow += s.amount_paid.abs();
+                // TODO(F5, DD-13): full ledger-derived cash-flow breakdown.
+                match (s.transaction_type, s.kind) {
+                    (_, PaymentKind::ReturnCredit) => {} // non-cash
+                    (TransactionType::Sale, PaymentKind::Upfront | PaymentKind::Settlement)
+                    | (TransactionType::Purchase, PaymentKind::RefundIn) => total_inflow += s.amount_paid,
+                    _ => total_outflow += s.amount_paid,
                 }
             }
         }

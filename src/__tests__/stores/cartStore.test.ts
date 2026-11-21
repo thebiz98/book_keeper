@@ -350,7 +350,7 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
         currentStock: 50.0,
       }, 3);
       store.setCustomer({ id: 9, name: 'Sharmaji' });
-      store.setPaymentStatus('Partial', 50.0);
+      store.setPaymentStatus('PARTIAL', 50.0);
 
       expect(useCartStore.getState().items).toHaveLength(1);
       expect(useCartStore.getState().selectedCustomer).not.toBeNull();
@@ -363,7 +363,7 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
       expect(cleared.totalBaseUnits).toBe(0);
       expect(cleared.totalItems).toBe(0);
       expect(cleared.selectedCustomer).toBeNull();
-      expect(cleared.paymentStatus).toBe('Paid');
+      expect(cleared.paymentStatus).toBe('PAID');
       expect(cleared.paidAmount).toBe(0);
       expect(cleared.balanceDue).toBe(0);
     });
@@ -384,12 +384,12 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
       expect(useCartStore.getState().balanceDue).toBe(0);
 
       // Case B: PARTIAL payment of ₹400 -> balance due = 600
-      store.setPaymentStatus('Partial', 400.0);
+      store.setPaymentStatus('PARTIAL', 400.0);
       expect(useCartStore.getState().paidAmount).toBe(400.0);
       expect(useCartStore.getState().balanceDue).toBe(600.0);
 
       // Case C: Full UNPAID credit sale -> balance due = 1000
-      store.setPaymentStatus('Unpaid');
+      store.setPaymentStatus('UNPAID');
       expect(useCartStore.getState().paidAmount).toBe(0.0);
       expect(useCartStore.getState().balanceDue).toBe(1000.0);
     });

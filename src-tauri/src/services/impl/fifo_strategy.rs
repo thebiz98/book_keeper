@@ -1,5 +1,6 @@
-use crate::core::entities::{AdjustmentStockAllocation, PurchaseItem, SaleStockAllocation};
+use crate::core::entities::{StockOutflowAllocation, PurchaseItem, SaleStockAllocation};
 use crate::core::error::AppError;
+use crate::core::value_objects::OutflowSourceType;
 use crate::data::contracts::unit_of_work::TransactionContext;
 use crate::services::contracts::inventory_allocation_strategy::{
     AdjustmentDepletionResult, DepletionResult, InventoryAllocationStrategy,
@@ -57,11 +58,13 @@ impl InventoryAllocationStrategy for FifoStrategy {
             let new_lot_remaining = lot.remaining_quantity - take;
             uow.purchases()
                 .update_remaining_quantity(lot.id, new_lot_remaining)?;
+            // TODO(F4, DD-05): restore_lots_for_return must bump returned_quantity.
             let allocation = SaleStockAllocation {
                 id: 0,
                 sale_item_id,
                 purchase_item_id: lot.id,
                 quantity_depleted: take,
+                returned_quantity: 0.0,
                 unit_cost: lot.unit_cost,
             };
             let alloc_id = uow.allocations().create(&allocation)?;
@@ -181,14 +184,15 @@ impl InventoryAllocationStrategy for FifoStrategy {
             let new_lot_remaining = lot.remaining_quantity - take;
             uow.purchases()
                 .update_remaining_quantity(lot.id, new_lot_remaining)?;
-            let alloc = AdjustmentStockAllocation {
+            let alloc = StockOutflowAllocation {
                 id: 0,
-                stock_adjustment_id,
+                source_type: OutflowSourceType::Adjustment,
+                source_id: stock_adjustment_id,
                 purchase_item_id: lot.id,
                 quantity_depleted: take,
                 unit_cost: lot.unit_cost,
             };
-            let alloc_id = uow.adjustment_allocations().create(&alloc)?;
+            let alloc_id = uow.outflow_allocations().create(&alloc)?;
             let mut saved = alloc;
             saved.id = alloc_id;
             allocations.push(saved);

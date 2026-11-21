@@ -7,7 +7,7 @@ pub mod settlement;
 pub mod shop_setting;
 pub mod stock_return;
 
-pub use adjustment::{AdjustmentStockAllocation, StockAdjustment};
+pub use adjustment::{StockAdjustment, StockOutflowAllocation};
 pub use item::{Item, ItemBundle};
 pub use party::{CreatePartyPayload, Party, UpdatePartyPayload};
 pub use purchase::{PurchaseItem, PurchaseTransaction};

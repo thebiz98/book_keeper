@@ -2,7 +2,7 @@ use std::sync::Arc;
 use crate::core::dtos::{PaginatedList, StockAdjustmentPayload};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction, StockAdjustment};
 use crate::core::error::AppError;
-use crate::core::value_objects::PaymentStatus;
+use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_allocation_strategy::{
     DepletionResult, InventoryAllocationStrategy,
@@ -141,16 +141,6 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
 
     fn create_adjustment(&self, payload: StockAdjustmentPayload) -> Result<i64, AppError> {
         let mut tx = self.uow.begin_transaction()?;
-        let adj = StockAdjustment {
-            id: 0,
-            adjustment_date: payload.adjustment_date.clone(),
-            item_id: payload.item_id,
-            quantity: payload.quantity,
-            reason: payload.reason,
-            notes: payload.notes,
-            created_at: chrono::Utc::now().to_rfc3339(),
-        };
-        let adj_id = tx.adjustments().create(&adj)?;
         let item = tx
             .items()
             .find_by_id(payload.item_id)?
@@ -158,6 +148,31 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                 entity: "Item".to_string(),
                 id: payload.item_id.to_string(),
             })?;
+        // Positive adjustments create a lot at the latest lot cost (DD-07/DD-12).
+        // TODO(F3, DD-12): accept a user-supplied unit_cost and reject when no cost is derivable.
+        let lot_cost = if payload.quantity > 0.0 {
+            let latest_lot = tx
+                .purchases()
+                .get_latest_purchase_item_for_item(payload.item_id)?;
+            Some(
+                latest_lot
+                    .map(|l| l.unit_cost)
+                    .unwrap_or(item.default_sale_price * 0.7),
+            )
+        } else {
+            None
+        };
+        let adj = StockAdjustment {
+            id: 0,
+            adjustment_date: payload.adjustment_date.clone(),
+            item_id: payload.item_id,
+            quantity: payload.quantity,
+            unit_cost: lot_cost,
+            reason: payload.reason,
+            notes: payload.notes,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let adj_id = tx.adjustments().create(&adj)?;
 
         if payload.quantity < 0.0 {
             let write_off_qty = payload.quantity.abs();
@@ -167,21 +182,21 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             let is_low = new_stock < 5.0;
             tx.items().update_stock_cache(item.id, new_stock, is_low)?;
         } else {
-            let latest_lot = tx
-                .purchases()
-                .get_latest_purchase_item_for_item(payload.item_id)?;
-            let unit_cost = latest_lot
-                .map(|l| l.unit_cost)
-                .unwrap_or(item.default_sale_price * 0.7);
+            let unit_cost = lot_cost.unwrap_or(0.0);
+            // DD-07: non-PURCHASE lot headers are not supplier bills (total 0, no party, PAID).
+            // TODO(F3, DD-07): per-source code sequence (ADJ-0001) instead of the adjustment id.
             let synthetic_tx = PurchaseTransaction {
                 id: 0,
                 transaction_code: format!("ADJ-{}", adj_id),
+                source: LotSource::Adjustment,
+                supplier_invoice_ref: None,
                 transaction_date: payload.adjustment_date,
                 party_id: None,
+                party_name: None,
                 payment_mode: None,
                 payment_status: PaymentStatus::Paid,
-                total_amount: payload.quantity * unit_cost,
-                paid_amount: payload.quantity * unit_cost,
+                total_amount: 0.0,
+                paid_amount: 0.0,
                 balance_due: 0.0,
                 notes: Some("Synthetic Adjustment Lot".to_string()),
                 created_at: chrono::Utc::now().to_rfc3339(),
@@ -191,8 +206,9 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                 id: 0,
                 purchase_transaction_id: synth_tx_id,
                 item_id: payload.item_id,
-                bundle_id: None,
-                bundle_quantity: payload.quantity,
+                item_name: item.name.clone(),
+                pack_label: None,
+                pack_quantity: payload.quantity,
                 quantity: payload.quantity,
                 unit_cost,
                 total_amount: payload.quantity * unit_cost,

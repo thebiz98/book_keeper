@@ -41,7 +41,7 @@ impl PartyRepository for SqlitePartyRepository {
     }
 
     fn list(&self, party_type: Option<PartyType>, active_only: bool) -> Result<Vec<Party>, AppError> {
-        let pt = party_type.as_ref().map(enum_to_sql);
+        let pt = party_type.as_ref().map(enum_to_sql).transpose()?;
         let mut stmt = self.conn.prepare_cached(&format!(
             "SELECT {COLS} FROM parties WHERE (?1 IS NULL OR party_type = ?1) AND (?2 = 0 OR is_active = 1) ORDER BY id"
         ))?;
@@ -57,7 +57,7 @@ impl PartyRepository for SqlitePartyRepository {
         let id = if p.id > 0 { Some(p.id) } else { None };
         self.conn.execute(
             &format!("INSERT INTO parties ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"),
-            params![id, p.name, p.phone, enum_to_sql(&p.party_type), p.notes, p.is_active, p.created_at, p.updated_at],
+            params![id, p.name, p.phone, enum_to_sql(&p.party_type)?, p.notes, p.is_active, p.created_at, p.updated_at],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -65,7 +65,7 @@ impl PartyRepository for SqlitePartyRepository {
     fn update(&mut self, p: &Party) -> Result<(), AppError> {
         let n = self.conn.execute(
             "UPDATE parties SET name=?2, phone=?3, party_type=?4, notes=?5, is_active=?6, created_at=?7, updated_at=?8 WHERE id=?1",
-            params![p.id, p.name, p.phone, enum_to_sql(&p.party_type), p.notes, p.is_active, p.created_at, p.updated_at],
+            params![p.id, p.name, p.phone, enum_to_sql(&p.party_type)?, p.notes, p.is_active, p.created_at, p.updated_at],
         )?;
         if n == 0 {
             return Err(AppError::NotFound { entity: "Party".to_string(), id: p.id.to_string() });

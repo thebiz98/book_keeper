@@ -9,12 +9,13 @@
 //!   `shop_settings`, `items`, `item_bundles`, `parties`, `purchase_transactions`,
 //!   `purchase_items`, `sale_transactions`, `sale_items`, `sale_stock_allocations`,
 //!   `return_transactions`, `return_items`, `payment_settlements`, `stock_adjustments`,
-//!   `adjustment_stock_allocations`, plus FTS5 virtual table `item_search_fts`.
-//! * **Columns** are exactly the Rust entity field names (`core::entities`), same order.
+//!   `stock_outflow_allocations`, plus FTS5 virtual table `item_search_fts`.
+//! * **Columns** are exactly the Rust entity field names (`core::entities`), same order; repositories
+//!   use explicit named column lists (never positional `SELECT *`).
 //!   `id INTEGER PRIMARY KEY AUTOINCREMENT`. Booleans are `INTEGER` 0/1, money/qty `REAL`,
 //!   dates/timestamps `TEXT`.
 //! * **Enums** are stored as `TEXT` using [`enum_to_sql`] / [`enum_from_sql`] (serde name,
-//!   e.g. `PaymentStatus::Paid` -> `"Paid"`).
+//!   SCREAMING_SNAKE_CASE, e.g. `PaymentStatus::Paid` -> `"PAID"`; DD-23).
 //! * **Explicit ids:** `create(&entity)` inserts the given `id` when `id > 0` (fixtures rely
 //!   on this), otherwise lets SQLite assign one. Always return the row id.
 //! * Errors: `rusqlite::Error` converts into `AppError` via `?` (`From` impl exists).
@@ -35,12 +36,13 @@ use crate::core::error::AppError;
 /// `Rc` is fine: a `TransactionContext` is confined to one thread.
 pub type SqliteConn = Rc<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>>;
 
-/// Serialises a unit-variant enum to its serde name for TEXT storage.
-pub fn enum_to_sql<T: Serialize>(value: &T) -> String {
+/// Serialises a unit-variant enum to its serde name (SCREAMING_SNAKE_CASE) for TEXT storage.
+/// Errors propagate instead of silently producing an empty string.
+pub fn enum_to_sql<T: Serialize>(value: &T) -> Result<String, AppError> {
     match serde_json::to_value(value) {
-        Ok(serde_json::Value::String(s)) => s,
-        Ok(other) => other.to_string(),
-        Err(_) => String::new(),
+        Ok(serde_json::Value::String(s)) => Ok(s),
+        Ok(other) => Err(AppError::DatabaseError(format!("enum did not serialize to a string: {other}"))),
+        Err(e) => Err(AppError::DatabaseError(format!("enum serialization failed: {e}"))),
     }
 }
 
@@ -56,4 +58,17 @@ pub fn enum_col<T: DeserializeOwned>(row: &rusqlite::Row<'_>, idx: usize) -> rus
     serde_json::from_value(serde_json::Value::String(raw.clone())).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
     })
+}
+
+/// Nullable enum column (`NULL` -> `None`).
+pub fn opt_enum_col<T: DeserializeOwned>(row: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<Option<T>> {
+    let raw: Option<String> = row.get(idx)?;
+    match raw {
+        None => Ok(None),
+        Some(raw) => serde_json::from_value(serde_json::Value::String(raw))
+            .map(Some)
+            .map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
+            }),
+    }
 }

@@ -4,7 +4,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, ItemBundle, PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
-use crate::core::value_objects::PaymentStatus;
+use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::item_service::ItemService;
@@ -89,13 +89,18 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
             let unit_cost = payload.initial_cost.unwrap_or(payload.default_sale_price * 0.7);
             let synthetic_tx = PurchaseTransaction {
                 id: 0,
+                // TODO(F3, DD-07): OPN- per-source sequence instead of INIT-<item id>.
                 transaction_code: format!("INIT-{}", item_id),
+                source: LotSource::Opening,
+                supplier_invoice_ref: None,
                 transaction_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
                 party_id: None,
+                party_name: None,
                 payment_mode: None,
                 payment_status: PaymentStatus::Paid,
-                total_amount: initial_stock * unit_cost,
-                paid_amount: initial_stock * unit_cost,
+                // DD-07: opening lots are not supplier bills.
+                total_amount: 0.0,
+                paid_amount: 0.0,
                 balance_due: 0.0,
                 notes: Some("Initial Stock Batch".to_string()),
                 created_at: chrono::Utc::now().to_rfc3339(),
@@ -105,8 +110,9 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
                 id: 0,
                 purchase_transaction_id: synth_tx_id,
                 item_id,
-                bundle_id: None,
-                bundle_quantity: initial_stock,
+                item_name: item.name.clone(),
+                pack_label: None,
+                pack_quantity: initial_stock,
                 quantity: initial_stock,
                 unit_cost,
                 total_amount: initial_stock * unit_cost,

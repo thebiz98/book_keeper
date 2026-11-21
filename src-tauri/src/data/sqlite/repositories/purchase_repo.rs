@@ -8,22 +8,25 @@ use crate::core::value_objects::PaymentStatus;
 use crate::data::contracts::purchase_repository::PurchaseRepository;
 use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
 
-const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
-const ITEM_COLS: &str = "id, purchase_transaction_id, item_id, bundle_id, bundle_quantity, quantity, unit_cost, total_amount, remaining_quantity";
+const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
+const ITEM_COLS: &str = "id, purchase_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_cost, total_amount, remaining_quantity";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<PurchaseTransaction> {
     Ok(PurchaseTransaction {
         id: r.get(0)?,
         transaction_code: r.get(1)?,
-        transaction_date: r.get(2)?,
-        party_id: r.get(3)?,
-        payment_mode: r.get(4)?,
-        payment_status: enum_col(r, 5)?,
-        total_amount: r.get(6)?,
-        paid_amount: r.get(7)?,
-        balance_due: r.get(8)?,
-        notes: r.get(9)?,
-        created_at: r.get(10)?,
+        source: enum_col(r, 2)?,
+        supplier_invoice_ref: r.get(3)?,
+        transaction_date: r.get(4)?,
+        party_id: r.get(5)?,
+        party_name: r.get(6)?,
+        payment_mode: r.get(7)?,
+        payment_status: enum_col(r, 8)?,
+        total_amount: r.get(9)?,
+        paid_amount: r.get(10)?,
+        balance_due: r.get(11)?,
+        notes: r.get(12)?,
+        created_at: r.get(13)?,
     })
 }
 
@@ -32,12 +35,13 @@ fn map_item(r: &Row<'_>) -> rusqlite::Result<PurchaseItem> {
         id: r.get(0)?,
         purchase_transaction_id: r.get(1)?,
         item_id: r.get(2)?,
-        bundle_id: r.get(3)?,
-        bundle_quantity: r.get(4)?,
-        quantity: r.get(5)?,
-        unit_cost: r.get(6)?,
-        total_amount: r.get(7)?,
-        remaining_quantity: r.get(8)?,
+        item_name: r.get(3)?,
+        pack_label: r.get(4)?,
+        pack_quantity: r.get(5)?,
+        quantity: r.get(6)?,
+        unit_cost: r.get(7)?,
+        total_amount: r.get(8)?,
+        remaining_quantity: r.get(9)?,
     })
 }
 
@@ -63,7 +67,7 @@ impl SqlitePurchaseRepository {
         end: Option<&str>,
         status: Option<PaymentStatus>,
         party_id: Option<i64>,
-    ) -> (String, Vec<Value>) {
+    ) -> Result<(String, Vec<Value>), AppError> {
         let mut conds: Vec<&str> = Vec::new();
         let mut vals: Vec<Value> = Vec::new();
         if let Some(p) = party_id {
@@ -72,7 +76,7 @@ impl SqlitePurchaseRepository {
         }
         if let Some(s) = status {
             conds.push("payment_status = ?");
-            vals.push(Value::Text(enum_to_sql(&s)));
+            vals.push(Value::Text(enum_to_sql(&s)?));
         }
         if let Some(s) = start {
             conds.push("transaction_date >= ?");
@@ -83,7 +87,7 @@ impl SqlitePurchaseRepository {
             vals.push(Value::Text(e.to_string()));
         }
         let w = if conds.is_empty() { String::new() } else { format!(" WHERE {}", conds.join(" AND ")) };
-        (w, vals)
+        Ok((w, vals))
     }
 
     fn query_items(&self, sql: &str, p: impl rusqlite::Params) -> Result<Vec<PurchaseItem>, AppError> {
@@ -96,10 +100,11 @@ impl SqlitePurchaseRepository {
 impl PurchaseRepository for SqlitePurchaseRepository {
     fn create_transaction(&mut self, tx: &PurchaseTransaction) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+            &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"),
             params![
-                opt_id(tx.id), tx.transaction_code, tx.transaction_date, tx.party_id, tx.payment_mode,
-                enum_to_sql(&tx.payment_status), tx.total_amount, tx.paid_amount, tx.balance_due,
+                opt_id(tx.id), tx.transaction_code, enum_to_sql(&tx.source)?, tx.supplier_invoice_ref,
+                tx.transaction_date, tx.party_id, tx.party_name, tx.payment_mode,
+                enum_to_sql(&tx.payment_status)?, tx.total_amount, tx.paid_amount, tx.balance_due,
                 tx.notes, tx.created_at
             ],
         )?;
@@ -108,9 +113,9 @@ impl PurchaseRepository for SqlitePurchaseRepository {
 
     fn create_purchase_item(&mut self, l: &PurchaseItem) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO purchase_items ({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+            &format!("INSERT INTO purchase_items ({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
             params![
-                opt_id(l.id), l.purchase_transaction_id, l.item_id, l.bundle_id, l.bundle_quantity,
+                opt_id(l.id), l.purchase_transaction_id, l.item_id, l.item_name, l.pack_label, l.pack_quantity,
                 l.quantity, l.unit_cost, l.total_amount, l.remaining_quantity
             ],
         )?;
@@ -179,7 +184,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
     fn update_balance_due(&mut self, tx_id: i64, new_balance: f64, status: PaymentStatus) -> Result<(), AppError> {
         let n = self.conn.execute(
             "UPDATE purchase_transactions SET paid_amount = paid_amount + MAX(balance_due - ?1, 0.0), balance_due = ?1, payment_status = ?2 WHERE id = ?3",
-            params![new_balance, enum_to_sql(&status), tx_id],
+            params![new_balance, enum_to_sql(&status)?, tx_id],
         )?;
         if n == 0 {
             return Err(AppError::NotFound { entity: "PurchaseTransaction".to_string(), id: tx_id.to_string() });
@@ -196,7 +201,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<PurchaseTransaction>, AppError> {
-        let (w, mut vals) = Self::where_clause(start_date, end_date, status, party_id);
+        let (w, mut vals) = Self::where_clause(start_date, end_date, status, party_id)?;
         vals.push(Value::Integer(lim(limit)));
         vals.push(Value::Integer(lim(offset)));
         let sql = format!("SELECT {TX_COLS} FROM purchase_transactions{w} ORDER BY id LIMIT ? OFFSET ?");
@@ -236,7 +241,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         let limit = filter.limit.unwrap_or(50);
         let offset = page.saturating_sub(1) * limit;
 
-        let (w, vals) = Self::where_clause(from, to, filter.payment_status, filter.party_id);
+        let (w, vals) = Self::where_clause(from, to, filter.payment_status, filter.party_id)?;
         let total: i64 = self.conn.query_row(
             &format!("SELECT COUNT(*) FROM purchase_transactions{w}"),
             rusqlite::params_from_iter(vals.iter()),

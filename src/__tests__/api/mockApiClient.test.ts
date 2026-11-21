@@ -58,11 +58,11 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
 
   describe('2. Parties & Dues Khata Seed Profile', () => {
     it('TC-MOCK-005: provides seeded customer directory with active dues balances', async () => {
-      const customers = await client.listParties('Customer');
+      const customers = await client.listParties('CUSTOMER');
       expect(customers).toBeDefined();
       expect(customers.length).toBeGreaterThan(0);
 
-      const duesSummary = await client.getPartyDuesSummary('Customer');
+      const duesSummary = await client.getPartyDuesSummary('CUSTOMER');
       expect(duesSummary).toBeDefined();
       expect(duesSummary.length).toBeGreaterThan(0);
 
@@ -72,7 +72,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
     });
 
     it('TC-MOCK-006: provides seeded vendor directory', async () => {
-      const vendors = await client.listParties('Vendor');
+      const vendors = await client.listParties('VENDOR');
       expect(vendors).toBeDefined();
       expect(vendors.length).toBeGreaterThan(0);
     });
@@ -193,7 +193,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
 
   describe('6. Accounting, Dues Settlement & Reports', () => {
     it('TC-MOCK-015: settleBillPayment decrements customer dues', async () => {
-      const dues = await client.getPartyDuesSummary('Customer');
+      const dues = await client.getPartyDuesSummary('CUSTOMER');
       expect(dues.length).toBeGreaterThan(0);
       const party = dues[0];
       const initialDue = party.totalDue;

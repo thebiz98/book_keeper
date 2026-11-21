@@ -4,21 +4,24 @@ use rusqlite::{params, Row};
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
 use crate::data::contracts::settlement_repository::SettlementRepository;
-use crate::data::sqlite::SqliteConn;
+use crate::core::value_objects::TransactionType;
+use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
 
-const COLS: &str = "id, settlement_date, party_id, transaction_type, transaction_id, amount_paid, payment_mode, notes, created_at";
+const COLS: &str = "id, settlement_date, party_id, kind, transaction_type, transaction_id, return_id, amount_paid, payment_mode, notes, created_at";
 
 fn map(r: &Row<'_>) -> rusqlite::Result<PaymentSettlement> {
     Ok(PaymentSettlement {
         id: r.get(0)?,
         settlement_date: r.get(1)?,
         party_id: r.get(2)?,
-        transaction_type: r.get(3)?,
-        transaction_id: r.get(4)?,
-        amount_paid: r.get(5)?,
-        payment_mode: r.get(6)?,
-        notes: r.get(7)?,
-        created_at: r.get(8)?,
+        kind: enum_col(r, 3)?,
+        transaction_type: enum_col(r, 4)?,
+        transaction_id: r.get(5)?,
+        return_id: r.get(6)?,
+        amount_paid: r.get(7)?,
+        payment_mode: r.get(8)?,
+        notes: r.get(9)?,
+        created_at: r.get(10)?,
     })
 }
 
@@ -41,11 +44,11 @@ impl SqliteSettlementRepository {
 impl SettlementRepository for SqliteSettlementRepository {
     fn create_settlement(&mut self, s: &PaymentSettlement) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO payment_settlements ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+            &format!("INSERT INTO payment_settlements ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
             params![
                 if s.id > 0 { Some(s.id) } else { None },
-                s.settlement_date, s.party_id, s.transaction_type, s.transaction_id,
-                s.amount_paid, s.payment_mode, s.notes, s.created_at
+                s.settlement_date, s.party_id, enum_to_sql(&s.kind)?, enum_to_sql(&s.transaction_type)?,
+                s.transaction_id, s.return_id, s.amount_paid, s.payment_mode, s.notes, s.created_at
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -66,17 +69,17 @@ impl SettlementRepository for SqliteSettlementRepository {
         self.list_by_party(party_id)
     }
 
-    fn list_by_transaction(&self, tx_type: &str, tx_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
+    fn list_by_transaction(&self, tx_type: TransactionType, tx_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
         self.query(
             &format!("SELECT {COLS} FROM payment_settlements WHERE transaction_type = ?1 AND transaction_id = ?2 ORDER BY id"),
-            params![tx_type, tx_id],
+            params![enum_to_sql(&tx_type)?, tx_id],
         )
     }
 
-    fn get_daily_settlement_total(&self, date: &str, tx_type: &str) -> Result<f64, AppError> {
+    fn get_daily_settlement_total(&self, date: &str, tx_type: TransactionType) -> Result<f64, AppError> {
         Ok(self.conn.query_row(
             "SELECT COALESCE(SUM(amount_paid), 0.0) FROM payment_settlements WHERE settlement_date = ?1 AND transaction_type = ?2",
-            params![date, tx_type],
+            params![date, enum_to_sql(&tx_type)?],
             |r| r.get::<_, f64>(0),
         )?)
     }

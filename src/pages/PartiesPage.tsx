@@ -27,7 +27,7 @@ const emptyForm = (partyType: PartyType): PartyForm => ({
 });
 
 export const PartiesPage: React.FC = () => {
-  const [tab, setTab] = useState<PartyType>('Customer');
+  const [tab, setTab] = useState<PartyType>('CUSTOMER');
   const [query, setQuery] = useState('');
   const [parties, setParties] = useState<Party[]>([]);
   const [dues, setDues] = useState<Record<number, number>>({});
@@ -117,11 +117,11 @@ export const PartiesPage: React.FC = () => {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <Tabs
           tabs={[
-            { id: 'Customer', label: 'Customers', icon: <User className="h-3.5 w-3.5" /> },
-            { id: 'Vendor', label: 'Vendors', icon: <Truck className="h-3.5 w-3.5" /> },
+            { id: 'CUSTOMER', label: 'Customers', icon: <User className="h-3.5 w-3.5" /> },
+            { id: 'VENDOR', label: 'Vendors', icon: <Truck className="h-3.5 w-3.5" /> },
           ]}
           activeTab={tab}
-          onChange={(id) => setTab(id === 'Vendor' ? 'Vendor' : 'Customer')}
+          onChange={(id) => setTab(id === 'VENDOR' ? 'VENDOR' : 'CUSTOMER')}
         />
         <div className="w-64">
           <TextInput
@@ -223,8 +223,8 @@ export const PartiesPage: React.FC = () => {
               value={form.partyType}
               onChange={(v) => setForm({ ...form, partyType: v })}
               options={[
-                { value: 'Customer', label: 'Customer' },
-                { value: 'Vendor', label: 'Vendor' },
+                { value: 'CUSTOMER', label: 'Customer' },
+                { value: 'VENDOR', label: 'Vendor' },
               ]}
             />
           </div>

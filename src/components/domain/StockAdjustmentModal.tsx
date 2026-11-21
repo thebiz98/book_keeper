@@ -27,7 +27,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
 }) => {
   const [adjustmentType, setAdjustmentType] = useState<'DECREASE' | 'INCREASE'>('DECREASE');
   const [quantity, setQuantity] = useState<number>(1);
-  const [reason, setReason] = useState<AdjustmentReason>('Damaged');
+  const [reason, setReason] = useState<AdjustmentReason>('DAMAGED');
   const [notes, setNotes] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
     if (isOpen) {
       setAdjustmentType('DECREASE');
       setQuantity(1);
-      setReason('Damaged');
+      setReason('DAMAGED');
       setNotes('');
       setError(null);
     }
@@ -153,12 +153,10 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
           value={reason}
           onChange={(val) => setReason(val as AdjustmentReason)}
           options={[
-            { value: 'Damaged', label: 'Damaged / Defective in Store' },
-            { value: 'Expired', label: 'Expired / Dried Ink' },
-            { value: 'DamageWriteOff', label: 'Written off to Scrap' },
-            { value: 'AuditCorrection', label: 'Cycle Count Audit Correction' },
-            { value: 'Theft', label: 'Shrinkage / Pilferage' },
-            { value: 'FoundStock', label: 'Found Stock / Surplus' },
+            { value: 'DAMAGED', label: 'Damaged / Defective in Store' },
+            { value: 'EXPIRED', label: 'Expired / Dried Ink' },
+            { value: 'COUNT_CORRECTION', label: 'Count Correction (audit / found stock)' },
+            { value: 'THEFT_LOST', label: 'Theft / Lost' },
           ]}
         />
 

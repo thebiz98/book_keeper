@@ -78,8 +78,8 @@ function paginate<T>(all: T[], page = 1, limit = 50): PaginatedList<T> {
 }
 
 function statusFor(total: number, paid: number): PaymentStatus {
-  if (paid >= total) return 'Paid';
-  return paid > 0 ? 'Partial' : 'Unpaid';
+  if (paid >= total) return 'PAID';
+  return paid > 0 ? 'PARTIAL' : 'UNPAID';
 }
 
 /** In-memory ApiClient returning the same camelCase shapes as the Tauri client. */
@@ -460,7 +460,7 @@ export class MockApiClient implements ApiClient {
     const party = this.findParty(payload.partyId);
     if (!party) throw new Error(`Party ${payload.partyId} not found`);
     this.addDue(party, -payload.amount);
-    if (party.partyType === 'Customer') {
+    if (party.partyType === 'CUSTOMER') {
       this.cashDrawer.customerDuesSettled += payload.amount;
     } else {
       this.cashDrawer.vendorDuesSettled += payload.amount;
@@ -547,8 +547,8 @@ export class MockApiClient implements ApiClient {
       todayPurchaseCount: 2,
       todayNetProfit: 1450.0,
       totalStockValuation: this.stockValuation(),
-      customerReceivables: this.dueTotal('Customer'),
-      vendorPayables: this.dueTotal('Vendor'),
+      customerReceivables: this.dueTotal('CUSTOMER'),
+      vendorPayables: this.dueTotal('VENDOR'),
       liveCashInDrawer:
         d.salesCash + d.customerDuesSettled - (d.purchaseCash + d.vendorDuesSettled + d.refunds),
     };
@@ -624,10 +624,10 @@ export class MockApiClient implements ApiClient {
     let refund = 0;
     for (const line of payload.items) {
       const item = this.findItem(line.itemId);
-      if (item && line.condition === 'Restockable') this.adjustStock(item, line.quantity);
+      if (item && line.condition === 'RESTOCKABLE') this.adjustStock(item, line.quantity);
       refund += line.quantity * line.unitPrice;
     }
-    if (payload.settlementType === 'CashRefund') this.cashDrawer.refunds += refund;
+    if (payload.settlementType === 'REFUND') this.cashDrawer.refunds += refund;
     return payload.returnCode || `RET-SAL-${Math.floor(1000 + Math.random() * 9000)}`;
   }
 
@@ -645,10 +645,10 @@ export class MockApiClient implements ApiClient {
         id: returnId,
         returnCode: `RET-${returnId}`,
         returnDate: '2026-11-20',
-        returnType: 'Customer',
+        returnType: 'CUSTOMER',
         partyId: null,
         originalTransactionId: null,
-        settlementType: 'CashRefund',
+        settlementType: 'REFUND',
         totalAmount: 0,
         reason: null,
         notes: null,

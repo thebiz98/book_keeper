@@ -123,6 +123,7 @@ impl<S: InventoryAllocationStrategy> InventoryService for InventoryServiceImpl<S
             adjustment_date: payload.adjustment_date.clone(),
             item_id: payload.item_id,
             quantity: payload.quantity,
+            unit_cost: None,
             reason: payload.reason,
             notes: payload.notes,
             created_at: "2026-11-20T12:00:00Z".to_string(),
@@ -147,12 +148,15 @@ impl<S: InventoryAllocationStrategy> InventoryService for InventoryServiceImpl<S
             let synthetic_tx = PurchaseTransaction {
                 id: 0,
                 transaction_code: format!("ADJ-{}", adj_id),
+                source: LotSource::Adjustment,
+                supplier_invoice_ref: None,
                 transaction_date: payload.adjustment_date,
                 party_id: None,
+                party_name: None,
                 payment_mode: None,
                 payment_status: PaymentStatus::Paid,
-                total_amount: payload.quantity * unit_cost,
-                paid_amount: payload.quantity * unit_cost,
+                total_amount: 0.0,
+                paid_amount: 0.0,
                 balance_due: 0.0,
                 notes: Some("Synthetic Adjustment Lot".to_string()),
                 created_at: "2026-11-20T12:00:00Z".to_string(),
@@ -163,8 +167,9 @@ impl<S: InventoryAllocationStrategy> InventoryService for InventoryServiceImpl<S
                 id: 0,
                 purchase_transaction_id: synth_tx_id,
                 item_id: payload.item_id,
-                bundle_id: None,
-                bundle_quantity: payload.quantity,
+                item_name: item.name.clone(),
+                pack_label: None,
+                pack_quantity: payload.quantity,
                 quantity: payload.quantity,
                 unit_cost,
                 total_amount: payload.quantity * unit_cost,
@@ -315,7 +320,7 @@ fn test_tc_inv_004_negative_adjustment_creates_audit_trail() {
     assert_eq!(updated.current_stock, 17.0);
 
     // Audit allocations exist
-    let allocs = check_tx.adjustment_allocations().list_by_adjustment_id(adj_id).expect("list allocs");
+    let allocs = check_tx.outflow_allocations().find_by_source(OutflowSourceType::Adjustment, adj_id).expect("list allocs");
     assert_eq!(allocs.len(), 1);
     assert_eq!(allocs[0].quantity_depleted, 3.0);
     assert_eq!(allocs[0].unit_cost, 5.0);

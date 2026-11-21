@@ -1,5 +1,6 @@
 use crate::core::dtos::{RecordPaymentPayload, RecordRefundPayload};
 use crate::core::error::AppError;
+use crate::core::value_objects::TransactionType;
 use crate::data::contracts::unit_of_work::TransactionContext;
 
 pub trait PaymentService: Send + Sync {
@@ -10,7 +11,7 @@ pub trait PaymentService: Send + Sync {
         payload: RecordPaymentPayload,
     ) -> Result<i64, AppError>;
 
-    /// Records a cash refund (negative payment / outflow from drawer).
+    /// Records a cash refund ledger row (REFUND_OUT / REFUND_IN, positive amount).
     fn record_refund(
         &self,
         uow: &mut dyn TransactionContext,
@@ -21,7 +22,7 @@ pub trait PaymentService: Send + Sync {
     fn reduce_transaction_balance(
         &self,
         uow: &mut dyn TransactionContext,
-        transaction_type: &str,
+        transaction_type: TransactionType,
         transaction_id: i64,
         reduction_amount: f64,
     ) -> Result<(), AppError>;
@@ -47,7 +48,7 @@ impl<T: PaymentService + ?Sized> PaymentService for std::sync::Arc<T> {
     fn reduce_transaction_balance(
         &self,
         uow: &mut dyn TransactionContext,
-        transaction_type: &str,
+        transaction_type: TransactionType,
         transaction_id: i64,
         reduction_amount: f64,
     ) -> Result<(), AppError> {

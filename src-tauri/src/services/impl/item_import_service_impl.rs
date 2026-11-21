@@ -3,7 +3,7 @@ use calamine::{open_workbook_auto, Data, Reader};
 use crate::core::dtos::ImportSummary;
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
-use crate::core::value_objects::PaymentStatus;
+use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::item_import_service::ItemImportService;
 
@@ -168,13 +168,17 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
                             let unit_cost = default_sale_price * 0.7;
                             let synthetic_tx = PurchaseTransaction {
                                 id: 0,
+                                // TODO(F3, DD-07/DD-16): OPN- per-source sequence.
                                 transaction_code: format!("IMP-{}", item_id),
+                                source: LotSource::Opening,
+                                supplier_invoice_ref: None,
                                 transaction_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
                                 party_id: None,
+                                party_name: None,
                                 payment_mode: None,
                                 payment_status: PaymentStatus::Paid,
-                                total_amount: current_stock * unit_cost,
-                                paid_amount: current_stock * unit_cost,
+                                total_amount: 0.0,
+                                paid_amount: 0.0,
                                 balance_due: 0.0,
                                 notes: Some("Excel Inward Import".to_string()),
                                 created_at: chrono::Utc::now().to_rfc3339(),
@@ -184,8 +188,9 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
                                     id: 0,
                                     purchase_transaction_id: p_id,
                                     item_id,
-                                    bundle_id: None,
-                                    bundle_quantity: current_stock,
+                                    item_name: item.name.clone(),
+                                    pack_label: None,
+                                    pack_quantity: current_stock,
                                     quantity: current_stock,
                                     unit_cost,
                                     total_amount: current_stock * unit_cost,

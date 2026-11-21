@@ -2,31 +2,26 @@
  * Core domain models for Book Keeper.
  * camelCase mirrors of src-tauri/src/core/entities & dtos. The IPC layer
  * (src/api/caseConvert.ts) converts Rust snake_case keys to camelCase.
- * Enums are the Rust variant names.
+ * Enums are SCREAMING_SNAKE_CASE strings (DD-23).
  */
 
 export * from './store';
 export * from './api';
 
-export type PartyType = 'Customer' | 'Vendor';
-export type PaymentStatus = 'Paid' | 'Partial' | 'Unpaid';
-export type AdjustmentReason =
-  | 'AuditCorrection'
-  | 'DamageWriteOff'
-  | 'Expiry'
-  | 'Theft'
-  | 'FoundStock'
-  | 'InitialSetup'
-  | 'Damaged'
-  | 'Expired';
-export type SettlementType =
-  | 'CashRefund'
-  | 'ReduceDue'
-  | 'DefectiveReplacement'
-  | 'SpecificBill'
-  | 'FifoDues';
-export type StockCondition = 'Restockable' | 'DamagedScrap';
-export type ReturnType = 'Customer' | 'Vendor' | 'CustomerReturn' | 'VendorReturn';
+// Enum string literals are SCREAMING_SNAKE_CASE, identical to the Rust serde names and the
+// SQLite TEXT values (DD-23). Do not change one side without the others.
+export type PartyType = 'CUSTOMER' | 'VENDOR';
+export type PaymentStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
+export type AdjustmentReason = 'DAMAGED' | 'EXPIRED' | 'COUNT_CORRECTION' | 'THEFT_LOST';
+/** Refund = value applied to dues first, remainder as cash. Replacement = customer-only no-money swap. */
+export type SettlementType = 'REFUND' | 'REPLACEMENT';
+export type StockCondition = 'RESTOCKABLE' | 'DAMAGED_SCRAP';
+export type ReturnType = 'CUSTOMER' | 'VENDOR';
+export type ReturnLineType = 'RETURNED' | 'REPLACEMENT_ISSUED';
+export type PaymentKind = 'UPFRONT' | 'SETTLEMENT' | 'RETURN_CREDIT' | 'REFUND_OUT' | 'REFUND_IN';
+export type TransactionType = 'SALE' | 'PURCHASE';
+export type LotSource = 'PURCHASE' | 'ADJUSTMENT' | 'OPENING' | 'RETURN';
+export type OutflowSourceType = 'ADJUSTMENT' | 'REPLACEMENT' | 'VENDOR_RETURN';
 
 export interface Item {
   id: number;

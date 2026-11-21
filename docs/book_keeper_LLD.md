@@ -427,6 +427,7 @@ pub struct ReturnItem {
     pub return_transaction_id: i64,
     pub line_type: ReturnLineType,     // Returned or ReplacementIssued
     pub item_id: i64,
+    pub item_name: String,             // Name snapshot at write time (DD-30)
     pub sale_item_id: Option<i64>,     // Customer: linked sale line (None = unlinked return)
     pub purchase_item_id: Option<i64>, // Vendor: named lot (None = FIFO)
     pub quantity: f64,                 // Base units

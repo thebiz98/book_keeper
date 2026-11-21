@@ -27,8 +27,8 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
   // Tab 1: Customer Return State
   const [custReturnItem, setCustReturnItem] = useState<ItemSearchResult | null>(null);
   const [custReturnQty, setCustReturnQty] = useState(1);
-  const [custCondition, setCustCondition] = useState<StockCondition>('Restockable');
-  const [custResolution, setCustResolution] = useState<SettlementType>('CashRefund');
+  const [custCondition, setCustCondition] = useState<StockCondition>('RESTOCKABLE');
+  const [custResolution, setCustResolution] = useState<SettlementType>('REFUND');
   const [custRefundAmount, setCustRefundAmount] = useState(0);
   const [custNotes, setCustNotes] = useState('');
   const [isSubmittingCust, setIsSubmittingCust] = useState(false);
@@ -36,7 +36,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
   // Tab 2: Vendor Return State
   const [vendReturnItem, setVendReturnItem] = useState<ItemSearchResult | null>(null);
   const [vendReturnQty, setVendReturnQty] = useState(1);
-  const [vendResolution, setVendResolution] = useState<SettlementType>('ReduceDue');
+  const [vendResolution, setVendResolution] = useState<SettlementType>('REFUND');
   const [vendRefundAmount, setVendRefundAmount] = useState(0);
   const [vendNotes, setVendNotes] = useState('');
   const [isSubmittingVend, setIsSubmittingVend] = useState(false);
@@ -66,7 +66,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
     setFeedback(null);
     try {
       const unitPrice =
-        custResolution === 'CashRefund' && custReturnQty > 0
+        custResolution === 'REFUND' && custReturnQty > 0
           ? custRefundAmount / custReturnQty
           : custReturnItem.defaultSalePrice;
       const returnCode = await api.createCustomerReturn({
@@ -85,7 +85,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
           },
         ],
       });
-      if (custResolution === 'CashRefund' && custRefundAmount > 0) {
+      if (custResolution === 'REFUND' && custRefundAmount > 0) {
         recordCashFlow({ refunds: custRefundAmount });
       }
 
@@ -252,8 +252,8 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                 value={custCondition}
                 onChange={(v) => setCustCondition(v as StockCondition)}
                 options={[
-                  { value: 'Restockable', label: 'Restockable (Back to shelf)' },
-                  { value: 'DamagedScrap', label: 'Damaged / Write-off to Scrap' },
+                  { value: 'RESTOCKABLE', label: 'Restockable (Back to shelf)' },
+                  { value: 'DAMAGED_SCRAP', label: 'Damaged / Write-off to Scrap' },
                 ]}
               />
             </div>
@@ -264,12 +264,12 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                 value={custResolution}
                 onChange={(v) => setCustResolution(v as SettlementType)}
                 options={[
-                  { value: 'CashRefund', label: 'Immediate Cash Refund' },
-                  { value: 'ReduceDue', label: 'Reduce Customer Due Balance' },
-                  { value: 'DefectiveReplacement', label: 'Direct Item Swap (Zero Cash)' },
+                  // TODO(F4/UI, DD-02): Refund applies to dues first, then cash.
+                  { value: 'REFUND', label: 'Refund (dues first, then cash)' },
+                  { value: 'REPLACEMENT', label: 'Direct Item Swap (Zero Cash)' },
                 ]}
               />
-              {custResolution === 'CashRefund' ? (
+              {custResolution === 'REFUND' ? (
                 <NumericInput
                   label="Refund Cash (₹)"
                   value={custRefundAmount}
@@ -355,8 +355,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                 value={vendResolution}
                 onChange={(v) => setVendResolution(v as SettlementType)}
                 options={[
-                  { value: 'ReduceDue', label: 'Credit Note / Reduce Vendor Due' },
-                  { value: 'CashRefund', label: 'Cash Refund Received from Vendor' },
+                  { value: 'REFUND', label: 'Refund (credit against dues first, then cash)' },
                 ]}
               />
             </div>

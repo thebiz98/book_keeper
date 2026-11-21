@@ -8,8 +8,12 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&dir)?;
-            let state = book_keeper::app_state::build_sqlite_app_state(&dir.join("book_keeper.db"))?;
+            let env_override = std::env::var(book_keeper::app_state::DB_PATH_ENV).ok();
+            let db_path = book_keeper::app_state::resolve_db_path(&dir, env_override.as_deref());
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let state = book_keeper::app_state::build_sqlite_app_state(&db_path)?;
             app.manage(state);
             Ok(())
         })

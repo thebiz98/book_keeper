@@ -1,5 +1,6 @@
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
+use crate::core::value_objects::TransactionType;
 
 pub trait SettlementRepository {
     fn create_settlement(&mut self, settlement: &PaymentSettlement) -> Result<i64, AppError> {
@@ -14,10 +15,10 @@ pub trait SettlementRepository {
     fn list_by_party_id(&self, party_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
         self.list_by_party(party_id)
     }
-    fn list_by_transaction(&self, _tx_type: &str, _tx_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
+    fn list_by_transaction(&self, _tx_type: TransactionType, _tx_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
         Ok(Vec::new())
     }
-    fn get_daily_settlement_total(&self, _date: &str, _tx_type: &str) -> Result<f64, AppError> {
+    fn get_daily_settlement_total(&self, _date: &str, _tx_type: TransactionType) -> Result<f64, AppError> {
         Ok(0.0)
     }
     fn list_all(&self) -> Result<Vec<PaymentSettlement>, AppError> {

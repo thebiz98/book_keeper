@@ -36,7 +36,7 @@ export const DashboardPage: React.FC = () => {
       api.getLowStockAlerts().catch(() => [] as LowStockItem[]),
       api.getSalesPurchaseTrend('7d').catch(() => [] as TrendDataPoint[]),
       api.getSalesHistory({ limit: 6 }).catch(() => null),
-      api.listParties('Customer', false).catch(() => []),
+      api.listParties('CUSTOMER', false).catch(() => []),
     ]).then(([metricsRes, alertsRes, trendRes, salesRes, customers]) => {
       if (!isMounted) return;
       if (metricsRes) setMetrics(metricsRes);

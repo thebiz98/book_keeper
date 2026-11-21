@@ -1,9 +1,9 @@
 use crate::core::error::AppError;
-use super::adjustment_allocation_repository::AdjustmentAllocationRepository;
 use super::adjustment_repository::AdjustmentRepository;
 use super::allocation_repository::AllocationRepository;
 use super::bundle_repository::BundleRepository;
 use super::item_repository::ItemRepository;
+use super::outflow_allocation_repository::OutflowAllocationRepository;
 use super::party_repository::PartyRepository;
 use super::purchase_repository::PurchaseRepository;
 use super::return_repository::ReturnRepository;
@@ -38,7 +38,7 @@ pub trait TransactionContext {
     fn settlements(&mut self) -> &mut dyn SettlementRepository;
     fn returns(&mut self) -> &mut dyn ReturnRepository;
     fn adjustments(&mut self) -> &mut dyn AdjustmentRepository;
-    fn adjustment_allocations(&mut self) -> &mut dyn AdjustmentAllocationRepository;
+    fn outflow_allocations(&mut self) -> &mut dyn OutflowAllocationRepository;
     fn settings(&mut self) -> &mut dyn SettingRepository;
     fn parties(&mut self) -> &mut dyn PartyRepository;
 }

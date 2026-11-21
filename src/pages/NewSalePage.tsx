@@ -59,7 +59,7 @@ export const NewSalePage: React.FC = () => {
 
   // Update default cash tendered when subtotal changes
   useEffect(() => {
-    if (paymentStatus === 'Paid') {
+    if (paymentStatus === 'PAID') {
       setPaidAmount(subtotal);
       setCashTendered(subtotal);
     }
@@ -106,7 +106,7 @@ export const NewSalePage: React.FC = () => {
       transactionCode: invoiceCode,
       transactionDate: invoiceDate,
       partyId: customerId,
-      paidAmount: paymentStatus === 'Unpaid' ? 0 : paidAmount,
+      paidAmount: paymentStatus === 'UNPAID' ? 0 : paidAmount,
       paymentMode: 'CASH',
       notes: null,
       items: items.map((it) => ({
@@ -121,7 +121,7 @@ export const NewSalePage: React.FC = () => {
       await api.createSale(payload);
 
       // Record cash inflow into cash register
-      const actualPaid = paymentStatus === 'Unpaid' ? 0 : paidAmount;
+      const actualPaid = paymentStatus === 'UNPAID' ? 0 : paidAmount;
       if (actualPaid > 0) {
         recordCashFlow({ salesCash: actualPaid });
       }
@@ -168,7 +168,7 @@ export const NewSalePage: React.FC = () => {
         {/* Customer Selector */}
         <div className="w-72">
           <PartySelector
-            partyType="Customer"
+            partyType="CUSTOMER"
             selectedPartyId={customerId}
             onSelectParty={(party) => {
               if (party) {
@@ -221,7 +221,7 @@ export const NewSalePage: React.FC = () => {
         {/* Middle: Payment Status Toggle */}
         <div className="flex items-center gap-3">
           <div className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs">
-            {(['Paid', 'Partial', 'Unpaid'] as const).map((status) => (
+            {(['PAID', 'PARTIAL', 'UNPAID'] as const).map((status) => (
               <button
                 key={status}
                 type="button"
@@ -237,7 +237,7 @@ export const NewSalePage: React.FC = () => {
             ))}
           </div>
 
-          {paymentStatus === 'Partial' && (
+          {paymentStatus === 'PARTIAL' && (
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs">
               <span className="text-slate-400">Paid: ₹</span>
               <input

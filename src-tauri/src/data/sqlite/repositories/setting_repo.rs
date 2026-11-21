@@ -37,7 +37,7 @@ impl SettingRepository for SqliteSettingRepository {
     }
 
     fn update(&mut self, s: &ShopSetting) -> Result<(), AppError> {
-        let id = if s.id > 0 { s.id } else { 1 };
+        let id = 1; // single-row table (CHECK id = 1)
         self.conn.execute(
             "INSERT INTO shop_settings (id, shop_name, phone, address, tax_id) VALUES (?1,?2,?3,?4,?5) \
              ON CONFLICT(id) DO UPDATE SET shop_name=excluded.shop_name, phone=excluded.phone, \

@@ -111,7 +111,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(1),
-        settlement_type: SettlementType::CashRefund,
+        settlement_type: SettlementType::Refund,
         reason: None,
         notes: None,
         items: vec![CustomerReturnItemPayload {
@@ -293,7 +293,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
         return_date: "2026-11-20".to_string(),
         party_id: Some(1),
         original_purchase_id: Some(pur_id),
-        settlement_type: SettlementType::ReduceDue,
+        settlement_type: SettlementType::Refund,
         reason: Some("Surplus stock returned".to_string()),
         notes: None,
         items: vec![VendorReturnItemPayload {

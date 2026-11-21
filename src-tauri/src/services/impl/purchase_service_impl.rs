@@ -5,7 +5,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
-use crate::core::value_objects::PaymentStatus;
+use crate::core::value_objects::{LotSource, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
@@ -55,28 +55,48 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         let mut total_amount = 0.0;
         let mut resolved_lines = Vec::new();
         for item_payload in &payload.items {
-            let (multiplier, unit_cost) = if let Some(bundle_id) = item_payload.bundle_id {
+            let item = tx.items().find_by_id(item_payload.item_id)?.ok_or_else(|| {
+                AppError::NotFound {
+                    entity: "Item".to_string(),
+                    id: item_payload.item_id.to_string(),
+                }
+            })?;
+            let (multiplier, unit_cost, pack_label) = if let Some(bundle_id) = item_payload.bundle_id {
                 let bundle = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| {
                     AppError::NotFound {
                         entity: "ItemBundle".to_string(),
                         id: bundle_id.to_string(),
                     }
                 })?;
+                if bundle.item_id != item.id {
+                    return Err(AppError::ValidationError {
+                        field: "bundle_id".to_string(),
+                        message: format!("Bundle {bundle_id} does not belong to item {}", item.id),
+                    });
+                }
                 let effective_cost = item_payload.unit_cost / bundle.units_per_bundle;
-                (bundle.units_per_bundle, effective_cost)
+                (bundle.units_per_bundle, effective_cost, Some(bundle.bundle_name.clone()))
             } else {
-                (1.0, item_payload.unit_cost)
+                (1.0, item_payload.unit_cost, None)
             };
             let base_qty = item_payload.bundle_quantity * multiplier;
             let line_total = item_payload.bundle_quantity * item_payload.unit_cost;
             total_amount += line_total;
-            resolved_lines.push((item_payload.clone(), base_qty, unit_cost, line_total));
+            resolved_lines.push((item_payload.clone(), item.name.clone(), pack_label, base_qty, unit_cost, line_total));
         }
+        let party_name = match payload.party_id {
+            Some(pid) => tx.parties().find_by_id(pid)?.map(|p| p.name),
+            None => None,
+        };
         let purchase_tx = PurchaseTransaction {
             id: 0,
             transaction_code: pur_code,
+            source: LotSource::Purchase,
+            // TODO(F3, DD-06): carry the supplier invoice ref from the payload once it has one.
+            supplier_invoice_ref: None,
             transaction_date: payload.transaction_date.clone(),
             party_id: payload.party_id,
+            party_name,
             payment_mode: payload.payment_mode.clone(),
             payment_status: PaymentStatus::Unpaid,
             total_amount,
@@ -86,13 +106,14 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         let purchase_id = tx.purchases().create_transaction(&purchase_tx)?;
-        for (line_payload, base_qty, unit_cost, line_total) in resolved_lines {
+        for (line_payload, item_name, pack_label, base_qty, unit_cost, line_total) in resolved_lines {
             let purchase_item = PurchaseItem {
                 id: 0,
                 purchase_transaction_id: purchase_id,
                 item_id: line_payload.item_id,
-                bundle_id: line_payload.bundle_id,
-                bundle_quantity: line_payload.bundle_quantity,
+                item_name,
+                pack_label,
+                pack_quantity: line_payload.bundle_quantity,
                 quantity: base_qty,
                 unit_cost,
                 total_amount: line_total,
@@ -105,7 +126,8 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         if upfront_payment > 0.0 {
             let payment_payload = RecordPaymentPayload {
                 party_id: payload.party_id,
-                transaction_type: "PURCHASE".to_string(),
+                transaction_type: TransactionType::Purchase,
+                kind: PaymentKind::Upfront,
                 transaction_id: purchase_id,
                 settlement_date: payload.transaction_date,
                 amount_paid: upfront_payment,
@@ -154,23 +176,16 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         let items = tx.purchases().list_items_by_transaction_id(purchase_id)?;
         let mut details: Vec<PurchaseItemDetail> = Vec::new();
         for item in items {
-            let item_name = tx
-                .items()
-                .find_by_id(item.item_id)?
-                .map(|i| i.name)
-                .unwrap_or_else(|| "Unknown Item".to_string());
-            let bundle_name = if let Some(bid) = item.bundle_id {
-                tx.bundles().find_by_id(bid)?.map(|b| b.bundle_name)
-            } else {
-                None
-            };
+            // DD-30 / DD-28: bills read the write-time snapshots, not the live catalog.
+            let item_name = item.item_name.clone();
+            let bundle_name = item.pack_label.clone();
             details.push(PurchaseItemDetail {
                 purchase_item: item,
                 item_name,
                 bundle_name,
             });
         }
-        let settlements = tx.settlements().list_by_transaction("PURCHASE", purchase_id)?;
+        let settlements = tx.settlements().list_by_transaction(TransactionType::Purchase, purchase_id)?;
         Ok(PurchaseDetailView {
             purchase: pur,
             party,

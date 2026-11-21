@@ -33,6 +33,22 @@ pub struct AppState {
     pub shop_setting_service: Arc<dyn ShopSettingService>,
 }
 
+/// Env var holding a full database file path that overrides the default location (DD-20).
+pub const DB_PATH_ENV: &str = "BOOK_KEEPER_DB_PATH";
+
+/// Default database file name inside the app data directory (DD-20).
+pub const DEFAULT_DB_FILE: &str = "shop.db";
+
+/// Resolves the database file path: a non-blank `override_path` (the value of
+/// `BOOK_KEEPER_DB_PATH`, a full file path) wins, otherwise `<app_data_dir>/shop.db`.
+/// Pure so it can be tested without Tauri; the caller creates the parent directory.
+pub fn resolve_db_path(app_data_dir: &std::path::Path, override_path: Option<&str>) -> std::path::PathBuf {
+    match override_path.map(str::trim) {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => app_data_dir.join(DEFAULT_DB_FILE),
+    }
+}
+
 pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, crate::core::error::AppError> {
     use crate::core::error::AppError;
     use crate::data::sqlite::connection::create_pool;

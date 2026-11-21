@@ -201,7 +201,7 @@ fn test_tc_fifo_005_scrap_return_zero_lot_restoration() {
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(15),
-        settlement_type: SettlementType::CashRefund,
+        settlement_type: SettlementType::Refund,
         reason: Some("Cracked display - unusable".to_string()),
         notes: None,
         items: vec![CustomerReturnItemPayload {
@@ -250,7 +250,8 @@ fn test_tc_fifo_006_negative_stock_adjustment_fifo_depletion() {
     // Assert: Loss value = 3.0 * 12.0 = 36.0 ₹
     assert_eq!(adj_result.total_loss_value, 36.0);
     assert_eq!(adj_result.allocations.len(), 1);
-    assert_eq!(adj_result.allocations[0].stock_adjustment_id, 1);
+    assert_eq!(adj_result.allocations[0].source_id, 1);
+    assert_eq!(adj_result.allocations[0].source_type, OutflowSourceType::Adjustment);
     assert_eq!(adj_result.allocations[0].purchase_item_id, 1);
     assert_eq!(adj_result.allocations[0].quantity_depleted, 3.0);
     assert_eq!(adj_result.allocations[0].unit_cost, 12.0);

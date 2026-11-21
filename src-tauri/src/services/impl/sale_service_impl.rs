@@ -5,7 +5,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
-use crate::core::value_objects::PaymentStatus;
+use crate::core::value_objects::{PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
@@ -89,37 +89,49 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                     id: item_payload.item_id.to_string(),
                 }
             })?;
-            let (multiplier, rate) = if let Some(bundle_id) = item_payload.bundle_id {
+            let (multiplier, rate, pack_label) = if let Some(bundle_id) = item_payload.bundle_id {
                 let bundle = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| {
                     AppError::NotFound {
                         entity: "ItemBundle".to_string(),
                         id: bundle_id.to_string(),
                     }
                 })?;
+                if bundle.item_id != item.id {
+                    return Err(AppError::ValidationError {
+                        field: "bundle_id".to_string(),
+                        message: format!("Bundle {bundle_id} does not belong to item {}", item.id),
+                    });
+                }
                 let rate = item_payload.unit_price.unwrap_or_else(|| {
                     bundle
                         .default_bundle_price
                         .unwrap_or(item.default_sale_price * bundle.units_per_bundle)
                 });
-                (bundle.units_per_bundle, rate)
+                (bundle.units_per_bundle, rate, Some(bundle.bundle_name.clone()))
             } else {
                 (
                     1.0,
                     item_payload.unit_price.unwrap_or(item.default_sale_price),
+                    None,
                 )
             };
             let base_qty = item_payload.bundle_quantity * multiplier;
             let line_total = round2(item_payload.bundle_quantity * rate);
             let unit_price = line_total / base_qty;
             total_amount += line_total;
-            resolved_lines.push((item_payload.clone(), base_qty, unit_price, line_total));
+            resolved_lines.push((item_payload.clone(), item.name.clone(), pack_label, base_qty, unit_price, line_total));
         }
 
+        let party_name = match payload.party_id {
+            Some(pid) => tx.parties().find_by_id(pid)?.map(|p| p.name),
+            None => None,
+        };
         let sale_tx = SaleTransaction {
             id: 0,
             transaction_code: sale_code.clone(),
             transaction_date: payload.transaction_date,
             party_id: payload.party_id,
+            party_name,
             payment_mode: payload.payment_mode.clone(),
             payment_status: PaymentStatus::Unpaid,
             total_amount,
@@ -129,13 +141,14 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         let sale_id = tx.sales().create_transaction(&sale_tx)?;
-        for (line_payload, base_qty, unit_price, line_total) in resolved_lines {
+        for (line_payload, item_name, pack_label, base_qty, unit_price, line_total) in resolved_lines {
             let sale_item = SaleItem {
                 id: 0,
                 sale_transaction_id: sale_id,
                 item_id: line_payload.item_id,
-                bundle_id: line_payload.bundle_id,
-                bundle_quantity: line_payload.bundle_quantity,
+                item_name,
+                pack_label,
+                pack_quantity: line_payload.bundle_quantity,
                 quantity: base_qty,
                 unit_price,
                 total_amount: line_total,
@@ -149,7 +162,8 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         if upfront_payment > 0.0 {
             let payment_payload = RecordPaymentPayload {
                 party_id: payload.party_id,
-                transaction_type: "SALE".to_string(),
+                transaction_type: TransactionType::Sale,
+                kind: PaymentKind::Upfront,
                 transaction_id: sale_id,
                 settlement_date: sale_tx.transaction_date.clone(),
                 amount_paid: upfront_payment,
@@ -216,16 +230,9 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         let items = tx.sales().list_items_by_transaction_id(sale_id)?;
         let mut details: Vec<SaleItemDetail> = Vec::new();
         for item in items {
-            let item_name = tx
-                .items()
-                .find_by_id(item.item_id)?
-                .map(|i| i.name)
-                .unwrap_or_else(|| "Unknown Item".to_string());
-            let bundle_name = if let Some(bid) = item.bundle_id {
-                tx.bundles().find_by_id(bid)?.map(|b| b.bundle_name)
-            } else {
-                None
-            };
+            // DD-30 / DD-28: bills read the write-time snapshots, not the live catalog.
+            let item_name = item.item_name.clone();
+            let bundle_name = item.pack_label.clone();
             let allocations = tx.allocations().find_by_sale_item_id(item.id)?;
             details.push(SaleItemDetail {
                 sale_item: item,
@@ -234,7 +241,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                 allocations,
             });
         }
-        let settlements = tx.settlements().list_by_transaction("SALE", sale_id)?;
+        let settlements = tx.settlements().list_by_transaction(TransactionType::Sale, sale_id)?;
         Ok(SaleDetailView {
             sale,
             party,

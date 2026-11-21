@@ -5,10 +5,10 @@ use crate::core::entities::{ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::ReturnType;
 use crate::data::contracts::return_repository::ReturnRepository;
-use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
+use crate::data::sqlite::{enum_col, enum_to_sql, opt_enum_col, SqliteConn};
 
-const TX_COLS: &str = "id, return_code, return_date, return_type, party_id, original_transaction_id, settlement_type, total_amount, reason, notes, created_at";
-const ITEM_COLS: &str = "id, return_transaction_id, item_id, sale_item_id, purchase_item_id, quantity, unit_price, total_amount, condition";
+const TX_COLS: &str = "id, return_code, return_date, return_type, party_id, party_name, original_transaction_id, settlement_type, total_amount, reason, notes, created_at";
+const ITEM_COLS: &str = "id, return_transaction_id, line_type, item_id, item_name, sale_item_id, purchase_item_id, quantity, unit_price, total_amount, cost_amount, condition";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<ReturnTransaction> {
     Ok(ReturnTransaction {
@@ -17,12 +17,13 @@ fn map_tx(r: &Row<'_>) -> rusqlite::Result<ReturnTransaction> {
         return_date: r.get(2)?,
         return_type: enum_col(r, 3)?,
         party_id: r.get(4)?,
-        original_transaction_id: r.get(5)?,
-        settlement_type: enum_col(r, 6)?,
-        total_amount: r.get(7)?,
-        reason: r.get(8)?,
-        notes: r.get(9)?,
-        created_at: r.get(10)?,
+        party_name: r.get(5)?,
+        original_transaction_id: r.get(6)?,
+        settlement_type: enum_col(r, 7)?,
+        total_amount: r.get(8)?,
+        reason: r.get(9)?,
+        notes: r.get(10)?,
+        created_at: r.get(11)?,
     })
 }
 
@@ -30,13 +31,16 @@ fn map_item(r: &Row<'_>) -> rusqlite::Result<ReturnItem> {
     Ok(ReturnItem {
         id: r.get(0)?,
         return_transaction_id: r.get(1)?,
-        item_id: r.get(2)?,
-        sale_item_id: r.get(3)?,
-        purchase_item_id: r.get(4)?,
-        quantity: r.get(5)?,
-        unit_price: r.get(6)?,
-        total_amount: r.get(7)?,
-        condition: enum_col(r, 8)?,
+        line_type: enum_col(r, 2)?,
+        item_id: r.get(3)?,
+        item_name: r.get(4)?,
+        sale_item_id: r.get(5)?,
+        purchase_item_id: r.get(6)?,
+        quantity: r.get(7)?,
+        unit_price: r.get(8)?,
+        total_amount: r.get(9)?,
+        cost_amount: r.get(10)?,
+        condition: opt_enum_col(r, 11)?,
     })
 }
 
@@ -53,11 +57,11 @@ impl SqliteReturnRepository {
 impl ReturnRepository for SqliteReturnRepository {
     fn create_return_transaction(&mut self, t: &ReturnTransaction) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO return_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+            &format!("INSERT INTO return_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
             params![
                 if t.id > 0 { Some(t.id) } else { None },
-                t.return_code, t.return_date, enum_to_sql(&t.return_type), t.party_id,
-                t.original_transaction_id, enum_to_sql(&t.settlement_type), t.total_amount,
+                t.return_code, t.return_date, enum_to_sql(&t.return_type)?, t.party_id, t.party_name,
+                t.original_transaction_id, enum_to_sql(&t.settlement_type)?, t.total_amount,
                 t.reason, t.notes, t.created_at
             ],
         )?;
@@ -70,11 +74,12 @@ impl ReturnRepository for SqliteReturnRepository {
 
     fn create_return_item(&mut self, i: &ReturnItem) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO return_items ({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+            &format!("INSERT INTO return_items ({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
             params![
                 if i.id > 0 { Some(i.id) } else { None },
-                i.return_transaction_id, i.item_id, i.sale_item_id, i.purchase_item_id,
-                i.quantity, i.unit_price, i.total_amount, enum_to_sql(&i.condition)
+                i.return_transaction_id, enum_to_sql(&i.line_type)?, i.item_id, i.item_name,
+                i.sale_item_id, i.purchase_item_id, i.quantity, i.unit_price, i.total_amount,
+                i.cost_amount, i.condition.as_ref().map(enum_to_sql).transpose()?
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -112,7 +117,7 @@ impl ReturnRepository for SqliteReturnRepository {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<ReturnTransaction>, AppError> {
-        let rt = return_type.as_ref().map(enum_to_sql);
+        let rt = return_type.as_ref().map(enum_to_sql).transpose()?;
         let lim = limit.min(i64::MAX as usize) as i64;
         let off = offset.min(i64::MAX as usize) as i64;
         let mut stmt = self.conn.prepare(&format!(

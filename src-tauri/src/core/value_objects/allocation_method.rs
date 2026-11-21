@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// Enum selecting the inventory allocation strategy at DI wiring time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AllocationMethod {
     Fifo,
 }

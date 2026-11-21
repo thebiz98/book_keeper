@@ -7,6 +7,7 @@ pub struct SaleTransaction {
     pub transaction_code: String, // e.g. "SAL-1001"
     pub transaction_date: String, // "YYYY-MM-DD"
     pub party_id: Option<i64>,    // Customer
+    pub party_name: Option<String>, // Snapshot at write time (DD-30)
     pub payment_mode: Option<String>,
     pub payment_status: PaymentStatus,
     pub total_amount: f64,
@@ -21,9 +22,10 @@ pub struct SaleItem {
     pub id: i64,
     pub sale_transaction_id: i64,
     pub item_id: i64,
-    pub bundle_id: Option<i64>,
-    pub bundle_quantity: f64,
-    pub quantity: f64,   // Normalized base units
+    pub item_name: String,          // Name snapshot at write time (DD-30)
+    pub pack_label: Option<String>, // Display snapshot ("Box of 10"); None = base units (DD-28)
+    pub pack_quantity: f64,         // Display snapshot: qty in that pack
+    pub quantity: f64,   // Base units
     pub unit_price: f64, // Effective selling rate per base unit
     pub total_amount: f64,
 }
@@ -34,5 +36,6 @@ pub struct SaleStockAllocation {
     pub sale_item_id: i64,
     pub purchase_item_id: i64,  // Inward batch depleted
     pub quantity_depleted: f64, // Base units consumed from lot
+    pub returned_quantity: f64, // Base units later reversed by customer returns (0..=quantity_depleted)
     pub unit_cost: f64,         // Historical inward cost per base unit (for COGS)
 }

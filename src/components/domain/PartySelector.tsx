@@ -60,8 +60,8 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
     setSearch('');
   };
 
-  const Icon = partyType === 'Customer' ? User : Truck;
-  const walkInLabel = partyType === 'Customer' ? 'Walk-in Customer' : 'Standard Vendor';
+  const Icon = partyType === 'CUSTOMER' ? User : Truck;
+  const walkInLabel = partyType === 'CUSTOMER' ? 'Walk-in Customer' : 'Standard Vendor';
 
   return (
     <div className={cn('relative w-full', className)}>

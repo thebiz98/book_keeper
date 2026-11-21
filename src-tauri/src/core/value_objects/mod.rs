@@ -1,17 +1,27 @@
 pub mod adjustment_reason;
 pub mod allocation_method;
+pub mod lot_source;
+pub mod outflow_source;
 pub mod party_type;
+pub mod payment_kind;
 pub mod payment_status;
+pub mod return_line_type;
 pub mod return_type;
 pub mod settlement_type;
 pub mod stock_condition;
 pub mod transaction_code;
+pub mod transaction_type;
 
 pub use adjustment_reason::AdjustmentReason;
 pub use allocation_method::AllocationMethod;
+pub use lot_source::LotSource;
+pub use outflow_source::OutflowSourceType;
 pub use party_type::PartyType;
+pub use payment_kind::PaymentKind;
 pub use payment_status::PaymentStatus;
+pub use return_line_type::ReturnLineType;
 pub use return_type::ReturnType;
 pub use settlement_type::SettlementType;
 pub use stock_condition::StockCondition;
 pub use transaction_code::TransactionCode;
+pub use transaction_type::TransactionType;
