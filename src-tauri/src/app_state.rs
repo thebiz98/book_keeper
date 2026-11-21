@@ -34,3 +34,69 @@ pub struct AppState {
     pub backup_service: Arc<dyn BackupService>,
     pub shop_setting_service: Arc<dyn ShopSettingService>,
 }
+
+pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, crate::core::error::AppError> {
+    use crate::core::error::AppError;
+    use crate::data::sqlite::connection::create_pool;
+    use crate::data::sqlite::fts_indexer::SqliteFts5SearchIndexer;
+    use crate::data::sqlite::migrations::run_migrations;
+    use crate::data::sqlite::sqlite_uow::SqliteUnitOfWork;
+    use crate::services::r#impl::*;
+
+    let pool = create_pool(db_path)?;
+    {
+        let conn = pool
+            .get()
+            .map_err(|e| AppError::DatabaseError(format!("pool checkout failed: {e}")))?;
+        run_migrations(&conn)?;
+    }
+
+    let uow: Arc<dyn UnitOfWork> = Arc::new(SqliteUnitOfWork::new(pool.clone()));
+    let search_indexer: Arc<dyn ItemSearchIndexer> = Arc::new(SqliteFts5SearchIndexer::new(pool));
+    let allocation_strategy: Arc<dyn InventoryAllocationStrategy> = Arc::new(FifoStrategy);
+
+    let item_service: Arc<dyn ItemService> =
+        Arc::new(ItemServiceImpl::new(uow.clone(), search_indexer.clone()));
+    let inventory_service: Arc<dyn InventoryService> =
+        Arc::new(InventoryServiceImpl::new(FifoStrategy, uow.clone()));
+    let payment_service: Arc<dyn PaymentService> = Arc::new(PaymentServiceImpl::new());
+    let accounting_service: Arc<dyn AccountingService> =
+        Arc::new(AccountingServiceImpl::new(payment_service.clone(), uow.clone()));
+    let sale_service: Arc<dyn SaleService> = Arc::new(SaleServiceImpl::new(
+        inventory_service.clone(), payment_service.clone(), uow.clone(),
+    ));
+    let purchase_service: Arc<dyn PurchaseService> = Arc::new(PurchaseServiceImpl::new(
+        inventory_service.clone(), payment_service.clone(), uow.clone(),
+    ));
+    let return_service: Arc<dyn ReturnService> = Arc::new(ReturnServiceImpl::new(
+        inventory_service.clone(), payment_service.clone(), uow.clone(),
+    ));
+    let report_service: Arc<dyn ReportService> = Arc::new(ReportServiceImpl::new(uow.clone()));
+    let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone()));
+    let migration_service: Arc<dyn MigrationService> =
+        Arc::new(MigrationServiceImpl::with_indexer(uow.clone(), search_indexer.clone()));
+    let import_export_service: Arc<dyn DataExportImportService> =
+        Arc::new(ImportExportServiceImpl::new(uow.clone()));
+    let backup_service: Arc<dyn BackupService> = Arc::new(BackupServiceImpl::new(db_path));
+    let shop_setting_service: Arc<dyn ShopSettingService> =
+        Arc::new(ShopSettingServiceImpl::new(uow.clone()));
+
+    Ok(AppState {
+        unit_of_work: uow,
+        search_indexer,
+        inventory_allocation_strategy: allocation_strategy,
+        inventory_service,
+        item_service,
+        sale_service,
+        purchase_service,
+        payment_service,
+        accounting_service,
+        return_service,
+        report_service,
+        party_service,
+        migration_service,
+        import_export_service,
+        backup_service,
+        shop_setting_service,
+    })
+}

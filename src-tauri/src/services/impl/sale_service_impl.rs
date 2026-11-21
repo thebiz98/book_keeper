@@ -75,7 +75,9 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         let sale_code = payload
             .transaction_code
             .clone()
-            .unwrap_or_else(|| self.get_next_sale_code().unwrap_or_else(|_| "SAL-1001".to_string()));
+            .map(Ok)
+            // Use the open transaction; a nested begin_transaction() would deadlock on BEGIN IMMEDIATE.
+            .unwrap_or_else(|| tx.sales().get_next_transaction_code())?;
         let mut total_amount = 0.0;
         let mut resolved_lines = Vec::new();
         for item_payload in &payload.items {

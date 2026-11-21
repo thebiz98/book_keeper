@@ -1,0 +1,227 @@
+//! SQLite implementation of `SaleRepository`.
+use rusqlite::{params, types::Value, OptionalExtension, Row};
+
+use crate::core::dtos::{PaginatedList, SalesFilter};
+use crate::core::entities::{SaleItem, SaleTransaction};
+use crate::core::error::AppError;
+use crate::core::value_objects::PaymentStatus;
+use crate::data::contracts::sale_repository::SaleRepository;
+use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
+
+const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
+const ITEM_COLS: &str = "id, sale_transaction_id, item_id, bundle_id, bundle_quantity, quantity, unit_price, total_amount";
+
+fn map_tx(r: &Row<'_>) -> rusqlite::Result<SaleTransaction> {
+    Ok(SaleTransaction {
+        id: r.get(0)?,
+        transaction_code: r.get(1)?,
+        transaction_date: r.get(2)?,
+        party_id: r.get(3)?,
+        payment_mode: r.get(4)?,
+        payment_status: enum_col(r, 5)?,
+        total_amount: r.get(6)?,
+        paid_amount: r.get(7)?,
+        balance_due: r.get(8)?,
+        notes: r.get(9)?,
+        created_at: r.get(10)?,
+    })
+}
+
+fn map_item(r: &Row<'_>) -> rusqlite::Result<SaleItem> {
+    Ok(SaleItem {
+        id: r.get(0)?,
+        sale_transaction_id: r.get(1)?,
+        item_id: r.get(2)?,
+        bundle_id: r.get(3)?,
+        bundle_quantity: r.get(4)?,
+        quantity: r.get(5)?,
+        unit_price: r.get(6)?,
+        total_amount: r.get(7)?,
+    })
+}
+
+fn opt_id(id: i64) -> Option<i64> {
+    if id > 0 { Some(id) } else { None }
+}
+
+fn lim(n: usize) -> i64 {
+    n.min(i64::MAX as usize) as i64
+}
+
+pub struct SqliteSaleRepository {
+    conn: SqliteConn,
+}
+
+impl SqliteSaleRepository {
+    pub fn new(conn: SqliteConn) -> Self {
+        Self { conn }
+    }
+
+    fn where_clause(
+        start: Option<&str>,
+        end: Option<&str>,
+        status: Option<PaymentStatus>,
+        party_id: Option<i64>,
+    ) -> (String, Vec<Value>) {
+        let mut conds: Vec<&str> = Vec::new();
+        let mut vals: Vec<Value> = Vec::new();
+        if let Some(p) = party_id {
+            conds.push("party_id = ?");
+            vals.push(Value::Integer(p));
+        }
+        if let Some(s) = status {
+            conds.push("payment_status = ?");
+            vals.push(Value::Text(enum_to_sql(&s)));
+        }
+        if let Some(s) = start {
+            conds.push("transaction_date >= ?");
+            vals.push(Value::Text(s.to_string()));
+        }
+        if let Some(e) = end {
+            conds.push("transaction_date <= ?");
+            vals.push(Value::Text(e.to_string()));
+        }
+        let w = if conds.is_empty() { String::new() } else { format!(" WHERE {}", conds.join(" AND ")) };
+        (w, vals)
+    }
+
+    fn query_items(&self, sql: &str, p: impl rusqlite::Params) -> Result<Vec<SaleItem>, AppError> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(p, map_item)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+impl SaleRepository for SqliteSaleRepository {
+    fn create_transaction(&mut self, tx: &SaleTransaction) -> Result<i64, AppError> {
+        self.conn.execute(
+            &format!("INSERT INTO sale_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),
+            params![
+                opt_id(tx.id), tx.transaction_code, tx.transaction_date, tx.party_id, tx.payment_mode,
+                enum_to_sql(&tx.payment_status), tx.total_amount, tx.paid_amount, tx.balance_due,
+                tx.notes, tx.created_at
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    fn create_sale_item(&mut self, l: &SaleItem) -> Result<i64, AppError> {
+        self.conn.execute(
+            &format!("INSERT INTO sale_items ({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"),
+            params![
+                opt_id(l.id), l.sale_transaction_id, l.item_id, l.bundle_id, l.bundle_quantity,
+                l.quantity, l.unit_price, l.total_amount
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    fn find_transaction_by_id(&self, id: i64) -> Result<Option<SaleTransaction>, AppError> {
+        Ok(self
+            .conn
+            .query_row(&format!("SELECT {TX_COLS} FROM sale_transactions WHERE id = ?1"), params![id], map_tx)
+            .optional()?)
+    }
+
+    fn find_by_id(&self, id: i64) -> Result<Option<SaleTransaction>, AppError> {
+        self.find_transaction_by_id(id)
+    }
+
+    fn find_by_code(&self, code: &str) -> Result<Option<SaleTransaction>, AppError> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {TX_COLS} FROM sale_transactions WHERE transaction_code = ?1"),
+                params![code],
+                map_tx,
+            )
+            .optional()?)
+    }
+
+    fn get_next_transaction_code(&self) -> Result<String, AppError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT transaction_code FROM sale_transactions WHERE transaction_code LIKE 'SAL-%'")?;
+        let codes = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        let max = codes.iter().filter_map(|c| c[4..].parse::<u64>().ok()).max().unwrap_or(1000);
+        Ok(format!("SAL-{}", max + 1))
+    }
+
+    fn get_latest_code(&self) -> Result<Option<String>, AppError> {
+        Ok(self
+            .conn
+            .query_row("SELECT MAX(transaction_code) FROM sale_transactions", [], |r| r.get::<_, Option<String>>(0))?)
+    }
+
+    fn update_balance_due(&mut self, tx_id: i64, new_balance: f64, status: PaymentStatus) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE sale_transactions SET paid_amount = paid_amount + MAX(balance_due - ?1, 0.0), balance_due = ?1, payment_status = ?2 WHERE id = ?3",
+            params![new_balance, enum_to_sql(&status), tx_id],
+        )?;
+        if n == 0 {
+            return Err(AppError::NotFound { entity: "SaleTransaction".to_string(), id: tx_id.to_string() });
+        }
+        Ok(())
+    }
+
+    fn list_sales(
+        &self,
+        start_date: Option<&str>,
+        end_date: Option<&str>,
+        status: Option<PaymentStatus>,
+        party_id: Option<i64>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<SaleTransaction>, AppError> {
+        let (w, mut vals) = Self::where_clause(start_date, end_date, status, party_id);
+        vals.push(Value::Integer(lim(limit)));
+        vals.push(Value::Integer(lim(offset)));
+        let sql = format!("SELECT {TX_COLS} FROM sale_transactions{w} ORDER BY id LIMIT ? OFFSET ?");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(vals.iter()), map_tx)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<SaleItem>, AppError> {
+        self.query_items(
+            &format!("SELECT {ITEM_COLS} FROM sale_items WHERE sale_transaction_id = ?1 ORDER BY id"),
+            params![tx_id],
+        )
+    }
+
+    fn list_unpaid_by_party_id(&self, party_id: i64) -> Result<Vec<SaleTransaction>, AppError> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TX_COLS} FROM sale_transactions WHERE party_id = ?1 AND balance_due > 0 ORDER BY id"
+        ))?;
+        let rows = stmt.query_map(params![party_id], map_tx)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn list_transactions(&self, filter: &SalesFilter) -> Result<PaginatedList<SaleTransaction>, AppError> {
+        let from = filter.from_date.as_deref().or(filter.start_date.as_deref());
+        let to = filter.to_date.as_deref().or(filter.end_date.as_deref());
+        let page = filter.page.unwrap_or(1);
+        let limit = filter.limit.unwrap_or(50);
+        let offset = page.saturating_sub(1) * limit;
+
+        let (w, vals) = Self::where_clause(from, to, filter.payment_status, filter.party_id);
+        let total: i64 = self.conn.query_row(
+            &format!("SELECT COUNT(*) FROM sale_transactions{w}"),
+            rusqlite::params_from_iter(vals.iter()),
+            |r| r.get(0),
+        )?;
+        let items = self.list_sales(from, to, filter.payment_status, filter.party_id, offset, limit)?;
+        Ok(PaginatedList::new(items, total as usize, page, limit))
+    }
+}
+
+impl SqliteSaleRepository {
+    pub fn find_sale_item_by_id(&self, id: i64) -> Result<Option<SaleItem>, AppError> {
+        Ok(self
+            .conn
+            .query_row(&format!("SELECT {ITEM_COLS} FROM sale_items WHERE id = ?1"), params![id], map_item)
+            .optional()?)
+    }
+}
