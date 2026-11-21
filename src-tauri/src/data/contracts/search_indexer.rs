@@ -5,7 +5,7 @@ use crate::core::error::AppError;
 pub trait ItemSearchIndexer: Send + Sync {
     /// High-speed typeahead lookup matching prefix across name, barcode, and category (< 1ms).
     fn search(&self, query: &str) -> Result<Vec<ItemSearchResult>, AppError> {
-        self.search_with_limit(query, 50)
+        self.search_with_limit(query, 8)
     }
 
     fn search_with_limit(&self, query: &str, limit: usize) -> Result<Vec<ItemSearchResult>, AppError>;
@@ -20,6 +20,9 @@ pub trait ItemSearchIndexer: Send + Sync {
 
     /// Deletes an item from the search index.
     fn remove_item(&self, item_id: i64) -> Result<(), AppError>;
+
+    /// Number of distinct items currently in the index (startup consistency check).
+    fn indexed_item_count(&self) -> Result<usize, AppError>;
 
     /// Rebuilds the search index entirely from storage (migration, bulk restore).
     fn rebuild_index(&self) -> Result<(), AppError>;
@@ -48,6 +51,10 @@ impl<T: ItemSearchIndexer + ?Sized> ItemSearchIndexer for std::sync::Arc<T> {
 
     fn rebuild_index(&self) -> Result<(), AppError> {
         (**self).rebuild_index()
+    }
+
+    fn indexed_item_count(&self) -> Result<usize, AppError> {
+        (**self).indexed_item_count()
     }
 
 }

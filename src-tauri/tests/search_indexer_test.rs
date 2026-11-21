@@ -120,3 +120,125 @@ fn test_tc_srch_004_dynamic_bundle_suggestion_aggregation() {
     assert_eq!(suggestions[1].units_per_bundle, 12.0);
     assert_eq!(suggestions[1].usage_count, 2);
 }
+
+fn seed(uow: &TestDb, items: &[(i64, &str, Option<&str>, Option<&str>)]) {
+    let indexer = uow.indexer();
+    let mut tx = uow.begin_transaction().expect("begin tx");
+    for (id, name, cat, bc) in items {
+        let it = create_test_item(*id, name, *cat, *bc, 5.0, 10.0);
+        tx.items().create(&it).expect("create item");
+    }
+    tx.commit().expect("commit");
+    for (id, name, cat, bc) in items {
+        indexer.index_item(&create_test_item(*id, name, *cat, *bc, 5.0, 10.0)).expect("index");
+    }
+}
+
+#[test]
+fn test_srch_multi_word_and_semantics() {
+    let uow = TestDb::new();
+    seed(&uow, &[(1, "Blue Ink Pen", None, None), (2, "Blue Notebook", None, None), (3, "Red Ink", None, None)]);
+    let indexer = uow.indexer();
+    let ids = |q: &str| indexer.search(q).unwrap().into_iter().map(|r| r.item_id).collect::<Vec<_>>();
+    assert_eq!(ids("blue ink"), vec![1]);
+    let mut both = ids("ink");
+    both.sort();
+    assert_eq!(both, vec![1, 3]);
+    assert!(ids("blue zebra").is_empty());
+}
+
+#[test]
+fn test_srch_query_sanitisation_never_errors() {
+    let uow = TestDb::new();
+    seed(&uow, &[(1, "Blue Pen", Some("Stationery"), None)]);
+    let indexer = uow.indexer();
+    for q in ["\"", "\"blue", "*", "bl*ue", "-pen", "blue:pen", "(pen)", "pen)", "((", "a OR b", "NEAR(pen)", "blue -", "%", "_", "'; DROP TABLE items;--"] {
+        indexer.search(q).unwrap_or_else(|e| panic!("query {q:?} must not error: {e:?}"));
+    }
+    assert_eq!(indexer.search("(blue) \"pen\"").unwrap().len(), 1);
+    assert_eq!(indexer.search("-pen").unwrap().len(), 1);
+    // LIKE wildcards are not special.
+    assert!(indexer.search("%").unwrap().is_empty());
+    assert!(indexer.search("_").unwrap().is_empty());
+}
+
+#[test]
+fn test_srch_bundle_barcode_resolves_parent_with_matched_bundle_and_dedupes() {
+    let uow = TestDb::new();
+    let indexer = uow.indexer();
+    let mut tx = uow.begin_transaction().unwrap();
+    let item = create_test_item(1, "Gel Pen", None, Some("1000"), 5.0, 10.0);
+    tx.items().create(&item).unwrap();
+    let b1 = create_test_bundle(1, 1, "Box", 10.0, Some(90.0), Some("2000"));
+    let b2 = create_test_bundle(2, 1, "Case", 100.0, Some(800.0), Some("3000"));
+    tx.bundles().create(&b1).unwrap();
+    tx.bundles().create(&b2).unwrap();
+    tx.commit().unwrap();
+    indexer.index_item_with_bundles(&item, &[b1, b2]).unwrap();
+
+    let r = indexer.search("3000").unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!((r[0].item_id, r[0].matched_bundle_id), (1, Some(2)));
+    assert_eq!(r[0].bundles.len(), 2);
+    // Item barcode: no matched bundle.
+    let r = indexer.search("1000").unwrap();
+    assert_eq!((r[0].item_id, r[0].matched_bundle_id), (1, None));
+    // Name hit matching several rows of the same item is deduped.
+    let r = indexer.search("gel").unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].matched_bundle_id, None);
+}
+
+#[test]
+fn test_srch_exact_barcode_ranks_first_and_limit_applies() {
+    let uow = TestDb::new();
+    seed(&uow, &[
+        (1, "Pen 123 Premium", None, Some("9990")),
+        (2, "Pen Basic", None, Some("123")),
+        (3, "Pen 123", None, None),
+    ]);
+    let indexer = uow.indexer();
+    assert_eq!(indexer.search("123").unwrap()[0].item_id, 2, "exact barcode first");
+    assert_eq!(indexer.search_with_limit("pen", 2).unwrap().len(), 2);
+    let many: Vec<_> = (10..30).map(|i| (i, format!("Widget {i}"))).collect();
+    let refs: Vec<(i64, &str, Option<&str>, Option<&str>)> =
+        many.iter().map(|(i, n)| (*i, n.as_str(), None, None)).collect();
+    seed(&uow, &refs);
+    assert_eq!(indexer.search("widget").unwrap().len(), 8, "default limit is 8");
+}
+
+#[test]
+fn test_srch_archived_item_excluded_even_when_row_remains() {
+    let uow = TestDb::new();
+    seed(&uow, &[(1, "Old Ink", None, None)]);
+    let indexer = uow.indexer();
+    assert_eq!(indexer.search("ink").unwrap().len(), 1);
+    let mut tx = uow.begin_transaction().unwrap();
+    let mut it = tx.items().find_by_id(1).unwrap().unwrap();
+    it.is_active = false;
+    tx.items().update(&it).unwrap();
+    tx.commit().unwrap();
+    assert!(indexer.search("ink").unwrap().is_empty(), "is_active is checked at query time");
+}
+
+#[test]
+fn test_srch_startup_rebuild_on_count_mismatch() {
+    let uow = TestDb::new();
+    let indexer = uow.indexer();
+    let mut tx = uow.begin_transaction().unwrap();
+    // Two active items committed but never indexed, one archived.
+    tx.items().create(&create_test_item(1, "Alpha", None, None, 1.0, 1.0)).unwrap();
+    tx.items().create(&create_test_item(2, "Beta", None, None, 1.0, 1.0)).unwrap();
+    let mut arch = create_test_item(3, "Gamma", None, None, 1.0, 1.0);
+    arch.is_active = false;
+    tx.items().create(&arch).unwrap();
+    tx.commit().unwrap();
+    assert!(indexer.search("alpha").unwrap().is_empty());
+    assert_eq!(indexer.indexed_item_count().unwrap(), 0);
+
+    assert!(book_keeper::app_state::ensure_search_index(&uow, &indexer).unwrap(), "rebuilt");
+    assert_eq!(indexer.indexed_item_count().unwrap(), 2);
+    assert_eq!(indexer.search("alpha").unwrap().len(), 1);
+    assert!(indexer.search("gamma").unwrap().is_empty());
+    assert!(!book_keeper::app_state::ensure_search_index(&uow, &indexer).unwrap(), "consistent: no rebuild");
+}

@@ -96,7 +96,8 @@ fn consecutive_returns_get_distinct_ret_codes_for_both_sides() {
     let db = TestDb::new();
     use book_keeper::services::contracts::inventory_service::InventoryService;
     let inventory = InventoryServiceImpl::new(FifoStrategy, db.clone());
-    let returns = ReturnServiceImpl::new(inventory.clone(), PaymentServiceImpl, db.clone());
+    let accounting = AccountingServiceImpl::new(PaymentServiceImpl, db.clone());
+    let returns = ReturnServiceImpl::new(inventory.clone(), PaymentServiceImpl, accounting, db.clone());
 
     let mut tx = db.begin_transaction().unwrap();
     tx.items().create(&create_test_item(7, "Calculator", None, None, 5.0, 500.0)).unwrap();
@@ -106,9 +107,10 @@ fn consecutive_returns_get_distinct_ret_codes_for_both_sides() {
     // Sold 2 of the line: returns (even scrap, DD-05) reverse real allocations.
     inventory.deplete_stock_for_sale(&mut *tx, 15, 7, 2.0).unwrap();
     tx.commit().unwrap();
+    exec(&db, "UPDATE sale_items SET quantity = 2, unit_price = 500 WHERE id = 15");
 
     let customer = |qty: f64| CustomerReturnPayload {
-        original_sale_id: Some(15),
+        original_sale_id: Some(900_015),
         party_id: None,
         return_date: "2026-11-21".to_string(),
         settlement_type: SettlementType::Refund,
@@ -120,10 +122,12 @@ fn consecutive_returns_get_distinct_ret_codes_for_both_sides() {
             quantity: qty,
             unit_price: 500.0,
             condition: StockCondition::DamagedScrap,
+            unit_cost_override: None,
         }],
+        replacement_items: vec![],
     };
-    assert_eq!(returns.create_customer_return(customer(1.0)).unwrap(), "RET-1001");
-    assert_eq!(returns.create_customer_return(customer(1.0)).unwrap(), "RET-1002");
+    assert_eq!(returns.create_customer_return(customer(1.0)).unwrap().return_code, "RET-1001");
+    assert_eq!(returns.create_customer_return(customer(1.0)).unwrap().return_code, "RET-1002");
     let vendor = VendorReturnPayload {
         original_purchase_id: None,
         party_id: None,
@@ -131,9 +135,9 @@ fn consecutive_returns_get_distinct_ret_codes_for_both_sides() {
         settlement_type: SettlementType::Refund,
         reason: None,
         notes: None,
-        items: vec![VendorReturnItemPayload { item_id: 7, purchase_item_id: None, quantity: 1.0, unit_cost: 300.0 }],
+        items: vec![VendorReturnItemPayload { item_id: 7, purchase_item_id: None, quantity: 1.0 }],
     };
-    assert_eq!(returns.create_vendor_return(vendor).unwrap(), "RET-1003", "one shared RET- sequence");
+    assert_eq!(returns.create_vendor_return(vendor).unwrap().return_code, "RET-1003", "one shared RET- sequence");
     assert_eq!(returns.get_next_return_code().unwrap(), "RET-1004");
 }
 

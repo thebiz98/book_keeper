@@ -26,7 +26,7 @@ struct ComboTestHarness {
     inventory_service: InventoryServiceImpl<FifoStrategy>,
     purchase_service: PurchaseServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>,
     sale_service: SaleServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>,
-    return_service: ReturnServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>,
+    return_service: ReturnServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl, AccountingServiceImpl<PaymentServiceImpl>>,
     accounting_service: AccountingServiceImpl<PaymentServiceImpl>,
     report_service: ReportServiceImpl,
     indexer: book_keeper::data::sqlite::fts_indexer::SqliteFts5SearchIndexer,
@@ -39,8 +39,8 @@ fn create_combo_harness() -> ComboTestHarness {
     let payment_service = PaymentServiceImpl;
     let purchase_service = PurchaseServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
-    let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let accounting_service = AccountingServiceImpl::new(payment_service, uow.clone());
+    let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, accounting_service.clone(), uow.clone());
     let report_service = ReportServiceImpl::with_fixed_today(uow.clone(), "2026-11-20");
     let indexer = uow.indexer();
 
@@ -111,12 +111,14 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
         settlement_type: SettlementType::Refund,
         reason: None,
         notes: None,
+        replacement_items: vec![],
         items: vec![CustomerReturnItemPayload {
             item_id: 1,
             sale_item_id: Some(1),
             quantity: 10.0,
             unit_price: 100.0,
             condition: StockCondition::Restockable,
+            unit_cost_override: None,
         }],
     };
     harness.return_service.create_customer_return(ret_payload).expect("return");
@@ -295,7 +297,6 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
             item_id: 1,
             purchase_item_id: Some(1),
             quantity: 10.0,
-            unit_cost: 30.0,
         }],
     };
     harness.return_service.create_vendor_return(ret_payload).expect("vendor return");

@@ -1,7 +1,8 @@
 //! SQLite implementation of `ReturnRepository`.
 use rusqlite::{params, OptionalExtension, Row};
 
-use crate::core::entities::{ReturnItem, ReturnTransaction};
+use crate::core::dtos::ReturnsFilter;
+use crate::core::entities::{PaymentSettlement, ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::ReturnType;
 use crate::data::contracts::return_repository::ReturnRepository;
@@ -91,6 +92,66 @@ impl ReturnRepository for SqliteReturnRepository {
             return Err(AppError::NotFound { entity: "ReturnItem".to_string(), id: return_item_id.to_string() });
         }
         Ok(())
+    }
+
+    fn update_return_total(&mut self, return_id: i64, total_amount: f64) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE return_transactions SET total_amount = ?1 WHERE id = ?2",
+            params![total_amount, return_id],
+        )?;
+        if n == 0 {
+            return Err(AppError::NotFound { entity: "ReturnTransaction".to_string(), id: return_id.to_string() });
+        }
+        Ok(())
+    }
+
+    fn find_ledger_by_return_id(&self, return_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, settlement_date, party_id, kind, transaction_type, transaction_id, return_id, amount_paid, payment_mode, notes, created_at \
+             FROM payment_settlements WHERE return_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt
+            .query_map(params![return_id], |r| {
+                Ok(PaymentSettlement {
+                    id: r.get(0)?,
+                    settlement_date: r.get(1)?,
+                    party_id: r.get(2)?,
+                    kind: enum_col(r, 3)?,
+                    transaction_type: enum_col(r, 4)?,
+                    transaction_id: r.get(5)?,
+                    return_id: r.get(6)?,
+                    amount_paid: r.get(7)?,
+                    payment_mode: r.get(8)?,
+                    notes: r.get(9)?,
+                    created_at: r.get(10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn list_returns_page(
+        &self,
+        filter: &ReturnsFilter,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<ReturnTransaction>, usize), AppError> {
+        let rt = filter.return_type.as_ref().map(enum_to_sql).transpose()?;
+        let where_clause = "WHERE (?1 IS NULL OR return_type = ?1) AND (?2 IS NULL OR return_date >= ?2) AND (?3 IS NULL OR return_date <= ?3)";
+        let total: i64 = self.conn.query_row(
+            &format!("SELECT COUNT(*) FROM return_transactions {where_clause}"),
+            params![rt, filter.start_date, filter.end_date],
+            |r| r.get(0),
+        )?;
+        let lim = limit.min(i64::MAX as usize) as i64;
+        let off = offset.min(i64::MAX as usize) as i64;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TX_COLS} FROM return_transactions {where_clause} ORDER BY return_date DESC, id DESC LIMIT ?4 OFFSET ?5"
+        ))?;
+        let rows = stmt
+            .query_map(params![rt, filter.start_date, filter.end_date, lim, off], map_tx)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((rows, total.max(0) as usize))
     }
 
     fn find_return_by_id(&self, id: i64) -> Result<Option<ReturnTransaction>, AppError> {

@@ -58,6 +58,23 @@ pub fn strategy_for(method: crate::core::value_objects::AllocationMethod) -> Arc
     }
 }
 
+/// Startup FTS consistency check: the index must hold exactly the active items. On a mismatch
+/// (crash between commit and reindex, restored backup) it is rebuilt from storage and logged.
+/// Returns whether a rebuild happened.
+pub fn ensure_search_index(
+    uow: &dyn UnitOfWork,
+    indexer: &dyn ItemSearchIndexer,
+) -> Result<bool, crate::core::error::AppError> {
+    let active = uow.begin_read()?.items().count_catalog(None, false)?;
+    let indexed = indexer.indexed_item_count()?;
+    if active == indexed {
+        return Ok(false);
+    }
+    eprintln!("[search] index has {indexed} items but {active} are active; rebuilding");
+    indexer.rebuild_index()?;
+    Ok(true)
+}
+
 pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, crate::core::error::AppError> {
     build_sqlite_app_state_with_strategy(db_path, strategy_for(crate::core::value_objects::AllocationMethod::default()))
 }
@@ -102,12 +119,12 @@ pub fn build_sqlite_app_state_with_strategy(
         inventory_service.clone(), payment_service.clone(), uow.clone(),
     ));
     let return_service: Arc<dyn ReturnService> = Arc::new(ReturnServiceImpl::new(
-        inventory_service.clone(), payment_service.clone(), uow.clone(),
+        inventory_service.clone(), payment_service.clone(), accounting_service.clone(), uow.clone(),
     ));
     let report_service: Arc<dyn ReportService> = Arc::new(ReportServiceImpl::new(uow.clone()));
     let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone()));
     let item_import_service: Arc<dyn ItemImportService> =
-        Arc::new(ItemImportServiceImpl::new(uow.clone(), inventory_service.clone()));
+        Arc::new(ItemImportServiceImpl::new(uow.clone(), inventory_service.clone()).with_indexer(search_indexer.clone()));
     let backup_service: Arc<dyn BackupService> = Arc::new(BackupServiceImpl::new(db_path));
     let shop_setting_service: Arc<dyn ShopSettingService> =
         Arc::new(ShopSettingServiceImpl::new(uow.clone()));
@@ -124,6 +141,8 @@ pub fn build_sqlite_app_state_with_strategy(
             );
         }
     }
+
+    ensure_search_index(&*uow, &*search_indexer)?;
 
     Ok(AppState {
         unit_of_work: uow,

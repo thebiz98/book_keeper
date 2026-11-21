@@ -80,19 +80,27 @@ impl BundleRepository for SqliteBundleRepository {
     }
 
     fn delete(&mut self, bundle_id: i64) -> Result<(), AppError> {
-        self.conn.execute("DELETE FROM item_bundles WHERE id = ?1", params![bundle_id])?;
+        let n = self.conn.execute("DELETE FROM item_bundles WHERE id = ?1", params![bundle_id])?;
+        if n == 0 {
+            return Err(AppError::NotFound { entity: "ItemBundle".to_string(), id: bundle_id.to_string() });
+        }
         Ok(())
     }
 
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError> {
+        // Distinct (name NOCASE, multiplier) over bundles of active items, most used first.
+        // The multiplier is never rounded; the display name is the lexicographically first spelling.
         let mut stmt = self.conn.prepare_cached(
-            "SELECT bundle_name, CAST(ROUND(units_per_bundle) AS INTEGER) AS u, COUNT(*) AS c \
-             FROM item_bundles GROUP BY bundle_name, u ORDER BY c DESC, bundle_name, u",
+            "SELECT MIN(b.bundle_name), b.units_per_bundle, COUNT(*) AS c \
+             FROM item_bundles b JOIN items i ON i.id = b.item_id \
+             WHERE i.is_active = 1 \
+             GROUP BY b.bundle_name COLLATE NOCASE, b.units_per_bundle \
+             ORDER BY c DESC, b.bundle_name COLLATE NOCASE, b.units_per_bundle",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(BundleSuggestion {
                 bundle_name: r.get(0)?,
-                units_per_bundle: r.get::<_, i64>(1)? as f64,
+                units_per_bundle: r.get(1)?,
                 usage_count: r.get(2)?,
             })
         })?;

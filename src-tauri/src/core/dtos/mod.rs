@@ -16,9 +16,9 @@ pub use dues_dto::{
 };
 pub use item_dto::{
     BundleSuggestion, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult, ItemLot,
-    ItemSearchResult, UpdateItemPayload,
+    ItemSearchResult, UpdateBundlePayload, UpdateItemPayload,
 };
-pub use import_dto::ImportSummary;
+pub use import_dto::{ConflictStrategy, ImportDuplicate, ImportRowError, ImportSummary, ImportValidationReport};
 pub use pagination::PaginatedList;
 pub use payment_dto::{LedgerCashSummary, LedgerTotals, RecordPaymentPayload, RecordRefundPayload};
 pub use purchase_dto::{
@@ -31,7 +31,8 @@ pub use report_dto::{
 };
 pub use return_dto::{
     CustomerReturnItemPayload, CustomerReturnPayload, ReturnDetailView, ReturnItemDetail,
-    ReturnItemPayload, VendorReturnItemPayload, VendorReturnPayload,
+    ReplacementItemPayload, ReturnItemPayload, ReturnResult, ReturnsFilter, VendorReturnItemPayload,
+    VendorReturnPayload,
 };
 pub use sale_dto::{
     CreateSaleItemPayload, CreateSalePayload, SaleDetailView, SaleItemDetail, SaleSummaryResponse,

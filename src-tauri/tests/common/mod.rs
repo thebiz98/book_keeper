@@ -104,7 +104,7 @@ pub use book_keeper::services::{
 pub type InventoryServiceImpl<S> = book_keeper::services::InventoryServiceImpl<S, TestDb>;
 pub type SaleServiceImpl<I, P> = book_keeper::services::SaleServiceImpl<I, P, TestDb>;
 pub type PurchaseServiceImpl<I, P> = book_keeper::services::PurchaseServiceImpl<I, P, TestDb>;
-pub type ReturnServiceImpl<I, P> = book_keeper::services::ReturnServiceImpl<I, P, TestDb>;
+pub type ReturnServiceImpl<I, P, A> = book_keeper::services::ReturnServiceImpl<I, P, A, TestDb>;
 pub type AccountingServiceImpl<P> = book_keeper::services::AccountingServiceImpl<P, TestDb>;
 pub type ReportServiceImpl = book_keeper::services::ReportServiceImpl<TestDb>;
 pub type ItemImportServiceImpl<I> = book_keeper::services::ItemImportServiceImpl<TestDb, I>;

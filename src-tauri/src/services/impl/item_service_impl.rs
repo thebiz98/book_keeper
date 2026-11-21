@@ -1,12 +1,13 @@
 use std::sync::Arc;
 use crate::core::dtos::{
-    BundleSuggestion, CreateBundlePayload, CreateItemPayload, PaginatedList, UpdateItemPayload,
+    BundleSuggestion, CreateBundlePayload, CreateItemPayload, PaginatedList, UpdateBundlePayload,
+    UpdateItemPayload,
 };
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
 use crate::core::value_objects::LotSource;
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
-use crate::data::contracts::unit_of_work::UnitOfWork;
+use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::item_service::ItemService;
 
@@ -24,6 +25,162 @@ pub struct ItemServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>, I: InventoryServ
 impl<U: UnitOfWork, I: InventoryService> ItemServiceImpl<U, I> {
     pub fn new(uow: U, search_indexer: Arc<dyn ItemSearchIndexer>, inventory_service: I) -> Self {
         Self { uow, search_indexer, inventory_service }
+    }
+}
+
+fn invalid(field: &str, message: impl Into<String>) -> AppError {
+    AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
+
+fn clean(s: Option<String>) -> Option<String> {
+    s.map(|c| c.trim().to_string()).filter(|c| !c.is_empty())
+}
+
+/// Which table owns a barcode (used to exclude the record being edited from the collision check).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarcodeOwner {
+    Item,
+    Bundle,
+}
+
+/// Pure field validation for an item (create, update, import). `name` is checked trimmed.
+/// `mrp` must be null or > 0 (0 is rejected: the UI sends null for "no MRP").
+pub fn validate_item_fields(name: &str, default_sale_price: f64, mrp: Option<f64>) -> Result<(), AppError> {
+    if name.trim().is_empty() {
+        return Err(invalid("name", "Item name cannot be empty"));
+    }
+    if !default_sale_price.is_finite() || default_sale_price < 0.0 {
+        return Err(invalid("default_sale_price", "Sale price must be a number that is 0 or more"));
+    }
+    validate_mrp(mrp)
+}
+
+fn validate_mrp(mrp: Option<f64>) -> Result<(), AppError> {
+    match mrp {
+        Some(m) if !m.is_finite() || m <= 0.0 => {
+            Err(invalid("mrp", "MRP must be greater than 0 (leave it empty for no MRP)"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Pure field validation for a bundle (create, update, nested in create_item).
+pub fn validate_bundle_fields(
+    bundle_name: &str,
+    units_per_bundle: f64,
+    mrp: Option<f64>,
+    default_bundle_price: Option<f64>,
+) -> Result<(), AppError> {
+    if bundle_name.trim().is_empty() {
+        return Err(invalid("bundle_name", "Bundle name cannot be empty"));
+    }
+    if !units_per_bundle.is_finite() || units_per_bundle <= 1.0 {
+        return Err(invalid("units_per_bundle", "Units per bundle must be greater than 1"));
+    }
+    validate_mrp(mrp).map_err(|_| invalid("mrp", "Bundle MRP must be greater than 0 (leave it empty for no MRP)"))?;
+    if let Some(p) = default_bundle_price {
+        if !p.is_finite() || p < 0.0 {
+            return Err(invalid("default_bundle_price", "Bundle price must be a number that is 0 or more"));
+        }
+    }
+    Ok(())
+}
+
+/// Rejects `barcode` when any item or bundle other than `exclude` already carries it.
+pub fn ensure_barcode_unique(
+    tx: &mut dyn TransactionContext,
+    barcode: &str,
+    exclude: Option<(BarcodeOwner, i64)>,
+) -> Result<(), AppError> {
+    let barcode = barcode.trim();
+    if barcode.is_empty() {
+        return Ok(());
+    }
+    let clash = |what: &str| invalid("barcode", format!("Barcode '{barcode}' is already used by another {what}"));
+    if let Some(it) = tx.items().find_by_barcode(barcode)? {
+        if exclude != Some((BarcodeOwner::Item, it.id)) {
+            return Err(clash("item"));
+        }
+    }
+    if let Some(b) = tx.bundles().find_by_barcode(barcode)? {
+        if exclude != Some((BarcodeOwner::Bundle, b.id)) {
+            return Err(clash("bundle"));
+        }
+    }
+    Ok(())
+}
+
+/// Case-insensitive item-name uniqueness with a friendly error (the schema also enforces it).
+pub fn ensure_item_name_unique(
+    tx: &mut dyn TransactionContext,
+    name: &str,
+    exclude_item_id: Option<i64>,
+) -> Result<(), AppError> {
+    if let Some(it) = tx.items().find_by_name(name.trim())? {
+        if Some(it.id) != exclude_item_id {
+            return Err(invalid("name", format!("An item named '{}' already exists", it.name)));
+        }
+    }
+    Ok(())
+}
+
+/// Bundle name must be unique per item (case-insensitive).
+fn ensure_bundle_name_unique(
+    tx: &mut dyn TransactionContext,
+    item_id: i64,
+    name: &str,
+    exclude_bundle_id: Option<i64>,
+) -> Result<(), AppError> {
+    let name = name.trim();
+    let dup = tx
+        .bundles()
+        .find_by_item_id(item_id)?
+        .into_iter()
+        .any(|b| Some(b.id) != exclude_bundle_id && b.bundle_name.trim().eq_ignore_ascii_case(name));
+    if dup {
+        return Err(invalid("bundle_name", format!("This item already has a bundle named '{name}'")));
+    }
+    Ok(())
+}
+
+fn not_found(entity: &str, id: i64) -> AppError {
+    AppError::NotFound { entity: entity.to_string(), id: id.to_string() }
+}
+
+impl<U: UnitOfWork, I: InventoryService> ItemServiceImpl<U, I> {
+    /// Reindex after commit. A failure is logged and surfaced as `SearchIndexError`; the master
+    /// data is already committed and the next startup rebuilds on mismatch.
+    fn reindex(&self, item: &Item, bundles: &[ItemBundle]) -> Result<(), AppError> {
+        self.search_indexer.index_item_with_bundles(item, bundles).map_err(|e| {
+            eprintln!("[search] reindex of item #{} failed: {e}", item.id);
+            match e {
+                AppError::SearchIndexError(_) => e,
+                other => AppError::SearchIndexError(other.to_string()),
+            }
+        })
+    }
+
+    fn validate_and_build_bundle(
+        tx: &mut dyn TransactionContext,
+        item_id: i64,
+        bundle_id: Option<i64>,
+        p: &UpdateBundlePayload,
+    ) -> Result<ItemBundle, AppError> {
+        validate_bundle_fields(&p.bundle_name, p.units_per_bundle, p.mrp, p.default_bundle_price)?;
+        ensure_bundle_name_unique(tx, item_id, &p.bundle_name, bundle_id)?;
+        let barcode = clean(p.barcode.clone());
+        if let Some(bc) = barcode.as_deref() {
+            ensure_barcode_unique(tx, bc, bundle_id.map(|id| (BarcodeOwner::Bundle, id)))?;
+        }
+        Ok(ItemBundle {
+            id: bundle_id.unwrap_or(0),
+            item_id,
+            bundle_name: p.bundle_name.trim().to_string(),
+            units_per_bundle: p.units_per_bundle,
+            mrp: p.mrp,
+            default_bundle_price: p.default_bundle_price,
+            barcode,
+        })
     }
 }
 
@@ -45,36 +202,27 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
     }
 
     fn create_item(&self, payload: CreateItemPayload) -> Result<i64, AppError> {
-        if payload.name.trim().is_empty() {
-            return Err(AppError::ValidationError {
-                field: "name".to_string(),
-                message: "Item name cannot be empty".to_string(),
-            });
-        }
-        if payload.default_sale_price < 0.0 {
-            return Err(AppError::ValidationError {
-                field: "default_sale_price".to_string(),
-                message: "default_sale_price cannot be negative".to_string(),
-            });
-        }
-
-        let mut tx = self.uow.begin_transaction()?;
-        if let Some(ref bc) = payload.barcode {
-            let trimmed = bc.trim();
-            if !trimmed.is_empty() && tx.items().find_by_barcode(trimmed)?.is_some() {
-                return Err(AppError::ValidationError {
-                    field: "barcode".to_string(),
-                    message: format!("Barcode '{}' already exists", trimmed),
-                });
+        validate_item_fields(&payload.name, payload.default_sale_price, payload.mrp)?;
+        if let Some(bundles) = &payload.bundles {
+            for b in bundles {
+                validate_bundle_fields(&b.bundle_name, b.units_per_bundle, b.mrp, b.default_bundle_price)?;
             }
         }
 
+        let mut tx = self.uow.begin_transaction()?;
+        ensure_item_name_unique(&mut *tx, &payload.name, None)?;
+        let barcode = clean(payload.barcode);
+        if let Some(bc) = barcode.as_deref() {
+            ensure_barcode_unique(&mut *tx, bc, None)?;
+        }
+
         let initial_stock = payload.initial_stock.unwrap_or(0.0);
+        let now = chrono::Utc::now().to_rfc3339();
         let item = Item {
             id: 0,
             name: payload.name.trim().to_string(),
-            category: payload.category.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()),
-            barcode: payload.barcode.map(|b| b.trim().to_string()).filter(|b| !b.is_empty()),
+            category: clean(payload.category),
+            barcode,
             base_unit: payload.base_unit.trim().to_string(),
             mrp: payload.mrp,
             default_sale_price: payload.default_sale_price,
@@ -82,12 +230,11 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
             current_stock: 0.0,
             is_low_stock: true,
             is_active: true,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            updated_at: chrono::Utc::now().to_rfc3339(),
+            created_at: now.clone(),
+            updated_at: now,
         };
 
         let item_id = tx.items().create(&item)?;
-        let mut created_bundles = Vec::new();
 
         if initial_stock != 0.0 {
             // initial_cost is required (or a prior lot): never derived from the sale price (DD-12).
@@ -102,77 +249,42 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
             )?;
         }
 
-        if let Some(bundles) = payload.bundles {
-            for b_payload in bundles {
-                let bundle = ItemBundle {
-                    id: 0,
-                    item_id,
-                    bundle_name: b_payload.bundle_name,
-                    units_per_bundle: b_payload.units_per_bundle,
-                    mrp: b_payload.mrp,
-                    default_bundle_price: b_payload.default_bundle_price,
-                    barcode: b_payload.barcode,
-                };
-                let bid = tx.bundles().create(&bundle)?;
-                let mut saved_b = bundle;
-                saved_b.id = bid;
-                created_bundles.push(saved_b);
-            }
+        for b in payload.bundles.unwrap_or_default() {
+            let p = UpdateBundlePayload {
+                bundle_name: b.bundle_name,
+                units_per_bundle: b.units_per_bundle,
+                mrp: b.mrp,
+                default_bundle_price: b.default_bundle_price,
+                barcode: b.barcode,
+            };
+            let bundle = Self::validate_and_build_bundle(&mut *tx, item_id, None, &p)?;
+            tx.bundles().create(&bundle)?;
         }
 
+        let saved = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let bundles = tx.bundles().find_by_item_id(item_id)?;
         tx.commit()?;
-
-        let mut saved_item = item;
-        saved_item.id = item_id;
-        let _ = self
-            .search_indexer
-            .index_item_with_bundles(&saved_item, &created_bundles);
-
+        self.reindex(&saved, &bundles)?;
         Ok(item_id)
     }
 
     fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError> {
-        if payload.name.trim().is_empty() {
-            return Err(AppError::ValidationError {
-                field: "name".to_string(),
-                message: "Item name cannot be empty".to_string(),
-            });
-        }
-        if payload.default_sale_price < 0.0 {
-            return Err(AppError::ValidationError {
-                field: "default_sale_price".to_string(),
-                message: "default_sale_price cannot be negative".to_string(),
-            });
-        }
+        validate_item_fields(&payload.name, payload.default_sale_price, payload.mrp)?;
 
         let mut tx = self.uow.begin_transaction()?;
-        let mut existing = tx
-            .items()
-            .find_by_id(item_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Item".to_string(),
-                id: item_id.to_string(),
-            })?;
-
-        if let Some(ref bc) = payload.barcode {
-            let trimmed = bc.trim();
-            if !trimmed.is_empty() && existing.barcode.as_deref() != Some(trimmed) {
-                if let Some(found) = tx.items().find_by_barcode(trimmed)? {
-                    if found.id != item_id {
-                        return Err(AppError::ValidationError {
-                            field: "barcode".to_string(),
-                            message: format!("Barcode '{}' already exists", trimmed),
-                        });
-                    }
-                }
-            }
+        let mut existing = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        ensure_item_name_unique(&mut *tx, &payload.name, Some(item_id))?;
+        let barcode = clean(payload.barcode);
+        if let Some(bc) = barcode.as_deref() {
+            ensure_barcode_unique(&mut *tx, bc, Some((BarcodeOwner::Item, item_id)))?;
         }
 
+        // Master fields only: the repository update never touches stock.
         existing.name = payload.name.trim().to_string();
-        existing.category = payload.category.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
-        existing.barcode = payload.barcode.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+        existing.category = clean(payload.category);
+        existing.barcode = barcode;
         existing.base_unit = payload.base_unit.trim().to_string();
-        existing.mrp = payload.mrp;
+        existing.mrp = payload.mrp; // None clears the MRP
         existing.default_sale_price = payload.default_sale_price;
         existing.updated_at = chrono::Utc::now().to_rfc3339();
 
@@ -180,54 +292,54 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let bundles = tx.bundles().find_by_item_id(item_id)?;
         tx.commit()?;
 
-        let _ = self.search_indexer.index_item_with_bundles(&existing, &bundles);
-        Ok(())
+        self.reindex(&existing, &bundles)
     }
 
-    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<i64, AppError> {
-        if payload.bundle_name.trim().is_empty() {
-            return Err(AppError::ValidationError {
-                field: "bundle_name".to_string(),
-                message: "Bundle name cannot be empty".to_string(),
-            });
-        }
-        if payload.units_per_bundle <= 0.0 {
-            return Err(AppError::ValidationError {
-                field: "units_per_bundle".to_string(),
-                message: "Units per bundle must be positive".to_string(),
-            });
-        }
-
-        let item_id = payload.item_id.ok_or_else(|| AppError::ValidationError {
-            field: "item_id".to_string(),
-            message: "item_id is required for creating a bundle".to_string(),
-        })?;
-
-        let mut tx = self.uow.begin_transaction()?;
-        let item = tx
-            .items()
-            .find_by_id(item_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Item".to_string(),
-                id: item_id.to_string(),
-            })?;
-
-        let bundle = ItemBundle {
-            id: 0,
-            item_id,
-            bundle_name: payload.bundle_name.trim().to_string(),
+    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<ItemBundle, AppError> {
+        let item_id = payload.item_id.ok_or_else(|| invalid("item_id", "item_id is required for creating a bundle"))?;
+        let p = UpdateBundlePayload {
+            bundle_name: payload.bundle_name,
             units_per_bundle: payload.units_per_bundle,
             mrp: payload.mrp,
             default_bundle_price: payload.default_bundle_price,
-            barcode: payload.barcode.map(|b| b.trim().to_string()).filter(|b| !b.is_empty()),
+            barcode: payload.barcode,
         };
 
-        let bundle_id = tx.bundles().create(&bundle)?;
+        let mut tx = self.uow.begin_transaction()?;
+        let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let mut bundle = Self::validate_and_build_bundle(&mut *tx, item_id, None, &p)?;
+        bundle.id = tx.bundles().create(&bundle)?;
         let bundles = tx.bundles().find_by_item_id(item_id)?;
         tx.commit()?;
 
-        let _ = self.search_indexer.index_item_with_bundles(&item, &bundles);
-        Ok(bundle_id)
+        self.reindex(&item, &bundles)?;
+        Ok(bundle)
+    }
+
+    fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<ItemBundle, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let existing = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| not_found("ItemBundle", bundle_id))?;
+        let item = tx.items().find_by_id(existing.item_id)?.ok_or_else(|| not_found("Item", existing.item_id))?;
+        // A bundle stays on its item; the payload has no item_id.
+        let bundle = Self::validate_and_build_bundle(&mut *tx, existing.item_id, Some(bundle_id), &payload)?;
+        tx.bundles().update(&bundle)?;
+        let bundles = tx.bundles().find_by_item_id(existing.item_id)?;
+        tx.commit()?;
+
+        self.reindex(&item, &bundles)?;
+        Ok(bundle)
+    }
+
+    fn delete_bundle(&self, bundle_id: i64) -> Result<(), AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let existing = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| not_found("ItemBundle", bundle_id))?;
+        let item = tx.items().find_by_id(existing.item_id)?.ok_or_else(|| not_found("Item", existing.item_id))?;
+        // DD-28: no reference guard; bills keep their pack_label snapshot.
+        tx.bundles().delete(bundle_id)?;
+        let bundles = tx.bundles().find_by_item_id(existing.item_id)?;
+        tx.commit()?;
+
+        self.reindex(&item, &bundles)
     }
 
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError> {

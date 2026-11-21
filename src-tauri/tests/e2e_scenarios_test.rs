@@ -191,7 +191,8 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
     let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
-    let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
+    let accounting_service = AccountingServiceImpl::new(payment_service, uow.clone());
+    let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, accounting_service, uow.clone());
 
     {
         let mut tx = uow.begin_transaction().unwrap();
@@ -233,12 +234,14 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
         settlement_type: SettlementType::Refund,
         reason: Some("Unused in packaging".to_string()),
         notes: None,
+        replacement_items: vec![],
         items: vec![CustomerReturnItemPayload {
             item_id: 1,
             sale_item_id: Some(1),
             quantity: 1.0,
             unit_price: 300.0,
             condition: StockCondition::Restockable,
+            unit_cost_override: None,
         }],
     };
     return_service.create_customer_return(return_payload).unwrap();
@@ -259,12 +262,14 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
         settlement_type: SettlementType::Replacement,
         reason: Some("Keypad unresponsive".to_string()),
         notes: None,
+        replacement_items: vec![ReplacementItemPayload { item_id: 1, quantity: 1.0 }],
         items: vec![CustomerReturnItemPayload {
             item_id: 1,
             sale_item_id: Some(1),
             quantity: 1.0,
             unit_price: 300.0,
             condition: StockCondition::DamagedScrap,
+            unit_cost_override: None,
         }],
     };
     return_service.create_customer_return(swap_payload).unwrap();
@@ -272,7 +277,15 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
     {
         let mut tx = uow.begin_transaction().unwrap();
         let item = tx.items().find_by_id(1).unwrap().unwrap();
-        assert_eq!(item.current_stock, 4.0);
+        // Scrapped unit is not restocked; one replacement unit was issued: 4 - 1 = 3.
+        assert_eq!(item.current_stock, 3.0);
+        let lots = tx.purchases().get_active_lots_for_item(1).unwrap();
+        assert_eq!(lots.iter().map(|l| l.remaining_quantity).sum::<f64>(), 3.0, "stock == sum of lots");
+        let outflows = tx.outflow_allocations().find_by_source(OutflowSourceType::Replacement, 2).unwrap();
+        assert_eq!(outflows.iter().map(|o| o.quantity_depleted * o.unit_cost).sum::<f64>(), 200.0);
+        let refunds: Vec<_> = tx.settlements().list_by_transaction(TransactionType::Sale, 1).unwrap()
+            .into_iter().filter(|s| s.kind == PaymentKind::RefundOut).collect();
+        assert_eq!(refunds.len(), 1, "replacement books no money; only the earlier refund exists");
     }
 
     println!("=== SCENARIO S3 PASSED SUCCESSFULLY! ===");

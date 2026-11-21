@@ -22,7 +22,8 @@ fn test_e2e_5_step_lifecycle_scenario() {
     let payment_service = PaymentServiceImpl;
     let purchase_service = PurchaseServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
-    let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
+    let accounting_service = AccountingServiceImpl::new(payment_service, uow.clone());
+    let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, accounting_service, uow.clone());
     let report_service = ReportServiceImpl::with_fixed_today(uow.clone(), "2026-11-20");
 
     // Initial Setup: Register the item "Pencil"
@@ -160,16 +161,19 @@ fn test_e2e_5_step_lifecycle_scenario() {
         settlement_type: SettlementType::Refund,
         reason: Some("Customer overbought".to_string()),
         notes: None,
+        replacement_items: vec![],
         items: vec![CustomerReturnItemPayload {
             item_id: 1,
             sale_item_id: Some(1),
             quantity: 10.0,
             unit_price: 10.0,
             condition: StockCondition::Restockable,
+            unit_cost_override: None,
         }],
     };
-    let ret_code = return_service.create_customer_return(return_payload).expect("return succeeds");
-    assert_eq!(ret_code, "RET-1001");
+    let ret = return_service.create_customer_return(return_payload).expect("return succeeds");
+    assert_eq!(ret.return_code, "RET-1001");
+    assert_eq!((ret.credited_amount, ret.cash_refunded), (0.0, 100.0), "fully paid bill: all cash");
 
     {
         let mut tx = uow.begin_transaction().expect("tx");

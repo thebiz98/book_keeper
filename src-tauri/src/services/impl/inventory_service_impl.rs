@@ -124,20 +124,40 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         unit_cost: Option<f64>,
         notes: Option<String>,
     ) -> Result<i64, AppError> {
+        let ids = self.create_source_lots(uow, source, date, notes, &[(item_id, quantity, unit_cost)])?;
+        Ok(ids[0])
+    }
+
+    fn create_source_lots(
+        &self,
+        uow: &mut dyn TransactionContext,
+        source: LotSource,
+        date: &str,
+        notes: Option<String>,
+        lines: &[(i64, f64, Option<f64>)],
+    ) -> Result<Vec<i64>, AppError> {
         if source == LotSource::Purchase {
             return Err(validation("source", "Purchase lots are created by PurchaseService, not as source lots"));
         }
-        require_positive("quantity", quantity)?;
+        if lines.is_empty() {
+            return Ok(Vec::new());
+        }
         require_date("date", date)?;
-        let item = find_item(uow, item_id)?;
-        let cost = match unit_cost {
-            Some(c) => c,
-            None => uow.purchases().get_latest_lot_cost(item_id)?.ok_or_else(|| {
-                validation("unit_cost", "unit cost required: item has no prior lot")
-            })?,
-        };
-        if !cost.is_finite() || cost < 0.0 {
-            return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {cost})")));
+        // Validate every line before writing the header.
+        let mut resolved: Vec<(Item, f64, f64)> = Vec::with_capacity(lines.len());
+        for &(item_id, quantity, unit_cost) in lines {
+            require_positive("quantity", quantity)?;
+            let item = find_item(uow, item_id)?;
+            let cost = match unit_cost {
+                Some(c) => c,
+                None => uow.purchases().get_latest_lot_cost(item_id)?.ok_or_else(|| {
+                    validation("unit_cost", "unit cost required: item has no prior lot")
+                })?,
+            };
+            if !cost.is_finite() || cost < 0.0 {
+                return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {cost})")));
+            }
+            resolved.push((item, quantity, cost));
         }
 
         // DD-07: non-PURCHASE lot headers are not supplier bills (total 0, no party, PAID, no ledger).
@@ -158,21 +178,25 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         let header_id = uow.purchases().create_transaction(&header)?;
-        let lot = PurchaseItem {
-            id: 0,
-            purchase_transaction_id: header_id,
-            item_id,
-            item_name: item.name,
-            pack_label: None,
-            pack_quantity: quantity,
-            quantity,
-            unit_cost: cost,
-            total_amount: quantity * cost,
-            remaining_quantity: quantity,
-        };
-        let lot_id = uow.purchases().create_purchase_item(&lot)?;
-        uow.items().apply_stock_delta(item_id, quantity)?;
-        Ok(lot_id)
+        let mut ids = Vec::with_capacity(resolved.len());
+        for (item, quantity, cost) in resolved {
+            let item_id = item.id;
+            let lot = PurchaseItem {
+                id: 0,
+                purchase_transaction_id: header_id,
+                item_id,
+                item_name: item.name,
+                pack_label: None,
+                pack_quantity: quantity,
+                quantity,
+                unit_cost: cost,
+                total_amount: quantity * cost,
+                remaining_quantity: quantity,
+            };
+            ids.push(uow.purchases().create_purchase_item(&lot)?);
+            uow.items().apply_stock_delta(item_id, quantity)?;
+        }
+        Ok(ids)
     }
 
     fn issue_stock_outflow(

@@ -2,7 +2,7 @@ use crate::app_state::AppState;
 use tauri::State;
 use crate::core::error::AppError;
 use crate::core::dtos::*;
-use crate::core::entities::Item;
+use crate::core::entities::{Item, ItemBundle};
 
 #[tauri::command]
 pub async fn search_items_fts(state: State<'_, AppState>, query: String, limit: Option<usize>) -> Result<Vec<ItemSearchResult>, AppError> {
@@ -29,9 +29,19 @@ pub async fn update_item(state: State<'_, AppState>, item_id: i64, payload: Upda
     super::run_blocking(move || svc.update_item(item_id, payload)).await
 }
 #[tauri::command]
-pub async fn create_bundle(state: State<'_, AppState>, payload: CreateBundlePayload) -> Result<i64, AppError> {
+pub async fn create_bundle(state: State<'_, AppState>, payload: CreateBundlePayload) -> Result<ItemBundle, AppError> {
     let svc = state.item_service.clone();
     super::run_blocking(move || svc.create_bundle(payload)).await
+}
+#[tauri::command]
+pub async fn update_bundle(state: State<'_, AppState>, bundle_id: i64, payload: UpdateBundlePayload) -> Result<ItemBundle, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.update_bundle(bundle_id, payload)).await
+}
+#[tauri::command]
+pub async fn delete_bundle(state: State<'_, AppState>, bundle_id: i64) -> Result<(), AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.delete_bundle(bundle_id)).await
 }
 #[tauri::command]
 pub async fn get_bundle_suggestions(state: State<'_, AppState>) -> Result<Vec<BundleSuggestion>, AppError> {

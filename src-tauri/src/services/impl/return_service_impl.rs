@@ -1,211 +1,527 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::core::constants::EPS;
 use crate::core::dtos::{
-    CustomerReturnPayload, RecordRefundPayload, ReturnDetailView, ReturnItemDetail,
-    VendorReturnPayload,
+    CustomerReturnPayload, PaginatedList, RecordRefundPayload, ReturnDetailView, ReturnItemDetail,
+    ReturnResult, ReturnsFilter, VendorReturnPayload,
 };
 use crate::core::entities::{ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
+use crate::core::money::{check_date, round2, MONEY_EPS};
 use crate::core::value_objects::{
-    ReturnLineType, ReturnType, SettlementType, StockCondition, TransactionType,
+    LotSource, OutflowSourceType, ReturnLineType, ReturnType, SettlementType, StockCondition,
+    TransactionType,
 };
-use crate::data::contracts::unit_of_work::UnitOfWork;
+use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
+use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
 use crate::services::contracts::return_service::ReturnService;
+
+const DEFAULT_PAGE_LIMIT: usize = 50;
+const MAX_PAGE_LIMIT: usize = 500;
 
 #[derive(Clone)]
 pub struct ReturnServiceImpl<
     I: InventoryService = Arc<dyn InventoryService>,
     P: PaymentService = Arc<dyn PaymentService>,
+    A: AccountingService = Arc<dyn AccountingService>,
     U: UnitOfWork = Arc<dyn UnitOfWork>,
 > {
     pub inventory_service: I,
     pub payment_service: P,
+    pub accounting_service: A,
     pub uow: U,
 }
 
-impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnServiceImpl<I, P, U> {
-    pub fn new(inventory_service: I, payment_service: P, uow: U) -> Self {
-        Self {
-            inventory_service,
-            payment_service,
-            uow,
+impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork>
+    ReturnServiceImpl<I, P, A, U>
+{
+    pub fn new(inventory_service: I, payment_service: P, accounting_service: A, uow: U) -> Self {
+        Self { inventory_service, payment_service, accounting_service, uow }
+    }
+
+    /// Credits dues first, then books the cash remainder (DD-03). `linked_value` is credited to
+    /// `bill_id` only; `unlinked_value` is applied FIFO across the party's open bills (walk-in: none).
+    #[allow(clippy::too_many_arguments)]
+    fn settle(
+        &self,
+        tx: &mut dyn TransactionContext,
+        tx_type: TransactionType,
+        party_id: Option<i64>,
+        bill_id: Option<i64>,
+        return_id: i64,
+        date: &str,
+        linked_value: f64,
+        unlinked_value: f64,
+        note: &str,
+    ) -> Result<(f64, f64), AppError> {
+        let total = round2(linked_value + unlinked_value);
+        let mut credited = 0.0;
+        if linked_value > MONEY_EPS {
+            credited += self.accounting_service.apply_return_credit(
+                tx, tx_type, party_id, bill_id, return_id, date, linked_value,
+            )?;
         }
+        if unlinked_value > MONEY_EPS {
+            credited += self.accounting_service.apply_return_credit(
+                tx, tx_type, party_id, None, return_id, date, unlinked_value,
+            )?;
+        }
+        let credited = round2(credited);
+        let cash = round2((total - credited).max(0.0));
+        if cash > MONEY_EPS {
+            self.payment_service.record_refund(
+                tx,
+                RecordRefundPayload {
+                    party_id,
+                    transaction_type: tx_type,
+                    transaction_id: bill_id,
+                    return_id: Some(return_id),
+                    refund_date: date.to_string(),
+                    amount: cash,
+                    payment_mode: Some("CASH".to_string()),
+                    notes: Some(note.to_string()),
+                },
+            )?;
+        }
+        Ok((credited, cash))
     }
 }
 
-impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for ReturnServiceImpl<I, P, U> {
+fn validation(field: &str, message: impl Into<String>) -> AppError {
+    AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
+
+fn check_qty(field: &str, q: f64) -> Result<(), AppError> {
+    if !q.is_finite() || q <= 0.0 {
+        return Err(validation(field, format!("Quantity must be a positive finite number, got {q}")));
+    }
+    Ok(())
+}
+
+/// Resolves the effective party: defaults to the bill's party and must match it when given.
+fn resolve_party(
+    tx: &mut dyn TransactionContext,
+    payload_party: Option<i64>,
+    bill_party: Option<i64>,
+    has_bill: bool,
+) -> Result<(Option<i64>, Option<String>), AppError> {
+    let party_id = if has_bill {
+        if let Some(p) = payload_party {
+            if bill_party != Some(p) {
+                return Err(validation("party_id", "party_id does not match the original bill's party"));
+            }
+        }
+        bill_party
+    } else {
+        payload_party
+    };
+    let party_name = match party_id {
+        Some(pid) => Some(
+            tx.parties()
+                .find_by_id(pid)?
+                .ok_or_else(|| AppError::not_found("Party", pid.to_string()))?
+                .name,
+        ),
+        None => None,
+    };
+    Ok((party_id, party_name))
+}
+
+fn active_item_name(tx: &mut dyn TransactionContext, item_id: i64) -> Result<String, AppError> {
+    let item = tx
+        .items()
+        .find_by_id(item_id)?
+        .ok_or_else(|| AppError::not_found("Item", item_id.to_string()))?;
+    if !item.is_active {
+        return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+    }
+    Ok(item.name)
+}
+
+impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork> ReturnService
+    for ReturnServiceImpl<I, P, A, U>
+{
     fn get_next_return_code(&self) -> Result<String, AppError> {
         // Display-only preview: the code is assigned for real inside the create_* write transaction.
         let mut tx = self.uow.begin_read()?;
         tx.returns().get_next_return_code()
     }
 
-    fn create_customer_return(&self, payload: CustomerReturnPayload) -> Result<String, AppError> {
+    fn create_customer_return(&self, payload: CustomerReturnPayload) -> Result<ReturnResult, AppError> {
+        // ---- Payload-only validation -------------------------------------------------------
+        check_date("return_date", &payload.return_date)?;
+        if payload.items.is_empty() {
+            return Err(validation("items", "A return needs at least one returned line"));
+        }
+        for it in &payload.items {
+            check_qty("quantity", it.quantity)?;
+            if !it.unit_price.is_finite() || it.unit_price < 0.0 {
+                return Err(validation("unit_price", "unit_price must be a non-negative finite number"));
+            }
+            if let Some(c) = it.unit_cost_override {
+                if !c.is_finite() || c <= 0.0 {
+                    return Err(validation("unit_cost_override", "unit_cost_override must be positive"));
+                }
+            }
+            if it.sale_item_id.is_none() && payload.settlement_type != SettlementType::Refund {
+                return Err(validation("sale_item_id", "Replacement returns require every returned line to be linked"));
+            }
+            if it.sale_item_id.is_some() && payload.original_sale_id.is_none() {
+                return Err(validation("original_sale_id", "original_sale_id is required for linked lines"));
+            }
+        }
+        match payload.settlement_type {
+            SettlementType::Refund => {
+                if !payload.replacement_items.is_empty() {
+                    return Err(validation("replacement_items", "replacement_items must be empty for a Refund"));
+                }
+            }
+            SettlementType::Replacement => {
+                if payload.original_sale_id.is_none() {
+                    return Err(validation("original_sale_id", "A Replacement requires the original sale"));
+                }
+                if payload.replacement_items.is_empty() {
+                    return Err(validation("replacement_items", "A Replacement needs at least one issued item"));
+                }
+                for r in &payload.replacement_items {
+                    check_qty("replacement_items.quantity", r.quantity)?;
+                }
+            }
+        }
+
+        // ---- Validation against stored data (read-only, before any write) -------------------
         let mut tx = self.uow.begin_transaction()?;
-        let mut total_refund = 0.0;
-        // Assigned inside the write transaction; customer and vendor returns share one RET- sequence.
-        let return_code = tx.returns().get_next_return_code()?;
-        let party_name = match payload.party_id {
-            Some(pid) => tx.parties().find_by_id(pid)?.map(|p| p.name),
+        let sale = match payload.original_sale_id {
+            Some(sid) => Some(
+                tx.sales()
+                    .find_transaction_by_id(sid)?
+                    .ok_or_else(|| AppError::not_found("SaleTransaction", sid.to_string()))?,
+            ),
             None => None,
         };
-        let ret_tx = ReturnTransaction {
+        let (party_id, party_name) = resolve_party(
+            &mut *tx,
+            payload.party_id,
+            sale.as_ref().and_then(|s| s.party_id),
+            sale.is_some(),
+        )?;
+
+        let mut per_line_qty: HashMap<i64, f64> = HashMap::new();
+        let mut item_names: Vec<String> = Vec::with_capacity(payload.items.len());
+        for it in &payload.items {
+            match it.sale_item_id {
+                Some(sid) => {
+                    let line = tx
+                        .sales()
+                        .find_sale_item_by_id(sid)?
+                        .ok_or_else(|| AppError::not_found("SaleItem", sid.to_string()))?;
+                    if Some(line.sale_transaction_id) != payload.original_sale_id {
+                        return Err(validation("sale_item_id", format!("Sale line {sid} does not belong to the original sale")));
+                    }
+                    if line.item_id != it.item_id {
+                        return Err(validation("item_id", format!("Item does not match sale line {sid}")));
+                    }
+                    if it.unit_price > line.unit_price + MONEY_EPS {
+                        return Err(validation(
+                            "unit_price",
+                            format!("unit_price {} exceeds the sold price {}", it.unit_price, line.unit_price),
+                        ));
+                    }
+                    *per_line_qty.entry(sid).or_insert(0.0) += it.quantity;
+                    item_names.push(line.item_name);
+                }
+                None => item_names.push(active_item_name(&mut *tx, it.item_id)?),
+            }
+        }
+        for (sid, qty) in &per_line_qty {
+            let line = tx.sales().find_sale_item_by_id(*sid)?.ok_or_else(|| AppError::not_found("SaleItem", sid.to_string()))?;
+            let returned = tx.sales().get_returned_quantity_for_line(*sid)?;
+            if *qty > line.quantity - returned + EPS {
+                return Err(validation(
+                    "quantity",
+                    format!("Cannot return {qty} of sale line {sid}: sold {}, already returned {returned}", line.quantity),
+                ));
+            }
+        }
+        let mut issue_names: Vec<String> = Vec::new();
+        for r in &payload.replacement_items {
+            issue_names.push(active_item_name(&mut *tx, r.item_id)?);
+        }
+
+        // ---- Writes -----------------------------------------------------------------------
+        let line_totals: Vec<f64> =
+            payload.items.iter().map(|i| round2(i.quantity * i.unit_price)).collect();
+        let total_amount = round2(payload.items.iter().map(|i| i.quantity * i.unit_price).sum());
+        let return_code = tx.returns().get_next_return_code()?;
+        let return_id = tx.returns().create_return_transaction(&ReturnTransaction {
             id: 0,
             return_code: return_code.clone(),
             return_date: payload.return_date.clone(),
             return_type: ReturnType::Customer,
-            party_id: payload.party_id,
+            party_id,
             party_name,
             original_transaction_id: payload.original_sale_id,
             settlement_type: payload.settlement_type,
-            total_amount: 0.0,
-            reason: payload.reason,
-            notes: payload.notes,
+            total_amount,
+            reason: payload.reason.clone(),
+            notes: payload.notes.clone(),
             created_at: chrono::Utc::now().to_rfc3339(),
-        };
-        let return_id = tx.returns().create_return_transaction(&ret_tx)?;
-        for item_payload in &payload.items {
-            let line_total = item_payload.quantity * item_payload.unit_price;
-            total_refund += line_total;
-            let item_name = tx
-                .items()
-                .find_by_id(item_payload.item_id)?
-                .ok_or_else(|| AppError::not_found("Item", item_payload.item_id.to_string()))?
-                .name;
-            // DD-05: every linked line reverses its sale allocations; only RESTOCKABLE units go
-            // back into lots/stock. The reversed FIFO cost is the line's cost_amount.
-            let cost_amount = match item_payload.sale_item_id {
-                Some(sale_item_id) => self.inventory_service.reverse_sale_line(
-                    &mut *tx,
-                    sale_item_id,
-                    item_payload.item_id,
-                    item_payload.quantity,
-                    item_payload.condition == StockCondition::Restockable,
-                )?,
-                None => 0.0, // TODO(F4): unlinked returns have no allocation to reverse; cost policy
+        })?;
+
+        let (mut linked_value, mut unlinked_value) = (0.0, 0.0);
+        for (idx, it) in payload.items.iter().enumerate() {
+            let restock = it.condition == StockCondition::Restockable;
+            let cost = match it.sale_item_id {
+                Some(sid) => {
+                    linked_value += line_totals[idx];
+                    self.inventory_service.reverse_sale_line(&mut *tx, sid, it.item_id, it.quantity, restock)?
+                }
+                None => {
+                    unlinked_value += line_totals[idx];
+                    if restock {
+                        let lot_id = self.inventory_service.create_source_lot(
+                            &mut *tx,
+                            LotSource::Return,
+                            &payload.return_date,
+                            it.item_id,
+                            it.quantity,
+                            it.unit_cost_override,
+                            Some(format!("Return {return_code}")),
+                        )?;
+                        let lot = tx
+                            .purchases()
+                            .find_purchase_item_by_id(lot_id)?
+                            .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+                        it.quantity * lot.unit_cost
+                    } else {
+                        0.0
+                    }
+                }
             };
-            let ret_item = ReturnItem {
+            tx.returns().create_return_item(&ReturnItem {
                 id: 0,
                 return_transaction_id: return_id,
                 line_type: ReturnLineType::Returned,
-                item_id: item_payload.item_id,
-                item_name,
-                sale_item_id: item_payload.sale_item_id,
+                item_id: it.item_id,
+                item_name: item_names[idx].clone(),
+                sale_item_id: it.sale_item_id,
                 purchase_item_id: None,
-                quantity: item_payload.quantity,
-                unit_price: item_payload.unit_price,
-                total_amount: line_total,
-                cost_amount,
-                condition: Some(item_payload.condition),
-            };
-            tx.returns().create_return_item(&ret_item)?;
+                quantity: it.quantity,
+                unit_price: it.unit_price,
+                total_amount: line_totals[idx],
+                cost_amount: round2(cost),
+                condition: Some(it.condition),
+            })?;
         }
-        // TODO(F4, DD-02/DD-04/DD-05): Refund must first apply RETURN_CREDIT to the linked bill /
-        // oldest open bills, and Replacement must issue REPLACEMENT_ISSUED lines. For now every
-        // Refund is a REFUND_OUT cash row.
-        if payload.settlement_type == SettlementType::Refund && total_refund > 0.0 {
-            let refund_payload = RecordRefundPayload {
-                party_id: payload.party_id,
-                transaction_type: TransactionType::Sale,
-                transaction_id: payload.original_sale_id,
-                return_id: Some(return_id),
-                refund_date: payload.return_date,
-                amount: total_refund,
-                payment_mode: Some("CASH".to_string()),
-                notes: Some("Customer return refund".to_string()),
-            };
-            self.payment_service
-                .record_refund(&mut *tx, refund_payload)?;
+
+        let (mut credited, mut cash) = (0.0, 0.0);
+        match payload.settlement_type {
+            SettlementType::Refund => {
+                (credited, cash) = self.settle(
+                    &mut *tx,
+                    TransactionType::Sale,
+                    party_id,
+                    payload.original_sale_id,
+                    return_id,
+                    &payload.return_date,
+                    linked_value,
+                    unlinked_value,
+                    "Customer return refund",
+                )?;
+            }
+            SettlementType::Replacement => {
+                // Stock check after the returned units are restocked, so swapping a just-sold
+                // last unit works; any shortfall rolls the whole transaction back.
+                let mut reqs: Vec<(i64, f64)> = Vec::new();
+                for r in &payload.replacement_items {
+                    match reqs.iter_mut().find(|(i, _)| *i == r.item_id) {
+                        Some(e) => e.1 += r.quantity,
+                        None => reqs.push((r.item_id, r.quantity)),
+                    }
+                }
+                self.inventory_service.validate_stock_availability(&mut *tx, &reqs)?;
+                for (idx, r) in payload.replacement_items.iter().enumerate() {
+                    let cost = self.inventory_service.issue_stock_outflow(
+                        &mut *tx,
+                        OutflowSourceType::Replacement,
+                        return_id,
+                        r.item_id,
+                        r.quantity,
+                    )?;
+                    tx.returns().create_return_item(&ReturnItem {
+                        id: 0,
+                        return_transaction_id: return_id,
+                        line_type: ReturnLineType::ReplacementIssued,
+                        item_id: r.item_id,
+                        item_name: issue_names[idx].clone(),
+                        sale_item_id: None,
+                        purchase_item_id: None,
+                        quantity: r.quantity,
+                        unit_price: 0.0,
+                        total_amount: 0.0,
+                        cost_amount: round2(cost),
+                        condition: None,
+                    })?;
+                }
+            }
         }
         tx.commit()?;
-        Ok(return_code)
+        Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash })
     }
 
-    fn create_vendor_return(&self, payload: VendorReturnPayload) -> Result<String, AppError> {
+    fn create_vendor_return(&self, payload: VendorReturnPayload) -> Result<ReturnResult, AppError> {
+        check_date("return_date", &payload.return_date)?;
         if payload.settlement_type == SettlementType::Replacement {
-            return Err(AppError::ValidationError {
-                field: "settlement_type".to_string(),
-                message: "Replacement is customer-only; vendor returns are always Refund".to_string(),
-            });
+            return Err(validation("settlement_type", "Replacement is customer-only; vendor returns are always Refund"));
         }
-        let mut tx = self.uow.begin_transaction()?;
-        let return_code = tx.returns().get_next_return_code()?;
-        let mut total_amount = 0.0;
-        for item in &payload.items {
-            total_amount += item.quantity * item.unit_cost;
+        if payload.items.is_empty() {
+            return Err(validation("items", "A return needs at least one line"));
+        }
+        for it in &payload.items {
+            check_qty("quantity", it.quantity)?;
         }
 
-        let party_name = match payload.party_id {
-            Some(pid) => tx.parties().find_by_id(pid)?.map(|p| p.name),
+        let mut tx = self.uow.begin_transaction()?;
+        let purchase = match payload.original_purchase_id {
+            Some(pid) => {
+                let p = tx
+                    .purchases()
+                    .find_transaction_by_id(pid)?
+                    .ok_or_else(|| AppError::not_found("PurchaseTransaction", pid.to_string()))?;
+                if p.source != LotSource::Purchase {
+                    return Err(validation("original_purchase_id", "Only a PURCHASE bill can be returned to a vendor"));
+                }
+                Some(p)
+            }
             None => None,
         };
-        let ret_tx = ReturnTransaction {
+        let (party_id, party_name) = resolve_party(
+            &mut *tx,
+            payload.party_id,
+            purchase.as_ref().and_then(|p| p.party_id),
+            purchase.is_some(),
+        )?;
+
+        let mut per_lot: HashMap<i64, f64> = HashMap::new();
+        let mut fifo_reqs: Vec<(i64, f64)> = Vec::new();
+        let mut item_names: Vec<String> = Vec::new();
+        for it in &payload.items {
+            item_names.push(
+                tx.items()
+                    .find_by_id(it.item_id)?
+                    .ok_or_else(|| AppError::not_found("Item", it.item_id.to_string()))?
+                    .name,
+            );
+            match it.purchase_item_id {
+                Some(lid) => {
+                    let lot = tx
+                        .purchases()
+                        .find_purchase_item_by_id(lid)?
+                        .ok_or_else(|| AppError::not_found("PurchaseItem", lid.to_string()))?;
+                    let header = tx
+                        .purchases()
+                        .find_transaction_by_id(lot.purchase_transaction_id)?
+                        .ok_or_else(|| AppError::not_found("PurchaseTransaction", lot.purchase_transaction_id.to_string()))?;
+                    if header.source != LotSource::Purchase {
+                        return Err(validation("purchase_item_id", "Only PURCHASE-source lots can be returned to a vendor"));
+                    }
+                    if lot.item_id != it.item_id {
+                        return Err(validation("item_id", format!("Item does not match lot {lid}")));
+                    }
+                    if let Some(pid) = payload.original_purchase_id {
+                        if lot.purchase_transaction_id != pid {
+                            return Err(validation("purchase_item_id", format!("Lot {lid} does not belong to the original purchase")));
+                        }
+                    }
+                    *per_lot.entry(lid).or_insert(0.0) += it.quantity;
+                }
+                None => match fifo_reqs.iter_mut().find(|(i, _)| *i == it.item_id) {
+                    Some(e) => e.1 += it.quantity,
+                    None => fifo_reqs.push((it.item_id, it.quantity)),
+                },
+            }
+        }
+        for (lid, qty) in &per_lot {
+            let lot = tx.purchases().find_purchase_item_by_id(*lid)?.ok_or_else(|| AppError::not_found("PurchaseItem", lid.to_string()))?;
+            if *qty > lot.remaining_quantity + EPS {
+                return Err(validation(
+                    "quantity",
+                    format!("Cannot return {qty} from lot {lid}: only {} remaining", lot.remaining_quantity),
+                ));
+            }
+        }
+        if !fifo_reqs.is_empty() {
+            self.inventory_service.validate_stock_availability(&mut *tx, &fifo_reqs)?;
+        }
+
+        // ---- Writes -----------------------------------------------------------------------
+        let return_code = tx.returns().get_next_return_code()?;
+        let return_id = tx.returns().create_return_transaction(&ReturnTransaction {
             id: 0,
             return_code: return_code.clone(),
             return_date: payload.return_date.clone(),
             return_type: ReturnType::Vendor,
-            party_id: payload.party_id,
+            party_id,
             party_name,
             original_transaction_id: payload.original_purchase_id,
-            settlement_type: payload.settlement_type,
-            total_amount,
-            reason: payload.reason,
-            notes: payload.notes,
+            settlement_type: SettlementType::Refund,
+            total_amount: 0.0,
+            reason: payload.reason.clone(),
+            notes: payload.notes.clone(),
             created_at: chrono::Utc::now().to_rfc3339(),
-        };
-        let return_id = tx.returns().create_return_transaction(&ret_tx)?;
-
-        for item in &payload.items {
-            let line_total = item.quantity * item.unit_cost;
-            let item_name = tx
-                .items()
-                .find_by_id(item.item_id)?
-                .ok_or_else(|| AppError::not_found("Item", item.item_id.to_string()))?
-                .name;
-            // DD-11: the lot cost removed (named lot or FIFO) is the line's cost_amount.
-            let cost_amount = self.inventory_service.remove_stock_for_vendor_return(
+        })?;
+        let mut total = 0.0;
+        for (idx, it) in payload.items.iter().enumerate() {
+            // DD-11: the lot cost removed (named lot or FIFO) is the line's value and cost.
+            let value = self.inventory_service.remove_stock_for_vendor_return(
                 &mut *tx,
                 return_id,
-                item.item_id,
-                item.purchase_item_id,
-                item.quantity,
+                it.item_id,
+                it.purchase_item_id,
+                it.quantity,
             )?;
-            let ret_item = ReturnItem {
+            total += value;
+            tx.returns().create_return_item(&ReturnItem {
                 id: 0,
                 return_transaction_id: return_id,
                 line_type: ReturnLineType::Returned,
-                item_id: item.item_id,
-                item_name,
+                item_id: it.item_id,
+                item_name: item_names[idx].clone(),
                 sale_item_id: None,
-                purchase_item_id: item.purchase_item_id,
-                quantity: item.quantity,
-                unit_price: item.unit_cost,
-                total_amount: line_total,
-                cost_amount,
+                purchase_item_id: it.purchase_item_id,
+                quantity: it.quantity,
+                unit_price: value / it.quantity,
+                total_amount: round2(value),
+                cost_amount: round2(value),
                 condition: None, // condition applies to customer lines only
-            };
-            tx.returns().create_return_item(&ret_item)?;
+            })?;
         }
-
-        // TODO(F4, DD-02/DD-04): RETURN_CREDIT against payables first, remainder as REFUND_IN.
-        if payload.settlement_type == SettlementType::Refund && total_amount > 0.0 {
-            let refund_payload = RecordRefundPayload {
-                party_id: payload.party_id,
-                transaction_type: TransactionType::Purchase,
-                transaction_id: payload.original_purchase_id,
-                return_id: Some(return_id),
-                refund_date: payload.return_date,
-                amount: total_amount,
-                payment_mode: Some("CASH".to_string()),
-                notes: Some("Vendor return refund".to_string()),
-            };
-            self.payment_service
-                .record_refund(&mut *tx, refund_payload)?;
-        }
-
+        let total = round2(total);
+        tx.returns().update_return_total(return_id, total)?;
+        let (credited, cash) = self.settle(
+            &mut *tx,
+            TransactionType::Purchase,
+            party_id,
+            payload.original_purchase_id,
+            return_id,
+            &payload.return_date,
+            total,
+            0.0,
+            "Vendor return refund",
+        )?;
         tx.commit()?;
-        Ok(return_code)
+        Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash })
+    }
+
+    fn list_returns(&self, filter: ReturnsFilter) -> Result<PaginatedList<ReturnTransaction>, AppError> {
+        let page = filter.page.unwrap_or(1).max(1);
+        let limit = filter.limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, MAX_PAGE_LIMIT);
+        let mut tx = self.uow.begin_read()?;
+        let (rows, total) = tx.returns().list_returns_page(&filter, (page - 1) * limit, limit)?;
+        Ok(PaginatedList::new(rows, total, page, limit))
     }
 
     fn get_return_details(&self, return_id: i64) -> Result<ReturnDetailView, AppError> {
@@ -213,29 +529,27 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
         let ret_tx = tx
             .returns()
             .find_return_by_id(return_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "ReturnTransaction".to_string(),
-                id: return_id.to_string(),
-            })?;
-        let party = if let Some(pid) = ret_tx.party_id {
-            tx.parties().find_by_id(pid)?
-        } else {
-            None
+            .ok_or_else(|| AppError::not_found("ReturnTransaction", return_id.to_string()))?;
+        let party = match ret_tx.party_id {
+            Some(pid) => tx.parties().find_by_id(pid)?,
+            None => None,
         };
-        let items = tx.returns().find_items_by_return_id(return_id)?;
-        let mut item_details = Vec::new();
-        for it in items {
-            // DD-30: read the write-time snapshot.
-            let name = it.item_name.clone();
-            item_details.push(ReturnItemDetail {
-                return_item: it,
-                item_name: name,
-            });
-        }
-        Ok(ReturnDetailView {
-            return_tx: ret_tx,
-            party,
-            items: item_details,
-        })
+        let items = tx
+            .returns()
+            .find_items_by_return_id(return_id)?
+            .into_iter()
+            .map(|it| ReturnItemDetail { item_name: it.item_name.clone(), return_item: it }) // DD-30 snapshot
+            .collect();
+        let source = match (ret_tx.return_type, ret_tx.settlement_type) {
+            (ReturnType::Vendor, _) => Some(OutflowSourceType::VendorReturn),
+            (ReturnType::Customer, SettlementType::Replacement) => Some(OutflowSourceType::Replacement),
+            _ => None,
+        };
+        let allocations = match source {
+            Some(s) => tx.outflow_allocations().find_by_source(s, return_id)?,
+            None => Vec::new(),
+        };
+        let ledger = tx.returns().find_ledger_by_return_id(return_id)?;
+        Ok(ReturnDetailView { return_tx: ret_tx, party, items, allocations, ledger })
     }
 }

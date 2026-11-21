@@ -59,6 +59,18 @@ pub trait InventoryService: Send + Sync {
         notes: Option<String>,
     ) -> Result<i64, AppError>;
 
+    /// Batch form of [`Self::create_source_lot`]: ONE header for all `(item_id, quantity,
+    /// unit_cost)` lines (used by the items import: one `OPN-` header per import). All lines are
+    /// validated before anything is written. Returns the lot ids in line order.
+    fn create_source_lots(
+        &self,
+        uow: &mut dyn TransactionContext,
+        source: LotSource,
+        date: &str,
+        notes: Option<String>,
+        lines: &[(i64, f64, Option<f64>)],
+    ) -> Result<Vec<i64>, AppError>;
+
     /// Strategy-ordered outflow (negative adjustment, replacement issue): lots depleted,
     /// `StockOutflowAllocation` rows logged, cache decremented. Returns total cost.
     fn issue_stock_outflow(
@@ -163,6 +175,17 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
         notes: Option<String>,
     ) -> Result<i64, AppError> {
         (**self).create_source_lot(uow, source, date, item_id, quantity, unit_cost, notes)
+    }
+
+    fn create_source_lots(
+        &self,
+        uow: &mut dyn TransactionContext,
+        source: LotSource,
+        date: &str,
+        notes: Option<String>,
+        lines: &[(i64, f64, Option<f64>)],
+    ) -> Result<Vec<i64>, AppError> {
+        (**self).create_source_lots(uow, source, date, notes, lines)
     }
 
     fn issue_stock_outflow(

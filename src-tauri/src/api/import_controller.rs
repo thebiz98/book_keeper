@@ -1,10 +1,20 @@
 use crate::app_state::AppState;
-use crate::core::dtos::ImportSummary;
-use tauri::State;
+use crate::core::dtos::{ConflictStrategy, ImportSummary, ImportValidationReport};
 use crate::core::error::AppError;
+use tauri::State;
 
 #[tauri::command]
-pub async fn import_items_from_excel(state: State<'_, AppState>, file_path: String) -> Result<ImportSummary, AppError> {
+pub async fn validate_items_import(state: State<'_, AppState>, file_path: String) -> Result<ImportValidationReport, AppError> {
     let svc = state.item_import_service.clone();
-    super::run_blocking(move || svc.import_items_from_excel(&file_path)).await
+    super::run_blocking(move || svc.validate_items_import(&file_path)).await
+}
+
+#[tauri::command]
+pub async fn execute_items_import(
+    state: State<'_, AppState>,
+    file_path: String,
+    conflict_strategy: ConflictStrategy,
+) -> Result<ImportSummary, AppError> {
+    let svc = state.item_import_service.clone();
+    super::run_blocking(move || svc.execute_items_import(&file_path, conflict_strategy)).await
 }
