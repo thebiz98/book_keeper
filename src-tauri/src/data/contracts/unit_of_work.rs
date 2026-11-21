@@ -6,6 +6,7 @@ use super::item_repository::ItemRepository;
 use super::outflow_allocation_repository::OutflowAllocationRepository;
 use super::party_repository::PartyRepository;
 use super::purchase_repository::PurchaseRepository;
+use super::report_repository::ReportRepository;
 use super::return_repository::ReturnRepository;
 use super::sale_repository::SaleRepository;
 use super::setting_repository::SettingRepository;
@@ -56,4 +57,5 @@ pub trait TransactionContext {
     fn outflow_allocations(&mut self) -> &mut dyn OutflowAllocationRepository;
     fn settings(&mut self) -> &mut dyn SettingRepository;
     fn parties(&mut self) -> &mut dyn PartyRepository;
+    fn reports(&mut self) -> &mut dyn ReportRepository;
 }

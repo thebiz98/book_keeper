@@ -47,6 +47,20 @@ impl BundleRepository for SqliteBundleRepository {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    fn find_by_item_ids(&self, item_ids: &[i64]) -> Result<Vec<ItemBundle>, AppError> {
+        if item_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ph = vec!["?"; item_ids.len()].join(",");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {COLS} FROM item_bundles WHERE item_id IN ({ph}) ORDER BY id"
+        ))?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(item_ids.iter()), map_bundle)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     fn find_by_barcode(&self, barcode: &str) -> Result<Option<ItemBundle>, AppError> {
         Ok(self
             .conn

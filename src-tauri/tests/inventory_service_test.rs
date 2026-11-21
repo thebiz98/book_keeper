@@ -99,7 +99,7 @@ fn test_tc_inv_004_negative_adjustment_creates_audit_trail() {
     let allocs = r.outflow_allocations().find_by_source(OutflowSourceType::Adjustment, res.adjustment_id).unwrap();
     assert_eq!(allocs.len(), 1);
     assert_eq!((allocs[0].quantity_depleted, allocs[0].unit_cost), (3.0, 5.0));
-    let page = inv.list_adjustments(Some(4), 1, 10).unwrap();
+    let page = inv.list_adjustments(Some(4), Some(1), Some(10)).unwrap();
     assert_eq!(page.items.len(), 1);
     assert_eq!(page.items[0].unit_cost, None, "write-offs record no unit cost");
     assert_stock_invariant(&mut *r);
@@ -111,7 +111,7 @@ fn negative_adjustment_beyond_stock_is_rejected_atomically() {
     let err = inv.create_adjustment(adj(4, -3.0, AdjustmentReason::Expired, None)).unwrap_err();
     assert!(matches!(err, AppError::InsufficientStockError { .. }), "{err:?}");
     assert_eq!(stock(&db, 4).0, 2.0);
-    assert!(inv.list_adjustments(Some(4), 1, 10).unwrap().items.is_empty(), "no adjustment row left behind");
+    assert!(inv.list_adjustments(Some(4), Some(1), Some(10)).unwrap().items.is_empty(), "no adjustment row left behind");
 }
 
 #[test]
@@ -160,12 +160,12 @@ fn test_tc_inv_007_positive_adjustment_without_prior_lot_needs_cost() {
         other => panic!("expected unit_cost ValidationError, got {other:?}"),
     }
     assert_eq!(stock(&db, 7).0, 0.0);
-    assert!(inv.list_adjustments(Some(7), 1, 10).unwrap().items.is_empty());
+    assert!(inv.list_adjustments(Some(7), Some(1), Some(10)).unwrap().items.is_empty());
 
     inv.create_adjustment(adj(7, 5.0, AdjustmentReason::CountCorrection, Some(4.0))).unwrap();
     let lots = inv.get_item_lots(7).unwrap();
     assert_eq!((lots.len(), lots[0].unit_cost, lots[0].source), (1, 4.0, LotSource::Adjustment));
-    assert_eq!(inv.list_adjustments(Some(7), 1, 10).unwrap().items[0].unit_cost, Some(4.0));
+    assert_eq!(inv.list_adjustments(Some(7), Some(1), Some(10)).unwrap().items[0].unit_cost, Some(4.0));
 }
 
 #[test]
@@ -341,7 +341,7 @@ fn item_create_with_opening_stock_goes_through_inventory_service() {
         Err(AppError::ValidationError { field, .. }) => assert_eq!(field, "unit_cost"),
         other => panic!("{other:?}"),
     }
-    assert_eq!(items.get_catalog(None, false, 1, 10).unwrap().items.len(), 0);
+    assert_eq!(items.get_catalog(Default::default()).unwrap().items.len(), 0);
 
     let id = items.create_item(mk("Pen", Some(6.0))).unwrap();
     assert_eq!(stock(&db, id), (8.0, false));

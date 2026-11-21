@@ -94,3 +94,20 @@ pub struct ItemLot {
     pub remaining_quantity: f64,
     pub unit_cost: f64,
 }
+
+/// Inventory catalog query. `search` goes through the FTS indexer; `category` and
+/// `low_stock_only` still apply while searching. Defaults: page 1, limit 50 (max 200),
+/// `low_stock_only = false`. Blank `category` / `search` mean no filter.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CatalogFilter {
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default)]
+    pub low_stock_only: Option<bool>,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub page: Option<usize>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}

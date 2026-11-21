@@ -1,13 +1,13 @@
 //! SQLite implementation of `SaleRepository`.
 use rusqlite::{params, types::Value, OptionalExtension, Row};
 
-use crate::core::dtos::{PaginatedList, SalesFilter};
+use crate::core::dtos::{SaleHistoryRow, SalesHistoryFilter};
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
 use crate::data::contracts::sale_repository::SaleRepository;
 use crate::data::sqlite::code_gen::{next_code, SALE_CODE};
-use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
+use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
 const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
 const ITEM_COLS: &str = "id, sale_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_price, total_amount";
@@ -190,21 +190,60 @@ impl SaleRepository for SqliteSaleRepository {
         )
     }
 
-    fn list_transactions(&self, filter: &SalesFilter) -> Result<PaginatedList<SaleTransaction>, AppError> {
-        let from = filter.from_date.as_deref().or(filter.start_date.as_deref());
-        let to = filter.to_date.as_deref().or(filter.end_date.as_deref());
-        let page = filter.page.unwrap_or(1);
-        let limit = filter.limit.unwrap_or(50);
-        let offset = page.saturating_sub(1) * limit;
-
-        let (w, vals) = Self::where_clause(from, to, filter.payment_status, filter.party_id)?;
+    fn list_history(
+        &self,
+        filter: &SalesHistoryFilter,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<SaleHistoryRow>, usize), AppError> {
+        let (w, vals) = history_where(filter, None, &["t.transaction_code", "t.party_name"])?;
         let total: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM sale_transactions{w}"),
+            &format!("SELECT COUNT(*) FROM sale_transactions t{w}"),
             rusqlite::params_from_iter(vals.iter()),
             |r| r.get(0),
         )?;
-        let items = self.list_sales(from, to, filter.payment_status, filter.party_id, offset, limit)?;
-        Ok(PaginatedList::new(items, total as usize, page, limit))
+        let mut page_vals = vals;
+        page_vals.push(Value::Integer(lim(limit)));
+        page_vals.push(Value::Integer(lim(offset)));
+        let sql = format!(
+            "SELECT t.id, t.transaction_code, t.transaction_date, t.created_at, t.party_id, t.party_name, \
+             (SELECT COUNT(*) FROM sale_items si WHERE si.sale_transaction_id = t.id), \
+             t.total_amount, t.paid_amount, t.balance_due, t.payment_status \
+             FROM sale_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(page_vals.iter()), |r| {
+                Ok(SaleHistoryRow {
+                    id: r.get(0)?,
+                    transaction_code: r.get(1)?,
+                    transaction_date: r.get(2)?,
+                    created_at: r.get(3)?,
+                    party_id: r.get(4)?,
+                    party_name: r.get(5)?,
+                    line_count: r.get(6)?,
+                    total_amount: r.get(7)?,
+                    paid_amount: r.get(8)?,
+                    balance_due: r.get(9)?,
+                    payment_status: enum_col(r, 10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((rows, total.max(0) as usize))
+    }
+
+    fn get_returned_quantities_for_sale(&self, sale_id: i64) -> Result<Vec<(i64, f64)>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ri.sale_item_id, SUM(ri.quantity) FROM return_items ri \
+             JOIN return_transactions rt ON rt.id = ri.return_transaction_id \
+             JOIN sale_items si ON si.id = ri.sale_item_id \
+             WHERE si.sale_transaction_id = ?1 AND ri.line_type = 'RETURNED' AND rt.return_type = 'CUSTOMER' \
+             GROUP BY ri.sale_item_id",
+        )?;
+        let rows = stmt
+            .query_map(params![sale_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError> {

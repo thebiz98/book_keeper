@@ -1,8 +1,7 @@
 use crate::core::dtos::{
-    CreatePurchasePayload, PaginatedList, PurchaseDetailView, PurchaseHistoryFilter,
-    PurchaseSummaryResponse,
+    CreatePurchasePayload, Paginated, PurchaseDetailView, PurchaseHistoryFilter,
+    PurchaseHistoryRow, PurchaseSummaryResponse,
 };
-use crate::core::entities::PurchaseTransaction;
 use crate::core::error::AppError;
 
 pub trait PurchaseService: Send + Sync {
@@ -11,7 +10,7 @@ pub trait PurchaseService: Send + Sync {
     fn get_purchases_history(
         &self,
         filter: PurchaseHistoryFilter,
-    ) -> Result<PaginatedList<PurchaseTransaction>, AppError>;
+    ) -> Result<Paginated<PurchaseHistoryRow>, AppError>;
     fn get_purchase_details(&self, purchase_id: i64) -> Result<PurchaseDetailView, AppError>;
 }
 
@@ -27,7 +26,7 @@ impl<T: PurchaseService + ?Sized> PurchaseService for std::sync::Arc<T> {
     fn get_purchases_history(
         &self,
         filter: PurchaseHistoryFilter,
-    ) -> Result<PaginatedList<PurchaseTransaction>, AppError> {
+    ) -> Result<Paginated<PurchaseHistoryRow>, AppError> {
         (**self).get_purchases_history(filter)
     }
 

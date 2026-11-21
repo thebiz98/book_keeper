@@ -1,7 +1,7 @@
 use crate::app_state::AppState;
 use tauri::State;
 use crate::core::error::AppError;
-use crate::core::entities::{CreatePartyPayload, Party, UpdatePartyPayload};
+use crate::core::entities::{CreatePartyPayload, Party, PartyListRow, UpdatePartyPayload};
 use crate::core::value_objects::PartyType;
 
 #[tauri::command]
@@ -20,12 +20,12 @@ pub async fn get_party(state: State<'_, AppState>, party_id: i64) -> Result<Part
     super::run_blocking(move || svc.get_party(party_id)).await
 }
 #[tauri::command]
-pub async fn list_parties(state: State<'_, AppState>, party_type: Option<PartyType>, active_only: Option<bool>) -> Result<Vec<Party>, AppError> {
+pub async fn list_parties(state: State<'_, AppState>, party_type: Option<PartyType>, active_only: Option<bool>) -> Result<Vec<PartyListRow>, AppError> {
     let svc = state.party_service.clone();
-    super::run_blocking(move || svc.list_parties(party_type, active_only.unwrap_or(true))).await
+    super::run_blocking(move || svc.list_parties(party_type, active_only)).await
 }
 #[tauri::command]
-pub async fn search_parties(state: State<'_, AppState>, query: String, party_type: Option<PartyType>) -> Result<Vec<Party>, AppError> {
+pub async fn search_parties(state: State<'_, AppState>, query: String, party_type: Option<PartyType>) -> Result<Vec<PartyListRow>, AppError> {
     let svc = state.party_service.clone();
     super::run_blocking(move || svc.search_parties(&query, party_type)).await
 }

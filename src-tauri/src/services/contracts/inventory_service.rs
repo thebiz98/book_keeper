@@ -1,4 +1,4 @@
-use crate::core::dtos::{ItemLot, PaginatedList, StockAdjustmentPayload, StockAdjustmentResult};
+use crate::core::dtos::{ItemLot, Paginated, StockAdjustmentPayload, StockAdjustmentResult};
 use crate::core::entities::{PurchaseItem, StockAdjustment};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, OutflowSourceType};
@@ -103,13 +103,14 @@ pub trait InventoryService: Send + Sync {
     /// Lot inspector (all sources, oldest first).
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;
 
-    /// Lists historical stock adjustments.
+    /// Historical stock adjustments, newest first (`adjustment_date DESC, id DESC`), paged in SQL.
+    /// Defaults: page 1, limit 50; out-of-range values are rejected.
     fn list_adjustments(
         &self,
         item_id: Option<i64>,
-        page: usize,
-        limit: usize,
-    ) -> Result<PaginatedList<StockAdjustment>, AppError>;
+        page: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<Paginated<StockAdjustment>, AppError>;
 
     /// Every item whose cached `current_stock` differs from Σ lot remainders (beyond EPS), as
     /// `(item_id, cached, lots_sum)`.
@@ -224,9 +225,9 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
     fn list_adjustments(
         &self,
         item_id: Option<i64>,
-        page: usize,
-        limit: usize,
-    ) -> Result<PaginatedList<StockAdjustment>, AppError> {
+        page: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<Paginated<StockAdjustment>, AppError> {
         (**self).list_adjustments(item_id, page, limit)
     }
 

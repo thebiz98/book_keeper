@@ -1,4 +1,4 @@
-use crate::core::dtos::{PaginatedList, SalesFilter};
+use crate::core::dtos::{SaleHistoryRow, SalesHistoryFilter};
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
@@ -32,7 +32,16 @@ pub trait SaleRepository {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<SaleTransaction>, AppError>;
-    fn list_transactions(&self, filter: &SalesFilter) -> Result<PaginatedList<SaleTransaction>, AppError>;
+    /// History page: filtered, newest first (`transaction_date DESC, id DESC`), paged in SQL, plus
+    /// the total matching count (same `WHERE`). Party name is the header snapshot.
+    fn list_history(
+        &self,
+        filter: &SalesHistoryFilter,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<SaleHistoryRow>, usize), AppError>;
+    /// `(sale_item_id, returned base qty)` for the bill's lines that have customer returns, one query.
+    fn get_returned_quantities_for_sale(&self, sale_id: i64) -> Result<Vec<(i64, f64)>, AppError>;
     fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<SaleItem>, AppError>;
     /// Σ quantity of customer `RETURNED` return lines referencing this sale line.
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError>;

@@ -102,6 +102,64 @@ fn map_item_result(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemSearchResult> 
     })
 }
 
+fn load_results(conn: &Connection, ids: Vec<i64>, clean_q: &str) -> Result<Vec<ItemSearchResult>, AppError> {
+    // Batched loads: one query for items, one for bundles (no N+1).
+    let ph = placeholders(ids.len());
+    let mut by_id: std::collections::HashMap<i64, ItemSearchResult> = {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, \
+                 is_low_stock FROM items WHERE is_active = 1 AND id IN ({ph})"
+            ))
+            .map_err(idx_err)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(ids.iter()), map_item_result)
+            .map_err(idx_err)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(idx_err)?
+            .into_iter()
+            .map(|r| (r.item_id, r))
+            .collect()
+    };
+    let bundles: Vec<ItemBundle> = {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT id, item_id, bundle_name, units_per_bundle, mrp, default_bundle_price, barcode \
+                 FROM item_bundles WHERE item_id IN ({ph}) ORDER BY id"
+            ))
+            .map_err(idx_err)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(ids.iter()), map_bundle)
+            .map_err(idx_err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(idx_err)?
+    };
+    for b in bundles {
+        let Some(res) = by_id.get_mut(&b.item_id) else { continue };
+        let bc = b.barcode.clone();
+        let item_hit = res.barcode.as_deref().is_some_and(|x| x == clean_q);
+        if res.matched_bundle_id.is_none() && !item_hit {
+            if let Some(bc) = bc.as_deref() {
+                // Exact bundle barcode wins; otherwise a bundle barcode prefix that the
+                // item's own barcode does not satisfy.
+                let exact = bc == clean_q;
+                let prefix = bc.starts_with(clean_q)
+                    && !res.barcode.as_deref().is_some_and(|x| x.starts_with(clean_q));
+                if exact || prefix {
+                    res.matched_bundle_id = Some(b.id);
+                }
+            }
+        }
+        res.bundles.push(ItemBundleSearchResult {
+            bundle_id: b.id,
+            bundle_name: b.bundle_name,
+            units_per_bundle: b.units_per_bundle,
+            bundle_price: b.default_bundle_price,
+            barcode: b.barcode,
+        });
+    }
+    Ok(ids.into_iter().filter_map(|id| by_id.remove(&id)).collect())
+}
+
 impl ItemSearchIndexer for SqliteFts5SearchIndexer {
     fn search(&self, query: &str) -> Result<Vec<ItemSearchResult>, AppError> {
         self.search_with_limit(query, DEFAULT_SEARCH_LIMIT)
@@ -136,61 +194,52 @@ impl ItemSearchIndexer for SqliteFts5SearchIndexer {
             return Ok(Vec::new());
         }
 
-        // Batched loads: one query for items, one for bundles (no N+1).
-        let ph = placeholders(ids.len());
-        let mut by_id: std::collections::HashMap<i64, ItemSearchResult> = {
+        load_results(&conn, ids, clean_q)
+    }
+
+    fn search_page(
+        &self,
+        query: &str,
+        category: Option<&str>,
+        low_stock_only: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<ItemSearchResult>, usize), AppError> {
+        let clean_q = query.trim().trim_end_matches('*').trim();
+        let Some(fq) = fts_query(clean_q) else { return Ok((Vec::new(), 0)) };
+        let conn = self.conn()?;
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT f.item_id) FROM item_search_fts f JOIN items i ON i.id = f.item_id \
+                 WHERE i.is_active = 1 AND item_search_fts MATCH ?1 \
+                 AND (?2 IS NULL OR i.category = ?2 COLLATE NOCASE) AND (?3 = 0 OR i.is_low_stock = 1)",
+                params![fq, category, low_stock_only as i64],
+                |r| r.get(0),
+            )
+            .map_err(idx_err)?;
+        let ids: Vec<i64> = {
             let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, \
-                     is_low_stock FROM items WHERE is_active = 1 AND id IN ({ph})"
-                ))
+                .prepare_cached(
+                    "SELECT item_id FROM ( \
+                       SELECT f.item_id AS item_id, (f.barcode = ?2) AS ex, f.rank AS rk \
+                       FROM item_search_fts f JOIN items i ON i.id = f.item_id \
+                       WHERE i.is_active = 1 AND item_search_fts MATCH ?1 \
+                       AND (?5 IS NULL OR i.category = ?5 COLLATE NOCASE) AND (?6 = 0 OR i.is_low_stock = 1)) \
+                     GROUP BY item_id ORDER BY MAX(ex) DESC, MIN(rk), item_id LIMIT ?3 OFFSET ?4",
+                )
                 .map_err(idx_err)?;
             let rows = stmt
-                .query_map(rusqlite::params_from_iter(ids.iter()), map_item_result)
-                .map_err(idx_err)?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(idx_err)?
-                .into_iter()
-                .map(|r| (r.item_id, r))
-                .collect()
-        };
-        let bundles: Vec<ItemBundle> = {
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT id, item_id, bundle_name, units_per_bundle, mrp, default_bundle_price, barcode \
-                     FROM item_bundles WHERE item_id IN ({ph}) ORDER BY id"
-                ))
-                .map_err(idx_err)?;
-            let rows = stmt
-                .query_map(rusqlite::params_from_iter(ids.iter()), map_bundle)
+                .query_map(
+                    params![fq, clean_q, limit as i64, offset as i64, category, low_stock_only as i64],
+                    |r| r.get::<_, i64>(0),
+                )
                 .map_err(idx_err)?;
             rows.collect::<Result<Vec<_>, _>>().map_err(idx_err)?
         };
-        for b in bundles {
-            let Some(res) = by_id.get_mut(&b.item_id) else { continue };
-            let bc = b.barcode.clone();
-            let item_hit = res.barcode.as_deref().is_some_and(|x| x == clean_q);
-            if res.matched_bundle_id.is_none() && !item_hit {
-                if let Some(bc) = bc.as_deref() {
-                    // Exact bundle barcode wins; otherwise a bundle barcode prefix that the
-                    // item's own barcode does not satisfy.
-                    let exact = bc == clean_q;
-                    let prefix = bc.starts_with(clean_q)
-                        && !res.barcode.as_deref().is_some_and(|x| x.starts_with(clean_q));
-                    if exact || prefix {
-                        res.matched_bundle_id = Some(b.id);
-                    }
-                }
-            }
-            res.bundles.push(ItemBundleSearchResult {
-                bundle_id: b.id,
-                bundle_name: b.bundle_name,
-                units_per_bundle: b.units_per_bundle,
-                bundle_price: b.default_bundle_price,
-                barcode: b.barcode,
-            });
+        if ids.is_empty() {
+            return Ok((Vec::new(), total.max(0) as usize));
         }
-        Ok(ids.into_iter().filter_map(|id| by_id.remove(&id)).collect())
+        Ok((load_results(&conn, ids, clean_q)?, total.max(0) as usize))
     }
 
     fn index_item(&self, item: &Item) -> Result<(), AppError> {

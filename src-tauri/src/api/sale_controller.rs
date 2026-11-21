@@ -2,7 +2,6 @@ use crate::app_state::AppState;
 use tauri::State;
 use crate::core::error::AppError;
 use crate::core::dtos::*;
-use crate::core::entities::SaleTransaction;
 
 #[tauri::command]
 pub async fn get_next_sale_code(state: State<'_, AppState>) -> Result<String, AppError> {
@@ -15,7 +14,7 @@ pub async fn create_sale(state: State<'_, AppState>, payload: CreateSalePayload)
     super::run_blocking(move || svc.create_sale(payload)).await
 }
 #[tauri::command]
-pub async fn get_sales_history(state: State<'_, AppState>, filter: SalesHistoryFilter) -> Result<PaginatedList<SaleTransaction>, AppError> {
+pub async fn get_sales_history(state: State<'_, AppState>, filter: SalesHistoryFilter) -> Result<Paginated<SaleHistoryRow>, AppError> {
     let svc = state.sale_service.clone();
     super::run_blocking(move || svc.get_sales_history(filter)).await
 }

@@ -75,3 +75,56 @@ pub fn opt_enum_col<T: DeserializeOwned>(row: &rusqlite::Row<'_>, idx: usize) ->
             }),
     }
 }
+
+/// `%q%` with `\`, `%` and `_` escaped, for `LIKE ? ESCAPE '\'`.
+pub fn like_contains(q: &str) -> String {
+    let mut out = String::with_capacity(q.len() + 2);
+    out.push('%');
+    for c in q.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('%');
+    out
+}
+
+/// `WHERE` clause (with leading space) and bound values shared by the sales and purchases history
+/// lists. Columns are qualified with alias `t`. `base_cond` is a fixed predicate (the purchase
+/// source), `search_cols` the columns `search_query` is matched against (case-insensitive for ASCII).
+pub fn history_where(
+    filter: &crate::core::dtos::SalesHistoryFilter,
+    base_cond: Option<&str>,
+    search_cols: &[&str],
+) -> Result<(String, Vec<rusqlite::types::Value>), AppError> {
+    use rusqlite::types::Value;
+    let mut conds: Vec<String> = base_cond.map(|c| vec![c.to_string()]).unwrap_or_default();
+    let mut vals: Vec<Value> = Vec::new();
+    if let Some(p) = filter.party_id {
+        conds.push("t.party_id = ?".into());
+        vals.push(Value::Integer(p));
+    }
+    if let Some(s) = filter.payment_status.and_then(|f| f.as_status()) {
+        conds.push("t.payment_status = ?".into());
+        vals.push(Value::Text(enum_to_sql(&s)?));
+    }
+    if let Some(s) = filter.start_date.as_deref() {
+        conds.push("t.transaction_date >= ?".into());
+        vals.push(Value::Text(s.to_string()));
+    }
+    if let Some(e) = filter.end_date.as_deref() {
+        conds.push("t.transaction_date <= ?".into());
+        vals.push(Value::Text(e.to_string()));
+    }
+    if let Some(q) = crate::core::dtos::clean_text(filter.search_query.as_deref()) {
+        let pat = like_contains(q);
+        let parts: Vec<String> = search_cols.iter().map(|c| format!("{c} LIKE ? ESCAPE '\\'")).collect();
+        conds.push(format!("({})", parts.join(" OR ")));
+        for _ in search_cols {
+            vals.push(Value::Text(pat.clone()));
+        }
+    }
+    let w = if conds.is_empty() { String::new() } else { format!(" WHERE {}", conds.join(" AND ")) };
+    Ok((w, vals))
+}

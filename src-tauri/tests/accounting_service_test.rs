@@ -310,11 +310,11 @@ fn test_party_dues_summary_both_sides() {
 
     let c = acc.get_party_dues_summary(PartyType::Customer).unwrap();
     assert_eq!(c.len(), 1);
-    assert_eq!((c[0].party_id, c[0].total_due, c[0].unpaid_bills_count), (1, 110.0, 2));
-    assert_eq!(c[0].oldest_bill_date.as_deref(), Some("2026-11-10"));
+    assert_eq!((c[0].party_id, c[0].balance_due, c[0].unsettled_bills_count), (1, 110.0, 2));
+    assert_eq!(c[0].earliest_bill_date.as_str(), "2026-11-10");
     let v = acc.get_party_dues_summary(PartyType::Vendor).unwrap();
     assert_eq!(v.len(), 1);
-    assert_eq!((v[0].party_id, v[0].total_due, v[0].unpaid_bills_count), (2, 250.0, 1));
+    assert_eq!((v[0].party_id, v[0].balance_due, v[0].unsettled_bills_count), (2, 250.0, 1));
 }
 
 #[test]

@@ -2,15 +2,23 @@ use serde::{Deserialize, Serialize};
 use crate::core::entities::{Party, PaymentSettlement, ReturnTransaction};
 use crate::core::value_objects::{PaymentStatus, TransactionType};
 
+/// Outstanding dues of one party, aggregated over its open bills (`balance_due > 0`).
+/// Customers: sales; vendors: `source = PURCHASE` purchases (DD-07).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PartyDueSummary {
     pub party_id: i64,
     pub party_name: String,
     pub phone: Option<String>,
     pub party_type: crate::core::value_objects::PartyType,
-    pub total_due: f64,
-    pub oldest_bill_date: Option<String>,
-    pub unpaid_bills_count: usize,
+    pub unsettled_bills_count: usize,
+    /// Minimum `transaction_date` among the open bills.
+    pub earliest_bill_date: String,
+    /// Σ `total_amount` of the open bills.
+    pub total_invoiced: f64,
+    /// Σ `paid_amount` of the open bills (upfront + settlements + return credits).
+    pub total_paid: f64,
+    /// Σ `balance_due` of the open bills.
+    pub balance_due: f64,
 }
 
 /// Cash settlement of dues (DD-04). `transaction_id = Some(bill)` settles that bill

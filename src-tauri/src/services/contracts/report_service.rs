@@ -1,6 +1,6 @@
 use crate::core::dtos::{
-    CashFlowReport, DashboardMetrics, LowStockItem, PnLReport, StockValuationReport,
-    TrendDataPoint,
+    CashFlowReport, DashboardMetrics, LowStockItem, PnLReport, RecentTransaction,
+    StockValuationReport, TrendDataPoint,
 };
 use crate::core::error::AppError;
 
@@ -12,6 +12,8 @@ pub trait ReportService: Send + Sync {
     fn get_pnl_report(&self, from_date: &str, to_date: &str) -> Result<PnLReport, AppError>;
     fn get_stock_valuation_report(&self) -> Result<StockValuationReport, AppError>;
     fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError>;
+    /// Newest `limit` (1..=100) sales, PURCHASE-source purchases and returns, newest first.
+    fn get_recent_transactions(&self, limit: usize) -> Result<Vec<RecentTransaction>, AppError>;
 }
 
 impl<T: ReportService + ?Sized> ReportService for std::sync::Arc<T> {
@@ -32,5 +34,8 @@ impl<T: ReportService + ?Sized> ReportService for std::sync::Arc<T> {
     }
     fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError> {
         (**self).get_cash_flow_report(from_date, to_date)
+    }
+    fn get_recent_transactions(&self, limit: usize) -> Result<Vec<RecentTransaction>, AppError> {
+        (**self).get_recent_transactions(limit)
     }
 }

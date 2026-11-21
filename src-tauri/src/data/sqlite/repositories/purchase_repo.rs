@@ -1,13 +1,13 @@
 //! SQLite implementation of `PurchaseRepository`.
 use rusqlite::{params, types::Value, OptionalExtension, Row};
 
-use crate::core::dtos::{ItemLot, PaginatedList, PurchaseFilter};
+use crate::core::dtos::{ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::purchase_repository::PurchaseRepository;
 use crate::data::sqlite::code_gen::{next_code, seq_for_source};
-use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
+use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
 const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
 const ITEM_COLS: &str = "id, purchase_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_cost, total_amount, remaining_quantity";
@@ -263,21 +263,53 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         self.query_items(&format!("SELECT {ITEM_COLS} FROM purchase_items ORDER BY id"), [])
     }
 
-    fn list_transactions(&self, filter: &PurchaseFilter) -> Result<PaginatedList<PurchaseTransaction>, AppError> {
-        let from = filter.from_date.as_deref().or(filter.start_date.as_deref());
-        let to = filter.to_date.as_deref().or(filter.end_date.as_deref());
-        let page = filter.page.unwrap_or(1);
-        let limit = filter.limit.unwrap_or(50);
-        let offset = page.saturating_sub(1) * limit;
-
-        let (w, vals) = Self::where_clause(from, to, filter.payment_status, filter.party_id)?;
+    fn list_history(
+        &self,
+        filter: &PurchaseHistoryFilter,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<PurchaseHistoryRow>, usize), AppError> {
+        // PURCHASE-source only: ADJUSTMENT / OPENING / RETURN headers are not supplier bills (DD-07).
+        let (w, vals) = history_where(
+            filter,
+            Some("t.source = 'PURCHASE'"),
+            &["t.transaction_code", "t.party_name", "t.supplier_invoice_ref"],
+        )?;
         let total: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM purchase_transactions{w}"),
+            &format!("SELECT COUNT(*) FROM purchase_transactions t{w}"),
             rusqlite::params_from_iter(vals.iter()),
             |r| r.get(0),
         )?;
-        let items = self.list_purchases(from, to, filter.payment_status, filter.party_id, offset, limit)?;
-        Ok(PaginatedList::new(items, total as usize, page, limit))
+        let mut page_vals = vals;
+        page_vals.push(Value::Integer(lim(limit)));
+        page_vals.push(Value::Integer(lim(offset)));
+        let sql = format!(
+            "SELECT t.id, t.transaction_code, t.supplier_invoice_ref, t.transaction_date, t.created_at, \
+             t.party_id, t.party_name, \
+             (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_transaction_id = t.id), \
+             t.total_amount, t.paid_amount, t.balance_due, t.payment_status \
+             FROM purchase_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(page_vals.iter()), |r| {
+                Ok(PurchaseHistoryRow {
+                    id: r.get(0)?,
+                    transaction_code: r.get(1)?,
+                    supplier_invoice_ref: r.get(2)?,
+                    transaction_date: r.get(3)?,
+                    created_at: r.get(4)?,
+                    party_id: r.get(5)?,
+                    party_name: r.get(6)?,
+                    line_count: r.get(7)?,
+                    total_amount: r.get(8)?,
+                    paid_amount: r.get(9)?,
+                    balance_due: r.get(10)?,
+                    payment_status: enum_col(r, 11)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((rows, total.max(0) as usize))
     }
 
     fn get_returned_quantity_for_lot(&self, purchase_item_id: i64) -> Result<f64, AppError> {

@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    CustomerReturnPayload, PaginatedList, ReturnDetailView, ReturnResult, ReturnsFilter,
+    CustomerReturnPayload, Paginated, ReturnDetailView, ReturnResult, ReturnsFilter,
     VendorReturnPayload,
 };
 use crate::core::entities::ReturnTransaction;
@@ -11,7 +11,7 @@ pub trait ReturnService: Send + Sync {
     fn create_customer_return(&self, payload: CustomerReturnPayload) -> Result<ReturnResult, AppError>;
     fn create_vendor_return(&self, payload: VendorReturnPayload) -> Result<ReturnResult, AppError>;
     /// Newest first, paginated in SQL (`page` 1-based, default 1; `limit` default 50).
-    fn list_returns(&self, filter: ReturnsFilter) -> Result<PaginatedList<ReturnTransaction>, AppError>;
+    fn list_returns(&self, filter: ReturnsFilter) -> Result<Paginated<ReturnTransaction>, AppError>;
     fn get_return_details(&self, return_id: i64) -> Result<ReturnDetailView, AppError>;
 }
 
@@ -28,7 +28,7 @@ impl<T: ReturnService + ?Sized> ReturnService for std::sync::Arc<T> {
         (**self).create_vendor_return(payload)
     }
 
-    fn list_returns(&self, filter: ReturnsFilter) -> Result<PaginatedList<ReturnTransaction>, AppError> {
+    fn list_returns(&self, filter: ReturnsFilter) -> Result<Paginated<ReturnTransaction>, AppError> {
         (**self).list_returns(filter)
     }
 

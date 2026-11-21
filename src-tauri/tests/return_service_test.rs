@@ -63,7 +63,7 @@ impl Env {
         self.db.begin_read().unwrap().items().find_by_id(item).unwrap().unwrap().current_stock
     }
     fn return_count(&self) -> usize {
-        self.rets.list_returns(ReturnsFilter::default()).unwrap().total_count
+        self.rets.list_returns(ReturnsFilter::default()).unwrap().total
     }
     /// `current_stock == Σ lot.remaining` for every item.
     fn assert_stock(&self) {
@@ -424,15 +424,15 @@ fn list_returns_is_paginated_newest_first_and_filtered() {
         items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: None, quantity: 1.0 }],
     }).unwrap();
     let all = e.rets.list_returns(ReturnsFilter { page: Some(1), limit: Some(3), ..Default::default() }).unwrap();
-    assert_eq!((all.total_count, all.items.len(), all.total_pages), (4, 3, 2));
+    assert_eq!((all.total, all.items.len(), all.limit), (4, 3, 3));
     let dates: Vec<_> = all.items.iter().map(|r| r.return_date.as_str()).collect();
     assert_eq!(dates, vec!["2026-11-05", "2026-11-04", "2026-11-03"]);
     let p2 = e.rets.list_returns(ReturnsFilter { page: Some(2), limit: Some(3), ..Default::default() }).unwrap();
     assert_eq!(p2.items.len(), 1);
     let v = e.rets.list_returns(ReturnsFilter { return_type: Some(ReturnType::Vendor), ..Default::default() }).unwrap();
-    assert_eq!(v.total_count, 1);
+    assert_eq!(v.total, 1);
     let r = e.rets.list_returns(ReturnsFilter { start_date: Some("2026-11-03".into()), end_date: Some("2026-11-04".into()), ..Default::default() }).unwrap();
-    assert_eq!(r.total_count, 2);
+    assert_eq!(r.total, 2);
     assert!(matches!(e.rets.get_return_details(9999), Err(AppError::NotFound { .. })));
     e.assert_stock();
 }

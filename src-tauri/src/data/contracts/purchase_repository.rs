@@ -1,4 +1,4 @@
-use crate::core::dtos::{ItemLot, PaginatedList, PurchaseFilter};
+use crate::core::dtos::{ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
@@ -50,7 +50,14 @@ pub trait PurchaseRepository {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<PurchaseTransaction>, AppError>;
-    fn list_transactions(&self, filter: &PurchaseFilter) -> Result<PaginatedList<PurchaseTransaction>, AppError>;
+    /// History page: `source = PURCHASE` only, filtered, newest first (`transaction_date DESC,
+    /// id DESC`), paged in SQL, plus the total matching count (same `WHERE`).
+    fn list_history(
+        &self,
+        filter: &PurchaseHistoryFilter,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<PurchaseHistoryRow>, usize), AppError>;
     fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<PurchaseItem>, AppError>;
     /// Σ quantity of vendor `RETURNED` return lines referencing this lot.
     fn get_returned_quantity_for_lot(&self, purchase_item_id: i64) -> Result<f64, AppError>;

@@ -15,7 +15,7 @@ pub async fn get_item_lots(state: State<'_, AppState>, item_id: i64) -> Result<V
     super::run_blocking(move || svc.get_item_lots(item_id)).await
 }
 #[tauri::command]
-pub async fn list_stock_adjustments(state: State<'_, AppState>, item_id: Option<i64>, page: Option<usize>, limit: Option<usize>) -> Result<PaginatedList<StockAdjustment>, AppError> {
+pub async fn list_stock_adjustments(state: State<'_, AppState>, item_id: Option<i64>, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<StockAdjustment>, AppError> {
     let svc = state.inventory_service.clone();
-    super::run_blocking(move || svc .list_adjustments(item_id, page.unwrap_or(1), limit.unwrap_or(50)) ).await
+    super::run_blocking(move || svc.list_adjustments(item_id, page, limit)).await
 }

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use crate::core::dtos::{
-    BundleSuggestion, CreateBundlePayload, CreateItemPayload, PaginatedList, UpdateBundlePayload,
+    BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult,
+    ItemSearchResult, PageRequest, Paginated, UpdateBundlePayload,
     UpdateItemPayload,
 };
 use crate::core::entities::{Item, ItemBundle};
@@ -185,20 +186,68 @@ impl<U: UnitOfWork, I: InventoryService> ItemServiceImpl<U, I> {
 }
 
 impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
-    fn get_catalog(
-        &self,
-        category: Option<String>,
-        low_stock_only: bool,
-        page: usize,
-        limit: usize,
-    ) -> Result<PaginatedList<Item>, AppError> {
+    fn get_catalog(&self, filter: CatalogFilter) -> Result<Paginated<ItemSearchResult>, AppError> {
+        let page = PageRequest::new(filter.page, filter.limit)?;
+        let category = clean(filter.category);
+        let low_stock_only = filter.low_stock_only.unwrap_or(false);
+        let search = clean(filter.search);
+
+        // Search goes through the indexer; category / low-stock are applied in the same SQL.
+        if let Some(q) = search {
+            let (rows, total) = self.search_indexer.search_page(
+                &q,
+                category.as_deref(),
+                low_stock_only,
+                page.offset(),
+                page.limit,
+            )?;
+            return Ok(Paginated::new(rows, total, page.page, page.limit));
+        }
+
         let mut tx = self.uow.begin_read()?;
-        let offset = page.saturating_sub(1) * limit;
-        let items = tx
-            .items()
-            .list_catalog(category.as_deref(), low_stock_only, offset, limit)?;
+        let items = tx.items().list_catalog(category.as_deref(), low_stock_only, page.offset(), page.limit)?;
         let total = tx.items().count_catalog(category.as_deref(), low_stock_only)?;
-        Ok(PaginatedList::new(items, total, page, limit))
+        // One batched query for the bundles of the whole page.
+        let ids: Vec<i64> = items.iter().map(|i| i.id).collect();
+        let mut by_item: std::collections::HashMap<i64, Vec<ItemBundleSearchResult>> = std::collections::HashMap::new();
+        for b in tx.bundles().find_by_item_ids(&ids)? {
+            by_item.entry(b.item_id).or_default().push(ItemBundleSearchResult {
+                bundle_id: b.id,
+                bundle_name: b.bundle_name,
+                units_per_bundle: b.units_per_bundle,
+                bundle_price: b.default_bundle_price,
+                barcode: b.barcode,
+            });
+        }
+        let rows = items
+            .into_iter()
+            .map(|i| ItemSearchResult {
+                bundles: by_item.remove(&i.id).unwrap_or_default(),
+                item_id: i.id,
+                name: i.name,
+                category: i.category,
+                barcode: i.barcode,
+                base_unit: i.base_unit,
+                mrp: i.mrp,
+                default_sale_price: i.default_sale_price,
+                current_stock: i.current_stock,
+                is_low_stock: i.is_low_stock,
+                matched_bundle_id: None,
+            })
+            .collect();
+        Ok(Paginated::new(rows, total, page.page, page.limit))
+    }
+
+    fn search_items_fts(&self, query: &str, limit: Option<usize>) -> Result<Vec<ItemSearchResult>, AppError> {
+        match limit {
+            Some(l) => self.search_indexer.search_with_limit(query, l),
+            None => self.search_indexer.search(query),
+        }
+    }
+
+    fn list_categories(&self) -> Result<Vec<String>, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        tx.items().list_categories()
     }
 
     fn create_item(&self, payload: CreateItemPayload) -> Result<i64, AppError> {

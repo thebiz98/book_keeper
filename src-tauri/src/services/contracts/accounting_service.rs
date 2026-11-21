@@ -4,7 +4,9 @@ use crate::core::value_objects::{PartyType, TransactionType};
 use crate::data::contracts::unit_of_work::TransactionContext;
 
 pub trait AccountingService: Send + Sync {
-    /// Aggregates all outstanding dues for customers or vendors.
+    /// Outstanding dues per party (customers: sales; vendors: PURCHASE-source purchases) in one
+    /// grouped query: open-bill count, earliest bill date, Σ invoiced / paid / balance. Not
+    /// paginated (the screen totals the whole list).
     fn get_party_dues_summary(
         &self,
         party_type: PartyType,

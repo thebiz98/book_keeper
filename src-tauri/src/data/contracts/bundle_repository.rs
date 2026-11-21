@@ -5,6 +5,8 @@ use crate::core::error::AppError;
 pub trait BundleRepository {
     fn find_by_id(&self, id: i64) -> Result<Option<ItemBundle>, AppError>;
     fn find_by_item_id(&self, item_id: i64) -> Result<Vec<ItemBundle>, AppError>;
+    /// Bundles of all the given items in one query, ordered by `id`.
+    fn find_by_item_ids(&self, item_ids: &[i64]) -> Result<Vec<ItemBundle>, AppError>;
     fn find_by_barcode(&self, barcode: &str) -> Result<Option<ItemBundle>, AppError>;
     fn create(&mut self, bundle: &ItemBundle) -> Result<i64, AppError>;
     fn update(&mut self, bundle: &ItemBundle) -> Result<(), AppError>;

@@ -105,8 +105,8 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
 
     // 5. Evening Drawer Audit:
     let metrics = report_service.get_dashboard_metrics().unwrap();
-    assert_eq!(metrics.today_sales, 4000.0);
-    assert_eq!(metrics.today_purchases, 2500.0);
+    assert_eq!(metrics.today_sales_amount, 4000.0);
+    assert_eq!(metrics.today_purchase_amount, 2500.0);
     assert_eq!(metrics.live_cash_in_drawer, 2500.0, "Evening drawer must equal ₹4,000 - ₹1,500 = ₹2,500");
 
     let valuation = report_service.get_stock_valuation_report().unwrap();
@@ -157,7 +157,7 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
     let dues = accounting_service.get_party_dues_summary(PartyType::Customer).unwrap();
     assert_eq!(dues.len(), 1);
     assert_eq!(dues[0].party_id, 1);
-    assert_eq!(dues[0].total_due, 1200.0);
+    assert_eq!(dues[0].balance_due, 1200.0);
 
     let settle_payload = SettlePaymentPayload {
         party_id: 1,
@@ -171,7 +171,7 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
     accounting_service.settle_bill_payment(settle_payload).unwrap();
 
     let dues_after = accounting_service.get_party_dues_summary(PartyType::Customer).unwrap();
-    assert_eq!(dues_after[0].total_due, 700.0);
+    assert_eq!(dues_after[0].balance_due, 700.0);
 
     {
         let mut tx = uow.begin_transaction().unwrap();

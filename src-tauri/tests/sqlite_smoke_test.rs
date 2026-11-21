@@ -1,7 +1,7 @@
 use book_keeper::app_state::build_sqlite_app_state;
 use book_keeper::core::dtos::{
     CreateItemPayload, CreatePurchaseItemPayload, CreatePurchasePayload, CreateSaleItemPayload,
-    CreateSalePayload,
+    CatalogFilter, CreateSalePayload,
 };
 use book_keeper::core::value_objects::PaymentStatus;
 
@@ -62,8 +62,8 @@ fn sqlite_end_to_end_smoke() {
         .expect("second auto-coded sale must not collide on transaction_code");
     assert_ne!(second.transaction_code, "SAL-1001");
 
-    let catalog = state.item_service.get_catalog(None, false, 1, 10).expect("catalog");
-    let item = catalog.items.iter().find(|i| i.id == item_id).expect("item in catalog");
+    let catalog = state.item_service.get_catalog(CatalogFilter { page: Some(1), limit: Some(10), ..Default::default() }).expect("catalog");
+    let item = catalog.items.iter().find(|i| i.item_id == item_id).expect("item in catalog");
     assert!((item.current_stock - 6.0).abs() < 1e-9, "stock was {}", item.current_stock);
 
     let hits = state.search_indexer.search("lux").expect("search");

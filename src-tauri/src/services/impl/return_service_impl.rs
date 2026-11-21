@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::core::constants::EPS;
-use crate::core::dtos::{
-    CustomerReturnPayload, PaginatedList, RecordRefundPayload, ReturnDetailView, ReturnItemDetail,
+use crate::core::dtos::{validate_date_range, 
+    CustomerReturnPayload, PageRequest, Paginated, RecordRefundPayload, ReturnDetailView, ReturnItemDetail,
     ReturnResult, ReturnsFilter, VendorReturnPayload,
 };
 use crate::core::entities::{ReturnItem, ReturnTransaction};
@@ -19,8 +19,6 @@ use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
 use crate::services::contracts::return_service::ReturnService;
 
-const DEFAULT_PAGE_LIMIT: usize = 50;
-const MAX_PAGE_LIMIT: usize = 500;
 
 #[derive(Clone)]
 pub struct ReturnServiceImpl<
@@ -516,12 +514,12 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash })
     }
 
-    fn list_returns(&self, filter: ReturnsFilter) -> Result<PaginatedList<ReturnTransaction>, AppError> {
-        let page = filter.page.unwrap_or(1).max(1);
-        let limit = filter.limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, MAX_PAGE_LIMIT);
+    fn list_returns(&self, filter: ReturnsFilter) -> Result<Paginated<ReturnTransaction>, AppError> {
+        validate_date_range(filter.start_date.as_deref(), filter.end_date.as_deref())?;
+        let page = PageRequest::new(filter.page, filter.limit)?;
         let mut tx = self.uow.begin_read()?;
-        let (rows, total) = tx.returns().list_returns_page(&filter, (page - 1) * limit, limit)?;
-        Ok(PaginatedList::new(rows, total, page, limit))
+        let (rows, total) = tx.returns().list_returns_page(&filter, page.offset(), page.limit)?;
+        Ok(Paginated::new(rows, total, page.page, page.limit))
     }
 
     fn get_return_details(&self, return_id: i64) -> Result<ReturnDetailView, AppError> {

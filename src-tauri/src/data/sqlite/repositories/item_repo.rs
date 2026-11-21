@@ -78,7 +78,7 @@ impl ItemRepository for SqliteItemRepository {
         limit: usize,
     ) -> Result<Vec<Item>, AppError> {
         let sql = format!(
-            "SELECT {COLS} FROM items WHERE is_active = 1 AND (?1 IS NULL OR category = ?1) \
+            "SELECT {COLS} FROM items WHERE is_active = 1 AND (?1 IS NULL OR category = ?1 COLLATE NOCASE) \
              AND (?2 = 0 OR is_low_stock = 1) ORDER BY name COLLATE NOCASE, id LIMIT ?3 OFFSET ?4"
         );
         let mut stmt = self.conn.prepare_cached(&sql)?;
@@ -90,12 +90,22 @@ impl ItemRepository for SqliteItemRepository {
 
     fn count_catalog(&self, category: Option<&str>, low_stock_only: bool) -> Result<usize, AppError> {
         let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM items WHERE is_active = 1 AND (?1 IS NULL OR category = ?1) \
+            "SELECT COUNT(*) FROM items WHERE is_active = 1 AND (?1 IS NULL OR category = ?1 COLLATE NOCASE) \
              AND (?2 = 0 OR is_low_stock = 1)",
             params![category, low_stock_only as i64],
             |r| r.get(0),
         )?;
         Ok(n as usize)
+    }
+
+    fn list_categories(&self) -> Result<Vec<String>, AppError> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT TRIM(category) FROM items \
+             WHERE is_active = 1 AND category IS NOT NULL AND TRIM(category) <> '' \
+             ORDER BY TRIM(category) COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     fn create(&mut self, item: &Item) -> Result<i64, AppError> {

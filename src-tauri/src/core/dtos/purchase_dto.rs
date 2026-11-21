@@ -28,21 +28,26 @@ pub struct PurchaseSummaryResponse {
     pub transaction_code: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct PurchaseHistoryFilter {
-    pub start_date: Option<String>,
-    pub end_date: Option<String>,
-    #[serde(default)]
-    pub from_date: Option<String>,
-    #[serde(default)]
-    pub to_date: Option<String>,
-    pub payment_status: Option<PaymentStatus>,
-    pub party_id: Option<i64>,
-    pub page: Option<usize>,
-    pub limit: Option<usize>,
-}
+/// Same shape as the sales filter; only `source = PURCHASE` headers are listed and
+/// `search_query` also matches `supplier_invoice_ref`.
+pub type PurchaseHistoryFilter = crate::core::dtos::sale_dto::SalesHistoryFilter;
 
-pub type PurchaseFilter = PurchaseHistoryFilter;
+/// One row of the purchases history (party name is the header snapshot, DD-30).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PurchaseHistoryRow {
+    pub id: i64,
+    pub transaction_code: String,
+    pub supplier_invoice_ref: Option<String>,
+    pub transaction_date: String,
+    pub created_at: String,
+    pub party_id: Option<i64>,
+    pub party_name: Option<String>,
+    pub line_count: i64,
+    pub total_amount: f64,
+    pub paid_amount: f64,
+    pub balance_due: f64,
+    pub payment_status: PaymentStatus,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PurchaseItemDetail {

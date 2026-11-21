@@ -10,6 +10,18 @@ pub trait ItemSearchIndexer: Send + Sync {
 
     fn search_with_limit(&self, query: &str, limit: usize) -> Result<Vec<ItemSearchResult>, AppError>;
 
+    /// One page of search hits with `category` / `low_stock_only` applied in SQL, plus the total
+    /// number of matching items. Same ranking as [`Self::search_with_limit`]. A query with no
+    /// searchable token matches nothing.
+    fn search_page(
+        &self,
+        query: &str,
+        category: Option<&str>,
+        low_stock_only: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<ItemSearchResult>, usize), AppError>;
+
     /// Indexes or updates an item, reading its bundles from storage.
     fn index_item(&self, item: &Item) -> Result<(), AppError> {
         self.index_item_with_bundles(item, &[])
@@ -35,6 +47,17 @@ impl<T: ItemSearchIndexer + ?Sized> ItemSearchIndexer for std::sync::Arc<T> {
 
     fn search_with_limit(&self, query: &str, limit: usize) -> Result<Vec<ItemSearchResult>, AppError> {
         (**self).search_with_limit(query, limit)
+    }
+
+    fn search_page(
+        &self,
+        query: &str,
+        category: Option<&str>,
+        low_stock_only: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<ItemSearchResult>, usize), AppError> {
+        (**self).search_page(query, category, low_stock_only, offset, limit)
     }
 
     fn index_item(&self, item: &Item) -> Result<(), AppError> {

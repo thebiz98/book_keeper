@@ -1,7 +1,6 @@
 use crate::core::dtos::{
-    CreateSalePayload, PaginatedList, SaleDetailView, SaleSummaryResponse, SalesHistoryFilter,
+    CreateSalePayload, Paginated, SaleDetailView, SaleHistoryRow, SaleSummaryResponse, SalesHistoryFilter,
 };
-use crate::core::entities::SaleTransaction;
 use crate::core::error::AppError;
 
 pub trait SaleService: Send + Sync {
@@ -11,11 +10,11 @@ pub trait SaleService: Send + Sync {
     /// Executes complete atomic checkout workflow.
     fn create_sale(&self, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError>;
 
-    /// Retrieves paginated sale history.
+    /// Paginated history, newest first: filtered, sorted and paged in SQL (see `SalesHistoryFilter`).
     fn get_sales_history(
         &self,
         filter: SalesHistoryFilter,
-    ) -> Result<PaginatedList<SaleTransaction>, AppError>;
+    ) -> Result<Paginated<SaleHistoryRow>, AppError>;
 
     /// Retrieves detailed breakdown of a sale including lines, bundles, and FIFO cost breakdown.
     fn get_sale_details(&self, sale_id: i64) -> Result<SaleDetailView, AppError>;
@@ -33,7 +32,7 @@ impl<T: SaleService + ?Sized> SaleService for std::sync::Arc<T> {
     fn get_sales_history(
         &self,
         filter: SalesHistoryFilter,
-    ) -> Result<PaginatedList<SaleTransaction>, AppError> {
+    ) -> Result<Paginated<SaleHistoryRow>, AppError> {
         (**self).get_sales_history(filter)
     }
 

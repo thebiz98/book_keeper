@@ -28,3 +28,14 @@ pub struct UpdatePartyPayload {
     pub party_type: PartyType,
     pub notes: Option<String>,
 }
+
+/// Directory row: the party plus its outstanding balance (sale side for customers,
+/// `source = PURCHASE` side for vendors) and the number of its bills (`transaction_count`).
+/// Serialised flat: all `Party` fields plus the two extras.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PartyListRow {
+    #[serde(flatten)]
+    pub party: Party,
+    pub outstanding_balance: f64,
+    pub transaction_count: i64,
+}

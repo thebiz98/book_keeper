@@ -179,7 +179,7 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
 
     // Step 2: Verify aging dues reflects ₹1,500
     let dues = harness.accounting_service.get_party_dues_summary(PartyType::Customer).unwrap();
-    assert_eq!(dues[0].total_due, 1500.0);
+    assert_eq!(dues[0].balance_due, 1500.0);
 
     // Step 3: Cash settlement installment of ₹600 on 2026-11-15
     let settle = SettlePaymentPayload {
@@ -195,7 +195,7 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
 
     // Step 4: Verify remaining balance is ₹900
     let dues_after = harness.accounting_service.get_party_dues_summary(PartyType::Customer).unwrap();
-    assert_eq!(dues_after[0].total_due, 900.0);
+    assert_eq!(dues_after[0].balance_due, 900.0);
 
     // Step 5: Cash drawer for 2026-11-15 must reflect the ₹600 cash inflow
     let drawer_today = harness.accounting_service.calculate_live_cash_drawer("2026-11-15").unwrap();
@@ -370,11 +370,13 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
 
     // Remaining balance must be ₹100
     let dues = harness.accounting_service.get_party_dues_summary(PartyType::Customer).unwrap();
-    assert_eq!(dues[0].total_due, 100.0);
+    assert_eq!(dues[0].balance_due, 100.0);
 
     // Cash flow report reflects ₹200 (cash) + ₹300 (UPI) = ₹500 inflow
     let cash_flow = harness.report_service.get_cash_flow_report("2026-11-01", "2026-11-30").unwrap();
-    assert_eq!(cash_flow.total_inflow, 500.0);
+    assert_eq!(cash_flow.sales_cash_inflow, 200.0, "upfront counted once (TC-PAY-005)");
+    assert_eq!(cash_flow.customer_settlements_inflow, 300.0);
+    assert_eq!(cash_flow.net_cash_balance, 500.0);
 }
 
 /// Combo 7: Barcode Scan -> Cart Add -> Bundle Multiplier -> Discount -> Split Tender

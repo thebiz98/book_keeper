@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use crate::core::constants::EPS;
-use crate::core::dtos::{ItemLot, PaginatedList, StockAdjustmentPayload, StockAdjustmentResult};
+use crate::core::dtos::{ItemLot, PageRequest, Paginated, StockAdjustmentPayload, StockAdjustmentResult};
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction, StockAdjustment, StockOutflowAllocation};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, OutflowSourceType, PaymentStatus};
@@ -334,14 +334,13 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
     fn list_adjustments(
         &self,
         item_id: Option<i64>,
-        page: usize,
-        limit: usize,
-    ) -> Result<PaginatedList<StockAdjustment>, AppError> {
+        page: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<Paginated<StockAdjustment>, AppError> {
+        let req = PageRequest::new(page, limit)?;
         let mut tx = self.uow.begin_read()?;
-        let (items, total) = tx
-            .adjustments()
-            .list_adjustments(item_id, page.saturating_sub(1) * limit, limit)?;
-        Ok(PaginatedList::new(items, total, page, limit))
+        let (items, total) = tx.adjustments().list_adjustments(item_id, req.offset(), req.limit)?;
+        Ok(Paginated::new(items, total, req.page, req.limit))
     }
 
     fn verify_stock_cache(

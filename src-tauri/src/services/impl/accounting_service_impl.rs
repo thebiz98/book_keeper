@@ -152,7 +152,9 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
         // repository sums them per party for the right side (sales / PURCHASE-source purchases).
         let mut rows = tx.parties().get_party_due_summary(party_type)?;
         for r in &mut rows {
-            r.total_due = round2(r.total_due);
+            r.total_invoiced = round2(r.total_invoiced);
+            r.total_paid = round2(r.total_paid);
+            r.balance_due = round2(r.balance_due);
         }
         Ok(rows)
     }

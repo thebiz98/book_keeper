@@ -2,7 +2,6 @@ use crate::app_state::AppState;
 use tauri::State;
 use crate::core::error::AppError;
 use crate::core::dtos::*;
-use crate::core::entities::PurchaseTransaction;
 
 #[tauri::command]
 pub async fn get_next_purchase_code(state: State<'_, AppState>) -> Result<String, AppError> {
@@ -15,7 +14,7 @@ pub async fn create_purchase(state: State<'_, AppState>, payload: CreatePurchase
     super::run_blocking(move || svc.create_purchase(payload)).await
 }
 #[tauri::command]
-pub async fn get_purchases_history(state: State<'_, AppState>, filter: PurchaseHistoryFilter) -> Result<PaginatedList<PurchaseTransaction>, AppError> {
+pub async fn get_purchases_history(state: State<'_, AppState>, filter: PurchaseHistoryFilter) -> Result<Paginated<PurchaseHistoryRow>, AppError> {
     let svc = state.purchase_service.clone();
     super::run_blocking(move || svc.get_purchases_history(filter)).await
 }

@@ -266,11 +266,11 @@ fn purchase_list_open_for_party_filters_source_balance_and_orders() {
     assert_eq!(open, vec![2, 1]);
     let summary = read.parties().get_party_due_summary(PartyType::Vendor).unwrap();
     assert_eq!(summary.len(), 1);
-    assert_eq!((summary[0].total_due, summary[0].unpaid_bills_count), (200.0, 2));
-    assert_eq!(summary[0].oldest_bill_date.as_deref(), Some("2026-11-02"));
+    assert_eq!((summary[0].balance_due, summary[0].unsettled_bills_count), (200.0, 2));
+    assert_eq!(summary[0].earliest_bill_date.as_str(), "2026-11-02");
     // History shows PURCHASE-source headers only.
-    let hist = read.purchases().list_transactions(&PurchaseFilter::default()).unwrap();
-    assert_eq!(hist.total_count, 3);
+    let (_, hist_total) = read.purchases().list_history(&Default::default(), 0, 50).unwrap();
+    assert_eq!(hist_total, 3);
 }
 
 #[test]
@@ -385,7 +385,7 @@ fn adjustment_and_opening_creators_use_their_own_sequences() {
     assert_eq!(codes, vec!["OPN-0001", "ADJ-0001", "ADJ-0002"]);
     let b_lots = r.purchases().list_lots_for_item(a + 1).unwrap();
     assert_eq!(b_lots[0].transaction_code, "OPN-0002");
-    let page = inventory.list_adjustments(Some(a), 1, 2).unwrap();
-    assert_eq!((page.items.len(), page.total_count), (2, 3));
+    let page = inventory.list_adjustments(Some(a), Some(1), Some(2)).unwrap();
+    assert_eq!((page.items.len(), page.total), (2, 3));
     assert_eq!(page.items[0].quantity, 3.0, "newest first");
 }

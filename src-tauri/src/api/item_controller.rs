@@ -2,21 +2,22 @@ use crate::app_state::AppState;
 use tauri::State;
 use crate::core::error::AppError;
 use crate::core::dtos::*;
-use crate::core::entities::{Item, ItemBundle};
+use crate::core::entities::ItemBundle;
 
 #[tauri::command]
 pub async fn search_items_fts(state: State<'_, AppState>, query: String, limit: Option<usize>) -> Result<Vec<ItemSearchResult>, AppError> {
-    let svc = state.search_indexer.clone();
-    super::run_blocking(move || match limit {
-        Some(l) => svc.search_with_limit(&query, l),
-        None => svc.search(&query),
-    })
-    .await
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.search_items_fts(&query, limit)).await
 }
 #[tauri::command]
-pub async fn get_items_catalog(state: State<'_, AppState>, category: Option<String>, low_stock_only: Option<bool>, page: Option<usize>, limit: Option<usize>) -> Result<PaginatedList<Item>, AppError> {
+pub async fn get_items_catalog(state: State<'_, AppState>, category: Option<String>, low_stock_only: Option<bool>, search: Option<String>, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemSearchResult>, AppError> {
     let svc = state.item_service.clone();
-    super::run_blocking(move || svc.get_catalog(category, low_stock_only.unwrap_or(false), page.unwrap_or(1), limit.unwrap_or(50))).await
+    super::run_blocking(move || svc.get_catalog(CatalogFilter { category, low_stock_only, search, page, limit })).await
+}
+#[tauri::command]
+pub async fn list_categories(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.list_categories()).await
 }
 #[tauri::command]
 pub async fn create_item(state: State<'_, AppState>, payload: CreateItemPayload) -> Result<i64, AppError> {

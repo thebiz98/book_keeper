@@ -136,8 +136,8 @@ fn test_tc_pur_005_supplier_invoice_ref_persisted() {
     let hist = purchases.get_purchases_history(PurchaseHistoryFilter::default()).unwrap();
     assert_eq!(hist.items.len(), 1);
     assert_eq!(hist.items[0].supplier_invoice_ref.as_deref(), Some("INV-77"));
-    assert_eq!(hist.items[0].notes.as_deref(), Some("dock 3"), "ref is not folded into notes (DD-25)");
     let d = purchases.get_purchase_details(r.purchase_id).unwrap();
+    assert_eq!(d.purchase.notes.as_deref(), Some("dock 3"), "ref is not folded into notes (DD-25)");
     assert_eq!(d.purchase.supplier_invoice_ref.as_deref(), Some("INV-77"));
 }
 

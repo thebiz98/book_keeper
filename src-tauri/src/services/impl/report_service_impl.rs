@@ -1,18 +1,27 @@
-use std::collections::HashMap;
+//! Dashboard & reports (LLD §6.10). Every figure is computed by SQL aggregates in
+//! `ReportRepository` inside one read snapshot; cash comes from the single
+//! `accounting_service_impl::ledger_cash_summary`.
 use std::sync::Arc;
+
+use chrono::{Datelike, Duration, NaiveDate};
+
 use crate::core::dtos::{
-    CashFlowReport, DashboardMetrics, LowStockItem, PnLReport, StockValuationReport, TrendDataPoint,
+    CashFlowReport, DashboardMetrics, LowStockItem, PnLReport, RecentTransaction,
+    StockValuationReport, TrendDataPoint,
 };
 use crate::core::error::AppError;
-use crate::core::value_objects::{PaymentKind, TransactionType};
+use crate::core::money::{check_date, round2};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::report_service::ReportService;
+use crate::services::r#impl::accounting_service_impl::ledger_cash_summary;
+
+const MAX_RECENT: usize = 100;
 
 #[derive(Clone)]
 pub struct ReportServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>> {
     pub uow: U,
-    /// Fixed business date ("YYYY-MM-DD") for deterministic tests; `None` = local clock.
-    fixed_today: Option<String>,
+    /// Fixed business date for deterministic tests; `None` = local clock.
+    fixed_today: Option<NaiveDate>,
 }
 
 impl<U: UnitOfWork> ReportServiceImpl<U> {
@@ -20,94 +29,50 @@ impl<U: UnitOfWork> ReportServiceImpl<U> {
         Self { uow, fixed_today: None }
     }
 
-    /// Pins "today" for dashboard metrics (tests, back-dated reports).
+    /// Pins "today" ("YYYY-MM-DD") for dashboard and trend (tests, back-dated reports).
     pub fn with_fixed_today(uow: U, today: &str) -> Self {
-        Self { uow, fixed_today: Some(today.to_string()) }
+        let d = NaiveDate::parse_from_str(today, "%Y-%m-%d").expect("fixed today must be YYYY-MM-DD");
+        Self { uow, fixed_today: Some(d) }
     }
 
-    fn today(&self) -> String {
-        self.fixed_today
-            .clone()
-            .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string())
+    fn today(&self) -> NaiveDate {
+        self.fixed_today.unwrap_or_else(|| chrono::Local::now().date_naive())
     }
+}
+
+fn fmt(d: NaiveDate) -> String {
+    d.format("%Y-%m-%d").to_string()
+}
+
+fn validation(field: &str, message: impl Into<String>) -> AppError {
+    AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
+
+fn check_range(from: &str, to: &str) -> Result<(), AppError> {
+    check_date("from_date", from)?;
+    check_date("to_date", to)?;
+    if from > to {
+        return Err(validation("from_date", "from_date must not be after to_date"));
+    }
+    Ok(())
 }
 
 impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     fn get_dashboard_metrics(&self) -> Result<DashboardMetrics, AppError> {
+        let today = fmt(self.today());
         let mut tx = self.uow.begin_read()?;
-        let sales = tx.sales().list_sales(None, None, None, None, 0, usize::MAX)?;
-        let purchases = tx.purchases().list_purchases(None, None, None, None, 0, usize::MAX)?;
-        let lots = tx.purchases().list_all_lots()?;
-        let allocations = tx.allocations().list_all()?;
-        let settlements = tx.settlements().list_all()?;
-        let settlements: Vec<_> = settlements
-            .into_iter()
-            .filter(|s| s.settlement_date.starts_with(self.today().as_str()))
-            .collect();
-
-        // Flow metrics cover today's business date only; balances below stay all-time.
-        let today = self.today();
-        let is_today = |date: &str| date.starts_with(today.as_str());
-        let today_sale_list: Vec<_> = sales.iter().filter(|s| is_today(&s.transaction_date)).collect();
-        let today_purchase_list: Vec<_> = purchases.iter().filter(|p| is_today(&p.transaction_date)).collect();
-
-        let today_sales: f64 = today_sale_list.iter().map(|s| s.total_amount).sum();
-        let today_purchases: f64 = today_purchase_list.iter().map(|p| p.total_amount).sum();
-
-        // COGS of today's sales: allocations whose sale line belongs to a sale dated today.
-        let mut today_sale_item_ids = std::collections::HashSet::new();
-        for sale in &today_sale_list {
-            for line in tx.sales().list_items_by_transaction_id(sale.id)? {
-                today_sale_item_ids.insert(line.id);
-            }
-        }
-        let total_cogs: f64 = allocations
-            .iter()
-            .filter(|a| today_sale_item_ids.contains(&a.sale_item_id))
-            .map(|a| a.quantity_depleted * a.unit_cost)
-            .sum();
-        let today_net_profit = today_sales - total_cogs;
-
-        let total_stock_valuation: f64 = lots
-            .iter()
-            .map(|l| l.remaining_quantity * l.unit_cost)
-            .sum();
-
-        let customer_receivables: f64 = sales.iter().map(|s| s.balance_due).sum();
-        let vendor_payables: f64 = purchases.iter().map(|p| p.balance_due).sum();
-
-        let sales_cash: f64 = today_sale_list
-            .iter()
-            .filter(|s| s.payment_mode.as_deref() == Some("CASH"))
-            .map(|s| s.paid_amount)
-            .sum();
-        let pur_cash: f64 = today_purchase_list
-            .iter()
-            .filter(|p| p.payment_mode.as_deref() == Some("CASH"))
-            .map(|p| p.paid_amount)
-            .sum();
-
-        let refunds_cash: f64 = settlements
-            .iter()
-            .filter(|s| s.kind == PaymentKind::RefundOut && s.payment_mode.as_deref() == Some("CASH"))
-            .map(|s| s.amount_paid)
-            .sum();
-
-        // TODO(F5, DD-13): derive the drawer purely from the ledger. Header paid_amount already
-        // includes dues payments on today's bills, so these stay 0 as before the schema rewrite.
-        let customer_dues_cash = 0.0_f64;
-        let vendor_dues_cash = 0.0_f64;
-
-        let live_cash_in_drawer = sales_cash - pur_cash - refunds_cash + customer_dues_cash - vendor_dues_cash;
-
+        let pnl = tx.reports().pnl(&today, &today)?;
+        let (today_sales_amount, today_sales_count) = tx.reports().sales_totals(&today, &today)?;
+        let (today_purchase_amount, today_purchase_count) = tx.reports().purchase_totals(&today, &today)?;
+        let (customer_receivables, vendor_payables) = tx.reports().dues_totals()?;
+        let total_stock_valuation = tx.reports().stock_valuation()?.total_valuation;
+        let live_cash_in_drawer = ledger_cash_summary(&mut *tx, &today, &today)?.net;
         Ok(DashboardMetrics {
-            today_sales,
-            today_purchases,
-            today_sales_amount: today_sales,
-            today_sales_count: today_sale_list.len(),
-            today_purchase_amount: today_purchases,
-            today_purchase_count: today_purchase_list.len(),
-            today_net_profit,
+            today_sales_amount,
+            today_sales_count,
+            today_purchase_amount,
+            today_purchase_count,
+            today_net_profit: pnl.net_profit,
             total_stock_valuation,
             customer_receivables,
             vendor_payables,
@@ -115,118 +80,89 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
         })
     }
 
+    /// Returns every active low-stock item (no cap), lowest stock first.
     fn get_low_stock_alerts(&self) -> Result<Vec<LowStockItem>, AppError> {
         let mut tx = self.uow.begin_read()?;
-        let items = tx.items().list_catalog(None, true, 0, 50)?;
-        Ok(items
+        tx.reports().low_stock_items()
+    }
+
+    fn get_sales_purchase_trend(&self, period: &str) -> Result<Vec<TrendDataPoint>, AppError> {
+        let today = self.today();
+        let (from, key_len, labels): (NaiveDate, usize, Vec<String>) = match period {
+            "7d" | "30d" => {
+                let days = if period == "7d" { 7 } else { 30 };
+                let from = today - Duration::days(days - 1);
+                (from, 10, (0..days).map(|i| fmt(from + Duration::days(i))).collect())
+            }
+            "1y" => {
+                let first = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+                    .ok_or_else(|| validation("period", "invalid date"))?;
+                let mut months = Vec::with_capacity(12);
+                let (mut y, mut m) = (first.year(), first.month() as i32);
+                for _ in 0..12 {
+                    months.push(format!("{y:04}-{m:02}-01"));
+                    m -= 1;
+                    if m == 0 {
+                        m = 12;
+                        y -= 1;
+                    }
+                }
+                months.reverse();
+                let from = NaiveDate::parse_from_str(&months[0], "%Y-%m-%d")
+                    .map_err(|_| validation("period", "invalid date"))?;
+                (from, 7, months)
+            }
+            other => {
+                return Err(validation("period", format!("period must be '7d', '30d' or '1y', got '{other}'")))
+            }
+        };
+        let mut tx = self.uow.begin_read()?;
+        let buckets = tx.reports().trend_buckets(&fmt(from), &fmt(today), key_len)?;
+        Ok(labels
             .into_iter()
-            .map(|i| LowStockItem {
-                id: i.id,
-                item_id: i.id,
-                name: i.name,
-                category: i.category,
-                current_stock: i.current_stock,
-                base_unit: i.base_unit,
-                default_sale_price: i.default_sale_price,
-                mrp: i.mrp,
+            .map(|date| {
+                let key = &date[..key_len];
+                let (s, p) = buckets
+                    .iter()
+                    .find(|(k, _, _)| k == key)
+                    .map(|(_, s, p)| (*s, *p))
+                    .unwrap_or((0.0, 0.0));
+                TrendDataPoint { date, sales_amount: s, purchase_amount: p }
             })
             .collect())
     }
 
-    fn get_sales_purchase_trend(&self, _period: &str) -> Result<Vec<TrendDataPoint>, AppError> {
-        let mut tx = self.uow.begin_read()?;
-        let sales = tx.sales().list_sales(None, None, None, None, 0, usize::MAX)?;
-        let purchases = tx.purchases().list_purchases(None, None, None, None, 0, usize::MAX)?;
-        let mut date_map: HashMap<String, (f64, f64)> = HashMap::new();
-        for s in sales {
-            let entry = date_map.entry(s.transaction_date).or_insert((0.0, 0.0));
-            entry.0 += s.total_amount;
-        }
-        for p in purchases {
-            let entry = date_map.entry(p.transaction_date).or_insert((0.0, 0.0));
-            entry.1 += p.total_amount;
-        }
-        let mut trend: Vec<TrendDataPoint> = date_map
-            .into_iter()
-            .map(|(date, (sales_amount, purchase_amount))| TrendDataPoint {
-                date,
-                sales_amount,
-                purchase_amount,
-            })
-            .collect();
-        trend.sort_by(|a, b| a.date.cmp(&b.date));
-        Ok(trend)
-    }
-
     fn get_pnl_report(&self, from_date: &str, to_date: &str) -> Result<PnLReport, AppError> {
+        check_range(from_date, to_date)?;
         let mut tx = self.uow.begin_read()?;
-        let sales = tx.sales().list_sales(Some(from_date), Some(to_date), None, None, 0, usize::MAX)?;
-        let allocations = tx.allocations().list_all()?;
-        let gross_sales: f64 = sales.iter().map(|s| s.total_amount).sum();
-        let cogs: f64 = allocations.iter().map(|a| a.quantity_depleted * a.unit_cost).sum();
-        let net_profit = gross_sales - cogs;
-        Ok(PnLReport {
-            from_date: from_date.to_string(),
-            to_date: to_date.to_string(),
-            gross_sales,
-            cogs,
-            net_profit,
-            total_discounts: 0.0,
-            returns_refunded: 0.0,
-        })
+        tx.reports().pnl(from_date, to_date)
     }
 
     fn get_stock_valuation_report(&self) -> Result<StockValuationReport, AppError> {
         let mut tx = self.uow.begin_read()?;
-        let lots = tx.purchases().list_all_lots()?;
-        let total_valuation: f64 = lots
-            .iter()
-            .map(|l| l.remaining_quantity * l.unit_cost)
-            .sum();
-        let total_items_count = lots.len();
-        Ok(StockValuationReport {
-            total_valuation,
-            active_lots_count: total_items_count,
-            total_items_count,
-            categories_breakdown: Vec::new(),
-            categories: Vec::new(),
-        })
+        tx.reports().stock_valuation()
     }
 
     fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError> {
+        check_range(from_date, to_date)?;
         let mut tx = self.uow.begin_read()?;
-        let settlements = tx.settlements().list_all()?;
-        let settlements: Vec<_> = settlements
-            .into_iter()
-            .filter(|s| s.settlement_date.starts_with(self.today().as_str()))
-            .collect();
-        let mut total_inflow = 0.0;
-        let mut total_outflow = 0.0;
-        for s in settlements {
-            if s.settlement_date.as_str() >= from_date && s.settlement_date.as_str() <= to_date {
-                // TODO(F5, DD-13): full ledger-derived cash-flow breakdown.
-                match (s.transaction_type, s.kind) {
-                    (_, PaymentKind::ReturnCredit) => {} // non-cash
-                    (TransactionType::Sale, PaymentKind::Upfront | PaymentKind::Settlement)
-                    | (TransactionType::Purchase, PaymentKind::RefundIn) => total_inflow += s.amount_paid,
-                    _ => total_outflow += s.amount_paid,
-                }
-            }
-        }
-        let net_cash_flow = total_inflow - total_outflow;
+        let s = ledger_cash_summary(&mut *tx, from_date, to_date)?;
         Ok(CashFlowReport {
-            from_date: from_date.to_string(),
-            to_date: to_date.to_string(),
-            total_inflow,
-            total_outflow,
-            net_cash_flow,
-            closing_drawer_balance: net_cash_flow,
-            sales_cash_inflow: total_inflow,
-            customer_settlements_inflow: 0.0,
-            purchase_cash_outflow: total_outflow,
-            vendor_settlements_outflow: 0.0,
-            refunds_cash_outflow: 0.0,
-            net_cash_balance: net_cash_flow,
+            sales_cash_inflow: round2(s.sale_upfront),
+            customer_settlements_inflow: round2(s.sale_settlement),
+            vendor_refunds_inflow: round2(s.vendor_refund_in),
+            purchase_cash_outflow: round2(s.purchase_upfront),
+            vendor_settlements_outflow: round2(s.purchase_settlement),
+            refunds_cash_outflow: round2(s.customer_refund_out),
+            net_cash_balance: s.net,
         })
+    }
+
+    fn get_recent_transactions(&self, limit: usize) -> Result<Vec<RecentTransaction>, AppError> {
+        if limit == 0 || limit > MAX_RECENT {
+            return Err(validation("limit", format!("limit must be between 1 and {MAX_RECENT}")));
+        }
+        let mut tx = self.uow.begin_read()?;
+        tx.reports().recent_transactions(limit)
     }
 }

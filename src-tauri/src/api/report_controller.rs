@@ -33,3 +33,8 @@ pub async fn get_cash_flow_report(state: State<'_, AppState>, from_date: String,
     let svc = state.report_service.clone();
     super::run_blocking(move || svc.get_cash_flow_report(&from_date, &to_date)).await
 }
+#[tauri::command]
+pub async fn get_recent_transactions(state: State<'_, AppState>, limit: usize) -> Result<Vec<RecentTransaction>, AppError> {
+    let svc = state.report_service.clone();
+    super::run_blocking(move || svc.get_recent_transactions(limit)).await
+}

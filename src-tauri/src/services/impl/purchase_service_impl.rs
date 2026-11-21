@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use crate::core::dtos::{
-    CreatePurchasePayload, PaginatedList, PurchaseDetailView, PurchaseFilter,
+    CreatePurchasePayload, Paginated, PurchaseDetailView, PurchaseHistoryRow,
     PurchaseHistoryFilter, PurchaseItemDetail, PurchaseSummaryResponse, RecordPaymentPayload,
 };
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
@@ -217,19 +217,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
     fn get_purchases_history(
         &self,
         filter: PurchaseHistoryFilter,
-    ) -> Result<PaginatedList<PurchaseTransaction>, AppError> {
+    ) -> Result<Paginated<PurchaseHistoryRow>, AppError> {
+        let page = filter.validate()?;
         let mut tx = self.uow.begin_read()?;
-        tx.purchases().list_transactions(&PurchaseFilter {
-            party_id: filter.party_id,
-            payment_status: filter.payment_status,
-            // Accept either naming (frontend sends start/end; legacy callers from/to).
-            start_date: filter.start_date.clone().or_else(|| filter.from_date.clone()),
-            end_date: filter.end_date.clone().or_else(|| filter.to_date.clone()),
-            from_date: filter.start_date.or(filter.from_date),
-            to_date: filter.end_date.or(filter.to_date),
-            page: filter.page,
-            limit: filter.limit,
-        })
+        let (rows, total) = tx.purchases().list_history(&filter, page.offset(), page.limit)?;
+        Ok(Paginated::new(rows, total, page.page, page.limit))
     }
 
     fn get_purchase_details(&self, purchase_id: i64) -> Result<PurchaseDetailView, AppError> {

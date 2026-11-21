@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use crate::core::dtos::{
-    CreateSalePayload, PaginatedList, RecordPaymentPayload, SaleDetailView, SaleItemDetail,
-    SaleSummaryResponse, SalesFilter, SalesHistoryFilter,
+    CreateSalePayload, Paginated, RecordPaymentPayload, SaleDetailView, SaleItemDetail,
+    SaleHistoryRow, SaleSummaryResponse, SalesHistoryFilter,
 };
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
@@ -238,19 +238,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
     fn get_sales_history(
         &self,
         filter: SalesHistoryFilter,
-    ) -> Result<PaginatedList<SaleTransaction>, AppError> {
+    ) -> Result<Paginated<SaleHistoryRow>, AppError> {
+        let page = filter.validate()?;
         let mut tx = self.uow.begin_read()?;
-        tx.sales().list_transactions(&SalesFilter {
-            party_id: filter.party_id,
-            payment_status: filter.payment_status,
-            // Accept either naming (frontend sends start/end; legacy callers from/to).
-            start_date: filter.start_date.clone().or_else(|| filter.from_date.clone()),
-            end_date: filter.end_date.clone().or_else(|| filter.to_date.clone()),
-            from_date: filter.start_date.or(filter.from_date),
-            to_date: filter.end_date.or(filter.to_date),
-            page: filter.page,
-            limit: filter.limit,
-        })
+        let (rows, total) = tx.sales().list_history(&filter, page.offset(), page.limit)?;
+        Ok(Paginated::new(rows, total, page.page, page.limit))
     }
 
     fn get_sale_details(&self, sale_id: i64) -> Result<SaleDetailView, AppError> {
@@ -268,16 +260,20 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             None
         };
         let items = tx.sales().list_items_by_transaction_id(sale_id)?;
+        let returned: std::collections::HashMap<i64, f64> =
+            tx.sales().get_returned_quantities_for_sale(sale_id)?.into_iter().collect();
         let mut details: Vec<SaleItemDetail> = Vec::new();
         for item in items {
             // DD-30 / DD-28: bills read the write-time snapshots, not the live catalog.
             let item_name = item.item_name.clone();
             let bundle_name = item.pack_label.clone();
             let allocations = tx.allocations().find_by_sale_item_id(item.id)?;
+            let returned_quantity = returned.get(&item.id).copied().unwrap_or(0.0);
             details.push(SaleItemDetail {
                 sale_item: item,
                 item_name,
                 bundle_name,
+                returned_quantity,
                 allocations,
             });
         }

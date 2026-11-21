@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::core::entities::{CreatePartyPayload, Party, UpdatePartyPayload};
+use crate::core::entities::{CreatePartyPayload, Party, PartyListRow, UpdatePartyPayload};
 use crate::core::error::AppError;
 use crate::core::value_objects::PartyType;
 use crate::data::contracts::unit_of_work::UnitOfWork;
@@ -83,30 +83,18 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
     fn list_parties(
         &self,
         party_type: Option<PartyType>,
-        active_only: bool,
-    ) -> Result<Vec<Party>, AppError> {
+        active_only: Option<bool>,
+    ) -> Result<Vec<PartyListRow>, AppError> {
         let mut tx = self.uow.begin_read()?;
-        tx.parties().list(party_type, active_only)
+        tx.parties().list_rows(party_type, active_only.unwrap_or(true), None)
     }
 
     fn search_parties(
         &self,
         query: &str,
         party_type: Option<PartyType>,
-    ) -> Result<Vec<Party>, AppError> {
+    ) -> Result<Vec<PartyListRow>, AppError> {
         let mut tx = self.uow.begin_read()?;
-        let parties = tx.parties().list(party_type, true)?;
-        let q = query.trim().to_lowercase();
-        if q.is_empty() {
-            return Ok(parties);
-        }
-        let matched = parties
-            .into_iter()
-            .filter(|p| {
-                p.name.to_lowercase().contains(&q)
-                    || p.phone.as_ref().is_some_and(|ph| ph.contains(&q))
-            })
-            .collect();
-        Ok(matched)
+        tx.parties().list_rows(party_type, true, Some(query))
     }
 }

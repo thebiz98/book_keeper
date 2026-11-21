@@ -25,7 +25,7 @@ pub async fn get_return_details(state: State<'_, AppState>, return_id: i64) -> R
     super::run_blocking(move || svc.get_return_details(return_id)).await
 }
 #[tauri::command]
-pub async fn list_returns(state: State<'_, AppState>, filter: ReturnsFilter) -> Result<PaginatedList<ReturnTransaction>, AppError> {
+pub async fn list_returns(state: State<'_, AppState>, filter: ReturnsFilter) -> Result<Paginated<ReturnTransaction>, AppError> {
     let svc = state.return_service.clone();
     super::run_blocking(move || svc.list_returns(filter)).await
 }
