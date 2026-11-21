@@ -1,15 +1,20 @@
 use std::sync::Arc;
 use crate::core::dtos::{
     CreatePurchasePayload, PaginatedList, PurchaseDetailView, PurchaseFilter,
-    PurchaseHistoryFilter, PurchaseItemDetail, RecordPaymentPayload,
+    PurchaseHistoryFilter, PurchaseItemDetail, PurchaseSummaryResponse, RecordPaymentPayload,
 };
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
-use crate::core::value_objects::{LotSource, PaymentKind, PaymentStatus, TransactionType};
+use crate::core::money::{check_date, round2, MONEY_EPS};
+use crate::core::value_objects::{LotSource, PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
 use crate::services::contracts::purchase_service::PurchaseService;
+
+fn validation(field: &str, message: impl Into<String>) -> AppError {
+    AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
 
 #[derive(Clone)]
 pub struct PurchaseServiceImpl<
@@ -39,63 +44,130 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         tx.purchases().get_next_transaction_code(LotSource::Purchase)
     }
 
-    fn create_purchase(&self, payload: CreatePurchasePayload) -> Result<i64, AppError> {
+    fn create_purchase(&self, payload: CreatePurchasePayload) -> Result<PurchaseSummaryResponse, AppError> {
+        // 1. Basic validation (no database needed).
         if payload.items.is_empty() {
-            return Err(AppError::ValidationError {
-                field: "items".to_string(),
-                message: "items cannot be empty".to_string(),
-            });
+            return Err(validation("items", "items cannot be empty"));
         }
+        check_date("transaction_date", &payload.transaction_date)?;
+        if !payload.paid_amount.is_finite() || payload.paid_amount < 0.0 {
+            return Err(validation("paid_amount", "paid_amount must be a non-negative number"));
+        }
+        for line in &payload.items {
+            if !line.bundle_quantity.is_finite() || line.bundle_quantity <= 0.0 {
+                return Err(validation(
+                    "bundle_quantity",
+                    format!("Inward quantity must be positive, got {}", line.bundle_quantity),
+                ));
+            }
+            if !line.unit_cost.is_finite() || line.unit_cost < 0.0 {
+                return Err(validation("unit_cost", "unit_cost must be a non-negative number"));
+            }
+        }
+
         let mut tx = self.uow.begin_transaction()?;
-        // Assigned inside the write transaction (never client-supplied).
-        let pur_code = tx.purchases().get_next_transaction_code(LotSource::Purchase)?;
-        let mut total_amount = 0.0;
-        let mut resolved_lines = Vec::new();
-        for item_payload in &payload.items {
-            let item = tx.items().find_by_id(item_payload.item_id)?.ok_or_else(|| {
-                AppError::NotFound {
-                    entity: "Item".to_string(),
-                    id: item_payload.item_id.to_string(),
-                }
-            })?;
-            let (multiplier, unit_cost, pack_label) = if let Some(bundle_id) = item_payload.bundle_id {
-                let bundle = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| {
-                    AppError::NotFound {
-                        entity: "ItemBundle".to_string(),
-                        id: bundle_id.to_string(),
-                    }
-                })?;
-                if bundle.item_id != item.id {
-                    return Err(AppError::ValidationError {
-                        field: "bundle_id".to_string(),
-                        message: format!("Bundle {bundle_id} does not belong to item {}", item.id),
-                    });
-                }
-                let effective_cost = item_payload.unit_cost / bundle.units_per_bundle;
-                (bundle.units_per_bundle, effective_cost, Some(bundle.bundle_name.clone()))
-            } else {
-                (1.0, item_payload.unit_cost, None)
-            };
-            let base_qty = item_payload.bundle_quantity * multiplier;
-            let line_total = item_payload.bundle_quantity * item_payload.unit_cost;
-            total_amount += line_total;
-            resolved_lines.push((item_payload.clone(), item.name.clone(), pack_label, base_qty, unit_cost, line_total));
-        }
+
+        // 2. Vendor must be an active vendor.
         let party_name = match payload.party_id {
-            Some(pid) => tx.parties().find_by_id(pid)?.map(|p| p.name),
+            Some(pid) => {
+                let party = tx.parties().find_by_id(pid)?.ok_or_else(|| AppError::NotFound {
+                    entity: "Party".to_string(),
+                    id: pid.to_string(),
+                })?;
+                if party.party_type != PartyType::Vendor {
+                    return Err(validation("party_id", "Purchases need a vendor party"));
+                }
+                if !party.is_active {
+                    return Err(validation("party_id", "Vendor is inactive"));
+                }
+                Some(party.name)
+            }
             None => None,
         };
+
+        // 3. Lines: active item, bundle belongs to the item, cost normalised to base units.
+        let mut resolved = Vec::with_capacity(payload.items.len());
+        let mut total_amount = 0.0;
+        for line in &payload.items {
+            let item = tx.items().find_by_id(line.item_id)?.ok_or_else(|| AppError::NotFound {
+                entity: "Item".to_string(),
+                id: line.item_id.to_string(),
+            })?;
+            if !item.is_active {
+                return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+            }
+            let (multiplier, pack_label) = match line.bundle_id {
+                Some(bundle_id) => {
+                    let bundle = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| AppError::NotFound {
+                        entity: "ItemBundle".to_string(),
+                        id: bundle_id.to_string(),
+                    })?;
+                    if bundle.item_id != item.id {
+                        return Err(validation(
+                            "bundle_id",
+                            format!("Bundle {bundle_id} does not belong to item {}", item.id),
+                        ));
+                    }
+                    if !(bundle.units_per_bundle > 0.0) {
+                        return Err(validation("bundle_id", "Bundle multiplier must be positive"));
+                    }
+                    (bundle.units_per_bundle, Some(bundle.bundle_name))
+                }
+                None => (1.0, None),
+            };
+            let base_qty = line.bundle_quantity * multiplier;
+            let line_total = round2(line.bundle_quantity * line.unit_cost);
+            total_amount += line_total;
+            resolved.push((item, pack_label, line.bundle_quantity, base_qty, line_total));
+        }
+        let total_amount = round2(total_amount);
+
+        // 4. Payment status cross-check (DD-02).
+        let paid = round2(payload.paid_amount);
+        if paid > total_amount + MONEY_EPS {
+            return Err(validation("paid_amount", "paid_amount cannot exceed the purchase total"));
+        }
+        match payload.payment_status {
+            PaymentStatus::Paid => {
+                if (paid - total_amount).abs() > MONEY_EPS {
+                    return Err(validation("paid_amount", "PAID needs paid_amount = total"));
+                }
+            }
+            PaymentStatus::Partial => {
+                if !(paid > MONEY_EPS && paid + MONEY_EPS < total_amount) {
+                    return Err(validation("paid_amount", "PARTIAL needs 0 < paid_amount < total"));
+                }
+            }
+            PaymentStatus::Unpaid => {
+                if paid > MONEY_EPS {
+                    return Err(validation("paid_amount", "UNPAID needs paid_amount = 0"));
+                }
+                if total_amount <= MONEY_EPS {
+                    return Err(validation("payment_status", "A zero-value bill must be PAID"));
+                }
+            }
+        }
+        if payload.payment_status != PaymentStatus::Paid && payload.party_id.is_none() {
+            return Err(validation("party_id", "vendor required for credit"));
+        }
+        let upfront = if payload.payment_status == PaymentStatus::Paid { total_amount } else { paid };
+
+        // 5. Header: paid 0 / balance = total; the ledger fixes both in step 7.
+        let pur_code = tx.purchases().get_next_transaction_code(LotSource::Purchase)?;
+        let invoice_ref = payload
+            .supplier_invoice_ref
+            .map(|r| r.trim().to_string())
+            .filter(|r| !r.is_empty());
         let purchase_tx = PurchaseTransaction {
             id: 0,
-            transaction_code: pur_code,
+            transaction_code: pur_code.clone(),
             source: LotSource::Purchase,
-            // TODO(F3, DD-06): carry the supplier invoice ref from the payload once it has one.
-            supplier_invoice_ref: None,
+            supplier_invoice_ref: invoice_ref,
             transaction_date: payload.transaction_date.clone(),
             party_id: payload.party_id,
             party_name,
             payment_mode: payload.payment_mode.clone(),
-            payment_status: PaymentStatus::Unpaid,
+            payment_status: if total_amount <= MONEY_EPS { PaymentStatus::Paid } else { PaymentStatus::Unpaid },
             total_amount,
             paid_amount: 0.0,
             balance_due: total_amount,
@@ -103,39 +175,43 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         let purchase_id = tx.purchases().create_transaction(&purchase_tx)?;
-        for (line_payload, item_name, pack_label, base_qty, unit_cost, line_total) in resolved_lines {
+
+        // 6. Lots and stock cache.
+        for (item, pack_label, pack_quantity, base_qty, line_total) in resolved {
             let purchase_item = PurchaseItem {
                 id: 0,
                 purchase_transaction_id: purchase_id,
-                item_id: line_payload.item_id,
-                item_name,
+                item_id: item.id,
+                item_name: item.name.clone(),
                 pack_label,
-                pack_quantity: line_payload.bundle_quantity,
+                pack_quantity,
                 quantity: base_qty,
-                unit_cost,
+                unit_cost: line_total / base_qty,
                 total_amount: line_total,
                 remaining_quantity: base_qty,
             };
-            self.inventory_service
-                .add_stock_for_purchase(&mut *tx, &purchase_item)?;
+            self.inventory_service.add_stock_for_purchase(&mut *tx, &purchase_item)?;
         }
-        let upfront_payment = payload.paid_amount.min(total_amount);
-        if upfront_payment > 0.0 {
-            let payment_payload = RecordPaymentPayload {
-                party_id: payload.party_id,
-                transaction_type: TransactionType::Purchase,
-                kind: PaymentKind::Upfront,
-                transaction_id: purchase_id,
-                settlement_date: payload.transaction_date,
-                amount_paid: upfront_payment,
-                payment_mode: payload.payment_mode,
-                notes: Some("Supplier Inward Payment".to_string()),
-            };
-            self.payment_service
-                .record_payment(&mut *tx, payment_payload)?;
+
+        // 7. Upfront payment through the one ledger path.
+        if upfront > 0.0 {
+            self.payment_service.record_payment(
+                &mut *tx,
+                RecordPaymentPayload {
+                    party_id: payload.party_id,
+                    transaction_type: TransactionType::Purchase,
+                    kind: PaymentKind::Upfront,
+                    return_id: None,
+                    transaction_id: purchase_id,
+                    settlement_date: payload.transaction_date,
+                    amount_paid: upfront,
+                    payment_mode: payload.payment_mode,
+                    notes: Some("Supplier Inward Payment".to_string()),
+                },
+            )?;
         }
         tx.commit()?;
-        Ok(purchase_id)
+        Ok(PurchaseSummaryResponse { purchase_id, transaction_code: pur_code })
     }
 
     fn get_purchases_history(

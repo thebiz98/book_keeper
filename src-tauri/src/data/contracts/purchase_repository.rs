@@ -17,7 +17,8 @@ pub trait PurchaseRepository {
     /// write transaction that inserts the header; from a read context it is a display preview.
     fn get_next_transaction_code(&self, source: LotSource) -> Result<String, AppError>;
 
-    /// Core FIFO query: lots of any source with `remaining_quantity > 0`, `ORDER BY id ASC`.
+    /// Lots of any source with `remaining_quantity > 0`. Order is NOT part of the contract (it is
+    /// `id` only for determinism); allocation strategies sort the lots themselves.
     fn get_active_lots_for_item(&self, item_id: i64) -> Result<Vec<PurchaseItem>, AppError>;
     /// `unit_cost` of the item's most recent lot (highest id, any source, any remaining).
     fn get_latest_lot_cost(&self, item_id: i64) -> Result<Option<f64>, AppError>;
@@ -28,13 +29,6 @@ pub trait PurchaseRepository {
 
     /// Sets remaining quantity on a lot; rejects values < 0 or > the lot quantity (1e-9 tolerance).
     fn update_remaining_quantity(&mut self, lot_id: i64, new_remaining_qty: f64) -> Result<(), AppError>;
-    /// Legacy balance writer; F3/T3 deletes it in favour of [`Self::update_money_fields`].
-    fn update_balance_due(
-        &mut self,
-        tx_id: i64,
-        new_balance: f64,
-        status: PaymentStatus,
-    ) -> Result<(), AppError>;
     /// Writes the cached money fields only; called exclusively by `PaymentService`.
     fn update_money_fields(
         &mut self,

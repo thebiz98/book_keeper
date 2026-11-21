@@ -76,7 +76,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 6000.0,
+        supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 6000.0,
         notes: None,
         items: vec![CreatePurchaseItemPayload {
             item_id: 1,
@@ -92,13 +92,13 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 4000.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 4000.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 40.0,
-            unit_price: Some(100.0),
+            unit_price: 100.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("sale");
@@ -127,6 +127,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
         item_id: 1,
         quantity: -5.0,
         reason: AdjustmentReason::Damaged,
+        unit_cost: None,
         notes: None,
     };
     harness.inventory_service.create_adjustment(adj_payload).expect("adjustment");
@@ -163,13 +164,13 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
         transaction_date: "2026-11-01".to_string(),
         party_id: Some(1),
         payment_mode: None,
-        paid_amount: 0.0,
+        payment_status: PaymentStatus::Unpaid, paid_amount: 0.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 30.0,
-            unit_price: Some(50.0),
+            unit_price: 50.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("credit sale");
@@ -181,10 +182,11 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
     // Step 3: Cash settlement installment of ₹600 on 2026-11-15
     let settle = SettlePaymentPayload {
         party_id: 1,
-        amount: 600.0,
+        transaction_type: TransactionType::Sale,
+        amount_paid: 600.0,
         settlement_date: "2026-11-15".to_string(),
         payment_mode: Some("CASH".to_string()),
-        specific_bill_id: Some(1),
+        transaction_id: Some(1),
         notes: Some("Installment payment".to_string()),
     };
     harness.accounting_service.settle_bill_payment(settle).expect("settlement");
@@ -216,13 +218,13 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 400.0,
+        supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 400.0,
         notes: None,
         items: vec![CreatePurchaseItemPayload {
             item_id: 1,
             bundle_id: Some(1),
             bundle_quantity: 5.0,
-            unit_cost: 400.0,
+            unit_cost: 80.0,
         }],
     };
     harness.purchase_service.create_purchase(pur_payload).expect("bundle inward");
@@ -232,13 +234,13 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 105.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 105.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 7.0,
-            unit_price: Some(15.0),
+            unit_price: 15.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("loose sale");
@@ -270,7 +272,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: None,
-        paid_amount: 0.0,
+        supplier_invoice_ref: None, payment_status: PaymentStatus::Unpaid, paid_amount: 0.0,
         notes: None,
         items: vec![CreatePurchaseItemPayload {
             item_id: 1,
@@ -279,7 +281,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
             unit_cost: 30.0,
         }],
     };
-    let pur_id = harness.purchase_service.create_purchase(pur_payload).expect("credit purchase");
+    let pur_id = harness.purchase_service.create_purchase(pur_payload).expect("credit purchase").purchase_id;
 
     // Return 10 units to vendor (debit note ₹300)
     let ret_payload = VendorReturnPayload {
@@ -303,13 +305,13 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 1000.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 1000.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 20.0,
-            unit_price: Some(50.0),
+            unit_price: 50.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("sale created");
@@ -342,13 +344,13 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 200.0,
+        payment_status: PaymentStatus::Partial, paid_amount: 200.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: Some(300.0),
+            unit_price: 300.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("split sale");
@@ -356,10 +358,11 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
     // Subsequent UPI installment of ₹300
     let settle = SettlePaymentPayload {
         party_id: 1,
-        amount: 300.0,
+        transaction_type: TransactionType::Sale,
+        amount_paid: 300.0,
         settlement_date: "2026-11-20".to_string(),
         payment_mode: Some("UPI".to_string()),
-        specific_bill_id: Some(1),
+        transaction_id: Some(1),
         notes: None,
     };
     harness.accounting_service.settle_bill_payment(settle).expect("settle");
@@ -403,13 +406,13 @@ fn test_tc_t3_cmb_007_barcode_scan_bundle_multiplier_tender() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 90.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 90.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: Some(1),
             bundle_quantity: 2.0,
-            unit_price: Some(45.0),
+            unit_price: 45.0,
         }],
     };
     let summary = harness.sale_service.create_sale(sale_payload).expect("sale");
@@ -443,7 +446,7 @@ fn test_tc_t3_cmb_008_low_stock_alert_reorder_cleared() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 375.0,
+        supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 375.0,
         notes: Some("Reorder low stock".to_string()),
         items: vec![CreatePurchaseItemPayload {
             item_id: 1,
@@ -491,13 +494,13 @@ fn test_tc_t3_cmb_009_shop_settings_profile_and_sale_summary() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 80.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 80.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: Some(40.0),
+            unit_price: 40.0,
         }],
     };
     let summary = harness.sale_service.create_sale(sale_payload).expect("sale");
@@ -529,13 +532,13 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 120.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 120.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: None, // Defaults to 60.0
+            unit_price: 60.0,
         }],
     };
     let s1_summary = harness.sale_service.create_sale(sale1).expect("sale 1");
@@ -560,13 +563,13 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 150.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 150.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: None, // Defaults to new price 75.0
+            unit_price: 75.0,
         }],
     };
     let s2_summary = harness.sale_service.create_sale(sale2).expect("sale 2");

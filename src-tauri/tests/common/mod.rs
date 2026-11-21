@@ -6,6 +6,8 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 
 pub mod fixtures;
+pub mod ledger;
+pub mod stock;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -21,7 +23,7 @@ use book_keeper::data::contracts::unit_of_work::{TransactionContext, UnitOfWork}
 use book_keeper::data::contracts::*;
 use book_keeper::services::contracts::accounting_service::AccountingService;
 use book_keeper::services::contracts::inventory_allocation_strategy::{
-    AdjustmentDepletionResult, DepletionResult, InventoryAllocationStrategy,
+    DepletionResult, InventoryAllocationStrategy, OutflowDepletionResult, ReversalResult,
 };
 use book_keeper::services::contracts::inventory_service::InventoryService;
 use book_keeper::services::contracts::payment_service::PaymentService;
@@ -105,7 +107,7 @@ pub type PurchaseServiceImpl<I, P> = book_keeper::services::PurchaseServiceImpl<
 pub type ReturnServiceImpl<I, P> = book_keeper::services::ReturnServiceImpl<I, P, TestDb>;
 pub type AccountingServiceImpl<P> = book_keeper::services::AccountingServiceImpl<P, TestDb>;
 pub type ReportServiceImpl = book_keeper::services::ReportServiceImpl<TestDb>;
-pub type ItemImportServiceImpl = book_keeper::services::ItemImportServiceImpl<TestDb>;
-pub type ItemServiceImpl = book_keeper::services::ItemServiceImpl<TestDb>;
+pub type ItemImportServiceImpl<I> = book_keeper::services::ItemImportServiceImpl<TestDb, I>;
+pub type ItemServiceImpl<I> = book_keeper::services::ItemServiceImpl<TestDb, I>;
 pub type PartyServiceImpl = book_keeper::services::PartyServiceImpl<TestDb>;
 pub type ShopSettingServiceImpl = book_keeper::services::ShopSettingServiceImpl<TestDb>;

@@ -15,7 +15,7 @@ pub mod shop_setting_service;
 pub use accounting_service::AccountingService;
 pub use backup_service::BackupService;
 pub use inventory_allocation_strategy::{
-    AdjustmentDepletionResult, DepletionResult, InventoryAllocationStrategy,
+    DepletionResult, InventoryAllocationStrategy, OutflowDepletionResult, ReversalResult,
 };
 pub use inventory_service::InventoryService;
 pub use item_import_service::ItemImportService;

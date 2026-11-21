@@ -139,4 +139,16 @@ impl ItemRepository for SqliteItemRepository {
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
     }
+
+    fn stock_cache_audit(&self) -> Result<Vec<(i64, f64, f64)>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT i.id, i.current_stock, \
+                    COALESCE((SELECT SUM(p.remaining_quantity) FROM purchase_items p WHERE p.item_id = i.id), 0.0) \
+             FROM items i ORDER BY i.id",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
 }

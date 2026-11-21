@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
 use crate::core::value_objects::{PaymentKind, TransactionType};
 
-/// Records a payment that reduces a bill's balance (`kind` is Upfront or Settlement).
+/// Records a balance-reducing ledger entry (`kind` is Upfront, Settlement or ReturnCredit).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordPaymentPayload {
     pub party_id: Option<i64>,
     pub transaction_type: TransactionType,
     pub transaction_id: i64,
-    pub kind: PaymentKind, // Upfront (checkout / inward) or Settlement (later dues payment)
+    pub kind: PaymentKind, // Upfront (checkout / inward), Settlement (dues) or ReturnCredit (return)
+    pub return_id: Option<i64>, // Required iff kind == ReturnCredit
     pub settlement_date: String, // "YYYY-MM-DD"
     pub amount_paid: f64,
     pub payment_mode: Option<String>,
@@ -35,4 +36,19 @@ pub struct LedgerTotals {
     pub return_credit: f64,
     pub refund_out: f64,
     pub refund_in: f64,
+}
+
+/// Cash movement over a date range, summed from the ledger by the DD-01 cash direction table.
+/// The one source for the live cash drawer and the cash-flow report.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct LedgerCashSummary {
+    pub sale_upfront: f64,         // SALE·UPFRONT       (in)
+    pub sale_settlement: f64,      // SALE·SETTLEMENT    (in)
+    pub vendor_refund_in: f64,     // PURCHASE·REFUND_IN (in)
+    pub purchase_upfront: f64,     // PURCHASE·UPFRONT   (out)
+    pub purchase_settlement: f64,  // PURCHASE·SETTLEMENT (out)
+    pub customer_refund_out: f64,  // SALE·REFUND_OUT    (out)
+    pub cash_in: f64,
+    pub cash_out: f64,
+    pub net: f64,                  // cash_in - cash_out
 }

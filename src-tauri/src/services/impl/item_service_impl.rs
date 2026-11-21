@@ -2,27 +2,32 @@ use std::sync::Arc;
 use crate::core::dtos::{
     BundleSuggestion, CreateBundlePayload, CreateItemPayload, PaginatedList, UpdateItemPayload,
 };
-use crate::core::entities::{Item, ItemBundle, PurchaseItem, PurchaseTransaction};
-use crate::core::constants::LOW_STOCK_THRESHOLD;
+use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
-use crate::core::value_objects::{LotSource, PaymentStatus};
+use crate::core::value_objects::LotSource;
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::UnitOfWork;
+use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::item_service::ItemService;
 
+/// Item + bundle master data. Opening stock is NOT written here: `create_item` delegates it to
+/// `InventoryService::create_source_lot(Opening, ..)` inside its own transaction (NFR-05 F-04).
+/// `InventoryService` reads items via `uow.items()` and does not depend on `ItemService`, so
+/// this dependency is acyclic (the LLD 6.1 edge `InventoryService -> ItemService` is dropped).
 #[derive(Clone)]
-pub struct ItemServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>> {
+pub struct ItemServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>, I: InventoryService = Arc<dyn InventoryService>> {
     pub uow: U,
     pub search_indexer: Arc<dyn ItemSearchIndexer>,
+    pub inventory_service: I,
 }
 
-impl<U: UnitOfWork> ItemServiceImpl<U> {
-    pub fn new(uow: U, search_indexer: Arc<dyn ItemSearchIndexer>) -> Self {
-        Self { uow, search_indexer }
+impl<U: UnitOfWork, I: InventoryService> ItemServiceImpl<U, I> {
+    pub fn new(uow: U, search_indexer: Arc<dyn ItemSearchIndexer>, inventory_service: I) -> Self {
+        Self { uow, search_indexer, inventory_service }
     }
 }
 
-impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
+impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
     fn get_catalog(
         &self,
         category: Option<String>,
@@ -73,8 +78,9 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
             base_unit: payload.base_unit.trim().to_string(),
             mrp: payload.mrp,
             default_sale_price: payload.default_sale_price,
-            current_stock: initial_stock,
-            is_low_stock: initial_stock < LOW_STOCK_THRESHOLD,
+            // Stock cache starts at 0; the opening lot below raises it (InventoryService is the sole writer).
+            current_stock: 0.0,
+            is_low_stock: true,
             is_active: true,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
@@ -83,40 +89,17 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
         let item_id = tx.items().create(&item)?;
         let mut created_bundles = Vec::new();
 
-        if initial_stock > 0.0 {
-            let unit_cost = payload.initial_cost.unwrap_or(payload.default_sale_price * 0.7);
-            let lot_code = tx.purchases().get_next_transaction_code(LotSource::Opening)?;
-            let synthetic_tx = PurchaseTransaction {
-                id: 0,
-                transaction_code: lot_code,
-                source: LotSource::Opening,
-                supplier_invoice_ref: None,
-                transaction_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-                party_id: None,
-                party_name: None,
-                payment_mode: None,
-                payment_status: PaymentStatus::Paid,
-                // DD-07: opening lots are not supplier bills.
-                total_amount: 0.0,
-                paid_amount: 0.0,
-                balance_due: 0.0,
-                notes: Some("Initial Stock Batch".to_string()),
-                created_at: chrono::Utc::now().to_rfc3339(),
-            };
-            let synth_tx_id = tx.purchases().create_transaction(&synthetic_tx)?;
-            let synth_lot = PurchaseItem {
-                id: 0,
-                purchase_transaction_id: synth_tx_id,
+        if initial_stock != 0.0 {
+            // initial_cost is required (or a prior lot): never derived from the sale price (DD-12).
+            self.inventory_service.create_source_lot(
+                &mut *tx,
+                LotSource::Opening,
+                &chrono::Utc::now().format("%Y-%m-%d").to_string(),
                 item_id,
-                item_name: item.name.clone(),
-                pack_label: None,
-                pack_quantity: initial_stock,
-                quantity: initial_stock,
-                unit_cost,
-                total_amount: initial_stock * unit_cost,
-                remaining_quantity: initial_stock,
-            };
-            tx.purchases().create_purchase_item(&synth_lot)?;
+                initial_stock,
+                payload.initial_cost,
+                Some("Initial Stock Batch".to_string()),
+            )?;
         }
 
         if let Some(bundles) = payload.bundles {

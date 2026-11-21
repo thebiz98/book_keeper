@@ -92,6 +92,23 @@ impl SettlementRepository for SqliteSettlementRepository {
         Ok(totals)
     }
 
+    fn sum_by_type_kind_between(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Vec<(TransactionType, PaymentKind, f64)>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT transaction_type, kind, COALESCE(SUM(amount_paid), 0.0) FROM payment_settlements \
+             WHERE settlement_date >= ?1 AND settlement_date <= ?2 GROUP BY transaction_type, kind",
+        )?;
+        let rows = stmt
+            .query_map(params![from, to], |r| {
+                Ok((enum_col::<TransactionType>(r, 0)?, enum_col::<PaymentKind>(r, 1)?, r.get::<_, f64>(2)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     fn list_all(&self) -> Result<Vec<PaymentSettlement>, AppError> {
         self.query(&format!("SELECT {COLS} FROM payment_settlements ORDER BY id"), [])
     }

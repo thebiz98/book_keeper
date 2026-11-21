@@ -3,6 +3,7 @@ use book_keeper::core::dtos::{
     CreateItemPayload, CreatePurchaseItemPayload, CreatePurchasePayload, CreateSaleItemPayload,
     CreateSalePayload,
 };
+use book_keeper::core::value_objects::PaymentStatus;
 
 #[test]
 fn sqlite_end_to_end_smoke() {
@@ -29,7 +30,7 @@ fn sqlite_end_to_end_smoke() {
         .create_purchase(CreatePurchasePayload {
             transaction_date: "2026-01-01".to_string(),
             party_id: None,
-            paid_amount: 100.0,
+            supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 100.0,
             payment_mode: Some("CASH".to_string()),
             notes: None,
             items: vec![CreatePurchaseItemPayload { item_id, bundle_id: None, bundle_quantity: 10.0, unit_cost: 10.0 }],
@@ -41,10 +42,10 @@ fn sqlite_end_to_end_smoke() {
         .create_sale(CreateSalePayload {
             transaction_date: "2026-01-02".to_string(),
             party_id: None,
-            paid_amount: 30.0,
+            payment_status: PaymentStatus::Paid, paid_amount: 30.0,
             payment_mode: Some("CASH".to_string()),
             notes: None,
-            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 3.0, unit_price: Some(10.0) }],
+            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 3.0, unit_price: 10.0 }],
         })
         .expect("sale");
 
@@ -53,10 +54,10 @@ fn sqlite_end_to_end_smoke() {
         .create_sale(CreateSalePayload {
             transaction_date: "2026-01-02".to_string(),
             party_id: None,
-            paid_amount: 10.0,
+            payment_status: PaymentStatus::Paid, paid_amount: 10.0,
             payment_mode: Some("CASH".to_string()),
             notes: None,
-            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: Some(10.0) }],
+            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: 10.0 }],
         })
         .expect("second auto-coded sale must not collide on transaction_code");
     assert_ne!(second.transaction_code, "SAL-1001");
@@ -85,15 +86,15 @@ fn sales_history_honours_start_end_date_filter() {
         default_sale_price: 5.0, initial_stock: None, initial_cost: None, bundles: None,
     }).expect("item");
     state.purchase_service.create_purchase(CreatePurchasePayload {
-        transaction_date: "2026-01-01".into(), party_id: None, paid_amount: 50.0,
+        transaction_date: "2026-01-01".into(), party_id: None, supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 50.0,
         payment_mode: Some("CASH".into()), notes: None,
         items: vec![CreatePurchaseItemPayload { item_id, bundle_id: None, bundle_quantity: 10.0, unit_cost: 5.0 }],
     }).expect("purchase");
     for date in ["2026-01-05", "2026-02-05"] {
         state.sale_service.create_sale(CreateSalePayload {
-            transaction_date: date.into(), party_id: None, paid_amount: 5.0,
+            transaction_date: date.into(), party_id: None, payment_status: PaymentStatus::Paid, paid_amount: 5.0,
             payment_mode: Some("CASH".into()), notes: None,
-            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: Some(5.0) }],
+            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: 5.0 }],
         }).expect("sale");
     }
     // Frontend shape: start_date / end_date only.

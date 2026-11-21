@@ -73,6 +73,18 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
                 .find_by_id(item_payload.item_id)?
                 .ok_or_else(|| AppError::not_found("Item", item_payload.item_id.to_string()))?
                 .name;
+            // DD-05: every linked line reverses its sale allocations; only RESTOCKABLE units go
+            // back into lots/stock. The reversed FIFO cost is the line's cost_amount.
+            let cost_amount = match item_payload.sale_item_id {
+                Some(sale_item_id) => self.inventory_service.reverse_sale_line(
+                    &mut *tx,
+                    sale_item_id,
+                    item_payload.item_id,
+                    item_payload.quantity,
+                    item_payload.condition == StockCondition::Restockable,
+                )?,
+                None => 0.0, // TODO(F4): unlinked returns have no allocation to reverse; cost policy
+            };
             let ret_item = ReturnItem {
                 id: 0,
                 return_transaction_id: return_id,
@@ -84,21 +96,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
                 quantity: item_payload.quantity,
                 unit_price: item_payload.unit_price,
                 total_amount: line_total,
-                // TODO(F4, DD-05/DD-13): FIFO cost of the reversed allocations.
-                cost_amount: 0.0,
+                cost_amount,
                 condition: Some(item_payload.condition),
             };
             tx.returns().create_return_item(&ret_item)?;
-            if item_payload.condition == StockCondition::Restockable {
-                if let Some(sale_item_id) = item_payload.sale_item_id {
-                    self.inventory_service.restore_stock_for_return(
-                        &mut *tx,
-                        sale_item_id,
-                        item_payload.item_id,
-                        item_payload.quantity,
-                    )?;
-                }
-            }
         }
         // TODO(F4, DD-02/DD-04/DD-05): Refund must first apply RETURN_CREDIT to the linked bill /
         // oldest open bills, and Replacement must issue REPLACEMENT_ISSUED lines. For now every
@@ -162,6 +163,14 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
                 .find_by_id(item.item_id)?
                 .ok_or_else(|| AppError::not_found("Item", item.item_id.to_string()))?
                 .name;
+            // DD-11: the lot cost removed (named lot or FIFO) is the line's cost_amount.
+            let cost_amount = self.inventory_service.remove_stock_for_vendor_return(
+                &mut *tx,
+                return_id,
+                item.item_id,
+                item.purchase_item_id,
+                item.quantity,
+            )?;
             let ret_item = ReturnItem {
                 id: 0,
                 return_transaction_id: return_id,
@@ -173,17 +182,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
                 quantity: item.quantity,
                 unit_price: item.unit_cost,
                 total_amount: line_total,
-                // TODO(F4, DD-11): lot cost via STOCK_OUTFLOW_ALLOCATION(VENDOR_RETURN).
-                cost_amount: 0.0,
+                cost_amount,
                 condition: None, // condition applies to customer lines only
             };
             tx.returns().create_return_item(&ret_item)?;
-            self.inventory_service.remove_stock_for_vendor_return(
-                &mut *tx,
-                item.item_id,
-                item.purchase_item_id,
-                item.quantity,
-            )?;
         }
 
         // TODO(F4, DD-02/DD-04): RETURN_CREDIT against payables first, remainder as REFUND_IN.

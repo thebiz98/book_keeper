@@ -39,7 +39,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 500.0,
+        supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 500.0,
         notes: Some("Lot #1 Inward".to_string()),
         items: vec![CreatePurchaseItemPayload {
             item_id: 1,
@@ -48,7 +48,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
             unit_cost: 5.0,
         }],
     };
-    let pur1_id = purchase_service.create_purchase(pur1_payload).expect("purchase 1 succeeds");
+    let pur1_id = purchase_service.create_purchase(pur1_payload).expect("purchase 1 succeeds").purchase_id;
     assert!(pur1_id > 0);
 
     {
@@ -75,7 +75,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 300.0,
+        supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 300.0,
         notes: Some("Lot #2 Inward".to_string()),
         items: vec![CreatePurchaseItemPayload {
             item_id: 1,
@@ -84,7 +84,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
             unit_cost: 6.0,
         }],
     };
-    let pur2_id = purchase_service.create_purchase(pur2_payload).expect("purchase 2 succeeds");
+    let pur2_id = purchase_service.create_purchase(pur2_payload).expect("purchase 2 succeeds").purchase_id;
     assert!(pur2_id > 0);
 
     {
@@ -109,13 +109,13 @@ fn test_e2e_5_step_lifecycle_scenario() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 1200.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 1200.0,
         notes: Some("Retail Counter Sale".to_string()),
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 120.0,
-            unit_price: Some(10.0),
+            unit_price: 10.0,
         }],
     };
     let sale_summary = sale_service.create_sale(sale_payload).expect("sale succeeds");

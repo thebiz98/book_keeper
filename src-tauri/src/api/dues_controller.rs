@@ -10,7 +10,7 @@ pub async fn get_party_dues_summary(state: State<'_, AppState>, party_type: Part
     super::run_blocking(move || svc.get_party_dues_summary(party_type)).await
 }
 #[tauri::command]
-pub async fn settle_bill_payment(state: State<'_, AppState>, payload: SettlePaymentPayload) -> Result<(), AppError> {
+pub async fn settle_bill_payment(state: State<'_, AppState>, payload: SettlePaymentPayload) -> Result<SettlementResult, AppError> {
     let svc = state.accounting_service.clone();
     super::run_blocking(move || svc.settle_bill_payment(payload)).await
 }

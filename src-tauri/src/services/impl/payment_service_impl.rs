@@ -1,6 +1,7 @@
 use crate::core::dtos::{RecordPaymentPayload, RecordRefundPayload};
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
+use crate::core::money::{round2, MONEY_EPS};
 use crate::core::value_objects::{PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::TransactionContext;
 use crate::services::contracts::payment_service::PaymentService;
@@ -14,75 +15,135 @@ impl PaymentServiceImpl {
     }
 }
 
+fn validation(field: &str, message: impl Into<String>) -> AppError {
+    AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
+
+/// `(balance_due, party_id)` of the bill a ledger row is booked against.
+fn load_bill(
+    uow: &mut dyn TransactionContext,
+    tx_type: TransactionType,
+    tx_id: i64,
+) -> Result<(f64, Option<i64>), AppError> {
+    match tx_type {
+        TransactionType::Sale => {
+            let sale = uow.sales().find_transaction_by_id(tx_id)?.ok_or_else(|| AppError::NotFound {
+                entity: "SaleTransaction".to_string(),
+                id: tx_id.to_string(),
+            })?;
+            Ok((sale.balance_due, sale.party_id))
+        }
+        TransactionType::Purchase => {
+            let pur = uow.purchases().find_transaction_by_id(tx_id)?.ok_or_else(|| AppError::NotFound {
+                entity: "PurchaseTransaction".to_string(),
+                id: tx_id.to_string(),
+            })?;
+            Ok((pur.balance_due, pur.party_id))
+        }
+    }
+}
+
+/// Rebuilds a bill's cached money fields from its ledger rows (DD-01, LLD §6.4). Idempotent.
+///
+/// `paid = Σ(UPFRONT + SETTLEMENT)`, `credit = Σ RETURN_CREDIT`, `balance = total − paid − credit`
+/// (an overshoot is rejected), status `PAID` at zero balance, else `PARTIAL` once anything has
+/// been paid or credited, else `UNPAID`. Called after every balance-reducing insert; this is the
+/// only place the header money fields are written after the header is created.
+pub fn recompute_bill(
+    uow: &mut dyn TransactionContext,
+    tx_type: TransactionType,
+    tx_id: i64,
+) -> Result<(), AppError> {
+    let total = match tx_type {
+        TransactionType::Sale => uow
+            .sales()
+            .find_transaction_by_id(tx_id)?
+            .map(|s| s.total_amount)
+            .ok_or_else(|| AppError::NotFound { entity: "SaleTransaction".to_string(), id: tx_id.to_string() })?,
+        TransactionType::Purchase => uow
+            .purchases()
+            .find_transaction_by_id(tx_id)?
+            .map(|p| p.total_amount)
+            .ok_or_else(|| AppError::NotFound { entity: "PurchaseTransaction".to_string(), id: tx_id.to_string() })?,
+    };
+    let totals = uow.settlements().sum_by_kind_for_transaction(tx_type, tx_id)?;
+    let paid = round2(totals.upfront + totals.settlement);
+    let credit = round2(totals.return_credit);
+    let mut balance = round2(total - paid - credit);
+    if balance < -MONEY_EPS {
+        return Err(validation("amount_paid", "Payment exceeds outstanding balance"));
+    }
+    if balance < 0.0 {
+        balance = 0.0;
+    }
+    let status = if balance <= MONEY_EPS {
+        PaymentStatus::Paid
+    } else if paid + credit > MONEY_EPS {
+        PaymentStatus::Partial
+    } else {
+        PaymentStatus::Unpaid
+    };
+    match tx_type {
+        TransactionType::Sale => uow.sales().update_money_fields(tx_id, paid, balance, status),
+        TransactionType::Purchase => uow.purchases().update_money_fields(tx_id, paid, balance, status),
+    }
+}
+
 impl PaymentService for PaymentServiceImpl {
     fn record_payment(
         &self,
         uow: &mut dyn TransactionContext,
         payload: RecordPaymentPayload,
     ) -> Result<i64, AppError> {
-        if payload.amount_paid <= 0.0 {
-            return Err(AppError::ValidationError {
-                field: "amount_paid".to_string(),
-                message: format!("Payment amount must be positive, got {}", payload.amount_paid),
-            });
+        match payload.kind {
+            PaymentKind::Upfront | PaymentKind::Settlement | PaymentKind::ReturnCredit => {}
+            other => {
+                return Err(validation(
+                    "kind",
+                    format!("record_payment accepts Upfront, Settlement or ReturnCredit, got {other:?}"),
+                ))
+            }
+        }
+        if payload.kind == PaymentKind::ReturnCredit && payload.return_id.is_none() {
+            return Err(validation("return_id", "return_id is required for a return credit"));
+        }
+        if !payload.amount_paid.is_finite() {
+            return Err(validation("amount_paid", "Payment amount must be a finite number"));
+        }
+        let amount = round2(payload.amount_paid);
+        if amount <= 0.0 {
+            return Err(validation(
+                "amount_paid",
+                format!("Payment amount must be positive, got {}", payload.amount_paid),
+            ));
         }
 
-        let (current_balance, _) = if payload.transaction_type == TransactionType::Sale {
-            let sale = uow
-                .sales()
-                .find_transaction_by_id(payload.transaction_id)?
-                .ok_or_else(|| AppError::NotFound {
-                    entity: "SaleTransaction".to_string(),
-                    id: payload.transaction_id.to_string(),
-                })?;
-            (sale.balance_due, sale.payment_status)
-        } else {
-            let pur = uow
-                .purchases()
-                .find_transaction_by_id(payload.transaction_id)?
-                .ok_or_else(|| AppError::NotFound {
-                    entity: "PurchaseTransaction".to_string(),
-                    id: payload.transaction_id.to_string(),
-                })?;
-            (pur.balance_due, pur.payment_status)
-        };
-
-        if payload.amount_paid > current_balance {
-            return Err(AppError::ValidationError {
-                field: "amount_paid".to_string(),
-                message: "Payment exceeds outstanding balance".to_string(),
-            });
+        let (balance, bill_party) = load_bill(uow, payload.transaction_type, payload.transaction_id)?;
+        if amount > balance + MONEY_EPS {
+            return Err(validation("amount_paid", "Payment exceeds outstanding balance"));
         }
-
-        let new_balance = current_balance - payload.amount_paid;
-        let new_status = if new_balance <= 0.0 {
-            PaymentStatus::Paid
-        } else {
-            PaymentStatus::Partial
-        };
-
-        if payload.transaction_type == TransactionType::Sale {
-            uow.sales()
-                .update_balance_due(payload.transaction_id, new_balance, new_status)?;
-        } else {
-            uow.purchases()
-                .update_balance_due(payload.transaction_id, new_balance, new_status)?;
+        if let (Some(p), Some(b)) = (payload.party_id, bill_party) {
+            if p != b {
+                return Err(validation("party_id", "Payment party does not match the bill's party"));
+            }
         }
 
         let settlement = PaymentSettlement {
             id: 0,
             settlement_date: payload.settlement_date,
-            party_id: payload.party_id,
+            party_id: payload.party_id.or(bill_party),
             kind: payload.kind,
             transaction_type: payload.transaction_type,
             transaction_id: Some(payload.transaction_id),
-            return_id: None,
-            amount_paid: payload.amount_paid,
+            return_id: payload.return_id,
+            amount_paid: amount,
             payment_mode: payload.payment_mode,
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        uow.settlements().create_settlement(&settlement)
+        let id = uow.settlements().create_settlement(&settlement)?;
+        recompute_bill(uow, payload.transaction_type, payload.transaction_id)?;
+        Ok(id)
     }
 
     fn record_refund(
@@ -90,13 +151,14 @@ impl PaymentService for PaymentServiceImpl {
         uow: &mut dyn TransactionContext,
         payload: RecordRefundPayload,
     ) -> Result<i64, AppError> {
-        if payload.amount <= 0.0 {
-            return Err(AppError::ValidationError {
-                field: "amount".to_string(),
-                message: format!("Refund amount must be positive, got {}", payload.amount),
-            });
+        if !payload.amount.is_finite() {
+            return Err(validation("amount", "Refund amount must be a finite number"));
         }
-        // Cash direction: customer refund goes out, vendor refund comes in. Refund rows never
+        let amount = round2(payload.amount);
+        if amount <= 0.0 {
+            return Err(validation("amount", format!("Refund amount must be positive, got {}", payload.amount)));
+        }
+        // Cash direction: a customer refund goes out, a vendor refund comes in. Refund rows never
         // touch a bill balance (DD-01).
         let kind = match payload.transaction_type {
             TransactionType::Sale => PaymentKind::RefundOut,
@@ -110,54 +172,11 @@ impl PaymentService for PaymentServiceImpl {
             transaction_type: payload.transaction_type,
             transaction_id: payload.transaction_id,
             return_id: payload.return_id,
-            amount_paid: payload.amount,
+            amount_paid: amount,
             payment_mode: payload.payment_mode,
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         uow.settlements().create_settlement(&settlement)
-    }
-
-    fn reduce_transaction_balance(
-        &self,
-        uow: &mut dyn TransactionContext,
-        transaction_type: TransactionType,
-        transaction_id: i64,
-        reduction_amount: f64,
-    ) -> Result<(), AppError> {
-        if transaction_type == TransactionType::Sale {
-            let sale = uow
-                .sales()
-                .find_transaction_by_id(transaction_id)?
-                .ok_or_else(|| AppError::NotFound {
-                    entity: "SaleTransaction".to_string(),
-                    id: transaction_id.to_string(),
-                })?;
-            let new_balance = (sale.balance_due - reduction_amount).max(0.0);
-            let new_status = if new_balance == 0.0 {
-                PaymentStatus::Paid
-            } else {
-                PaymentStatus::Partial
-            };
-            uow.sales()
-                .update_balance_due(transaction_id, new_balance, new_status)?;
-        } else {
-            let pur = uow
-                .purchases()
-                .find_transaction_by_id(transaction_id)?
-                .ok_or_else(|| AppError::NotFound {
-                    entity: "PurchaseTransaction".to_string(),
-                    id: transaction_id.to_string(),
-                })?;
-            let new_balance = (pur.balance_due - reduction_amount).max(0.0);
-            let new_status = if new_balance == 0.0 {
-                PaymentStatus::Paid
-            } else {
-                PaymentStatus::Partial
-            };
-            uow.purchases()
-                .update_balance_due(transaction_id, new_balance, new_status)?;
-        }
-        Ok(())
     }
 }

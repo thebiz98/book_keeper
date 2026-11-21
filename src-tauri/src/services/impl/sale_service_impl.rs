@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use crate::core::dtos::{
     CreateSalePayload, PaginatedList, RecordPaymentPayload, SaleDetailView, SaleItemDetail,
@@ -5,11 +6,16 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
-use crate::core::value_objects::{PaymentKind, PaymentStatus, TransactionType};
+use crate::core::money::{check_date, round2, MONEY_EPS};
+use crate::core::value_objects::{PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
 use crate::services::contracts::sale_service::SaleService;
+
+fn validation(field: &str, message: impl Into<String>) -> AppError {
+    AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
 
 #[derive(Clone)]
 pub struct SaleServiceImpl<
@@ -40,98 +46,134 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
     }
 
     fn create_sale(&self, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError> {
+        // 1. Basic validation (no database needed).
         if payload.items.is_empty() {
-            return Err(AppError::ValidationError {
-                field: "items".to_string(),
-                message: "items cannot be empty".to_string(),
-            });
+            return Err(validation("items", "items cannot be empty"));
         }
-        for item_payload in &payload.items {
-            if item_payload.bundle_quantity <= 0.0 {
-                return Err(AppError::ValidationError {
-                    field: "bundle_quantity".to_string(),
-                    message: format!(
-                        "Sale quantity must be positive, got {}",
-                        item_payload.bundle_quantity
-                    ),
-                });
-            }
-            if let Some(rate) = item_payload.unit_price {
-                if rate < 0.0 {
-                    return Err(AppError::ValidationError {
-                        field: "unit_price".to_string(),
-                        message: "unit_price cannot be negative".to_string(),
-                    });
-                }
-            }
+        check_date("transaction_date", &payload.transaction_date)?;
+        if !payload.paid_amount.is_finite() || payload.paid_amount < 0.0 {
+            return Err(validation("paid_amount", "paid_amount must be a non-negative number"));
         }
-        if payload.paid_amount < 0.0 {
-            return Err(AppError::ValidationError {
-                field: "paid_amount".to_string(),
-                message: "paid_amount cannot be negative".to_string(),
-            });
+        for line in &payload.items {
+            if !line.bundle_quantity.is_finite() || line.bundle_quantity <= 0.0 {
+                return Err(validation(
+                    "bundle_quantity",
+                    format!("Sale quantity must be positive, got {}", line.bundle_quantity),
+                ));
+            }
+            if !line.unit_price.is_finite() || line.unit_price < 0.0 {
+                return Err(validation("unit_price", "unit_price must be a non-negative number"));
+            }
         }
 
         let mut tx = self.uow.begin_transaction()?;
-        // Assigned inside the write transaction (never client-supplied): the IMMEDIATE lock makes
-        // MAX + 1 race-free.
-        let sale_code = tx.sales().get_next_transaction_code()?;
-        let mut total_amount = 0.0;
-        let mut resolved_lines = Vec::new();
-        for item_payload in &payload.items {
-            // LLD §6.7: `unit_price` is the rate per selected bundle (or per base unit
-            // when no bundle). line_total = bundle_quantity * rate.
-            let item = tx.items().find_by_id(item_payload.item_id)?.ok_or_else(|| {
-                AppError::NotFound {
-                    entity: "Item".to_string(),
-                    id: item_payload.item_id.to_string(),
-                }
-            })?;
-            let (multiplier, rate, pack_label) = if let Some(bundle_id) = item_payload.bundle_id {
-                let bundle = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| {
-                    AppError::NotFound {
-                        entity: "ItemBundle".to_string(),
-                        id: bundle_id.to_string(),
-                    }
-                })?;
-                if bundle.item_id != item.id {
-                    return Err(AppError::ValidationError {
-                        field: "bundle_id".to_string(),
-                        message: format!("Bundle {bundle_id} does not belong to item {}", item.id),
-                    });
-                }
-                let rate = item_payload.unit_price.unwrap_or_else(|| {
-                    bundle
-                        .default_bundle_price
-                        .unwrap_or(item.default_sale_price * bundle.units_per_bundle)
-                });
-                (bundle.units_per_bundle, rate, Some(bundle.bundle_name.clone()))
-            } else {
-                (
-                    1.0,
-                    item_payload.unit_price.unwrap_or(item.default_sale_price),
-                    None,
-                )
-            };
-            let base_qty = item_payload.bundle_quantity * multiplier;
-            let line_total = round2(item_payload.bundle_quantity * rate);
-            let unit_price = line_total / base_qty;
-            total_amount += line_total;
-            resolved_lines.push((item_payload.clone(), item.name.clone(), pack_label, base_qty, unit_price, line_total));
-        }
 
+        // 2. Party must be an active customer.
         let party_name = match payload.party_id {
-            Some(pid) => tx.parties().find_by_id(pid)?.map(|p| p.name),
+            Some(pid) => {
+                let party = tx.parties().find_by_id(pid)?.ok_or_else(|| AppError::NotFound {
+                    entity: "Party".to_string(),
+                    id: pid.to_string(),
+                })?;
+                if party.party_type != PartyType::Customer {
+                    return Err(validation("party_id", "Sales need a customer party"));
+                }
+                if !party.is_active {
+                    return Err(validation("party_id", "Customer is inactive"));
+                }
+                Some(party.name)
+            }
             None => None,
         };
+
+        // 3. Line resolution: active item, bundle belongs to the item, snapshots, round2 totals.
+        let mut resolved = Vec::with_capacity(payload.items.len());
+        let mut required: BTreeMap<i64, f64> = BTreeMap::new();
+        let mut total_amount = 0.0;
+        for line in &payload.items {
+            let item = tx.items().find_by_id(line.item_id)?.ok_or_else(|| AppError::NotFound {
+                entity: "Item".to_string(),
+                id: line.item_id.to_string(),
+            })?;
+            if !item.is_active {
+                return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+            }
+            let (multiplier, pack_label) = match line.bundle_id {
+                Some(bundle_id) => {
+                    let bundle = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| AppError::NotFound {
+                        entity: "ItemBundle".to_string(),
+                        id: bundle_id.to_string(),
+                    })?;
+                    if bundle.item_id != item.id {
+                        return Err(validation(
+                            "bundle_id",
+                            format!("Bundle {bundle_id} does not belong to item {}", item.id),
+                        ));
+                    }
+                    if !(bundle.units_per_bundle > 0.0) {
+                        return Err(validation("bundle_id", "Bundle multiplier must be positive"));
+                    }
+                    (bundle.units_per_bundle, Some(bundle.bundle_name))
+                }
+                None => (1.0, None),
+            };
+            let base_qty = line.bundle_quantity * multiplier;
+            let line_total = round2(line.bundle_quantity * line.unit_price);
+            total_amount += line_total;
+            *required.entry(item.id).or_insert(0.0) += base_qty;
+            resolved.push((item, pack_label, line.bundle_quantity, base_qty, line_total));
+        }
+        let total_amount = round2(total_amount);
+
+        // 4. Aggregated stock check across all lines of the same item (DD-10).
+        let requirements: Vec<(i64, f64)> = required.into_iter().collect();
+        self.inventory_service.validate_stock_availability(&mut *tx, &requirements)?;
+
+        // 5. Payment status cross-check (DD-02).
+        let paid = round2(payload.paid_amount);
+        let (upfront, change) = match payload.payment_status {
+            PaymentStatus::Paid => {
+                if total_amount <= MONEY_EPS {
+                    if paid > MONEY_EPS {
+                        return Err(validation("paid_amount", "A zero-value bill takes no payment"));
+                    }
+                    (0.0, 0.0)
+                } else if paid + MONEY_EPS < total_amount {
+                    return Err(validation("paid_amount", "PAID needs paid_amount >= total"));
+                } else {
+                    (total_amount, round2((paid - total_amount).max(0.0)))
+                }
+            }
+            PaymentStatus::Partial => {
+                if !(paid > MONEY_EPS && paid + MONEY_EPS < total_amount) {
+                    return Err(validation("paid_amount", "PARTIAL needs 0 < paid_amount < total"));
+                }
+                (paid, 0.0)
+            }
+            PaymentStatus::Unpaid => {
+                if paid > MONEY_EPS {
+                    return Err(validation("paid_amount", "UNPAID needs paid_amount = 0"));
+                }
+                if total_amount <= MONEY_EPS {
+                    return Err(validation("payment_status", "A zero-value bill must be PAID"));
+                }
+                (0.0, 0.0)
+            }
+        };
+        if payload.payment_status != PaymentStatus::Paid && payload.party_id.is_none() {
+            return Err(validation("party_id", "customer required for credit"));
+        }
+
+        // 6. Header: paid 0 / balance = total; the ledger fixes both in step 8.
+        let sale_code = tx.sales().get_next_transaction_code()?;
         let sale_tx = SaleTransaction {
             id: 0,
             transaction_code: sale_code.clone(),
-            transaction_date: payload.transaction_date,
+            transaction_date: payload.transaction_date.clone(),
             party_id: payload.party_id,
             party_name,
             payment_mode: payload.payment_mode.clone(),
-            payment_status: PaymentStatus::Unpaid,
+            payment_status: if total_amount <= MONEY_EPS { PaymentStatus::Paid } else { PaymentStatus::Unpaid },
             total_amount,
             paid_amount: 0.0,
             balance_due: total_amount,
@@ -139,57 +181,57 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             created_at: chrono::Utc::now().to_rfc3339(),
         };
         let sale_id = tx.sales().create_transaction(&sale_tx)?;
-        for (line_payload, item_name, pack_label, base_qty, unit_price, line_total) in resolved_lines {
+
+        // 7. Lines and stock depletion.
+        for (item, pack_label, pack_quantity, base_qty, line_total) in resolved {
             let sale_item = SaleItem {
                 id: 0,
                 sale_transaction_id: sale_id,
-                item_id: line_payload.item_id,
-                item_name,
+                item_id: item.id,
+                item_name: item.name.clone(),
                 pack_label,
-                pack_quantity: line_payload.bundle_quantity,
+                pack_quantity,
                 quantity: base_qty,
-                unit_price,
+                unit_price: line_total / base_qty,
                 total_amount: line_total,
             };
             let sale_item_id = tx.sales().create_sale_item(&sale_item)?;
             self.inventory_service
-                .deplete_stock_for_sale(&mut *tx, sale_item_id, line_payload.item_id, base_qty)?;
+                .deplete_stock_for_sale(&mut *tx, sale_item_id, item.id, base_qty)?;
         }
 
-        let upfront_payment = payload.paid_amount.min(total_amount);
-        if upfront_payment > 0.0 {
-            let payment_payload = RecordPaymentPayload {
-                party_id: payload.party_id,
-                transaction_type: TransactionType::Sale,
-                kind: PaymentKind::Upfront,
-                transaction_id: sale_id,
-                settlement_date: sale_tx.transaction_date.clone(),
-                amount_paid: upfront_payment,
-                payment_mode: payload.payment_mode,
-                notes: Some("Upfront Counter Payment".to_string()),
-            };
-            self.payment_service
-                .record_payment(&mut *tx, payment_payload)?;
+        // 8. Upfront cash goes through the one ledger path.
+        if upfront > 0.0 {
+            self.payment_service.record_payment(
+                &mut *tx,
+                RecordPaymentPayload {
+                    party_id: payload.party_id,
+                    transaction_type: TransactionType::Sale,
+                    kind: PaymentKind::Upfront,
+                    return_id: None,
+                    transaction_id: sale_id,
+                    settlement_date: payload.transaction_date,
+                    amount_paid: upfront,
+                    payment_mode: payload.payment_mode,
+                    notes: Some("Upfront Counter Payment".to_string()),
+                },
+            )?;
         }
+
+        // 9. Respond from the header as the ledger left it.
+        let header = tx.sales().find_transaction_by_id(sale_id)?.ok_or_else(|| AppError::NotFound {
+            entity: "SaleTransaction".to_string(),
+            id: sale_id.to_string(),
+        })?;
         tx.commit()?;
-        let balance_due = (total_amount - payload.paid_amount).max(0.0);
-        let change = (payload.paid_amount - total_amount).max(0.0);
-        let payment_status = if balance_due == 0.0 {
-            PaymentStatus::Paid
-        } else if payload.paid_amount > 0.0 {
-            PaymentStatus::Partial
-        } else {
-            PaymentStatus::Unpaid
-        };
         Ok(SaleSummaryResponse {
             sale_id,
             transaction_code: sale_code,
-            total_amount,
-            paid_amount: payload.paid_amount,
-            balance_due,
+            total_amount: header.total_amount,
+            paid_amount: header.paid_amount,
+            balance_due: header.balance_due,
             change_amount: change,
-            change_returned: change,
-            payment_status,
+            payment_status: header.payment_status,
         })
     }
 
@@ -247,9 +289,4 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             settlements,
         })
     }
-}
-
-/// Rounds a currency amount to 2 decimal places (paise precision).
-fn round2(v: f64) -> f64 {
-    (v * 100.0).round() / 100.0
 }

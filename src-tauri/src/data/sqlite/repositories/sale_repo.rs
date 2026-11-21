@@ -137,17 +137,6 @@ impl SaleRepository for SqliteSaleRepository {
         next_code(&self.conn, "sale_transactions", "transaction_code", &SALE_CODE)
     }
 
-    fn update_balance_due(&mut self, tx_id: i64, new_balance: f64, status: PaymentStatus) -> Result<(), AppError> {
-        let n = self.conn.execute(
-            "UPDATE sale_transactions SET paid_amount = paid_amount + MAX(balance_due - ?1, 0.0), balance_due = ?1, payment_status = ?2 WHERE id = ?3",
-            params![new_balance, enum_to_sql(&status)?, tx_id],
-        )?;
-        if n == 0 {
-            return Err(AppError::NotFound { entity: "SaleTransaction".to_string(), id: tx_id.to_string() });
-        }
-        Ok(())
-    }
-
     fn update_money_fields(
         &mut self,
         tx_id: i64,

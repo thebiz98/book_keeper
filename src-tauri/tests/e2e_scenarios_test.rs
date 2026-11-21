@@ -44,7 +44,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 1500.0,
+        supplier_invoice_ref: None, payment_status: PaymentStatus::Partial, paid_amount: 1500.0,
         notes: Some("Morning bulk delivery".to_string()),
         items: vec![CreatePurchaseItemPayload {
             item_id: 1,
@@ -68,13 +68,13 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
             transaction_date: "2026-11-20".to_string(),
             party_id: None,
             payment_mode: Some("CASH".to_string()),
-            paid_amount: 400.0,
+            payment_status: PaymentStatus::Paid, paid_amount: 400.0,
             notes: None,
             items: vec![CreateSaleItemPayload {
                 item_id: 1,
                 bundle_id: None,
                 bundle_quantity: 40.0,
-                unit_price: Some(10.0),
+                unit_price: 10.0,
             }],
         };
         sale_service.create_sale(sale_payload).unwrap();
@@ -92,6 +92,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
         item_id: 1,
         quantity: -5.0,
         reason: AdjustmentReason::Damaged,
+        unit_cost: None,
         notes: Some("Damaged in storage".to_string()),
     };
     inventory_service.create_adjustment(adj_payload).expect("negative adjustment");
@@ -142,13 +143,13 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: None,
-        paid_amount: 0.0,
+        payment_status: PaymentStatus::Unpaid, paid_amount: 0.0,
         notes: Some("Monthly school credit".to_string()),
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 20.0,
-            unit_price: Some(60.0),
+            unit_price: 60.0,
         }],
     };
     sale_service.create_sale(sale_payload).unwrap();
@@ -160,10 +161,11 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
 
     let settle_payload = SettlePaymentPayload {
         party_id: 1,
-        amount: 500.0,
+        transaction_type: TransactionType::Sale,
+        amount_paid: 500.0,
         settlement_date: "2026-11-23".to_string(),
         payment_mode: Some("CASH".to_string()),
-        specific_bill_id: None,
+        transaction_id: None,
         notes: Some("Installment payment".to_string()),
     };
     accounting_service.settle_bill_payment(settle_payload).unwrap();
@@ -207,13 +209,13 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 600.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 600.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: Some(300.0),
+            unit_price: 300.0,
         }],
     };
     sale_service.create_sale(sale_payload).unwrap();
@@ -317,13 +319,13 @@ fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
-        paid_amount: 100.0,
+        payment_status: PaymentStatus::Paid, paid_amount: 100.0,
         notes: None,
         items: vec![CreateSaleItemPayload {
             item_id: 42,
             bundle_id: None,
             bundle_quantity: 4.0,
-            unit_price: Some(25.0),
+            unit_price: 25.0,
         }],
     };
     let summary = sale_service.create_sale(sale_payload).expect("sale succeeds");

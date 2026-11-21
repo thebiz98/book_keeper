@@ -6,7 +6,8 @@ use crate::core::value_objects::PaymentStatus;
 pub struct CreateSalePayload {
     pub transaction_date: String,      // "YYYY-MM-DD"
     pub party_id: Option<i64>,         // Customer ID (required if UNPAID or PARTIAL)
-    pub paid_amount: f64,              // Upfront cash received
+    pub payment_status: PaymentStatus, // Paid, Partial, Unpaid; cross-checked against paid_amount (DD-02)
+    pub paid_amount: f64,              // Cash received (Paid: may exceed total; the excess is change)
     pub payment_mode: Option<String>,  // e.g. "CASH", "UPI"
     pub notes: Option<String>,
     pub items: Vec<CreateSaleItemPayload>,
@@ -15,9 +16,9 @@ pub struct CreateSalePayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateSaleItemPayload {
     pub item_id: i64,
-    pub bundle_id: Option<i64>, // Null if sold loose in base units
+    pub bundle_id: Option<i64>, // Write-time helper only (multiplier + label); not stored (DD-28)
     pub bundle_quantity: f64,   // Units entered in selected packaging
-    pub unit_price: Option<f64>, // Rate charged per selected bundle/unit (₹)
+    pub unit_price: f64,        // Rate charged per selected bundle/unit (₹); required
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -27,9 +28,7 @@ pub struct SaleSummaryResponse {
     pub total_amount: f64,
     pub paid_amount: f64,
     pub balance_due: f64,
-    pub change_amount: f64, // MAX(0, paid_amount - total_amount)
-    #[serde(default)]
-    pub change_returned: f64,
+    pub change_amount: f64, // MAX(0, tendered - total); not stored. paid_amount is the stored upfront.
     pub payment_status: PaymentStatus,
 }
 

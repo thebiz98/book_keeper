@@ -1,12 +1,50 @@
 use std::sync::Arc;
 use crate::core::dtos::{
-    PartyDueSummary, PartyLedgerView, RecordPaymentPayload, SettlePaymentPayload,
+    LedgerCashSummary, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
+    RecordPaymentPayload, SettlePaymentPayload, SettlementResult,
 };
 use crate::core::error::AppError;
-use crate::core::value_objects::{PartyType, PaymentKind, TransactionType};
-use crate::data::contracts::unit_of_work::UnitOfWork;
+use crate::core::money::{cash_direction, check_date, round2, CashDirection, MONEY_EPS};
+use crate::core::value_objects::{LotSource, PartyType, PaymentKind, TransactionType};
+use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::payment_service::PaymentService;
+
+fn validation(field: &str, message: impl Into<String>) -> AppError {
+    AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
+
+fn expected_party_type(tx_type: TransactionType) -> PartyType {
+    match tx_type {
+        TransactionType::Sale => PartyType::Customer,
+        TransactionType::Purchase => PartyType::Vendor,
+    }
+}
+
+/// Cash movement between `from` and `to` (inclusive), summed from the ledger by the DD-01 cash
+/// direction table. The one function behind the live cash drawer and the cash-flow report.
+pub fn ledger_cash_summary(
+    tx: &mut dyn TransactionContext,
+    from: &str,
+    to: &str,
+) -> Result<LedgerCashSummary, AppError> {
+    let mut s = LedgerCashSummary::default();
+    for (tx_type, kind, sum) in tx.settlements().sum_by_type_kind_between(from, to)? {
+        match (tx_type, kind) {
+            (TransactionType::Sale, PaymentKind::Upfront) => s.sale_upfront += sum,
+            (TransactionType::Sale, PaymentKind::Settlement) => s.sale_settlement += sum,
+            (TransactionType::Purchase, PaymentKind::RefundIn) => s.vendor_refund_in += sum,
+            (TransactionType::Purchase, PaymentKind::Upfront) => s.purchase_upfront += sum,
+            (TransactionType::Purchase, PaymentKind::Settlement) => s.purchase_settlement += sum,
+            (TransactionType::Sale, PaymentKind::RefundOut) => s.customer_refund_out += sum,
+            _ => debug_assert_eq!(cash_direction(tx_type, kind), CashDirection::None),
+        }
+    }
+    s.cash_in = round2(s.sale_upfront + s.sale_settlement + s.vendor_refund_in);
+    s.cash_out = round2(s.purchase_upfront + s.purchase_settlement + s.customer_refund_out);
+    s.net = round2(s.cash_in - s.cash_out);
+    Ok(s)
+}
 
 #[derive(Clone)]
 pub struct AccountingServiceImpl<
@@ -25,142 +63,397 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
         }
     }
 
-    pub fn calculate_live_cash_drawer(&self, today: &str) -> Result<f64, AppError> {
+    /// Cash movement from the ledger over `[from, to]` (see [`ledger_cash_summary`]).
+    pub fn ledger_cash_summary(&self, from: &str, to: &str) -> Result<LedgerCashSummary, AppError> {
         let mut tx = self.uow.begin_read()?;
-        let mut drawer = 0.0;
+        ledger_cash_summary(&mut *tx, from, to)
+    }
 
-        let settlements = tx.settlements().list_all()?;
-        let mut settled_sales: std::collections::HashSet<i64> = std::collections::HashSet::new();
-        let mut settled_purchases: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    /// Net cash in the drawer for one day, derived purely from the ledger (DD-01).
+    pub fn calculate_live_cash_drawer(&self, today: &str) -> Result<f64, AppError> {
+        Ok(self.ledger_cash_summary(today, today)?.net)
+    }
 
-        // 1. Accumulate all date-matched settlements that used physical CASH
-        for s in settlements {
-            if s.settlement_date == today {
-                let is_cash = s.payment_mode.as_deref() == Some("CASH");
-                if !is_cash {
-                    continue;
-                }
+    /// Open bills `(id, balance_due)` of a party, oldest first (`transaction_date, id`).
+    fn open_bills(
+        tx: &mut dyn TransactionContext,
+        tx_type: TransactionType,
+        party_id: i64,
+    ) -> Result<Vec<(i64, f64)>, AppError> {
+        Ok(match tx_type {
+            TransactionType::Sale => tx
+                .sales()
+                .list_open_for_party(party_id)?
+                .into_iter()
+                .map(|b| (b.id, b.balance_due))
+                .collect(),
+            TransactionType::Purchase => tx
+                .purchases()
+                .list_open_for_party(party_id)?
+                .into_iter()
+                .map(|b| (b.id, b.balance_due))
+                .collect(),
+        })
+    }
 
-                // TODO(F3, DD-01/DD-13): the drawer should be derived purely from the ledger.
-                match (s.transaction_type, s.kind) {
-                    (TransactionType::Sale, PaymentKind::Upfront | PaymentKind::Settlement) => {
-                        drawer += s.amount_paid;
-                        if let Some(id) = s.transaction_id {
-                            settled_sales.insert(id);
-                        }
-                    }
-                    (TransactionType::Purchase, PaymentKind::Upfront | PaymentKind::Settlement) => {
-                        drawer -= s.amount_paid;
-                        if let Some(id) = s.transaction_id {
-                            settled_purchases.insert(id);
-                        }
-                    }
-                    (_, PaymentKind::RefundOut) => drawer -= s.amount_paid,
-                    (_, PaymentKind::RefundIn) => drawer += s.amount_paid,
-                    (_, PaymentKind::ReturnCredit) => {} // non-cash
-                }
+    /// Spreads `amount` over the party's open bills oldest-first as ledger rows of `kind`.
+    /// Stops when the amount is exhausted or the bills run out. Returns the amount applied.
+    #[allow(clippy::too_many_arguments)]
+    fn apply_fifo(
+        &self,
+        tx: &mut dyn TransactionContext,
+        tx_type: TransactionType,
+        party_id: i64,
+        amount: f64,
+        kind: PaymentKind,
+        return_id: Option<i64>,
+        date: &str,
+        payment_mode: Option<String>,
+        notes: Option<String>,
+        result: &mut SettlementResult,
+    ) -> Result<f64, AppError> {
+        let mut remaining = round2(amount);
+        let mut applied = 0.0;
+        for (bill_id, balance) in Self::open_bills(tx, tx_type, party_id)? {
+            if remaining <= MONEY_EPS {
+                break;
             }
+            let apply = round2(balance.min(remaining));
+            if apply <= 0.0 {
+                continue;
+            }
+            let id = self.payment_service.record_payment(
+                tx,
+                RecordPaymentPayload {
+                    party_id: Some(party_id),
+                    transaction_type: tx_type,
+                    transaction_id: bill_id,
+                    kind,
+                    return_id,
+                    settlement_date: date.to_string(),
+                    amount_paid: apply,
+                    payment_mode: payment_mode.clone(),
+                    notes: notes.clone(),
+                },
+            )?;
+            result.settlement_ids.push(id);
+            result.bills_touched.push(bill_id);
+            remaining = round2(remaining - apply);
+            applied = round2(applied + apply);
         }
-
-        // 2. Include upfront cash from sales on `today` ONLY if no settlement was logged for them
-        let sales = tx.sales().list_sales(
-            Some(today),
-            Some(today),
-            None,
-            None,
-            0,
-            1000,
-        )?;
-        for s in sales {
-            if s.payment_mode.as_deref() == Some("CASH") && s.paid_amount > 0.0
-                && !settled_sales.contains(&s.id) {
-                    drawer += s.paid_amount;
-                }
-        }
-
-        // 3. Deduct upfront cash from purchases on `today` ONLY if no settlement was logged for them
-        let purchases = tx.purchases().list_purchases(
-            Some(today),
-            Some(today),
-            None,
-            None,
-            0,
-            1000,
-        )?;
-        for p in purchases {
-            if p.payment_mode.as_deref() == Some("CASH") && p.paid_amount > 0.0
-                && !settled_purchases.contains(&p.id) {
-                    drawer -= p.paid_amount;
-                }
-        }
-
-        Ok(drawer)
+        Ok(applied)
     }
 }
 
 impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceImpl<P, U> {
     fn get_party_dues_summary(&self, party_type: PartyType) -> Result<Vec<PartyDueSummary>, AppError> {
         let mut tx = self.uow.begin_read()?;
-        tx.parties().get_party_due_summary(party_type)
+        // Header balances are ledger-consistent (PaymentService is their only writer); the
+        // repository sums them per party for the right side (sales / PURCHASE-source purchases).
+        let mut rows = tx.parties().get_party_due_summary(party_type)?;
+        for r in &mut rows {
+            r.total_due = round2(r.total_due);
+        }
+        Ok(rows)
     }
 
-    fn settle_bill_payment(&self, payload: SettlePaymentPayload) -> Result<(), AppError> {
+    fn settle_bill_payment(&self, payload: SettlePaymentPayload) -> Result<SettlementResult, AppError> {
+        if !payload.amount_paid.is_finite() {
+            return Err(validation("amount_paid", "Settlement amount must be a finite number"));
+        }
+        let amount = round2(payload.amount_paid);
+        if amount <= 0.0 {
+            return Err(validation("amount_paid", "Settlement amount must be positive"));
+        }
+        check_date("settlement_date", &payload.settlement_date)?;
+
+        let tx_type = payload.transaction_type;
         let mut tx = self.uow.begin_transaction()?;
-        if let Some(sale_id) = payload.specific_bill_id {
-            let payment_payload = RecordPaymentPayload {
-                party_id: Some(payload.party_id),
-                transaction_type: TransactionType::Sale,
-                kind: PaymentKind::Settlement,
-                transaction_id: sale_id,
-                settlement_date: payload.settlement_date,
-                amount_paid: payload.amount,
-                payment_mode: payload.payment_mode,
-                notes: payload.notes,
-            };
-            self.payment_service
-                .record_payment(&mut *tx, payment_payload)?;
-        } else {
-            let unpaid = tx.sales().list_open_for_party(payload.party_id)?;
-            let mut remaining = payload.amount;
-            for bill in unpaid {
-                if remaining <= 0.0 {
-                    break;
-                }
-                let settle_amount = bill.balance_due.min(remaining);
-                let payment_payload = RecordPaymentPayload {
-                    party_id: Some(payload.party_id),
-                    transaction_type: TransactionType::Sale,
-                    kind: PaymentKind::Settlement,
-                    transaction_id: bill.id,
-                    settlement_date: payload.settlement_date.clone(),
-                    amount_paid: settle_amount,
-                    payment_mode: payload.payment_mode.clone(),
-                    notes: payload.notes.clone(),
-                };
-                self.payment_service
-                    .record_payment(&mut *tx, payment_payload)?;
-                remaining -= settle_amount;
+
+        let party = tx.parties().find_by_id(payload.party_id)?.ok_or_else(|| AppError::NotFound {
+            entity: "Party".to_string(),
+            id: payload.party_id.to_string(),
+        })?;
+        if party.party_type != expected_party_type(tx_type) {
+            return Err(validation(
+                "transaction_type",
+                format!("{:?} settlements need a {:?} party", tx_type, expected_party_type(tx_type)),
+            ));
+        }
+
+        let mut result = SettlementResult { settlement_ids: Vec::new(), bills_touched: Vec::new() };
+        if let Some(bill_id) = payload.transaction_id {
+            // Specific bill: must belong to the party (and be a PURCHASE-source bill for purchases).
+            let owner = match tx_type {
+                TransactionType::Sale => tx.sales().find_transaction_by_id(bill_id)?.map(|b| b.party_id),
+                TransactionType::Purchase => tx
+                    .purchases()
+                    .find_transaction_by_id(bill_id)?
+                    .filter(|b| b.source == LotSource::Purchase)
+                    .map(|b| b.party_id),
             }
+            .ok_or_else(|| AppError::NotFound {
+                entity: match tx_type {
+                    TransactionType::Sale => "SaleTransaction",
+                    TransactionType::Purchase => "PurchaseTransaction",
+                }
+                .to_string(),
+                id: bill_id.to_string(),
+            })?;
+            if owner != Some(payload.party_id) {
+                return Err(validation("transaction_id", "Bill does not belong to this party"));
+            }
+            let id = self.payment_service.record_payment(
+                &mut *tx,
+                RecordPaymentPayload {
+                    party_id: Some(payload.party_id),
+                    transaction_type: tx_type,
+                    transaction_id: bill_id,
+                    kind: PaymentKind::Settlement,
+                    return_id: None,
+                    settlement_date: payload.settlement_date,
+                    amount_paid: amount,
+                    payment_mode: payload.payment_mode,
+                    notes: payload.notes,
+                },
+            )?;
+            result.settlement_ids.push(id);
+            result.bills_touched.push(bill_id);
+        } else {
+            // Lump sum: reject over-settlement before any write.
+            let outstanding: f64 = Self::open_bills(&mut *tx, tx_type, payload.party_id)?
+                .iter()
+                .map(|(_, b)| b)
+                .sum();
+            if amount > round2(outstanding) + MONEY_EPS {
+                return Err(validation("amount_paid", "Settlement amount exceeds total outstanding dues"));
+            }
+            self.apply_fifo(
+                &mut *tx,
+                tx_type,
+                payload.party_id,
+                amount,
+                PaymentKind::Settlement,
+                None,
+                &payload.settlement_date,
+                payload.payment_mode,
+                payload.notes,
+                &mut result,
+            )?;
         }
         tx.commit()?;
-        Ok(())
+        Ok(result)
+    }
+
+    fn apply_return_credit(
+        &self,
+        uow: &mut dyn TransactionContext,
+        tx_type: TransactionType,
+        party_id: Option<i64>,
+        target_bill: Option<i64>,
+        return_id: i64,
+        date: &str,
+        value: f64,
+    ) -> Result<f64, AppError> {
+        if !value.is_finite() {
+            return Err(validation("value", "Return value must be a finite number"));
+        }
+        let value = round2(value);
+        if value <= 0.0 {
+            return Ok(0.0);
+        }
+        if let Some(bill_id) = target_bill {
+            // A linked return only ever touches its own bill (DD-03).
+            let (balance, bill_party) = match tx_type {
+                TransactionType::Sale => uow
+                    .sales()
+                    .find_transaction_by_id(bill_id)?
+                    .map(|b| (b.balance_due, b.party_id)),
+                TransactionType::Purchase => uow
+                    .purchases()
+                    .find_transaction_by_id(bill_id)?
+                    .map(|b| (b.balance_due, b.party_id)),
+            }
+            .ok_or_else(|| AppError::NotFound {
+                entity: match tx_type {
+                    TransactionType::Sale => "SaleTransaction",
+                    TransactionType::Purchase => "PurchaseTransaction",
+                }
+                .to_string(),
+                id: bill_id.to_string(),
+            })?;
+            let credit = round2(value.min(balance));
+            if credit > 0.0 {
+                self.payment_service.record_payment(
+                    uow,
+                    RecordPaymentPayload {
+                        party_id: party_id.or(bill_party),
+                        transaction_type: tx_type,
+                        transaction_id: bill_id,
+                        kind: PaymentKind::ReturnCredit,
+                        return_id: Some(return_id),
+                        settlement_date: date.to_string(),
+                        amount_paid: credit,
+                        payment_mode: None,
+                        notes: Some("Return credit".to_string()),
+                    },
+                )?;
+            }
+            return Ok(credit.max(0.0));
+        }
+        match party_id {
+            Some(p) => {
+                let mut sink = SettlementResult { settlement_ids: Vec::new(), bills_touched: Vec::new() };
+                self.apply_fifo(
+                    uow,
+                    tx_type,
+                    p,
+                    value,
+                    PaymentKind::ReturnCredit,
+                    Some(return_id),
+                    date,
+                    None,
+                    Some("Return credit".to_string()),
+                    &mut sink,
+                )
+            }
+            None => Ok(0.0),
+        }
     }
 
     fn get_party_ledger(&self, party_id: i64) -> Result<PartyLedgerView, AppError> {
         let mut tx = self.uow.begin_read()?;
-        let party = tx
-            .parties()
-            .find_by_id(party_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Party".to_string(),
-                id: party_id.to_string(),
-            })?;
-        let sales = tx.sales().list_open_for_party(party_id)?;
-        let total_due: f64 = sales.iter().map(|s| s.balance_due).sum();
-        Ok(PartyLedgerView {
-            party,
-            current_balance: total_due,
-            entries: Vec::new(),
-        })
+        let party = tx.parties().find_by_id(party_id)?.ok_or_else(|| AppError::NotFound {
+            entity: "Party".to_string(),
+            id: party_id.to_string(),
+        })?;
+        let tx_type = match party.party_type {
+            PartyType::Customer => TransactionType::Sale,
+            PartyType::Vendor => TransactionType::Purchase,
+        };
+
+        // Bills, both sides through the same shape (vendors: PURCHASE-source only).
+        let bills: Vec<PartyLedgerBill> = match tx_type {
+            TransactionType::Sale => tx
+                .sales()
+                .list_sales(None, None, None, Some(party_id), 0, usize::MAX)?
+                .into_iter()
+                .map(|b| PartyLedgerBill {
+                    id: b.id,
+                    transaction_type: tx_type,
+                    transaction_code: b.transaction_code,
+                    transaction_date: b.transaction_date,
+                    total_amount: b.total_amount,
+                    paid_amount: b.paid_amount,
+                    balance_due: b.balance_due,
+                    payment_status: b.payment_status,
+                })
+                .collect(),
+            TransactionType::Purchase => tx
+                .purchases()
+                .list_purchases(None, None, None, Some(party_id), 0, usize::MAX)?
+                .into_iter()
+                .map(|b| PartyLedgerBill {
+                    id: b.id,
+                    transaction_type: tx_type,
+                    transaction_code: b.transaction_code,
+                    transaction_date: b.transaction_date,
+                    total_amount: b.total_amount,
+                    paid_amount: b.paid_amount,
+                    balance_due: b.balance_due,
+                    payment_status: b.payment_status,
+                })
+                .collect(),
+        };
+        let payments = tx.settlements().list_by_party(party_id)?;
+        let returns: Vec<_> = tx
+            .returns()
+            .list_returns(None, 0, usize::MAX)?
+            .into_iter()
+            .filter(|r| r.party_id == Some(party_id))
+            .collect();
+
+        let code_of_bill = |id: i64| {
+            bills.iter().find(|b| b.id == id).map(|b| b.transaction_code.clone())
+        };
+        let code_of_return = |id: i64| {
+            returns.iter().find(|r| r.id == id).map(|r| r.return_code.clone())
+        };
+
+        // (date, rank, id) orders bills before returns before payments on the same day.
+        let mut raw: Vec<(String, u8, i64, PartyLedgerEntry)> = Vec::new();
+        for b in &bills {
+            raw.push((
+                b.transaction_date.clone(),
+                0,
+                b.id,
+                PartyLedgerEntry {
+                    date: b.transaction_date.clone(),
+                    transaction_code: b.transaction_code.clone(),
+                    transaction_type: format!("{:?}", b.transaction_type).to_uppercase(),
+                    debit: b.total_amount,
+                    credit: 0.0,
+                    running_balance: 0.0,
+                    notes: None,
+                },
+            ));
+        }
+        for r in &returns {
+            raw.push((
+                r.return_date.clone(),
+                1,
+                r.id,
+                PartyLedgerEntry {
+                    date: r.return_date.clone(),
+                    transaction_code: r.return_code.clone(),
+                    transaction_type: "RETURN".to_string(),
+                    debit: 0.0,
+                    credit: 0.0,
+                    running_balance: 0.0,
+                    notes: r.reason.clone().or_else(|| r.notes.clone()),
+                },
+            ));
+        }
+        for p in &payments {
+            let credit = matches!(
+                p.kind,
+                PaymentKind::Upfront | PaymentKind::Settlement | PaymentKind::ReturnCredit
+            );
+            let code = p
+                .transaction_id
+                .and_then(code_of_bill)
+                .or_else(|| p.return_id.and_then(code_of_return))
+                .unwrap_or_default();
+            raw.push((
+                p.settlement_date.clone(),
+                2,
+                p.id,
+                PartyLedgerEntry {
+                    date: p.settlement_date.clone(),
+                    transaction_code: code,
+                    transaction_type: serde_json::to_value(p.kind)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_default(),
+                    debit: 0.0,
+                    credit: if credit { p.amount_paid } else { 0.0 },
+                    running_balance: 0.0,
+                    notes: p.notes.clone(),
+                },
+            ));
+        }
+        raw.sort_by(|a, b| (&a.0, a.1, a.2).cmp(&(&b.0, b.1, b.2)));
+        let mut running = 0.0;
+        let entries: Vec<PartyLedgerEntry> = raw
+            .into_iter()
+            .map(|(_, _, _, mut e)| {
+                running = round2(running + e.debit - e.credit);
+                e.running_balance = running;
+                e
+            })
+            .collect();
+
+        let current_balance = round2(bills.iter().map(|b| b.balance_due).sum());
+        Ok(PartyLedgerView { party, current_balance, bills, payments, returns, entries })
     }
 }

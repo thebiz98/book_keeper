@@ -94,14 +94,17 @@ fn lot_header_sequences_are_independent_per_source() {
 #[test]
 fn consecutive_returns_get_distinct_ret_codes_for_both_sides() {
     let db = TestDb::new();
+    use book_keeper::services::contracts::inventory_service::InventoryService;
     let inventory = InventoryServiceImpl::new(FifoStrategy, db.clone());
-    let returns = ReturnServiceImpl::new(inventory, PaymentServiceImpl, db.clone());
+    let returns = ReturnServiceImpl::new(inventory.clone(), PaymentServiceImpl, db.clone());
 
     let mut tx = db.begin_transaction().unwrap();
     tx.items().create(&create_test_item(7, "Calculator", None, None, 5.0, 500.0)).unwrap();
     tx.purchases().create_transaction(&create_test_purchase_tx(7, "PUR-1001", None, 1500.0, 1500.0, "2026-11-20")).unwrap();
     tx.purchases().create_purchase_item(&create_test_purchase_lot(70, 7, 7, None, 5.0, 5.0, 300.0, 5.0)).unwrap();
     seed_sale_line(&mut *tx, 15, 7);
+    // Sold 2 of the line: returns (even scrap, DD-05) reverse real allocations.
+    inventory.deplete_stock_for_sale(&mut *tx, 15, 7, 2.0).unwrap();
     tx.commit().unwrap();
 
     let customer = |qty: f64| CustomerReturnPayload {
@@ -357,17 +360,17 @@ fn money_fields_ledger_and_returned_quantity_helpers() {
 fn adjustment_and_opening_creators_use_their_own_sequences() {
     use book_keeper::services::contracts::{inventory_service::InventoryService, item_service::ItemService};
     let db = TestDb::new();
-    let items = ItemServiceImpl::new(db.clone(), std::sync::Arc::new(db.indexer()));
+    let inventory = InventoryServiceImpl::new(FifoStrategy, db.clone());
+    let items = ItemServiceImpl::new(db.clone(), std::sync::Arc::new(db.indexer()), inventory.clone());
     let mk = |name: &str| CreateItemPayload {
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0, initial_stock: Some(8.0), initial_cost: Some(6.0), bundles: None,
     };
     let a = items.create_item(mk("Pen")).unwrap();
     items.create_item(mk("Pencil")).unwrap();
-    let inventory = InventoryServiceImpl::new(FifoStrategy, db.clone());
     let adj = |qty: f64| StockAdjustmentPayload {
         adjustment_date: "2026-11-21".into(), item_id: a, quantity: qty,
-        reason: AdjustmentReason::CountCorrection, notes: None,
+        reason: AdjustmentReason::CountCorrection, unit_cost: None, notes: None,
     };
     inventory.create_adjustment(adj(2.0)).unwrap();
     inventory.create_adjustment(adj(-1.0)).unwrap(); // no header

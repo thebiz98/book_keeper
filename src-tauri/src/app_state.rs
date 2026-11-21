@@ -49,7 +49,24 @@ pub fn resolve_db_path(app_data_dir: &std::path::Path, override_path: Option<&st
     }
 }
 
+/// Maps the configured allocation method to its strategy (DD-08). The only place a concrete
+/// strategy is named; services receive it as `Arc<dyn InventoryAllocationStrategy>`.
+pub fn strategy_for(method: crate::core::value_objects::AllocationMethod) -> Arc<dyn InventoryAllocationStrategy> {
+    use crate::core::value_objects::AllocationMethod;
+    match method {
+        AllocationMethod::Fifo => Arc::new(crate::services::r#impl::FifoStrategy),
+    }
+}
+
 pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, crate::core::error::AppError> {
+    build_sqlite_app_state_with_strategy(db_path, strategy_for(crate::core::value_objects::AllocationMethod::default()))
+}
+
+/// Same wiring with an explicit allocation strategy (tests inject alternative strategies here).
+pub fn build_sqlite_app_state_with_strategy(
+    db_path: &std::path::Path,
+    allocation_strategy: Arc<dyn InventoryAllocationStrategy>,
+) -> Result<AppState, crate::core::error::AppError> {
     use crate::core::error::AppError;
     use crate::data::sqlite::connection::create_pool;
     use crate::data::sqlite::fts_indexer::SqliteFts5SearchIndexer;
@@ -67,12 +84,14 @@ pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, cra
 
     let uow: Arc<dyn UnitOfWork> = Arc::new(SqliteUnitOfWork::new(pool.clone()));
     let search_indexer: Arc<dyn ItemSearchIndexer> = Arc::new(SqliteFts5SearchIndexer::new(pool));
-    let allocation_strategy: Arc<dyn InventoryAllocationStrategy> = Arc::new(FifoStrategy);
 
-    let item_service: Arc<dyn ItemService> =
-        Arc::new(ItemServiceImpl::new(uow.clone(), search_indexer.clone()));
+    // Inventory first: ItemService and ItemImportService delegate opening stock to it, and it
+    // reads items through the unit of work, so the graph is acyclic.
     let inventory_service: Arc<dyn InventoryService> =
-        Arc::new(InventoryServiceImpl::new(FifoStrategy, uow.clone()));
+        Arc::new(InventoryServiceImpl::new(allocation_strategy.clone(), uow.clone()));
+    let item_service: Arc<dyn ItemService> = Arc::new(ItemServiceImpl::new(
+        uow.clone(), search_indexer.clone(), inventory_service.clone(),
+    ));
     let payment_service: Arc<dyn PaymentService> = Arc::new(PaymentServiceImpl::new());
     let accounting_service: Arc<dyn AccountingService> =
         Arc::new(AccountingServiceImpl::new(payment_service.clone(), uow.clone()));
@@ -88,10 +107,23 @@ pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, cra
     let report_service: Arc<dyn ReportService> = Arc::new(ReportServiceImpl::new(uow.clone()));
     let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone()));
     let item_import_service: Arc<dyn ItemImportService> =
-        Arc::new(ItemImportServiceImpl::new(uow.clone()));
+        Arc::new(ItemImportServiceImpl::new(uow.clone(), inventory_service.clone()));
     let backup_service: Arc<dyn BackupService> = Arc::new(BackupServiceImpl::new(db_path));
     let shop_setting_service: Arc<dyn ShopSettingService> =
         Arc::new(ShopSettingServiceImpl::new(uow.clone()));
+
+    // Startup invariant (NFR-02 cache audit): current_stock == Σ lot remainders. A mismatch is
+    // repaired from the lots (the source of truth) and logged, never silently ignored.
+    {
+        let mut tx = uow.begin_transaction()?;
+        let repaired = inventory_service.repair_stock_cache(&mut *tx)?;
+        tx.commit()?;
+        for (item_id, cached, lots_sum) in repaired {
+            eprintln!(
+                "[inventory] stock cache repaired: item #{item_id} cached {cached} -> {lots_sum} (sum of lots)"
+            );
+        }
+    }
 
     Ok(AppState {
         unit_of_work: uow,

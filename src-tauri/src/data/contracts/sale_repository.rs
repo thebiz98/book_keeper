@@ -13,13 +13,6 @@ pub trait SaleRepository {
     /// Next `SAL-` code. Call inside the write transaction that inserts the sale; from a read
     /// context it is a display preview.
     fn get_next_transaction_code(&self) -> Result<String, AppError>;
-    /// Legacy balance writer; F3/T3 deletes it in favour of [`Self::update_money_fields`].
-    fn update_balance_due(
-        &mut self,
-        tx_id: i64,
-        new_balance: f64,
-        status: PaymentStatus,
-    ) -> Result<(), AppError>;
     /// Writes the cached money fields only; called exclusively by `PaymentService`.
     fn update_money_fields(
         &mut self,

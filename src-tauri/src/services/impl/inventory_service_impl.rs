@@ -1,15 +1,18 @@
 use std::sync::Arc;
-use crate::core::dtos::{PaginatedList, StockAdjustmentPayload};
-use crate::core::entities::{PurchaseItem, PurchaseTransaction, StockAdjustment};
-use crate::core::constants::LOW_STOCK_THRESHOLD;
+use crate::core::constants::EPS;
+use crate::core::dtos::{ItemLot, PaginatedList, StockAdjustmentPayload, StockAdjustmentResult};
+use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction, StockAdjustment, StockOutflowAllocation};
 use crate::core::error::AppError;
-use crate::core::value_objects::{LotSource, PaymentStatus};
+use crate::core::value_objects::{LotSource, OutflowSourceType, PaymentStatus};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_allocation_strategy::{
     DepletionResult, InventoryAllocationStrategy,
 };
 use crate::services::contracts::inventory_service::InventoryService;
 
+/// Sole writer of the stock cache and lot/allocation state. The strategy is injected (DD-08);
+/// this type never names a concrete strategy. It reads items through `uow.items()` rather than
+/// depending on `ItemService`, so `ItemService -> InventoryService` (initial stock) cannot cycle.
 #[derive(Clone)]
 pub struct InventoryServiceImpl<S: InventoryAllocationStrategy, U: UnitOfWork = Arc<dyn UnitOfWork>> {
     pub strategy: S,
@@ -22,15 +25,48 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
     }
 }
 
+fn validation(field: &str, message: impl Into<String>) -> AppError {
+    AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
+
+fn require_positive(field: &str, qty: f64) -> Result<(), AppError> {
+    if !qty.is_finite() || qty <= 0.0 {
+        return Err(validation(field, format!("Quantity must be a finite number greater than zero (got {qty})")));
+    }
+    Ok(())
+}
+
+fn require_date(field: &str, date: &str) -> Result<(), AppError> {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|_| ())
+        .map_err(|_| validation(field, format!("'{date}' is not a valid YYYY-MM-DD date")))
+}
+
+fn find_item(uow: &mut dyn TransactionContext, item_id: i64) -> Result<Item, AppError> {
+    uow.items()
+        .find_by_id(item_id)?
+        .ok_or_else(|| AppError::not_found("Item", item_id.to_string()))
+}
+
 impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for InventoryServiceImpl<S, U> {
     fn validate_stock_availability(
         &self,
         uow: &mut dyn TransactionContext,
-        item_id: i64,
-        required_base_qty: f64,
+        requirements: &[(i64, f64)],
     ) -> Result<(), AppError> {
-        self.strategy
-            .validate_stock_availability(uow, item_id, required_base_qty)
+        // Defensive merge: callers should pre-sum, but two lines of one item must be checked together.
+        let mut merged: Vec<(i64, f64)> = Vec::new();
+        for &(item_id, qty) in requirements {
+            require_positive("quantity", qty)?;
+            match merged.iter_mut().find(|(id, _)| *id == item_id) {
+                Some(entry) => entry.1 += qty,
+                None => merged.push((item_id, qty)),
+            }
+        }
+        for (item_id, qty) in merged {
+            self.strategy.validate_stock_availability(uow, item_id, qty)?;
+        }
+        Ok(())
     }
 
     fn deplete_stock_for_sale(
@@ -43,17 +79,8 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         let depletion = self
             .strategy
             .deplete_lots_for_sale(uow, sale_item_id, item_id, required_base_qty)?;
-        let item = uow
-            .items()
-            .find_by_id(item_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Item".to_string(),
-                id: item_id.to_string(),
-            })?;
-        let new_stock = (item.current_stock - required_base_qty).max(0.0);
-        let is_low_stock = new_stock < LOW_STOCK_THRESHOLD;
-        uow.items()
-            .update_stock_cache(item_id, new_stock, is_low_stock)?;
+        let moved: f64 = depletion.allocations.iter().map(|a| a.quantity_depleted).sum();
+        uow.items().apply_stock_delta(item_id, -moved)?;
         Ok(depletion)
     }
 
@@ -62,156 +89,222 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         uow: &mut dyn TransactionContext,
         purchase_item: &PurchaseItem,
     ) -> Result<(), AppError> {
+        require_positive("quantity", purchase_item.quantity)?;
+        find_item(uow, purchase_item.item_id)?;
         uow.purchases().create_purchase_item(purchase_item)?;
-        let item = uow
-            .items()
-            .find_by_id(purchase_item.item_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Item".to_string(),
-                id: purchase_item.item_id.to_string(),
-            })?;
-        let new_stock = item.current_stock + purchase_item.quantity;
-        let is_low_stock = new_stock < LOW_STOCK_THRESHOLD;
         uow.items()
-            .update_stock_cache(item.id, new_stock, is_low_stock)?;
+            .apply_stock_delta(purchase_item.item_id, purchase_item.remaining_quantity)?;
         Ok(())
     }
 
-    fn restore_stock_for_return(
+    fn reverse_sale_line(
         &self,
         uow: &mut dyn TransactionContext,
         sale_item_id: i64,
         item_id: i64,
-        quantity_to_restore: f64,
-    ) -> Result<(), AppError> {
-        self.strategy
-            .restore_lots_for_return(uow, sale_item_id, quantity_to_restore)?;
-        let item = uow
-            .items()
-            .find_by_id(item_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Item".to_string(),
-                id: item_id.to_string(),
-            })?;
-        let new_stock = item.current_stock + quantity_to_restore;
-        let is_low_stock = new_stock < LOW_STOCK_THRESHOLD;
-        uow.items()
-            .update_stock_cache(item.id, new_stock, is_low_stock)?;
-        Ok(())
+        quantity: f64,
+        restock: bool,
+    ) -> Result<f64, AppError> {
+        let result = self
+            .strategy
+            .reverse_sale_allocations(uow, sale_item_id, quantity, restock)?;
+        if result.restocked_quantity > 0.0 {
+            uow.items().apply_stock_delta(item_id, result.restocked_quantity)?;
+        }
+        Ok(result.reversed_cost)
+    }
+
+    fn create_source_lot(
+        &self,
+        uow: &mut dyn TransactionContext,
+        source: LotSource,
+        date: &str,
+        item_id: i64,
+        quantity: f64,
+        unit_cost: Option<f64>,
+        notes: Option<String>,
+    ) -> Result<i64, AppError> {
+        if source == LotSource::Purchase {
+            return Err(validation("source", "Purchase lots are created by PurchaseService, not as source lots"));
+        }
+        require_positive("quantity", quantity)?;
+        require_date("date", date)?;
+        let item = find_item(uow, item_id)?;
+        let cost = match unit_cost {
+            Some(c) => c,
+            None => uow.purchases().get_latest_lot_cost(item_id)?.ok_or_else(|| {
+                validation("unit_cost", "unit cost required: item has no prior lot")
+            })?,
+        };
+        if !cost.is_finite() || cost < 0.0 {
+            return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {cost})")));
+        }
+
+        // DD-07: non-PURCHASE lot headers are not supplier bills (total 0, no party, PAID, no ledger).
+        let header = PurchaseTransaction {
+            id: 0,
+            transaction_code: uow.purchases().get_next_transaction_code(source)?,
+            source,
+            supplier_invoice_ref: None,
+            transaction_date: date.to_string(),
+            party_id: None,
+            party_name: None,
+            payment_mode: None,
+            payment_status: PaymentStatus::Paid,
+            total_amount: 0.0,
+            paid_amount: 0.0,
+            balance_due: 0.0,
+            notes,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        let header_id = uow.purchases().create_transaction(&header)?;
+        let lot = PurchaseItem {
+            id: 0,
+            purchase_transaction_id: header_id,
+            item_id,
+            item_name: item.name,
+            pack_label: None,
+            pack_quantity: quantity,
+            quantity,
+            unit_cost: cost,
+            total_amount: quantity * cost,
+            remaining_quantity: quantity,
+        };
+        let lot_id = uow.purchases().create_purchase_item(&lot)?;
+        uow.items().apply_stock_delta(item_id, quantity)?;
+        Ok(lot_id)
+    }
+
+    fn issue_stock_outflow(
+        &self,
+        uow: &mut dyn TransactionContext,
+        source_type: OutflowSourceType,
+        source_id: i64,
+        item_id: i64,
+        quantity: f64,
+    ) -> Result<f64, AppError> {
+        let out = self
+            .strategy
+            .deplete_lots_for_outflow(uow, source_type, source_id, item_id, quantity)?;
+        let moved: f64 = out.allocations.iter().map(|a| a.quantity_depleted).sum();
+        uow.items().apply_stock_delta(item_id, -moved)?;
+        Ok(out.total_cost)
     }
 
     fn remove_stock_for_vendor_return(
         &self,
         uow: &mut dyn TransactionContext,
+        return_id: i64,
         item_id: i64,
         purchase_item_id: Option<i64>,
         quantity: f64,
-    ) -> Result<(), AppError> {
-        let item = uow
-            .items()
-            .find_by_id(item_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Item".to_string(),
-                id: item_id.to_string(),
-            })?;
-        if item.current_stock < quantity {
-            return Err(AppError::InsufficientStockError {
-                item_id,
-                item_name: item.name.clone(),
-                required: quantity,
-                available: item.current_stock,
-            });
+    ) -> Result<f64, AppError> {
+        require_positive("quantity", quantity)?;
+        let Some(lot_id) = purchase_item_id else {
+            return self.issue_stock_outflow(uow, OutflowSourceType::VendorReturn, return_id, item_id, quantity);
+        };
+
+        // A named lot is the user's choice, not a strategy concern (LLD 6.2 boundary note).
+        let lot = uow
+            .purchases()
+            .find_purchase_item_by_id(lot_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+        if lot.item_id != item_id {
+            return Err(validation("purchase_item_id", format!("Lot #{lot_id} does not belong to item #{item_id}")));
         }
-        if let Some(lot_id) = purchase_item_id {
-            let lots = uow.purchases().get_active_lots_for_item(item_id)?;
-            if let Some(lot) = lots.iter().find(|l| l.id == lot_id) {
-                let new_rem = (lot.remaining_quantity - quantity).max(0.0);
-                uow.purchases().update_remaining_quantity(lot_id, new_rem)?;
-            }
+        let header = uow
+            .purchases()
+            .find_transaction_by_id(lot.purchase_transaction_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseTransaction", lot.purchase_transaction_id.to_string()))?;
+        if header.source != LotSource::Purchase {
+            return Err(validation("purchase_item_id", format!("Lot #{lot_id} is not a purchase lot and cannot be returned to a vendor")));
         }
-        let new_stock = item.current_stock - quantity;
-        let is_low_stock = new_stock < LOW_STOCK_THRESHOLD;
-        uow.items()
-            .update_stock_cache(item_id, new_stock, is_low_stock)?;
-        Ok(())
+        if quantity > lot.remaining_quantity + EPS {
+            return Err(validation(
+                "quantity",
+                format!("Return quantity {quantity} exceeds the {} remaining in lot #{lot_id}", lot.remaining_quantity),
+            ));
+        }
+        let take = quantity.min(lot.remaining_quantity);
+        uow.purchases()
+            .update_remaining_quantity(lot_id, lot.remaining_quantity - take)?;
+        uow.outflow_allocations().create_allocation(&StockOutflowAllocation {
+            id: 0,
+            source_type: OutflowSourceType::VendorReturn,
+            source_id: return_id,
+            purchase_item_id: lot_id,
+            quantity_depleted: take,
+            unit_cost: lot.unit_cost,
+        })?;
+        uow.items().apply_stock_delta(item_id, -take)?;
+        Ok(take * lot.unit_cost)
     }
 
-    fn create_adjustment(&self, payload: StockAdjustmentPayload) -> Result<i64, AppError> {
+    fn create_adjustment(
+        &self,
+        payload: StockAdjustmentPayload,
+    ) -> Result<StockAdjustmentResult, AppError> {
+        if !payload.quantity.is_finite() || payload.quantity == 0.0 {
+            return Err(validation("quantity", "Adjustment quantity must be finite and non-zero"));
+        }
+        require_date("adjustment_date", &payload.adjustment_date)?;
+        if let Some(c) = payload.unit_cost {
+            if !c.is_finite() || c < 0.0 {
+                return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {c})")));
+            }
+        }
+
         let mut tx = self.uow.begin_transaction()?;
-        let item = tx
-            .items()
-            .find_by_id(payload.item_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Item".to_string(),
-                id: payload.item_id.to_string(),
-            })?;
-        // Positive adjustments create a lot at the latest lot cost (DD-07/DD-12).
-        // TODO(F3, DD-12): accept a user-supplied unit_cost and reject when no cost is derivable.
-        let lot_cost = if payload.quantity > 0.0 {
-            let latest_cost = tx.purchases().get_latest_lot_cost(payload.item_id)?;
-            Some(latest_cost.unwrap_or(item.default_sale_price * 0.7))
-        } else {
-            None
-        };
-        let adj = StockAdjustment {
+        let item = find_item(&mut *tx, payload.item_id)?;
+        if !item.is_active {
+            return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+        }
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let mut adj = StockAdjustment {
             id: 0,
             adjustment_date: payload.adjustment_date.clone(),
             item_id: payload.item_id,
             quantity: payload.quantity,
-            unit_cost: lot_cost,
+            unit_cost: None,
             reason: payload.reason,
-            notes: payload.notes,
-            created_at: chrono::Utc::now().to_rfc3339(),
+            notes: payload.notes.clone(),
+            created_at,
         };
-        let adj_id = tx.adjustments().create_adjustment(&adj)?;
 
-        if payload.quantity < 0.0 {
-            let write_off_qty = payload.quantity.abs();
-            self.strategy
-                .deplete_lots_for_adjustment(&mut *tx, adj_id, payload.item_id, write_off_qty)?;
-            let new_stock = (item.current_stock - write_off_qty).max(0.0);
-            let is_low = new_stock < LOW_STOCK_THRESHOLD;
-            tx.items().update_stock_cache(item.id, new_stock, is_low)?;
+        let loss_value = if payload.quantity < 0.0 {
+            let qty = -payload.quantity;
+            self.validate_stock_availability(&mut *tx, &[(payload.item_id, qty)])?;
+            let adj_id = tx.adjustments().create_adjustment(&adj)?;
+            adj.id = adj_id;
+            self.issue_stock_outflow(&mut *tx, OutflowSourceType::Adjustment, adj_id, payload.item_id, qty)?
         } else {
-            let unit_cost = lot_cost.unwrap_or(0.0);
-            // DD-07: non-PURCHASE lot headers are not supplier bills (total 0, no party, PAID).
-            let lot_code = tx.purchases().get_next_transaction_code(LotSource::Adjustment)?;
-            let synthetic_tx = PurchaseTransaction {
-                id: 0,
-                transaction_code: lot_code,
-                source: LotSource::Adjustment,
-                supplier_invoice_ref: None,
-                transaction_date: payload.adjustment_date,
-                party_id: None,
-                party_name: None,
-                payment_mode: None,
-                payment_status: PaymentStatus::Paid,
-                total_amount: 0.0,
-                paid_amount: 0.0,
-                balance_due: 0.0,
-                notes: Some("Synthetic Adjustment Lot".to_string()),
-                created_at: chrono::Utc::now().to_rfc3339(),
+            let cost = match payload.unit_cost {
+                Some(c) => c,
+                None => tx.purchases().get_latest_lot_cost(payload.item_id)?.ok_or_else(|| {
+                    validation("unit_cost", "unit cost required: item has no prior lot")
+                })?,
             };
-            let synth_tx_id = tx.purchases().create_transaction(&synthetic_tx)?;
-            let synth_lot = PurchaseItem {
-                id: 0,
-                purchase_transaction_id: synth_tx_id,
-                item_id: payload.item_id,
-                item_name: item.name.clone(),
-                pack_label: None,
-                pack_quantity: payload.quantity,
-                quantity: payload.quantity,
-                unit_cost,
-                total_amount: payload.quantity * unit_cost,
-                remaining_quantity: payload.quantity,
-            };
-            tx.purchases().create_purchase_item(&synth_lot)?;
-            let new_stock = item.current_stock + payload.quantity;
-            let is_low = new_stock < LOW_STOCK_THRESHOLD;
-            tx.items().update_stock_cache(item.id, new_stock, is_low)?;
-        }
+            adj.unit_cost = Some(cost);
+            let adj_id = tx.adjustments().create_adjustment(&adj)?;
+            adj.id = adj_id;
+            self.create_source_lot(
+                &mut *tx,
+                LotSource::Adjustment,
+                &payload.adjustment_date,
+                payload.item_id,
+                payload.quantity,
+                Some(cost),
+                Some(format!("Stock adjustment #{adj_id}: {:?}", payload.reason)),
+            )?;
+            0.0
+        };
         tx.commit()?;
-        Ok(adj_id)
+        Ok(StockAdjustmentResult { adjustment_id: adj.id, loss_value })
+    }
+
+    fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        tx.purchases().list_lots_for_item(item_id)
     }
 
     fn list_adjustments(
@@ -225,5 +318,28 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             .adjustments()
             .list_adjustments(item_id, page.saturating_sub(1) * limit, limit)?;
         Ok(PaginatedList::new(items, total, page, limit))
+    }
+
+    fn verify_stock_cache(
+        &self,
+        uow: &mut dyn TransactionContext,
+    ) -> Result<Vec<(i64, f64, f64)>, AppError> {
+        Ok(uow
+            .items()
+            .stock_cache_audit()?
+            .into_iter()
+            .filter(|(_, cached, lots)| (cached - lots).abs() > EPS)
+            .collect())
+    }
+
+    fn repair_stock_cache(
+        &self,
+        uow: &mut dyn TransactionContext,
+    ) -> Result<Vec<(i64, f64, f64)>, AppError> {
+        let bad = self.verify_stock_cache(uow)?;
+        for &(item_id, cached, lots) in &bad {
+            uow.items().apply_stock_delta(item_id, lots - cached)?;
+        }
+        Ok(bad)
     }
 }

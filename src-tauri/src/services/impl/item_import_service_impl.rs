@@ -1,25 +1,28 @@
 use std::sync::Arc;
 use calamine::{open_workbook_auto, Data, Reader};
 use crate::core::dtos::ImportSummary;
-use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
-use crate::core::constants::LOW_STOCK_THRESHOLD;
+use crate::core::entities::Item;
 use crate::core::error::AppError;
-use crate::core::value_objects::{LotSource, PaymentStatus};
+use crate::core::value_objects::LotSource;
 use crate::data::contracts::unit_of_work::UnitOfWork;
+use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::item_import_service::ItemImportService;
 
+/// Import of items. Opening stock goes through `InventoryService::create_source_lot(Opening, ..)`
+/// (sole stock writer). The rest of the import is rewritten in T9.
 #[derive(Clone)]
-pub struct ItemImportServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>> {
+pub struct ItemImportServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>, I: InventoryService = Arc<dyn InventoryService>> {
     pub uow: U,
+    pub inventory_service: I,
 }
 
-impl<U: UnitOfWork> ItemImportServiceImpl<U> {
-    pub fn new(uow: U) -> Self {
-        Self { uow }
+impl<U: UnitOfWork, I: InventoryService> ItemImportServiceImpl<U, I> {
+    pub fn new(uow: U, inventory_service: I) -> Self {
+        Self { uow, inventory_service }
     }
 }
 
-impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
+impl<U: UnitOfWork, I: InventoryService> ItemImportService for ItemImportServiceImpl<U, I> {
     fn import_items_from_excel(&self, input_path: &str) -> Result<ImportSummary, AppError> {
         let mut workbook = open_workbook_auto(input_path)
             .map_err(|e| AppError::IoError(format!("Failed to open workbook: {}", e)))?;
@@ -45,6 +48,7 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
         let mut col_mrp = None;
         let mut col_price = None;
         let mut col_stock = None;
+        let mut col_cost = None;
 
         for (idx, cell) in header_row.iter().enumerate() {
             let title = match cell {
@@ -59,6 +63,8 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
                 col_barcode = Some(idx);
             } else if title.contains("unit") {
                 col_unit = Some(idx);
+            } else if title.contains("cost") {
+                col_cost = Some(idx);
             } else if title == "mrp" {
                 col_mrp = Some(idx);
             } else if title.contains("price") || title.contains("rate") {
@@ -79,8 +85,7 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
         let mut errors = Vec::new();
 
         let mut tx = self.uow.begin_transaction()?;
-        // All opening stock of one import goes under a single OPENING header (DD-07), created lazily.
-        let mut opening_header_id: Option<i64> = None;
+        let import_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
         let parse_f64 = |cell: Option<&Data>| -> Option<f64> {
             match cell {
@@ -129,6 +134,7 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
             let current_stock = col_stock
                 .and_then(|idx| parse_f64(row.get(idx)))
                 .unwrap_or(0.0);
+            let unit_cost = col_cost.and_then(|idx| parse_f64(row.get(idx)));
 
             // Check if item already exists by barcode or name
             let existing_item = if let Some(ref bc) = barcode {
@@ -151,6 +157,16 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
                     continue;
                 }
             } else {
+                // Opening stock needs a cost (no sale-price fallback, DD-12). Reject the row before
+                // anything is written so the shared transaction stays consistent.
+                if current_stock > 0.0 && unit_cost.map_or(true, |c| !c.is_finite() || c < 0.0) {
+                    errors.push(format!(
+                        "Row {}: opening stock {} needs a cost column value",
+                        total_rows, current_stock
+                    ));
+                    skipped_count += 1;
+                    continue;
+                }
                 let item = Item {
                     id: 0,
                     name,
@@ -159,8 +175,9 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
                     base_unit,
                     mrp,
                     default_sale_price,
-                    current_stock,
-                    is_low_stock: current_stock < LOW_STOCK_THRESHOLD,
+                    // The cache starts at 0; the opening lot raises it.
+                    current_stock: 0.0,
+                    is_low_stock: true,
                     is_active: true,
                     created_at: chrono::Utc::now().to_rfc3339(),
                     updated_at: chrono::Utc::now().to_rfc3339(),
@@ -168,47 +185,15 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
                 match tx.items().create(&item) {
                     Ok(item_id) => {
                         if current_stock > 0.0 {
-                            let unit_cost = default_sale_price * 0.7;
-                            let header_id = match opening_header_id {
-                                Some(id) => Some(id),
-                                None => {
-                                    let code = tx.purchases().get_next_transaction_code(LotSource::Opening)?;
-                                    let header = PurchaseTransaction {
-                                        id: 0,
-                                        transaction_code: code,
-                                        source: LotSource::Opening,
-                                        supplier_invoice_ref: None,
-                                        transaction_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-                                        party_id: None,
-                                        party_name: None,
-                                        payment_mode: None,
-                                        payment_status: PaymentStatus::Paid,
-                                        total_amount: 0.0,
-                                        paid_amount: 0.0,
-                                        balance_due: 0.0,
-                                        notes: Some("Excel Inward Import".to_string()),
-                                        created_at: chrono::Utc::now().to_rfc3339(),
-                                    };
-                                    let id = tx.purchases().create_transaction(&header)?;
-                                    opening_header_id = Some(id);
-                                    Some(id)
-                                }
-                            };
-                            if let Some(p_id) = header_id {
-                                let lot = PurchaseItem {
-                                    id: 0,
-                                    purchase_transaction_id: p_id,
-                                    item_id,
-                                    item_name: item.name.clone(),
-                                    pack_label: None,
-                                    pack_quantity: current_stock,
-                                    quantity: current_stock,
-                                    unit_cost,
-                                    total_amount: current_stock * unit_cost,
-                                    remaining_quantity: current_stock,
-                                };
-                                let _ = tx.purchases().create_purchase_item(&lot);
-                            }
+                            self.inventory_service.create_source_lot(
+                                &mut *tx,
+                                LotSource::Opening,
+                                &import_date,
+                                item_id,
+                                current_stock,
+                                unit_cost,
+                                Some("Excel Inward Import".to_string()),
+                            )?;
                         }
                     }
                     Err(e) => {

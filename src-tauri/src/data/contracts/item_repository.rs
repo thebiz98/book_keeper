@@ -28,4 +28,7 @@ pub trait ItemRepository {
     /// [`crate::core::LOW_STOCK_THRESHOLD`] in one statement. No clamping: the cache must equal
     /// the sum of lot remainders (F3/T4 routes every stock write through this).
     fn apply_stock_delta(&mut self, item_id: i64, delta: f64) -> Result<(), AppError>;
+    /// One row per item: `(item_id, cached current_stock, Σ lot remaining_quantity)`. Read-only;
+    /// the stock-cache invariant check compares the two (NFR-02 cache audit).
+    fn stock_cache_audit(&self) -> Result<Vec<(i64, f64, f64)>, AppError>;
 }
