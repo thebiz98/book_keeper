@@ -1,0 +1,118 @@
+/**
+ * Store-specific DTOs and Zustand state contracts for Book Keeper.
+ * Compatible with docs/book_keeper_UI_LLD.md and src/__tests__/modules.d.ts.
+ */
+
+export interface CartItem {
+  itemId: number;
+  name: string;
+  barcode?: string;
+  baseUnit: string;
+  unitsPerBundle: number;
+  bundleId?: number;
+  bundleName?: string;
+  quantity: number;
+  baseQuantity: number;
+  rate: number;
+  mrp?: number;
+  lineTotal: number;
+  availableStock: number;
+  defaultSalePrice?: number;
+}
+
+export interface ItemInput {
+  id: number;
+  name: string;
+  barcode?: string;
+  base_unit?: string;
+  baseUnit?: string;
+  default_sale_price?: number;
+  defaultSalePrice?: number;
+  mrp?: number;
+  current_stock?: number;
+  currentStock?: number;
+}
+
+export interface BundleInput {
+  id?: number;
+  name: string;
+  bundle_name?: string;
+  bundleName?: string;
+  multiplier: number;
+  units_per_bundle?: number;
+  unitsPerBundle?: number;
+  sale_price?: number;
+  salePrice?: number;
+  mrp?: number;
+}
+
+export interface CustomerInput {
+  id: number;
+  name: string;
+  phone?: string;
+  balanceDue?: number;
+  balance_due?: number;
+}
+
+export type PaymentStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
+
+export interface CartState {
+  items: CartItem[];
+  subtotal: number;
+  totalBaseUnits: number;
+  totalItems: number;
+  selectedCustomer: CustomerInput | null;
+  paymentStatus: 'PAID' | 'PARTIAL' | 'UNPAID';
+  paidAmount: number;
+  balanceDue: number;
+
+  addItem: (item: ItemInput, quantity?: number, bundle?: BundleInput | null) => boolean;
+  updateQuantity: (itemId: number, quantity: number) => boolean;
+  setBundle: (itemId: number, bundle: BundleInput | null) => void;
+  updateRate: (itemId: number, rate: number) => void;
+  removeItem: (itemId: number) => void;
+  clearCart: () => void;
+  setCustomer: (customer: CustomerInput | null) => void;
+  setPaymentStatus: (status: 'PAID' | 'PARTIAL' | 'UNPAID', paidAmount?: number) => void;
+  setPaidAmount: (amount: number) => void;
+}
+
+export interface ShopProfile {
+  shopName: string;
+  phone?: string;
+  address?: string;
+  taxId?: string;
+}
+
+export interface CashDrawerFlow {
+  salesCash?: number;
+  customerDuesSettled?: number;
+  purchaseCash?: number;
+  vendorDuesSettled?: number;
+  refunds?: number;
+}
+
+export interface AppState {
+  activeRoute: string;
+  shopProfile: ShopProfile;
+  isDbConnected: boolean;
+  salesCash: number;
+  customerDuesSettled: number;
+  purchaseCash: number;
+  vendorDuesSettled: number;
+  refunds: number;
+  liveCashInDrawer: number;
+
+  setActiveRoute: (route: string) => void;
+  setShopProfile: (profile: Partial<ShopProfile>) => void;
+  setDbConnected: (connected: boolean) => void;
+  recordCashFlow: (flow: CashDrawerFlow) => void;
+  resetCashDrawer: () => void;
+  calculateCashDrawer: () => number;
+}
+
+export interface ThemeState {
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
+  setTheme: (theme: 'light' | 'dark') => void;
+}

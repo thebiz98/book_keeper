@@ -132,6 +132,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
       const item = catalog.items.find((i: any) => (i.currentStock ?? i.current_stock) > 10);
 
       expect(item).toBeDefined();
+      if (!item) throw new Error('seed item not found');
       const initialStock = item.currentStock ?? item.current_stock;
       const saleCode = await client.getNextSaleCode();
 
@@ -157,6 +158,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
       // Check that item stock was decremented
       const updatedCatalog = await client.getItemsCatalog({ limit: 100 });
       const updatedItem = updatedCatalog.items.find((i: any) => i.id === item.id);
+      if (!updatedItem) throw new Error('updated item not found');
       const newStock = updatedItem.currentStock ?? updatedItem.current_stock;
       expect(newStock).toBe(initialStock - 2);
     });
@@ -194,6 +196,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
 
       const updatedCatalog = await client.getItemsCatalog({ limit: 100 });
       const updatedItem = updatedCatalog.items.find((i: any) => i.id === item.id);
+      if (!updatedItem) throw new Error('updated item not found');
       expect(updatedItem.currentStock ?? updatedItem.current_stock).toBe(initialStock + 50);
     });
   });
