@@ -127,7 +127,6 @@ export const NewPurchasePage: React.FC = () => {
     setError(null);
 
     const payload: CreatePurchasePayload = {
-      transactionCode: purchaseCode,
       transactionDate: inwardDate,
       partyId: vendorId ?? null,
       notes: vendorInvoiceRef

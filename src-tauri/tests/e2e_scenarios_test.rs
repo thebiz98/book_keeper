@@ -22,7 +22,7 @@ use book_keeper::services::contracts::sale_service::SaleService;
 fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
     println!("=== EXECUTING SCENARIO S1: MORNING INWARD TO EVENING DRAWER AUDIT ===");
     let uow = TestDb::new();
-    let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
+    let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let purchase_service = PurchaseServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
@@ -41,7 +41,6 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
 
     // 2. Morning Inward Receipt: 500 Pencils @ ₹5/pc (Total = ₹2,500; Cash paid = ₹1,500; Credit = ₹1,000)
     let pur_payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-2001".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: Some("CASH".to_string()),
@@ -64,9 +63,8 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
     }
 
     // 3. Rapid Day Counter Billing: 10 sales totaling ₹4,000 (400 pcs depleted via FIFO @ ₹10)
-    for i in 1..=10 {
+    for _ in 1..=10 {
         let sale_payload = CreateSalePayload {
-            transaction_code: Some(format!("SAL-20{:02}", i)),
             transaction_date: "2026-11-20".to_string(),
             party_id: None,
             payment_mode: Some("CASH".to_string()),
@@ -120,7 +118,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
 fn test_scenario_s2_customer_credit_and_khata_cycle() {
     println!("=== EXECUTING SCENARIO S2: CUSTOMER CREDIT & KHATA CYCLE ===");
     let uow = TestDb::new();
-    let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
+    let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let accounting_service = AccountingServiceImpl::new(payment_service, uow.clone());
@@ -141,7 +139,6 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
     }
 
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-3001".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: None,
@@ -176,7 +173,7 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
 
     {
         let mut tx = uow.begin_transaction().unwrap();
-        let sale = tx.sales().find_by_id(1).unwrap().unwrap();
+        let sale = tx.sales().find_transaction_by_id(1).unwrap().unwrap();
         assert_eq!(sale.balance_due, 700.0);
         assert_eq!(sale.payment_status, PaymentStatus::Partial);
     }
@@ -189,7 +186,7 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
 fn test_scenario_s3_restockable_return_and_defective_replacement() {
     println!("=== EXECUTING SCENARIO S3: RESTOCKABLE RETURN & DEFECTIVE REPLACEMENT ===");
     let uow = TestDb::new();
-    let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
+    let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
@@ -207,7 +204,6 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
     }
 
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-4001".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -229,7 +225,6 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
     }
 
     let return_payload = CustomerReturnPayload {
-        return_code: Some("RET-4001".to_string()),
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(1),
@@ -251,12 +246,11 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
         let item = tx.items().find_by_id(1).unwrap().unwrap();
         assert_eq!(item.current_stock, 4.0);
 
-        let lots = tx.purchases().list_active_lots_for_item(1).unwrap();
+        let lots = tx.purchases().get_active_lots_for_item(1).unwrap();
         assert_eq!(lots[0].remaining_quantity, 4.0);
     }
 
     let swap_payload = CustomerReturnPayload {
-        return_code: Some("RET-4002".to_string()),
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(1),
@@ -288,7 +282,7 @@ fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
     println!("=== EXECUTING SCENARIO S4: BULK CATALOG & INSTANT BARCODE BILLING ===");
     let uow = TestDb::new();
     let indexer = uow.indexer();
-    let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
+    let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service, payment_service, uow.clone());
 
@@ -320,7 +314,6 @@ fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
     assert_eq!(matches[0].default_sale_price, 25.0);
 
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-5001".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),

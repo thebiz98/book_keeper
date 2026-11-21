@@ -12,9 +12,9 @@ use book_keeper::core::value_objects::*;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::purchase_service::PurchaseService;
 
-fn setup_purchase_service() -> (PurchaseServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>, TestDb) {
+fn setup_purchase_service() -> (PurchaseServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>, TestDb) {
     let uow = TestDb::new();
-    let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
+    let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let purchase_service = PurchaseServiceImpl::new(inventory_service, payment_service, uow.clone());
     (purchase_service, uow)
@@ -30,7 +30,6 @@ fn test_tc_pur_001_loose_base_unit_inward() {
     tx.commit().expect("commit");
 
     let payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-1001".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -47,12 +46,12 @@ fn test_tc_pur_001_loose_base_unit_inward() {
     assert!(pur_id > 0);
 
     let mut check_tx = uow.begin_transaction().expect("check tx");
-    let pur = check_tx.purchases().find_by_id(pur_id).expect("find").expect("exists");
+    let pur = check_tx.purchases().find_transaction_by_id(pur_id).expect("find").expect("exists");
     assert_eq!(pur.transaction_code, "PUR-1001");
     assert_eq!(pur.total_amount, 500.0);
     assert_eq!(pur.payment_status, PaymentStatus::Paid);
 
-    let lots = check_tx.purchases().list_active_lots_for_item(1).expect("lots");
+    let lots = check_tx.purchases().get_active_lots_for_item(1).expect("lots");
     assert_eq!(lots.len(), 1);
     assert_eq!(lots[0].remaining_quantity, 50.0);
     assert_eq!(lots[0].unit_cost, 10.0);
@@ -75,7 +74,6 @@ fn test_tc_pur_002_packaging_bundle_inward_normalization() {
     tx.commit().expect("commit");
 
     let payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-1002".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -92,7 +90,7 @@ fn test_tc_pur_002_packaging_bundle_inward_normalization() {
     assert!(pur_id > 0);
 
     let mut check_tx = uow.begin_transaction().expect("check tx");
-    let lots = check_tx.purchases().list_active_lots_for_item(2).expect("lots");
+    let lots = check_tx.purchases().get_active_lots_for_item(2).expect("lots");
     assert_eq!(lots.len(), 1);
     assert_eq!(lots[0].quantity, 1000.0);
     assert_eq!(lots[0].unit_cost, 8.0);
@@ -115,7 +113,6 @@ fn test_tc_pur_003_partial_payment_supplier_purchase() {
     tx.commit().expect("commit");
 
     let payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-1003".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(5),
         payment_mode: Some("BANK_TRANSFER".to_string()),
@@ -131,7 +128,7 @@ fn test_tc_pur_003_partial_payment_supplier_purchase() {
     let pur_id = purchase_service.create_purchase(payload).expect("partial purchase");
 
     let mut check_tx = uow.begin_transaction().expect("check tx");
-    let pur = check_tx.purchases().find_by_id(pur_id).expect("find").expect("exists");
+    let pur = check_tx.purchases().find_transaction_by_id(pur_id).expect("find").expect("exists");
     assert_eq!(pur.total_amount, 5000.0);
     assert_eq!(pur.paid_amount, 2000.0);
     assert_eq!(pur.balance_due, 3000.0);

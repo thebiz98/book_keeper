@@ -3,8 +3,10 @@
 //! ## Shared conventions (all repositories MUST follow these)
 //! * **Connection seam:** every repository struct holds a [`SqliteConn`] clone and is
 //!   constructed with `Repo::new(conn: SqliteConn)`. The owning
-//!   `SqliteTransactionContext` has already issued `BEGIN IMMEDIATE` on that connection,
-//!   so repositories never begin/commit transactions themselves.
+//!   `SqliteTransactionContext` has already begun the transaction on that connection
+//!   (`BEGIN IMMEDIATE` for `begin_transaction`, `BEGIN DEFERRED` + `query_only` for
+//!   `begin_read`), so repositories never begin/commit transactions themselves.
+//! * **Codes:** every human-readable code comes from [`code_gen::next_code`].
 //! * **Table names** (snake_case plural of the HLD ER entity):
 //!   `shop_settings`, `items`, `item_bundles`, `parties`, `purchase_transactions`,
 //!   `purchase_items`, `sale_transactions`, `sale_items`, `sale_stock_allocations`,
@@ -20,6 +22,7 @@
 //!   on this), otherwise lets SQLite assign one. Always return the row id.
 //! * Errors: `rusqlite::Error` converts into `AppError` via `?` (`From` impl exists).
 
+pub mod code_gen;
 pub mod connection;
 pub mod fts_indexer;
 pub mod migrations;

@@ -83,6 +83,10 @@ impl UnitOfWork for TestDb {
     fn begin_transaction(&self) -> Result<Box<dyn TransactionContext>, AppError> {
         self.uow.begin_transaction()
     }
+
+    fn begin_read(&self) -> Result<Box<dyn TransactionContext>, AppError> {
+        self.uow.begin_read()
+    }
 }
 
 // =========================================================================
@@ -90,12 +94,12 @@ impl UnitOfWork for TestDb {
 // =========================================================================
 
 pub use book_keeper::services::{
-    FifoStrategy, FifoStrategyImpl,
+    FifoStrategy,
     PaymentServiceImpl,
     BackupServiceImpl,
 };
 
-pub type InventoryServiceImpl<S = FifoStrategy> = book_keeper::services::InventoryServiceImpl<S, TestDb>;
+pub type InventoryServiceImpl<S> = book_keeper::services::InventoryServiceImpl<S, TestDb>;
 pub type SaleServiceImpl<I, P> = book_keeper::services::SaleServiceImpl<I, P, TestDb>;
 pub type PurchaseServiceImpl<I, P> = book_keeper::services::PurchaseServiceImpl<I, P, TestDb>;
 pub type ReturnServiceImpl<I, P> = book_keeper::services::ReturnServiceImpl<I, P, TestDb>;

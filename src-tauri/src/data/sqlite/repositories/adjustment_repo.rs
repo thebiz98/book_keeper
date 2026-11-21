@@ -43,26 +43,24 @@ impl AdjustmentRepository for SqliteAdjustmentRepository {
         Ok(self.conn.last_insert_rowid())
     }
 
-    fn create(&mut self, a: &StockAdjustment) -> Result<i64, AppError> {
-        self.create_adjustment(a)
-    }
-
     fn list_adjustments(
         &self,
         item_id: Option<i64>,
         offset: usize,
         limit: usize,
-    ) -> Result<Vec<StockAdjustment>, AppError> {
+    ) -> Result<(Vec<StockAdjustment>, usize), AppError> {
         let lim = limit.min(i64::MAX as usize) as i64;
         let off = offset.min(i64::MAX as usize) as i64;
+        let total: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM stock_adjustments WHERE (?1 IS NULL OR item_id = ?1)",
+            params![item_id],
+            |r| r.get(0),
+        )?;
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT {COLS} FROM stock_adjustments WHERE (?1 IS NULL OR item_id = ?1) ORDER BY id LIMIT ?2 OFFSET ?3"
+            "SELECT {COLS} FROM stock_adjustments WHERE (?1 IS NULL OR item_id = ?1) \
+             ORDER BY adjustment_date DESC, id DESC LIMIT ?2 OFFSET ?3"
         ))?;
         let rows = stmt.query_map(params![item_id, lim, off], map)?.collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
-
-    fn list_by_item_id(&self, item_id: i64) -> Result<Vec<StockAdjustment>, AppError> {
-        self.list_adjustments(Some(item_id), 0, usize::MAX)
+        Ok((rows, total as usize))
     }
 }

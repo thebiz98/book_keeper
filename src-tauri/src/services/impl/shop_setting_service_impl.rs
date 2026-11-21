@@ -17,7 +17,7 @@ impl<U: UnitOfWork> ShopSettingServiceImpl<U> {
 
 impl<U: UnitOfWork> ShopSettingService for ShopSettingServiceImpl<U> {
     fn get_settings(&self) -> Result<ShopSetting, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         tx.settings().get_shop_setting()
     }
 

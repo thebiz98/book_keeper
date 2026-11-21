@@ -8,7 +8,6 @@ mod common;
 use std::time::Instant;
 use common::fixtures::*;
 use common::{ReportServiceImpl, TestDb};
-use book_keeper::core::dtos::*;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::report_service::ReportService;
 
@@ -32,7 +31,7 @@ fn test_tc_rep_001_consolidated_dashboard_metrics_speed_and_integrity() {
     // Line on today's sale SAL-1001 so its COGS counts toward today's profit.
     tx.sales().create_sale_item(&create_test_sale_item(1, 1, 1, None, 40.0, 40.0, 37.5)).expect("create sale line");
     let alloc = create_test_allocation(1, 1, 1, 40.0, 5.0);
-    tx.allocations().create(&alloc).expect("create alloc");
+    tx.allocations().create_allocation(&alloc).expect("create alloc");
     tx.commit().expect("commit");
 
     // Action: Measure latency and fetch dashboard metrics
@@ -67,7 +66,7 @@ fn test_tc_rep_002_periodic_net_profit_calculation() {
     ensure_lot(&mut *tx, 1, 1);
     seed_sale_line(&mut *tx, 1, 1);
     let alloc = create_test_allocation(1, 1, 1, 720.0, 10.0);
-    tx.allocations().create(&alloc).expect("create alloc");
+    tx.allocations().create_allocation(&alloc).expect("create alloc");
     tx.commit().expect("commit");
 
     // Action: get_pnl_report("2026-11-01", "2026-11-30")

@@ -1,5 +1,5 @@
 //! SQLite implementation of `AllocationRepository`.
-use rusqlite::{params, Row};
+use rusqlite::{params, OptionalExtension, Row};
 
 use crate::core::entities::SaleStockAllocation;
 use crate::core::error::AppError;
@@ -47,10 +47,6 @@ impl AllocationRepository for SqliteAllocationRepository {
         Ok(self.conn.last_insert_rowid())
     }
 
-    fn create(&mut self, a: &SaleStockAllocation) -> Result<i64, AppError> {
-        self.create_allocation(a)
-    }
-
     fn find_by_sale_item_id(&self, sale_item_id: i64) -> Result<Vec<SaleStockAllocation>, AppError> {
         self.query(
             &format!("SELECT {COLS} FROM sale_stock_allocations WHERE sale_item_id = ?1 ORDER BY id"),
@@ -58,8 +54,43 @@ impl AllocationRepository for SqliteAllocationRepository {
         )
     }
 
-    fn list_by_sale_item_id(&self, sale_item_id: i64) -> Result<Vec<SaleStockAllocation>, AppError> {
-        self.find_by_sale_item_id(sale_item_id)
+    fn find_reversible_by_sale_item_id(&self, sale_item_id: i64) -> Result<Vec<SaleStockAllocation>, AppError> {
+        self.query(
+            &format!(
+                "SELECT {COLS} FROM sale_stock_allocations \
+                 WHERE sale_item_id = ?1 AND quantity_depleted > returned_quantity ORDER BY id DESC"
+            ),
+            params![sale_item_id],
+        )
+    }
+
+    fn update_returned_quantity(&mut self, allocation_id: i64, new_returned_qty: f64) -> Result<(), AppError> {
+        const EPS: f64 = 1e-9;
+        let depleted: f64 = self
+            .conn
+            .query_row(
+                "SELECT quantity_depleted FROM sale_stock_allocations WHERE id = ?1",
+                params![allocation_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::NotFound {
+                entity: "SaleStockAllocation".to_string(),
+                id: allocation_id.to_string(),
+            })?;
+        if !new_returned_qty.is_finite() || new_returned_qty < -EPS || new_returned_qty > depleted + EPS {
+            return Err(AppError::ValidationError {
+                field: "returned_quantity".to_string(),
+                message: format!(
+                    "Returned quantity {new_returned_qty} is outside 0..={depleted} for allocation #{allocation_id}"
+                ),
+            });
+        }
+        self.conn.execute(
+            "UPDATE sale_stock_allocations SET returned_quantity = ?1 WHERE id = ?2",
+            params![new_returned_qty.clamp(0.0, depleted), allocation_id],
+        )?;
+        Ok(())
     }
 
     fn list_all(&self) -> Result<Vec<SaleStockAllocation>, AppError> {

@@ -14,7 +14,7 @@ pub mod shop_setting_service_impl;
 
 pub use accounting_service_impl::AccountingServiceImpl;
 pub use backup_service_impl::BackupServiceImpl;
-pub use fifo_strategy::{FifoStrategy, FifoStrategyImpl};
+pub use fifo_strategy::FifoStrategy;
 pub use inventory_service_impl::InventoryServiceImpl;
 pub use item_import_service_impl::ItemImportServiceImpl;
 pub use item_service_impl::ItemServiceImpl;

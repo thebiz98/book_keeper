@@ -23,10 +23,10 @@ use book_keeper::services::contracts::sale_service::SaleService;
 
 struct ComboTestHarness {
     uow: TestDb,
-    inventory_service: InventoryServiceImpl<FifoStrategyImpl>,
-    purchase_service: PurchaseServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>,
-    sale_service: SaleServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>,
-    return_service: ReturnServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>,
+    inventory_service: InventoryServiceImpl<FifoStrategy>,
+    purchase_service: PurchaseServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>,
+    sale_service: SaleServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>,
+    return_service: ReturnServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>,
     accounting_service: AccountingServiceImpl<PaymentServiceImpl>,
     report_service: ReportServiceImpl,
     indexer: book_keeper::data::sqlite::fts_indexer::SqliteFts5SearchIndexer,
@@ -73,7 +73,6 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
 
     // Step 1: Inward 100 pcs @ ₹60/pc = ₹6,000
     let pur_payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-C1".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -90,7 +89,6 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
 
     // Step 2: Sale of 40 pcs @ ₹100/pc (leaves 60 pcs)
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-C1".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -107,7 +105,6 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
 
     // Step 3: Customer return of 10 restockable pcs (restores stock to 70 pcs)
     let ret_payload = CustomerReturnPayload {
-        return_code: Some("RET-C1".to_string()),
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(1),
@@ -163,7 +160,6 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
 
     // Step 1: Customer Credit Sale: 30 clipboards @ ₹50 = ₹1,500 due
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-C2".to_string()),
         transaction_date: "2026-11-01".to_string(),
         party_id: Some(1),
         payment_mode: None,
@@ -217,7 +213,6 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
 
     // Inward: 5 boxes of 10 = 50 base units @ ₹80/box (cost ₹8/pc)
     let pur_payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-C3".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -234,7 +229,6 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
 
     // Loose sale of 7 base units @ ₹15 = ₹105
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-C3".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -253,7 +247,7 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
     let item = check_tx.items().find_by_id(1).unwrap().unwrap();
     assert_eq!(item.current_stock, 43.0, "50 - 7 = 43");
 
-    let suggestions = check_tx.bundles().list_suggestions().unwrap();
+    let suggestions = check_tx.bundles().get_bundle_suggestions().unwrap();
     assert!(!suggestions.is_empty());
     assert_eq!(suggestions[0].bundle_name, "Box of 10");
 }
@@ -273,7 +267,6 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
 
     // Purchase 50 units @ ₹30 = ₹1,500 on credit
     let pur_payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-C5".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: None,
@@ -307,7 +300,6 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
 
     // Sell 20 units @ ₹50 = ₹1,000 revenue. COGS = 20 * 30 = ₹600. Net profit = ₹400.
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-C5".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -347,7 +339,6 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
 
     // Total = 2 * 300 = ₹600. Cash tendered upfront = ₹200. Balance due = ₹400.
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-C6".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: Some("CASH".to_string()),
@@ -409,7 +400,6 @@ fn test_tc_t3_cmb_007_barcode_scan_bundle_multiplier_tender() {
 
     // 2. Add 2 packs (10 base units) @ ₹45 = ₹90
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-C7".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -450,7 +440,6 @@ fn test_tc_t3_cmb_008_low_stock_alert_reorder_cleared() {
 
     // 2. Inward purchase of 25 units
     let pur_payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-REORD".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -488,7 +477,7 @@ fn test_tc_t3_cmb_009_shop_settings_profile_and_sale_summary() {
     };
     {
         let mut tx = harness.uow.begin_transaction().unwrap();
-        tx.settings().update(&setting).unwrap();
+        tx.settings().upsert_shop_setting(&setting).unwrap();
         let item = create_test_item(1, "Notebook Softcover", None, None, 20.0, 40.0);
         tx.items().create(&item).unwrap();
         let pur = create_test_purchase_tx(1, "PUR-C9", None, 400.0, 400.0, "2026-11-20");
@@ -499,7 +488,6 @@ fn test_tc_t3_cmb_009_shop_settings_profile_and_sale_summary() {
     }
 
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-C9".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -516,7 +504,7 @@ fn test_tc_t3_cmb_009_shop_settings_profile_and_sale_summary() {
     assert_eq!(summary.total_amount, 80.0);
 
     let mut check_tx = harness.uow.begin_transaction().unwrap();
-    let shop = check_tx.settings().get().unwrap().unwrap();
+    let shop = check_tx.settings().get_shop_setting().unwrap();
     assert_eq!(shop.shop_name, "Modern Book Mart");
     assert_eq!(shop.tax_id.as_deref(), Some("07ABCDE1234F1Z5"));
 }
@@ -538,7 +526,6 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
 
     // Sale 1 executed at initial price ₹60.0
     let sale1 = CreateSalePayload {
-        transaction_code: Some("SAL-HIST-1".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -570,7 +557,6 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
 
     // Sale 2 executed at new updated price ₹75.0
     let sale2 = CreateSalePayload {
-        transaction_code: Some("SAL-HIST-2".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),

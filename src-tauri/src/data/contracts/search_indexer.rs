@@ -8,30 +8,21 @@ pub trait ItemSearchIndexer: Send + Sync {
         self.search_with_limit(query, 50)
     }
 
-    fn search_with_limit(&self, query: &str, _limit: usize) -> Result<Vec<ItemSearchResult>, AppError> {
-        self.search(query)
-    }
+    fn search_with_limit(&self, query: &str, limit: usize) -> Result<Vec<ItemSearchResult>, AppError>;
 
-    /// Indexes or updates an item in the search catalog.
+    /// Indexes or updates an item, reading its bundles from storage.
     fn index_item(&self, item: &Item) -> Result<(), AppError> {
         self.index_item_with_bundles(item, &[])
     }
 
-    fn index_item_with_bundles(&self, item: &Item, _bundles: &[ItemBundle]) -> Result<(), AppError> {
-        self.index_item(item)
-    }
+    /// Indexes or updates an item; an empty `bundles` slice means "load them from storage".
+    fn index_item_with_bundles(&self, item: &Item, bundles: &[ItemBundle]) -> Result<(), AppError>;
 
-    /// Deletes an item from the search index (or marks it inactive).
+    /// Deletes an item from the search index.
     fn remove_item(&self, item_id: i64) -> Result<(), AppError>;
 
-    /// Rebuilds the search index entirely from storage (used in migration & bulk restore).
-    fn rebuild_index(&self) -> Result<(), AppError> {
-        self.rebuild_index_with_bundles(&[])
-    }
-
-    fn rebuild_index_with_bundles(&self, _items_with_bundles: &[(Item, Vec<ItemBundle>)]) -> Result<(), AppError> {
-        self.rebuild_index()
-    }
+    /// Rebuilds the search index entirely from storage (migration, bulk restore).
+    fn rebuild_index(&self) -> Result<(), AppError>;
 }
 
 impl<T: ItemSearchIndexer + ?Sized> ItemSearchIndexer for std::sync::Arc<T> {
@@ -59,7 +50,4 @@ impl<T: ItemSearchIndexer + ?Sized> ItemSearchIndexer for std::sync::Arc<T> {
         (**self).rebuild_index()
     }
 
-    fn rebuild_index_with_bundles(&self, items_with_bundles: &[(Item, Vec<ItemBundle>)]) -> Result<(), AppError> {
-        (**self).rebuild_index_with_bundles(items_with_bundles)
-    }
 }

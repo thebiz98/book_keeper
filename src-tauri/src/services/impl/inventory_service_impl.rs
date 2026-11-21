@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use crate::core::dtos::{PaginatedList, StockAdjustmentPayload};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction, StockAdjustment};
+use crate::core::constants::LOW_STOCK_THRESHOLD;
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
@@ -8,13 +9,9 @@ use crate::services::contracts::inventory_allocation_strategy::{
     DepletionResult, InventoryAllocationStrategy,
 };
 use crate::services::contracts::inventory_service::InventoryService;
-use super::fifo_strategy::FifoStrategy;
 
 #[derive(Clone)]
-pub struct InventoryServiceImpl<
-    S: InventoryAllocationStrategy = FifoStrategy,
-    U: UnitOfWork = Arc<dyn UnitOfWork>,
-> {
+pub struct InventoryServiceImpl<S: InventoryAllocationStrategy, U: UnitOfWork = Arc<dyn UnitOfWork>> {
     pub strategy: S,
     pub uow: U,
 }
@@ -54,7 +51,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                 id: item_id.to_string(),
             })?;
         let new_stock = (item.current_stock - required_base_qty).max(0.0);
-        let is_low_stock = new_stock < 5.0;
+        let is_low_stock = new_stock < LOW_STOCK_THRESHOLD;
         uow.items()
             .update_stock_cache(item_id, new_stock, is_low_stock)?;
         Ok(depletion)
@@ -74,7 +71,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                 id: purchase_item.item_id.to_string(),
             })?;
         let new_stock = item.current_stock + purchase_item.quantity;
-        let is_low_stock = new_stock < 5.0;
+        let is_low_stock = new_stock < LOW_STOCK_THRESHOLD;
         uow.items()
             .update_stock_cache(item.id, new_stock, is_low_stock)?;
         Ok(())
@@ -97,7 +94,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                 id: item_id.to_string(),
             })?;
         let new_stock = item.current_stock + quantity_to_restore;
-        let is_low_stock = new_stock < 5.0;
+        let is_low_stock = new_stock < LOW_STOCK_THRESHOLD;
         uow.items()
             .update_stock_cache(item.id, new_stock, is_low_stock)?;
         Ok(())
@@ -126,14 +123,14 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             });
         }
         if let Some(lot_id) = purchase_item_id {
-            let lots = uow.purchases().list_active_lots_for_item(item_id)?;
+            let lots = uow.purchases().get_active_lots_for_item(item_id)?;
             if let Some(lot) = lots.iter().find(|l| l.id == lot_id) {
                 let new_rem = (lot.remaining_quantity - quantity).max(0.0);
                 uow.purchases().update_remaining_quantity(lot_id, new_rem)?;
             }
         }
         let new_stock = item.current_stock - quantity;
-        let is_low_stock = new_stock < 5.0;
+        let is_low_stock = new_stock < LOW_STOCK_THRESHOLD;
         uow.items()
             .update_stock_cache(item_id, new_stock, is_low_stock)?;
         Ok(())
@@ -151,14 +148,8 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         // Positive adjustments create a lot at the latest lot cost (DD-07/DD-12).
         // TODO(F3, DD-12): accept a user-supplied unit_cost and reject when no cost is derivable.
         let lot_cost = if payload.quantity > 0.0 {
-            let latest_lot = tx
-                .purchases()
-                .get_latest_purchase_item_for_item(payload.item_id)?;
-            Some(
-                latest_lot
-                    .map(|l| l.unit_cost)
-                    .unwrap_or(item.default_sale_price * 0.7),
-            )
+            let latest_cost = tx.purchases().get_latest_lot_cost(payload.item_id)?;
+            Some(latest_cost.unwrap_or(item.default_sale_price * 0.7))
         } else {
             None
         };
@@ -172,22 +163,22 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        let adj_id = tx.adjustments().create(&adj)?;
+        let adj_id = tx.adjustments().create_adjustment(&adj)?;
 
         if payload.quantity < 0.0 {
             let write_off_qty = payload.quantity.abs();
             self.strategy
                 .deplete_lots_for_adjustment(&mut *tx, adj_id, payload.item_id, write_off_qty)?;
             let new_stock = (item.current_stock - write_off_qty).max(0.0);
-            let is_low = new_stock < 5.0;
+            let is_low = new_stock < LOW_STOCK_THRESHOLD;
             tx.items().update_stock_cache(item.id, new_stock, is_low)?;
         } else {
             let unit_cost = lot_cost.unwrap_or(0.0);
             // DD-07: non-PURCHASE lot headers are not supplier bills (total 0, no party, PAID).
-            // TODO(F3, DD-07): per-source code sequence (ADJ-0001) instead of the adjustment id.
+            let lot_code = tx.purchases().get_next_transaction_code(LotSource::Adjustment)?;
             let synthetic_tx = PurchaseTransaction {
                 id: 0,
-                transaction_code: format!("ADJ-{}", adj_id),
+                transaction_code: lot_code,
                 source: LotSource::Adjustment,
                 supplier_invoice_ref: None,
                 transaction_date: payload.adjustment_date,
@@ -216,7 +207,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             };
             tx.purchases().create_purchase_item(&synth_lot)?;
             let new_stock = item.current_stock + payload.quantity;
-            let is_low = new_stock < 5.0;
+            let is_low = new_stock < LOW_STOCK_THRESHOLD;
             tx.items().update_stock_cache(item.id, new_stock, is_low)?;
         }
         tx.commit()?;
@@ -229,18 +220,10 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         page: usize,
         limit: usize,
     ) -> Result<PaginatedList<StockAdjustment>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
-        let all = if let Some(id) = item_id {
-            tx.adjustments().list_by_item_id(id)?
-        } else {
-            tx.adjustments().list_adjustments(None, 0, usize::MAX)?
-        };
-        let total = all.len();
-        let items = all
-            .into_iter()
-            .skip((page.saturating_sub(1)) * limit)
-            .take(limit)
-            .collect();
+        let mut tx = self.uow.begin_read()?;
+        let (items, total) = tx
+            .adjustments()
+            .list_adjustments(item_id, page.saturating_sub(1) * limit, limit)?;
         Ok(PaginatedList::new(items, total, page, limit))
     }
 }

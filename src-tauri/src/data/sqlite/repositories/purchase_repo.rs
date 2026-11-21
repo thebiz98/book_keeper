@@ -1,11 +1,12 @@
 //! SQLite implementation of `PurchaseRepository`.
 use rusqlite::{params, types::Value, OptionalExtension, Row};
 
-use crate::core::dtos::{PaginatedList, PurchaseFilter};
+use crate::core::dtos::{ItemLot, PaginatedList, PurchaseFilter};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
-use crate::core::value_objects::PaymentStatus;
+use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::purchase_repository::PurchaseRepository;
+use crate::data::sqlite::code_gen::{next_code, seq_for_source};
 use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
 
 const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
@@ -68,7 +69,8 @@ impl SqlitePurchaseRepository {
         status: Option<PaymentStatus>,
         party_id: Option<i64>,
     ) -> Result<(String, Vec<Value>), AppError> {
-        let mut conds: Vec<&str> = Vec::new();
+        // History is PURCHASE-source only: ADJUSTMENT / OPENING / RETURN headers are not supplier bills.
+        let mut conds: Vec<&str> = vec!["source = 'PURCHASE'"];
         let mut vals: Vec<Value> = Vec::new();
         if let Some(p) = party_id {
             conds.push("party_id = ?");
@@ -86,7 +88,7 @@ impl SqlitePurchaseRepository {
             conds.push("transaction_date <= ?");
             vals.push(Value::Text(e.to_string()));
         }
-        let w = if conds.is_empty() { String::new() } else { format!(" WHERE {}", conds.join(" AND ")) };
+        let w = format!(" WHERE {}", conds.join(" AND "));
         Ok((w, vals))
     }
 
@@ -129,34 +131,15 @@ impl PurchaseRepository for SqlitePurchaseRepository {
             .optional()?)
     }
 
-    fn find_by_id(&self, id: i64) -> Result<Option<PurchaseTransaction>, AppError> {
-        self.find_transaction_by_id(id)
-    }
-
-    fn find_by_code(&self, code: &str) -> Result<Option<PurchaseTransaction>, AppError> {
+    fn find_purchase_item_by_id(&self, id: i64) -> Result<Option<PurchaseItem>, AppError> {
         Ok(self
             .conn
-            .query_row(
-                &format!("SELECT {TX_COLS} FROM purchase_transactions WHERE transaction_code = ?1"),
-                params![code],
-                map_tx,
-            )
+            .query_row(&format!("SELECT {ITEM_COLS} FROM purchase_items WHERE id = ?1"), params![id], map_item)
             .optional()?)
     }
 
-    fn get_next_transaction_code(&self) -> Result<String, AppError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT transaction_code FROM purchase_transactions WHERE transaction_code LIKE 'PUR-%'")?;
-        let codes = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
-        let max = codes.iter().filter_map(|c| c[4..].parse::<u64>().ok()).max().unwrap_or(1000);
-        Ok(format!("PUR-{}", max + 1))
-    }
-
-    fn get_latest_code(&self) -> Result<Option<String>, AppError> {
-        Ok(self
-            .conn
-            .query_row("SELECT MAX(transaction_code) FROM purchase_transactions", [], |r| r.get::<_, Option<String>>(0))?)
+    fn get_next_transaction_code(&self, source: LotSource) -> Result<String, AppError> {
+        next_code(&self.conn, "purchase_transactions", "transaction_code", seq_for_source(source))
     }
 
     fn get_active_lots_for_item(&self, item_id: i64) -> Result<Vec<PurchaseItem>, AppError> {
@@ -166,18 +149,60 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         )
     }
 
-    fn list_active_lots_for_item(&self, item_id: i64) -> Result<Vec<PurchaseItem>, AppError> {
-        self.get_active_lots_for_item(item_id)
+    fn get_latest_lot_cost(&self, item_id: i64) -> Result<Option<f64>, AppError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT unit_cost FROM purchase_items WHERE item_id = ?1 ORDER BY id DESC LIMIT 1",
+                params![item_id],
+                |r| r.get::<_, f64>(0),
+            )
+            .optional()?)
+    }
+
+    fn list_lots_for_item(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT pi.id, pi.purchase_transaction_id, pt.transaction_code, pt.source, pt.transaction_date,                     pt.party_name, pi.quantity, pi.remaining_quantity, pi.unit_cost              FROM purchase_items pi JOIN purchase_transactions pt ON pt.id = pi.purchase_transaction_id              WHERE pi.item_id = ?1 ORDER BY pi.id",
+        )?;
+        let rows = stmt
+            .query_map(params![item_id], |r| {
+                Ok(ItemLot {
+                    purchase_item_id: r.get(0)?,
+                    purchase_transaction_id: r.get(1)?,
+                    transaction_code: r.get(2)?,
+                    source: enum_col(r, 3)?,
+                    transaction_date: r.get(4)?,
+                    vendor_name: r.get(5)?,
+                    quantity: r.get(6)?,
+                    remaining_quantity: r.get(7)?,
+                    unit_cost: r.get(8)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     fn update_remaining_quantity(&mut self, lot_id: i64, new_remaining_qty: f64) -> Result<(), AppError> {
-        let n = self.conn.execute(
-            "UPDATE purchase_items SET remaining_quantity = ?1 WHERE id = ?2",
-            params![new_remaining_qty, lot_id],
-        )?;
-        if n == 0 {
-            return Err(AppError::NotFound { entity: "PurchaseItem".to_string(), id: lot_id.to_string() });
+        const EPS: f64 = 1e-9;
+        let quantity: f64 = self
+            .conn
+            .query_row("SELECT quantity FROM purchase_items WHERE id = ?1", params![lot_id], |r| r.get(0))
+            .optional()?
+            .ok_or_else(|| AppError::NotFound { entity: "PurchaseItem".to_string(), id: lot_id.to_string() })?;
+        if !new_remaining_qty.is_finite() || new_remaining_qty < -EPS || new_remaining_qty > quantity + EPS {
+            return Err(AppError::ValidationError {
+                field: "remaining_quantity".to_string(),
+                message: format!(
+                    "Remaining quantity {new_remaining_qty} is outside 0..={quantity} for lot #{lot_id}"
+                ),
+            });
         }
+        // Absorb float residue so a lot never holds a sliver below 0 or above its quantity.
+        let clamped = new_remaining_qty.clamp(0.0, quantity);
+        self.conn.execute(
+            "UPDATE purchase_items SET remaining_quantity = ?1 WHERE id = ?2",
+            params![clamped, lot_id],
+        )?;
         Ok(())
     }
 
@@ -190,6 +215,32 @@ impl PurchaseRepository for SqlitePurchaseRepository {
             return Err(AppError::NotFound { entity: "PurchaseTransaction".to_string(), id: tx_id.to_string() });
         }
         Ok(())
+    }
+
+    fn update_money_fields(
+        &mut self,
+        tx_id: i64,
+        paid_amount: f64,
+        balance_due: f64,
+        status: PaymentStatus,
+    ) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE purchase_transactions SET paid_amount = ?1, balance_due = ?2, payment_status = ?3 WHERE id = ?4",
+            params![paid_amount, balance_due, enum_to_sql(&status)?, tx_id],
+        )?;
+        if n == 0 {
+            return Err(AppError::NotFound { entity: "PurchaseTransaction".to_string(), id: tx_id.to_string() });
+        }
+        Ok(())
+    }
+
+    fn list_open_for_party(&self, party_id: i64) -> Result<Vec<PurchaseTransaction>, AppError> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TX_COLS} FROM purchase_transactions \
+             WHERE party_id = ?1 AND source = 'PURCHASE' AND balance_due > 0 ORDER BY transaction_date, id"
+        ))?;
+        let rows = stmt.query_map(params![party_id], map_tx)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     fn list_purchases(
@@ -219,17 +270,6 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         )
     }
 
-    fn get_latest_purchase_item_for_item(&self, item_id: i64) -> Result<Option<PurchaseItem>, AppError> {
-        Ok(self
-            .conn
-            .query_row(
-                &format!("SELECT {ITEM_COLS} FROM purchase_items WHERE item_id = ?1 ORDER BY id DESC LIMIT 1"),
-                params![item_id],
-                map_item,
-            )
-            .optional()?)
-    }
-
     fn list_all_lots(&self) -> Result<Vec<PurchaseItem>, AppError> {
         self.query_items(&format!("SELECT {ITEM_COLS} FROM purchase_items ORDER BY id"), [])
     }
@@ -250,13 +290,14 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         let items = self.list_purchases(from, to, filter.payment_status, filter.party_id, offset, limit)?;
         Ok(PaginatedList::new(items, total as usize, page, limit))
     }
-}
 
-impl SqlitePurchaseRepository {
-    pub fn find_purchase_item_by_id(&self, id: i64) -> Result<Option<PurchaseItem>, AppError> {
-        Ok(self
-            .conn
-            .query_row(&format!("SELECT {ITEM_COLS} FROM purchase_items WHERE id = ?1"), params![id], map_item)
-            .optional()?)
+    fn get_returned_quantity_for_lot(&self, purchase_item_id: i64) -> Result<f64, AppError> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(SUM(ri.quantity), 0.0) FROM return_items ri \
+             JOIN return_transactions rt ON rt.id = ri.return_transaction_id \
+             WHERE ri.purchase_item_id = ?1 AND ri.line_type = 'RETURNED' AND rt.return_type = 'VENDOR'",
+            params![purchase_item_id],
+            |r| r.get::<_, f64>(0),
+        )?)
     }
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use calamine::{open_workbook_auto, Data, Reader};
 use crate::core::dtos::ImportSummary;
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
+use crate::core::constants::LOW_STOCK_THRESHOLD;
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::unit_of_work::UnitOfWork;
@@ -78,6 +79,8 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
         let mut errors = Vec::new();
 
         let mut tx = self.uow.begin_transaction()?;
+        // All opening stock of one import goes under a single OPENING header (DD-07), created lazily.
+        let mut opening_header_id: Option<i64> = None;
 
         let parse_f64 = |cell: Option<&Data>| -> Option<f64> {
             match cell {
@@ -157,7 +160,7 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
                     mrp,
                     default_sale_price,
                     current_stock,
-                    is_low_stock: current_stock < 5.0,
+                    is_low_stock: current_stock < LOW_STOCK_THRESHOLD,
                     is_active: true,
                     created_at: chrono::Utc::now().to_rfc3339(),
                     updated_at: chrono::Utc::now().to_rfc3339(),
@@ -166,24 +169,32 @@ impl<U: UnitOfWork> ItemImportService for ItemImportServiceImpl<U> {
                     Ok(item_id) => {
                         if current_stock > 0.0 {
                             let unit_cost = default_sale_price * 0.7;
-                            let synthetic_tx = PurchaseTransaction {
-                                id: 0,
-                                // TODO(F3, DD-07/DD-16): OPN- per-source sequence.
-                                transaction_code: format!("IMP-{}", item_id),
-                                source: LotSource::Opening,
-                                supplier_invoice_ref: None,
-                                transaction_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
-                                party_id: None,
-                                party_name: None,
-                                payment_mode: None,
-                                payment_status: PaymentStatus::Paid,
-                                total_amount: 0.0,
-                                paid_amount: 0.0,
-                                balance_due: 0.0,
-                                notes: Some("Excel Inward Import".to_string()),
-                                created_at: chrono::Utc::now().to_rfc3339(),
+                            let header_id = match opening_header_id {
+                                Some(id) => Some(id),
+                                None => {
+                                    let code = tx.purchases().get_next_transaction_code(LotSource::Opening)?;
+                                    let header = PurchaseTransaction {
+                                        id: 0,
+                                        transaction_code: code,
+                                        source: LotSource::Opening,
+                                        supplier_invoice_ref: None,
+                                        transaction_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                                        party_id: None,
+                                        party_name: None,
+                                        payment_mode: None,
+                                        payment_status: PaymentStatus::Paid,
+                                        total_amount: 0.0,
+                                        paid_amount: 0.0,
+                                        balance_due: 0.0,
+                                        notes: Some("Excel Inward Import".to_string()),
+                                        created_at: chrono::Utc::now().to_rfc3339(),
+                                    };
+                                    let id = tx.purchases().create_transaction(&header)?;
+                                    opening_header_id = Some(id);
+                                    Some(id)
+                                }
                             };
-                            if let Ok(p_id) = tx.purchases().create_transaction(&synthetic_tx) {
+                            if let Some(p_id) = header_id {
                                 let lot = PurchaseItem {
                                     id: 0,
                                     purchase_transaction_id: p_id,

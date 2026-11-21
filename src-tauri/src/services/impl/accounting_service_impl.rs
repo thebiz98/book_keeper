@@ -26,7 +26,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
     }
 
     pub fn calculate_live_cash_drawer(&self, today: &str) -> Result<f64, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let mut drawer = 0.0;
 
         let settlements = tx.settlements().list_all()?;
@@ -100,26 +100,8 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
 
 impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceImpl<P, U> {
     fn get_party_dues_summary(&self, party_type: PartyType) -> Result<Vec<PartyDueSummary>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
-        let parties = tx.parties().list_by_type(party_type, true)?;
-        let mut summaries = Vec::new();
-        for party in parties {
-            let unpaid_sales = tx.sales().list_unpaid_by_party_id(party.id)?;
-            let total_due: f64 = unpaid_sales.iter().map(|s| s.balance_due).sum();
-            if total_due > 0.0 {
-                let oldest_bill_date = unpaid_sales.first().map(|s| s.transaction_date.clone());
-                summaries.push(PartyDueSummary {
-                    party_id: party.id,
-                    party_name: party.name,
-                    phone: party.phone,
-                    party_type,
-                    total_due,
-                    oldest_bill_date,
-                    unpaid_bills_count: unpaid_sales.len(),
-                });
-            }
-        }
-        Ok(summaries)
+        let mut tx = self.uow.begin_read()?;
+        tx.parties().get_party_due_summary(party_type)
     }
 
     fn settle_bill_payment(&self, payload: SettlePaymentPayload) -> Result<(), AppError> {
@@ -138,7 +120,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
             self.payment_service
                 .record_payment(&mut *tx, payment_payload)?;
         } else {
-            let unpaid = tx.sales().list_unpaid_by_party_id(payload.party_id)?;
+            let unpaid = tx.sales().list_open_for_party(payload.party_id)?;
             let mut remaining = payload.amount;
             for bill in unpaid {
                 if remaining <= 0.0 {
@@ -165,7 +147,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
     }
 
     fn get_party_ledger(&self, party_id: i64) -> Result<PartyLedgerView, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let party = tx
             .parties()
             .find_by_id(party_id)?
@@ -173,7 +155,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
                 entity: "Party".to_string(),
                 id: party_id.to_string(),
             })?;
-        let sales = tx.sales().list_unpaid_by_party_id(party_id)?;
+        let sales = tx.sales().list_open_for_party(party_id)?;
         let total_due: f64 = sales.iter().map(|s| s.balance_due).sum();
         Ok(PartyLedgerView {
             party,

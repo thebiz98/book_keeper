@@ -18,7 +18,7 @@ use book_keeper::services::contracts::sale_service::SaleService;
 fn test_e2e_5_step_lifecycle_scenario() {
     println!("=== STARTING 5-STEP BACKEND E2E LIFECYCLE TEST ===");
     let uow = TestDb::new();
-    let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
+    let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let purchase_service = PurchaseServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
@@ -36,7 +36,6 @@ fn test_e2e_5_step_lifecycle_scenario() {
     // STEP 1: Inward Purchase 1 (Lot #1) - 100 Pencils @ ₹5/pc (Paid = ₹500)
     println!("--- Step 1: Purchase 100 Pencils @ ₹5/pc ---");
     let pur1_payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-1001".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -54,12 +53,12 @@ fn test_e2e_5_step_lifecycle_scenario() {
 
     {
         let mut tx = uow.begin_transaction().expect("tx");
-        let pur1 = tx.purchases().find_by_id(pur1_id).unwrap().unwrap();
+        let pur1 = tx.purchases().find_transaction_by_id(pur1_id).unwrap().unwrap();
         assert_eq!(pur1.transaction_code, "PUR-1001");
         assert_eq!(pur1.payment_status, PaymentStatus::Paid);
         assert_eq!(pur1.balance_due, 0.0);
 
-        let lots = tx.purchases().list_active_lots_for_item(1).unwrap();
+        let lots = tx.purchases().get_active_lots_for_item(1).unwrap();
         assert_eq!(lots.len(), 1, "Exactly 1 lot should exist");
         assert_eq!(lots[0].id, 1, "Lot #1 ID");
         assert_eq!(lots[0].remaining_quantity, 100.0);
@@ -73,7 +72,6 @@ fn test_e2e_5_step_lifecycle_scenario() {
     // STEP 2: Inward Purchase 2 (Lot #2) - 50 Pencils @ ₹6/pc (Paid = ₹300)
     println!("--- Step 2: Purchase 50 Pencils @ ₹6/pc ---");
     let pur2_payload = CreatePurchasePayload {
-        transaction_code: Some("PUR-1002".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -91,10 +89,10 @@ fn test_e2e_5_step_lifecycle_scenario() {
 
     {
         let mut tx = uow.begin_transaction().expect("tx");
-        let pur2 = tx.purchases().find_by_id(pur2_id).unwrap().unwrap();
+        let pur2 = tx.purchases().find_transaction_by_id(pur2_id).unwrap().unwrap();
         assert_eq!(pur2.transaction_code, "PUR-1002");
 
-        let lots = tx.purchases().list_active_lots_for_item(1).unwrap();
+        let lots = tx.purchases().get_active_lots_for_item(1).unwrap();
         assert_eq!(lots.len(), 2, "Exactly 2 lots must now exist");
         assert_eq!(lots[1].id, 2, "Lot #2 ID");
         assert_eq!(lots[1].remaining_quantity, 50.0);
@@ -108,7 +106,6 @@ fn test_e2e_5_step_lifecycle_scenario() {
     // STEP 3: Counter Sale - 120 Pencils @ ₹10/pc (Paid = ₹1,200)
     println!("--- Step 3: Sale 120 Pencils @ ₹10/pc ---");
     let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-1001".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -129,7 +126,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
 
     {
         let mut tx = uow.begin_transaction().expect("tx");
-        let allocs = tx.allocations().list_by_sale_item_id(1).unwrap();
+        let allocs = tx.allocations().find_by_sale_item_id(1).unwrap();
         assert_eq!(allocs.len(), 2, "SALE_STOCK_ALLOCATION must have exactly 2 records");
 
         assert_eq!(allocs[0].purchase_item_id, 1);
@@ -143,7 +140,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
         let item = tx.items().find_by_id(1).unwrap().unwrap();
         assert_eq!(item.current_stock, 30.0, "Current stock must be 150 - 120 = 30");
 
-        let lots = tx.purchases().list_active_lots_for_item(1).unwrap();
+        let lots = tx.purchases().get_active_lots_for_item(1).unwrap();
         assert_eq!(lots.len(), 1, "Only Lot #2 has active stock");
         assert_eq!(lots[0].id, 2);
         assert_eq!(lots[0].remaining_quantity, 30.0, "Lot #2 remaining quantity: 50 - 20 = 30");
@@ -157,7 +154,6 @@ fn test_e2e_5_step_lifecycle_scenario() {
     // STEP 4: Customer Returns 10 Pencils (Restockable + Cash Refund)
     println!("--- Step 4: Customer Return 10 Pencils (Restockable) ---");
     let return_payload = CustomerReturnPayload {
-        return_code: Some("RET-1001".to_string()),
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(1),
@@ -178,7 +174,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
     {
         let mut tx = uow.begin_transaction().expect("tx");
 
-        let lots = tx.purchases().list_active_lots_for_item(1).unwrap();
+        let lots = tx.purchases().get_active_lots_for_item(1).unwrap();
         let lot2 = lots.iter().find(|l| l.id == 2).unwrap();
         assert_eq!(lot2.remaining_quantity, 40.0, "Lot #2 remaining increments from 30 to 40");
 
@@ -212,7 +208,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
 
     {
         let mut tx = uow.begin_transaction().expect("tx");
-        let adjs = tx.adjustments().list_by_item_id(1).unwrap();
+        let adjs = tx.adjustments().list_adjustments(Some(1), 0, 100).unwrap().0;
         assert_eq!(adjs.len(), 0, "Adjustment table must contain 0 records");
     }
 

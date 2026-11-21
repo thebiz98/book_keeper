@@ -42,7 +42,7 @@ fn test_tc_dues_001_full_due_settlement() {
     accounting_service.settle_bill_payment(payload).expect("settle bill");
 
     let mut check_tx = uow.begin_transaction().expect("check tx");
-    let updated_sale = check_tx.sales().find_by_id(1).expect("find").expect("exists");
+    let updated_sale = check_tx.sales().find_transaction_by_id(1).expect("find").expect("exists");
     assert_eq!(updated_sale.balance_due, 0.0);
     assert_eq!(updated_sale.payment_status, PaymentStatus::Paid);
 
@@ -74,7 +74,7 @@ fn test_tc_dues_002_incremental_partial_settlement() {
     accounting_service.settle_bill_payment(payload).expect("partial settle");
 
     let mut check_tx = uow.begin_transaction().expect("check tx");
-    let updated_sale = check_tx.sales().find_by_id(2).expect("find").expect("exists");
+    let updated_sale = check_tx.sales().find_transaction_by_id(2).expect("find").expect("exists");
     assert_eq!(updated_sale.balance_due, 300.0);
     assert_eq!(updated_sale.payment_status, PaymentStatus::Partial);
 }

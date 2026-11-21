@@ -1,10 +1,11 @@
 //! SQLite implementation of `SettlementRepository`.
 use rusqlite::{params, Row};
 
+use crate::core::dtos::LedgerTotals;
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
 use crate::data::contracts::settlement_repository::SettlementRepository;
-use crate::core::value_objects::TransactionType;
+use crate::core::value_objects::{PaymentKind, TransactionType};
 use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
 
 const COLS: &str = "id, settlement_date, party_id, kind, transaction_type, transaction_id, return_id, amount_paid, payment_mode, notes, created_at";
@@ -54,19 +55,11 @@ impl SettlementRepository for SqliteSettlementRepository {
         Ok(self.conn.last_insert_rowid())
     }
 
-    fn create(&mut self, s: &PaymentSettlement) -> Result<i64, AppError> {
-        self.create_settlement(s)
-    }
-
     fn list_by_party(&self, party_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
         self.query(
             &format!("SELECT {COLS} FROM payment_settlements WHERE party_id = ?1 ORDER BY id"),
             params![party_id],
         )
-    }
-
-    fn list_by_party_id(&self, party_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
-        self.list_by_party(party_id)
     }
 
     fn list_by_transaction(&self, tx_type: TransactionType, tx_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
@@ -76,12 +69,27 @@ impl SettlementRepository for SqliteSettlementRepository {
         )
     }
 
-    fn get_daily_settlement_total(&self, date: &str, tx_type: TransactionType) -> Result<f64, AppError> {
-        Ok(self.conn.query_row(
-            "SELECT COALESCE(SUM(amount_paid), 0.0) FROM payment_settlements WHERE settlement_date = ?1 AND transaction_type = ?2",
-            params![date, enum_to_sql(&tx_type)?],
-            |r| r.get::<_, f64>(0),
-        )?)
+    fn sum_by_kind_for_transaction(&self, tx_type: TransactionType, tx_id: i64) -> Result<LedgerTotals, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, COALESCE(SUM(amount_paid), 0.0) FROM payment_settlements \
+             WHERE transaction_type = ?1 AND transaction_id = ?2 GROUP BY kind",
+        )?;
+        let rows = stmt
+            .query_map(params![enum_to_sql(&tx_type)?, tx_id], |r| {
+                Ok((enum_col::<PaymentKind>(r, 0)?, r.get::<_, f64>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut totals = LedgerTotals::default();
+        for (kind, sum) in rows {
+            match kind {
+                PaymentKind::Upfront => totals.upfront = sum,
+                PaymentKind::Settlement => totals.settlement = sum,
+                PaymentKind::ReturnCredit => totals.return_credit = sum,
+                PaymentKind::RefundOut => totals.refund_out = sum,
+                PaymentKind::RefundIn => totals.refund_in = sum,
+            }
+        }
+        Ok(totals)
     }
 
     fn list_all(&self) -> Result<Vec<PaymentSettlement>, AppError> {

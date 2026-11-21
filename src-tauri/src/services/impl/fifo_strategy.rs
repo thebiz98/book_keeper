@@ -1,4 +1,4 @@
-use crate::core::entities::{StockOutflowAllocation, PurchaseItem, SaleStockAllocation};
+use crate::core::entities::{StockOutflowAllocation, SaleStockAllocation};
 use crate::core::error::AppError;
 use crate::core::value_objects::OutflowSourceType;
 use crate::data::contracts::unit_of_work::TransactionContext;
@@ -9,10 +9,6 @@ use crate::services::contracts::inventory_allocation_strategy::{
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FifoStrategy;
 
-pub type FifoStrategyImpl = FifoStrategy;
-#[allow(non_upper_case_globals)]
-pub const FifoStrategyImpl: FifoStrategy = FifoStrategy;
-
 impl InventoryAllocationStrategy for FifoStrategy {
     fn validate_stock_availability(
         &self,
@@ -20,7 +16,7 @@ impl InventoryAllocationStrategy for FifoStrategy {
         item_id: i64,
         required_base_qty: f64,
     ) -> Result<(), AppError> {
-        let lots = uow.purchases().list_active_lots_for_item(item_id)?;
+        let lots = uow.purchases().get_active_lots_for_item(item_id)?;
         let total_available: f64 = lots.iter().map(|l| l.remaining_quantity).sum();
         if total_available < required_base_qty {
             let item_name = uow
@@ -46,7 +42,7 @@ impl InventoryAllocationStrategy for FifoStrategy {
         required_base_qty: f64,
     ) -> Result<DepletionResult, AppError> {
         self.validate_stock_availability(uow, item_id, required_base_qty)?;
-        let lots = uow.purchases().list_active_lots_for_item(item_id)?;
+        let lots = uow.purchases().get_active_lots_for_item(item_id)?;
         let mut remaining_needed = required_base_qty;
         let mut total_cogs = 0.0;
         let mut allocations = Vec::new();
@@ -67,7 +63,7 @@ impl InventoryAllocationStrategy for FifoStrategy {
                 returned_quantity: 0.0,
                 unit_cost: lot.unit_cost,
             };
-            let alloc_id = uow.allocations().create(&allocation)?;
+            let alloc_id = uow.allocations().create_allocation(&allocation)?;
             let mut saved = allocation;
             saved.id = alloc_id;
             allocations.push(saved);
@@ -103,37 +99,13 @@ impl InventoryAllocationStrategy for FifoStrategy {
             }
             let restore_amount = alloc.quantity_depleted.min(remaining_to_restore);
 
-            // Dynamic lookup by alloc.purchase_item_id across purchases
-            let mut found_lot: Option<PurchaseItem> = None;
-            let purchases = uow
+            let lot = uow
                 .purchases()
-                .list_purchases(None, None, None, None, 0, 10000)?;
-            for p in purchases {
-                let items = uow.purchases().list_items_by_transaction_id(p.id)?;
-                if let Some(lot) = items.into_iter().find(|l| l.id == alloc.purchase_item_id) {
-                    found_lot = Some(lot);
-                    break;
-                }
-            }
-
-            if found_lot.is_none() {
-                let synth_items = uow.purchases().list_items_by_transaction_id(0)?;
-                if let Some(lot) = synth_items.into_iter().find(|l| l.id == alloc.purchase_item_id) {
-                    found_lot = Some(lot);
-                }
-            }
-
-            if found_lot.is_none() {
-                let all_lots = uow.purchases().list_all_lots()?;
-                if let Some(lot) = all_lots.into_iter().find(|l| l.id == alloc.purchase_item_id) {
-                    found_lot = Some(lot);
-                }
-            }
-
-            let lot = found_lot.ok_or_else(|| AppError::NotFound {
-                entity: "PurchaseItem".to_string(),
-                id: alloc.purchase_item_id.to_string(),
-            })?;
+                .find_purchase_item_by_id(alloc.purchase_item_id)?
+                .ok_or_else(|| AppError::NotFound {
+                    entity: "PurchaseItem".to_string(),
+                    id: alloc.purchase_item_id.to_string(),
+                })?;
 
             let new_remaining = lot.remaining_quantity + restore_amount;
             if new_remaining > lot.quantity {
@@ -172,7 +144,7 @@ impl InventoryAllocationStrategy for FifoStrategy {
         write_off_qty: f64,
     ) -> Result<AdjustmentDepletionResult, AppError> {
         self.validate_stock_availability(uow, item_id, write_off_qty)?;
-        let lots = uow.purchases().list_active_lots_for_item(item_id)?;
+        let lots = uow.purchases().get_active_lots_for_item(item_id)?;
         let mut remaining_needed = write_off_qty;
         let mut total_loss_value = 0.0;
         let mut allocations = Vec::new();
@@ -192,7 +164,7 @@ impl InventoryAllocationStrategy for FifoStrategy {
                 quantity_depleted: take,
                 unit_cost: lot.unit_cost,
             };
-            let alloc_id = uow.outflow_allocations().create(&alloc)?;
+            let alloc_id = uow.outflow_allocations().create_allocation(&alloc)?;
             let mut saved = alloc;
             saved.id = alloc_id;
             allocations.push(saved);

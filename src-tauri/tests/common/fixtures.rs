@@ -280,7 +280,7 @@ pub fn ensure_item(tx: &mut dyn TransactionContext, item_id: i64) {
 
 /// Creates a placeholder purchase header with `purchase_id` if missing.
 pub fn ensure_purchase(tx: &mut dyn TransactionContext, purchase_id: i64) {
-    if tx.purchases().find_by_id(purchase_id).expect("find purchase").is_none() {
+    if tx.purchases().find_transaction_by_id(purchase_id).expect("find purchase").is_none() {
         let pur = create_test_purchase_tx(purchase_id, &format!("SEED-PUR-{purchase_id}"), None, 0.0, 0.0, "2026-01-01");
         tx.purchases().create_transaction(&pur).expect("seed purchase");
     }
@@ -300,7 +300,7 @@ pub fn seed_sale_line(tx: &mut dyn TransactionContext, sale_item_id: i64, item_i
 pub fn seed_adjustment(tx: &mut dyn TransactionContext, adjustment_id: i64, item_id: i64) {
     ensure_item(tx, item_id);
     let adj = create_test_adjustment(adjustment_id, item_id, -1.0, AdjustmentReason::Damaged, "2026-01-01");
-    tx.adjustments().create(&adj).expect("seed adjustment");
+    tx.adjustments().create_adjustment(&adj).expect("seed adjustment");
 }
 
 /// Creates an empty (zero-quantity) purchase lot with `lot_id` if missing.

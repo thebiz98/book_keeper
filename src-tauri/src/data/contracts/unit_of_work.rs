@@ -12,13 +12,28 @@ use super::setting_repository::SettingRepository;
 use super::settlement_repository::SettlementRepository;
 
 pub trait UnitOfWork: Send + Sync {
-    /// Begins an immediate write transaction.
+    /// Begins an immediate write transaction (`BEGIN IMMEDIATE`). Every state-mutating service
+    /// method calls this exactly once, at the top, and passes the context down (never nested).
     fn begin_transaction(&self) -> Result<Box<dyn TransactionContext>, AppError>;
+
+    /// Begins a read-only snapshot (`BEGIN DEFERRED`): it takes no write lock, so it never
+    /// blocks (nor is blocked by) a concurrent writer in WAL mode. Every read-only service
+    /// method uses this.
+    ///
+    /// Calling a write method (`&mut self` repository method, `commit`) on a read context is a
+    /// programmer error. The SQLite implementation enforces it: the connection is put in
+    /// `query_only` mode, so any write fails with a database error, and `commit` returns an
+    /// error (use `rollback`, or just drop the context, to end a read).
+    fn begin_read(&self) -> Result<Box<dyn TransactionContext>, AppError>;
 }
 
 impl<T: UnitOfWork + ?Sized> UnitOfWork for std::sync::Arc<T> {
     fn begin_transaction(&self) -> Result<Box<dyn TransactionContext>, AppError> {
         (**self).begin_transaction()
+    }
+
+    fn begin_read(&self) -> Result<Box<dyn TransactionContext>, AppError> {
+        (**self).begin_read()
     }
 }
 

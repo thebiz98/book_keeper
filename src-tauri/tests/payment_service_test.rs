@@ -24,11 +24,11 @@ impl PaymentService for PaymentServiceImpl {
         payload: RecordPaymentPayload,
     ) -> Result<i64, AppError> {
         let (current_balance, _current_status) = if payload.transaction_type == TransactionType::Sale {
-            let sale = uow.sales().find_by_id(payload.transaction_id)?
+            let sale = uow.sales().find_transaction_by_id(payload.transaction_id)?
                 .ok_or_else(|| AppError::NotFound { entity: "SaleTransaction".to_string(), id: payload.transaction_id.to_string() })?;
             (sale.balance_due, sale.payment_status)
         } else {
-            let pur = uow.purchases().find_by_id(payload.transaction_id)?
+            let pur = uow.purchases().find_transaction_by_id(payload.transaction_id)?
                 .ok_or_else(|| AppError::NotFound { entity: "PurchaseTransaction".to_string(), id: payload.transaction_id.to_string() })?;
             (pur.balance_due, pur.payment_status)
         };
@@ -67,7 +67,7 @@ impl PaymentService for PaymentServiceImpl {
             created_at: "2026-11-20T12:00:00Z".to_string(),
         };
 
-        uow.settlements().create(&settlement)
+        uow.settlements().create_settlement(&settlement)
     }
 
     fn record_refund(
@@ -92,7 +92,7 @@ impl PaymentService for PaymentServiceImpl {
             created_at: "2026-11-20T12:00:00Z".to_string(),
         };
 
-        uow.settlements().create(&settlement)
+        uow.settlements().create_settlement(&settlement)
     }
 
     fn reduce_transaction_balance(
@@ -103,13 +103,13 @@ impl PaymentService for PaymentServiceImpl {
         reduction_amount: f64,
     ) -> Result<(), AppError> {
         if transaction_type == TransactionType::Sale {
-            let sale = uow.sales().find_by_id(transaction_id)?
+            let sale = uow.sales().find_transaction_by_id(transaction_id)?
                 .ok_or_else(|| AppError::NotFound { entity: "SaleTransaction".to_string(), id: transaction_id.to_string() })?;
             let new_balance = (sale.balance_due - reduction_amount).max(0.0);
             let new_status = if new_balance == 0.0 { PaymentStatus::Paid } else { PaymentStatus::Partial };
             uow.sales().update_balance_due(transaction_id, new_balance, new_status)?;
         } else {
-            let pur = uow.purchases().find_by_id(transaction_id)?
+            let pur = uow.purchases().find_transaction_by_id(transaction_id)?
                 .ok_or_else(|| AppError::NotFound { entity: "PurchaseTransaction".to_string(), id: transaction_id.to_string() })?;
             let new_balance = (pur.balance_due - reduction_amount).max(0.0);
             let new_status = if new_balance == 0.0 { PaymentStatus::Paid } else { PaymentStatus::Partial };
@@ -145,7 +145,7 @@ fn test_tc_pay_001_record_full_payment_clears_balance() {
     assert!(settlement_id > 0);
 
     // Assert: balance_due becomes 0.0, status becomes Paid
-    let updated_sale = tx.sales().find_by_id(1).expect("find sale").expect("sale exists");
+    let updated_sale = tx.sales().find_transaction_by_id(1).expect("find sale").expect("sale exists");
     assert_eq!(updated_sale.balance_due, 0.0);
     assert_eq!(updated_sale.payment_status, PaymentStatus::Paid);
 
@@ -180,7 +180,7 @@ fn test_tc_pay_002_record_partial_payment_updates_status() {
     assert!(settlement_id > 0);
 
     // Assert: balance_due becomes 400.0, payment_status is Partial
-    let updated_sale = tx.sales().find_by_id(2).expect("find sale").expect("sale exists");
+    let updated_sale = tx.sales().find_transaction_by_id(2).expect("find sale").expect("sale exists");
     assert_eq!(updated_sale.balance_due, 400.0);
     assert_eq!(updated_sale.payment_status, PaymentStatus::Partial);
 }
@@ -217,7 +217,7 @@ fn test_tc_pay_003_overpayment_rejected() {
     }
 
     // Zero mutations: balance remains 500.0
-    let unmodified_sale = tx.sales().find_by_id(3).expect("find sale").expect("sale exists");
+    let unmodified_sale = tx.sales().find_transaction_by_id(3).expect("find sale").expect("sale exists");
     assert_eq!(unmodified_sale.balance_due, 500.0);
     let settlements = tx.settlements().list_by_transaction(TransactionType::Sale, 3).expect("list settlements");
     assert!(settlements.is_empty(), "No settlements should be logged");

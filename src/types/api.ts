@@ -59,6 +59,7 @@ export interface CreateSaleItemPayload {
 }
 
 export interface CreateSalePayload {
+  /** @deprecated Ignored by the backend: codes are assigned inside the write transaction. */
   transactionCode?: string | null;
   transactionDate: string;
   partyId: number | null;
@@ -87,6 +88,7 @@ export interface CreatePurchaseItemPayload {
 }
 
 export interface CreatePurchasePayload {
+  /** @deprecated Ignored by the backend: codes are assigned inside the write transaction. */
   transactionCode?: string | null;
   transactionDate: string;
   partyId: number | null;
@@ -159,6 +161,7 @@ export interface CustomerReturnItemPayload {
 }
 
 export interface CustomerReturnPayload {
+  /** @deprecated Ignored by the backend: codes are assigned inside the write transaction. */
   returnCode?: string | null;
   originalSaleId: number | null;
   partyId: number | null;

@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { errorMessage, normalizeError } from './errors';
 import { camelToSnake, snakeToCamel } from './caseConvert';
 import type {
   ApiClient,
@@ -59,14 +60,15 @@ export async function invokeCmd<T>(
     const res = await invoke<unknown>(cmd, converted);
     return snakeToCamel<T>(res);
   } catch (err) {
-    const msg =
-      typeof err === 'string'
-        ? err
-        : err instanceof Error
-          ? err.message
-          : `IPC command "${cmd}" failed`;
-    console.error(`[TauriClient] Error calling "${cmd}":`, msg);
-    throw new Error(msg);
+    const typed = normalizeError(err, cmd);
+    console.error(`[TauriClient] Error calling "${cmd}":`, errorMessage(typed));
+    // Reject with the typed AppError. A non-enumerable `message` keeps legacy
+    // `err.message` readers working until pages migrate to errorMessage() (T11).
+    Object.defineProperty(typed, 'message', {
+      value: errorMessage(typed),
+      enumerable: false,
+    });
+    throw typed;
   }
 }
 

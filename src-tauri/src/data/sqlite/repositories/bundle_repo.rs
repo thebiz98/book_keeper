@@ -47,10 +47,6 @@ impl BundleRepository for SqliteBundleRepository {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    fn list_by_item_id(&self, item_id: i64) -> Result<Vec<ItemBundle>, AppError> {
-        self.find_by_item_id(item_id)
-    }
-
     fn find_by_barcode(&self, barcode: &str) -> Result<Option<ItemBundle>, AppError> {
         Ok(self
             .conn
@@ -101,9 +97,5 @@ impl BundleRepository for SqliteBundleRepository {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
-    }
-
-    fn list_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError> {
-        self.get_bundle_suggestions()
     }
 }

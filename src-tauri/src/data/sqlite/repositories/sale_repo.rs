@@ -6,6 +6,7 @@ use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
 use crate::data::contracts::sale_repository::SaleRepository;
+use crate::data::sqlite::code_gen::{next_code, SALE_CODE};
 use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
 
 const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
@@ -125,34 +126,15 @@ impl SaleRepository for SqliteSaleRepository {
             .optional()?)
     }
 
-    fn find_by_id(&self, id: i64) -> Result<Option<SaleTransaction>, AppError> {
-        self.find_transaction_by_id(id)
-    }
-
-    fn find_by_code(&self, code: &str) -> Result<Option<SaleTransaction>, AppError> {
+    fn find_sale_item_by_id(&self, id: i64) -> Result<Option<SaleItem>, AppError> {
         Ok(self
             .conn
-            .query_row(
-                &format!("SELECT {TX_COLS} FROM sale_transactions WHERE transaction_code = ?1"),
-                params![code],
-                map_tx,
-            )
+            .query_row(&format!("SELECT {ITEM_COLS} FROM sale_items WHERE id = ?1"), params![id], map_item)
             .optional()?)
     }
 
     fn get_next_transaction_code(&self) -> Result<String, AppError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT transaction_code FROM sale_transactions WHERE transaction_code LIKE 'SAL-%'")?;
-        let codes = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
-        let max = codes.iter().filter_map(|c| c[4..].parse::<u64>().ok()).max().unwrap_or(1000);
-        Ok(format!("SAL-{}", max + 1))
-    }
-
-    fn get_latest_code(&self) -> Result<Option<String>, AppError> {
-        Ok(self
-            .conn
-            .query_row("SELECT MAX(transaction_code) FROM sale_transactions", [], |r| r.get::<_, Option<String>>(0))?)
+        next_code(&self.conn, "sale_transactions", "transaction_code", &SALE_CODE)
     }
 
     fn update_balance_due(&mut self, tx_id: i64, new_balance: f64, status: PaymentStatus) -> Result<(), AppError> {
@@ -164,6 +146,32 @@ impl SaleRepository for SqliteSaleRepository {
             return Err(AppError::NotFound { entity: "SaleTransaction".to_string(), id: tx_id.to_string() });
         }
         Ok(())
+    }
+
+    fn update_money_fields(
+        &mut self,
+        tx_id: i64,
+        paid_amount: f64,
+        balance_due: f64,
+        status: PaymentStatus,
+    ) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE sale_transactions SET paid_amount = ?1, balance_due = ?2, payment_status = ?3 WHERE id = ?4",
+            params![paid_amount, balance_due, enum_to_sql(&status)?, tx_id],
+        )?;
+        if n == 0 {
+            return Err(AppError::NotFound { entity: "SaleTransaction".to_string(), id: tx_id.to_string() });
+        }
+        Ok(())
+    }
+
+    fn list_open_for_party(&self, party_id: i64) -> Result<Vec<SaleTransaction>, AppError> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TX_COLS} FROM sale_transactions \
+             WHERE party_id = ?1 AND balance_due > 0 ORDER BY transaction_date, id"
+        ))?;
+        let rows = stmt.query_map(params![party_id], map_tx)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     fn list_sales(
@@ -193,14 +201,6 @@ impl SaleRepository for SqliteSaleRepository {
         )
     }
 
-    fn list_unpaid_by_party_id(&self, party_id: i64) -> Result<Vec<SaleTransaction>, AppError> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {TX_COLS} FROM sale_transactions WHERE party_id = ?1 AND balance_due > 0 ORDER BY id"
-        ))?;
-        let rows = stmt.query_map(params![party_id], map_tx)?.collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
-
     fn list_transactions(&self, filter: &SalesFilter) -> Result<PaginatedList<SaleTransaction>, AppError> {
         let from = filter.from_date.as_deref().or(filter.start_date.as_deref());
         let to = filter.to_date.as_deref().or(filter.end_date.as_deref());
@@ -217,13 +217,14 @@ impl SaleRepository for SqliteSaleRepository {
         let items = self.list_sales(from, to, filter.payment_status, filter.party_id, offset, limit)?;
         Ok(PaginatedList::new(items, total as usize, page, limit))
     }
-}
 
-impl SqliteSaleRepository {
-    pub fn find_sale_item_by_id(&self, id: i64) -> Result<Option<SaleItem>, AppError> {
-        Ok(self
-            .conn
-            .query_row(&format!("SELECT {ITEM_COLS} FROM sale_items WHERE id = ?1"), params![id], map_item)
-            .optional()?)
+    fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(SUM(ri.quantity), 0.0) FROM return_items ri \
+             JOIN return_transactions rt ON rt.id = ri.return_transaction_id \
+             WHERE ri.sale_item_id = ?1 AND ri.line_type = 'RETURNED' AND rt.return_type = 'CUSTOMER'",
+            params![sale_item_id],
+            |r| r.get::<_, f64>(0),
+        )?)
     }
 }

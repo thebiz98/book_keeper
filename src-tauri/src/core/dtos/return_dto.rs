@@ -4,8 +4,6 @@ use crate::core::value_objects::{SettlementType, StockCondition};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CustomerReturnPayload {
-    #[serde(default)]
-    pub return_code: Option<String>,
     pub original_sale_id: Option<i64>,
     pub party_id: Option<i64>,
     pub return_date: String,

@@ -13,9 +13,9 @@ use book_keeper::core::value_objects::*;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::sale_service::SaleService;
 
-fn setup_sale_service() -> (SaleServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>, TestDb) {
+fn setup_sale_service() -> (SaleServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>, TestDb) {
     let uow = TestDb::new();
-    let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
+    let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service, payment_service, uow.clone());
     (sale_service, uow)
@@ -37,7 +37,6 @@ fn test_tc_sale_001_full_cash_sale_paid() {
 
     // Action: create_sale with 2 base units, paid_amount = 30.0
     let payload = CreateSalePayload {
-        transaction_code: Some("SAL-1001".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -77,7 +76,6 @@ fn test_tc_sale_002_partial_payment_sale() {
     tx.commit().expect("commit setup");
 
     let payload = CreateSalePayload {
-        transaction_code: Some("SAL-1002".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -116,7 +114,6 @@ fn test_tc_sale_003_full_credit_sale_unpaid() {
     tx.commit().expect("commit setup");
 
     let payload = CreateSalePayload {
-        transaction_code: Some("SAL-1003".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(10),
         payment_mode: None,
@@ -135,7 +132,7 @@ fn test_tc_sale_003_full_credit_sale_unpaid() {
     assert_eq!(summary.balance_due, 100.0);
 
     let mut check_tx = uow.begin_transaction().expect("check tx");
-    let unpaid = check_tx.sales().list_unpaid_by_party_id(10).expect("unpaid");
+    let unpaid = check_tx.sales().list_open_for_party(10).expect("unpaid");
     assert_eq!(unpaid.len(), 1);
     assert_eq!(unpaid[0].balance_due, 100.0);
 }
@@ -158,7 +155,6 @@ fn test_tc_sale_004_bundle_unit_sale_multiplier_conversion() {
     tx.commit().expect("commit setup");
 
     let payload = CreateSalePayload {
-        transaction_code: Some("SAL-1004".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -194,7 +190,6 @@ fn test_tc_sale_005_low_stock_flag_transition() {
     tx.commit().expect("commit setup");
 
     let payload = CreateSalePayload {
-        transaction_code: Some("SAL-1005".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -223,7 +218,6 @@ fn test_tc_sale_006_empty_cart_validation() {
     let (sale_service, _uow) = setup_sale_service();
 
     let payload = CreateSalePayload {
-        transaction_code: Some("SAL-1006".to_string()),
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),

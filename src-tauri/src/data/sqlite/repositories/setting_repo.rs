@@ -17,9 +17,8 @@ impl SqliteSettingRepository {
 }
 
 impl SettingRepository for SqliteSettingRepository {
-    fn get(&self) -> Result<Option<ShopSetting>, AppError> {
-        Ok(self
-            .conn
+    fn get_shop_setting(&self) -> Result<ShopSetting, AppError> {
+        self.conn
             .query_row(
                 "SELECT id, shop_name, phone, address, tax_id FROM shop_settings ORDER BY id LIMIT 1",
                 [],
@@ -33,10 +32,11 @@ impl SettingRepository for SqliteSettingRepository {
                     })
                 },
             )
-            .optional()?)
+            .optional()?
+            .ok_or_else(|| AppError::DatabaseError("Setting not found".to_string()))
     }
 
-    fn update(&mut self, s: &ShopSetting) -> Result<(), AppError> {
+    fn upsert_shop_setting(&mut self, s: &ShopSetting) -> Result<(), AppError> {
         let id = 1; // single-row table (CHECK id = 1)
         self.conn.execute(
             "INSERT INTO shop_settings (id, shop_name, phone, address, tax_id) VALUES (?1,?2,?3,?4,?5) \

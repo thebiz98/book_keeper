@@ -34,7 +34,8 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
 
 impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for SaleServiceImpl<I, P, U> {
     fn get_next_sale_code(&self) -> Result<String, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        // Display-only preview: the code is assigned for real inside create_sale's write transaction.
+        let mut tx = self.uow.begin_read()?;
         tx.sales().get_next_transaction_code()
     }
 
@@ -72,12 +73,9 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         }
 
         let mut tx = self.uow.begin_transaction()?;
-        let sale_code = payload
-            .transaction_code
-            .clone()
-            .map(Ok)
-            // Use the open transaction; a nested begin_transaction() would deadlock on BEGIN IMMEDIATE.
-            .unwrap_or_else(|| tx.sales().get_next_transaction_code())?;
+        // Assigned inside the write transaction (never client-supplied): the IMMEDIATE lock makes
+        // MAX + 1 race-free.
+        let sale_code = tx.sales().get_next_transaction_code()?;
         let mut total_amount = 0.0;
         let mut resolved_lines = Vec::new();
         for item_payload in &payload.items {
@@ -199,7 +197,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         &self,
         filter: SalesHistoryFilter,
     ) -> Result<PaginatedList<SaleTransaction>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         tx.sales().list_transactions(&SalesFilter {
             party_id: filter.party_id,
             payment_status: filter.payment_status,
@@ -214,10 +212,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
     }
 
     fn get_sale_details(&self, sale_id: i64) -> Result<SaleDetailView, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let sale = tx
             .sales()
-            .find_by_id(sale_id)?
+            .find_transaction_by_id(sale_id)?
             .ok_or_else(|| AppError::NotFound {
                 entity: "SaleTransaction".to_string(),
                 id: sale_id.to_string(),

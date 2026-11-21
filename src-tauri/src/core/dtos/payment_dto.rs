@@ -26,3 +26,13 @@ pub struct RecordRefundPayload {
     pub payment_mode: Option<String>,
     pub notes: Option<String>,
 }
+
+/// Σ `amount_paid` of one bill's ledger rows grouped by `kind` (zero when a kind has no rows).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct LedgerTotals {
+    pub upfront: f64,
+    pub settlement: f64,
+    pub return_credit: f64,
+    pub refund_out: f64,
+    pub refund_in: f64,
+}

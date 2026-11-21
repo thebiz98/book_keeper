@@ -12,12 +12,12 @@ pub mod sale_dto;
 pub use adjustment_dto::{AdjustmentItemPayload, StockAdjustmentPayload};
 pub use dues_dto::{PartyDueSummary, PartyLedgerEntry, PartyLedgerView, SettlePaymentPayload};
 pub use item_dto::{
-    BundleSuggestion, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult,
+    BundleSuggestion, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult, ItemLot,
     ItemSearchResult, UpdateItemPayload,
 };
 pub use import_dto::ImportSummary;
 pub use pagination::PaginatedList;
-pub use payment_dto::{RecordPaymentPayload, RecordRefundPayload};
+pub use payment_dto::{LedgerTotals, RecordPaymentPayload, RecordRefundPayload};
 pub use purchase_dto::{
     CreatePurchaseItemPayload, CreatePurchasePayload, PurchaseDetailView, PurchaseFilter,
     PurchaseHistoryFilter, PurchaseItemDetail,

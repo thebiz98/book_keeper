@@ -30,7 +30,7 @@ impl PaymentService for PaymentServiceImpl {
         let (current_balance, _) = if payload.transaction_type == TransactionType::Sale {
             let sale = uow
                 .sales()
-                .find_by_id(payload.transaction_id)?
+                .find_transaction_by_id(payload.transaction_id)?
                 .ok_or_else(|| AppError::NotFound {
                     entity: "SaleTransaction".to_string(),
                     id: payload.transaction_id.to_string(),
@@ -39,7 +39,7 @@ impl PaymentService for PaymentServiceImpl {
         } else {
             let pur = uow
                 .purchases()
-                .find_by_id(payload.transaction_id)?
+                .find_transaction_by_id(payload.transaction_id)?
                 .ok_or_else(|| AppError::NotFound {
                     entity: "PurchaseTransaction".to_string(),
                     id: payload.transaction_id.to_string(),
@@ -82,7 +82,7 @@ impl PaymentService for PaymentServiceImpl {
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        uow.settlements().create(&settlement)
+        uow.settlements().create_settlement(&settlement)
     }
 
     fn record_refund(
@@ -115,7 +115,7 @@ impl PaymentService for PaymentServiceImpl {
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        uow.settlements().create(&settlement)
+        uow.settlements().create_settlement(&settlement)
     }
 
     fn reduce_transaction_balance(
@@ -128,7 +128,7 @@ impl PaymentService for PaymentServiceImpl {
         if transaction_type == TransactionType::Sale {
             let sale = uow
                 .sales()
-                .find_by_id(transaction_id)?
+                .find_transaction_by_id(transaction_id)?
                 .ok_or_else(|| AppError::NotFound {
                     entity: "SaleTransaction".to_string(),
                     id: transaction_id.to_string(),
@@ -144,7 +144,7 @@ impl PaymentService for PaymentServiceImpl {
         } else {
             let pur = uow
                 .purchases()
-                .find_by_id(transaction_id)?
+                .find_transaction_by_id(transaction_id)?
                 .ok_or_else(|| AppError::NotFound {
                     entity: "PurchaseTransaction".to_string(),
                     id: transaction_id.to_string(),

@@ -71,7 +71,7 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
     }
 
     fn get_party(&self, id: i64) -> Result<Party, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         tx.parties()
             .find_by_id(id)?
             .ok_or_else(|| AppError::NotFound {
@@ -85,7 +85,7 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
         party_type: Option<PartyType>,
         active_only: bool,
     ) -> Result<Vec<Party>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         tx.parties().list(party_type, active_only)
     }
 
@@ -94,7 +94,7 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
         query: &str,
         party_type: Option<PartyType>,
     ) -> Result<Vec<Party>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let parties = tx.parties().list(party_type, true)?;
         let q = query.trim().to_lowercase();
         if q.is_empty() {

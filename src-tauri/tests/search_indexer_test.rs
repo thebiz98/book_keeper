@@ -5,7 +5,6 @@
 
 mod common;
 
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use common::fixtures::*;
 use common::TestDb;
@@ -109,7 +108,7 @@ fn test_tc_srch_004_dynamic_bundle_suggestion_aggregation() {
 
     // Action: query suggestions from BundleRepository
     let mut read_tx = uow.begin_transaction().expect("read tx");
-    let suggestions = read_tx.bundles().list_suggestions().expect("list suggestions");
+    let suggestions = read_tx.bundles().get_bundle_suggestions().expect("list suggestions");
 
     // Assert: Top suggestion is ("Box", 10.0, usage_count = 10), second is ("Dozen", 12.0, usage_count = 2)
     assert!(suggestions.len() >= 2);

@@ -4,8 +4,6 @@ use crate::core::value_objects::PaymentStatus;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateSalePayload {
-    #[serde(default)]
-    pub transaction_code: Option<String>,
     pub transaction_date: String,      // "YYYY-MM-DD"
     pub party_id: Option<i64>,         // Customer ID (required if UNPAID or PARTIAL)
     pub paid_amount: f64,              // Upfront cash received

@@ -219,16 +219,4 @@ impl ItemSearchIndexer for SqliteFts5SearchIndexer {
         }
         Ok(())
     }
-
-    fn rebuild_index_with_bundles(&self, items_with_bundles: &[(Item, Vec<ItemBundle>)]) -> Result<(), AppError> {
-        if items_with_bundles.is_empty() {
-            return self.rebuild_index();
-        }
-        let conn = self.conn()?;
-        conn.execute("DELETE FROM item_search_fts", []).map_err(idx_err)?;
-        for (item, bundles) in items_with_bundles {
-            insert_rows(&conn, item, bundles)?;
-        }
-        Ok(())
-    }
 }

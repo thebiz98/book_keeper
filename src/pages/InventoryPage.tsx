@@ -7,7 +7,7 @@ import {
   SlidersHorizontal,
   RefreshCw,
 } from 'lucide-react';
-import { api } from '@/api';
+import { api, errorMessage } from '@/api';
 import type { Item } from '@/types';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
@@ -130,7 +130,7 @@ export const InventoryPage: React.FC = () => {
       setNewItemStock(0);
       fetchItems();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to create item');
+      setFormError(errorMessage(err) || 'Failed to create item');
     } finally {
       setIsSaving(false);
     }

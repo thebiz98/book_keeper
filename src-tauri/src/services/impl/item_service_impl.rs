@@ -3,6 +3,7 @@ use crate::core::dtos::{
     BundleSuggestion, CreateBundlePayload, CreateItemPayload, PaginatedList, UpdateItemPayload,
 };
 use crate::core::entities::{Item, ItemBundle, PurchaseItem, PurchaseTransaction};
+use crate::core::constants::LOW_STOCK_THRESHOLD;
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
@@ -29,15 +30,12 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
         page: usize,
         limit: usize,
     ) -> Result<PaginatedList<Item>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let offset = page.saturating_sub(1) * limit;
         let items = tx
             .items()
             .list_catalog(category.as_deref(), low_stock_only, offset, limit)?;
-        let all_matching = tx
-            .items()
-            .list_catalog(category.as_deref(), low_stock_only, 0, usize::MAX)?;
-        let total = all_matching.len();
+        let total = tx.items().count_catalog(category.as_deref(), low_stock_only)?;
         Ok(PaginatedList::new(items, total, page, limit))
     }
 
@@ -76,7 +74,7 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
             mrp: payload.mrp,
             default_sale_price: payload.default_sale_price,
             current_stock: initial_stock,
-            is_low_stock: initial_stock < 5.0,
+            is_low_stock: initial_stock < LOW_STOCK_THRESHOLD,
             is_active: true,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
@@ -87,10 +85,10 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
 
         if initial_stock > 0.0 {
             let unit_cost = payload.initial_cost.unwrap_or(payload.default_sale_price * 0.7);
+            let lot_code = tx.purchases().get_next_transaction_code(LotSource::Opening)?;
             let synthetic_tx = PurchaseTransaction {
                 id: 0,
-                // TODO(F3, DD-07): OPN- per-source sequence instead of INIT-<item id>.
-                transaction_code: format!("INIT-{}", item_id),
+                transaction_code: lot_code,
                 source: LotSource::Opening,
                 supplier_invoice_ref: None,
                 transaction_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
@@ -250,7 +248,7 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
     }
 
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         tx.bundles().get_bundle_suggestions()
     }
 }

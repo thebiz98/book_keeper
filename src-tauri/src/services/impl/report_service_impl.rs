@@ -34,7 +34,7 @@ impl<U: UnitOfWork> ReportServiceImpl<U> {
 
 impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     fn get_dashboard_metrics(&self) -> Result<DashboardMetrics, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let sales = tx.sales().list_sales(None, None, None, None, 0, usize::MAX)?;
         let purchases = tx.purchases().list_purchases(None, None, None, None, 0, usize::MAX)?;
         let lots = tx.purchases().list_all_lots()?;
@@ -116,7 +116,7 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     }
 
     fn get_low_stock_alerts(&self) -> Result<Vec<LowStockItem>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let items = tx.items().list_catalog(None, true, 0, 50)?;
         Ok(items
             .into_iter()
@@ -134,7 +134,7 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     }
 
     fn get_sales_purchase_trend(&self, _period: &str) -> Result<Vec<TrendDataPoint>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let sales = tx.sales().list_sales(None, None, None, None, 0, usize::MAX)?;
         let purchases = tx.purchases().list_purchases(None, None, None, None, 0, usize::MAX)?;
         let mut date_map: HashMap<String, (f64, f64)> = HashMap::new();
@@ -159,7 +159,7 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     }
 
     fn get_pnl_report(&self, from_date: &str, to_date: &str) -> Result<PnLReport, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let sales = tx.sales().list_sales(Some(from_date), Some(to_date), None, None, 0, usize::MAX)?;
         let allocations = tx.allocations().list_all()?;
         let gross_sales: f64 = sales.iter().map(|s| s.total_amount).sum();
@@ -177,7 +177,7 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     }
 
     fn get_stock_valuation_report(&self) -> Result<StockValuationReport, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let lots = tx.purchases().list_all_lots()?;
         let total_valuation: f64 = lots
             .iter()
@@ -194,7 +194,7 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     }
 
     fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let settlements = tx.settlements().list_all()?;
         let settlements: Vec<_> = settlements
             .into_iter()

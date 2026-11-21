@@ -34,8 +34,9 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
 
 impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for PurchaseServiceImpl<I, P, U> {
     fn get_next_purchase_code(&self) -> Result<String, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
-        tx.purchases().get_next_transaction_code()
+        // Display-only preview: the code is assigned for real inside create_purchase's write transaction.
+        let mut tx = self.uow.begin_read()?;
+        tx.purchases().get_next_transaction_code(LotSource::Purchase)
     }
 
     fn create_purchase(&self, payload: CreatePurchasePayload) -> Result<i64, AppError> {
@@ -46,12 +47,8 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             });
         }
         let mut tx = self.uow.begin_transaction()?;
-        let pur_code = payload
-            .transaction_code
-            .clone()
-            .map(Ok)
-            // Use the open transaction; a nested begin_transaction() would deadlock on BEGIN IMMEDIATE.
-            .unwrap_or_else(|| tx.purchases().get_next_transaction_code())?;
+        // Assigned inside the write transaction (never client-supplied).
+        let pur_code = tx.purchases().get_next_transaction_code(LotSource::Purchase)?;
         let mut total_amount = 0.0;
         let mut resolved_lines = Vec::new();
         for item_payload in &payload.items {
@@ -145,7 +142,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         &self,
         filter: PurchaseHistoryFilter,
     ) -> Result<PaginatedList<PurchaseTransaction>, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         tx.purchases().list_transactions(&PurchaseFilter {
             party_id: filter.party_id,
             payment_status: filter.payment_status,
@@ -160,10 +157,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
     }
 
     fn get_purchase_details(&self, purchase_id: i64) -> Result<PurchaseDetailView, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let pur = tx
             .purchases()
-            .find_by_id(purchase_id)?
+            .find_transaction_by_id(purchase_id)?
             .ok_or_else(|| AppError::NotFound {
                 entity: "PurchaseTransaction".to_string(),
                 id: purchase_id.to_string(),

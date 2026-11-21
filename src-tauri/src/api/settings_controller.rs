@@ -1,20 +1,25 @@
 use crate::app_state::AppState;
 use tauri::State;
+use crate::core::error::AppError;
 use crate::core::entities::ShopSetting;
 
 #[tauri::command]
-pub fn get_shop_settings(state: State<'_, AppState>) -> Result<ShopSetting, String> {
-    state.shop_setting_service.get_settings().map_err(|e| e.to_string())
+pub async fn get_shop_settings(state: State<'_, AppState>) -> Result<ShopSetting, AppError> {
+    let svc = state.shop_setting_service.clone();
+    super::run_blocking(move || svc.get_settings()).await
 }
 #[tauri::command]
-pub fn update_shop_settings(state: State<'_, AppState>, settings: ShopSetting) -> Result<(), String> {
-    state.shop_setting_service.update_settings(settings).map_err(|e| e.to_string())
+pub async fn update_shop_settings(state: State<'_, AppState>, settings: ShopSetting) -> Result<(), AppError> {
+    let svc = state.shop_setting_service.clone();
+    super::run_blocking(move || svc.update_settings(settings)).await
 }
 #[tauri::command]
-pub fn backup_database(state: State<'_, AppState>, destination_path: String) -> Result<String, String> {
-    state.backup_service.backup_database(&destination_path).map_err(|e| e.to_string())
+pub async fn backup_database(state: State<'_, AppState>, destination_path: String) -> Result<String, AppError> {
+    let svc = state.backup_service.clone();
+    super::run_blocking(move || svc.backup_database(&destination_path)).await
 }
 #[tauri::command]
-pub fn verify_database_integrity(state: State<'_, AppState>) -> Result<bool, String> {
-    state.backup_service.verify_database_integrity().map_err(|e| e.to_string())
+pub async fn verify_database_integrity(state: State<'_, AppState>) -> Result<bool, AppError> {
+    let svc = state.backup_service.clone();
+    super::run_blocking(move || svc.verify_database_integrity()).await
 }

@@ -103,7 +103,6 @@ export const NewSalePage: React.FC = () => {
     setError(null);
 
     const payload: CreateSalePayload = {
-      transactionCode: invoiceCode,
       transactionDate: invoiceDate,
       partyId: customerId,
       paidAmount: paymentStatus === 'UNPAID' ? 0 : paidAmount,

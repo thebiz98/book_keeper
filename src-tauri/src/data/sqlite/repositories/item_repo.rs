@@ -2,6 +2,7 @@
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::core::entities::Item;
+use crate::core::constants::LOW_STOCK_THRESHOLD;
 use crate::core::error::AppError;
 use crate::data::contracts::ItemRepository;
 use crate::data::sqlite::SqliteConn;
@@ -87,6 +88,16 @@ impl ItemRepository for SqliteItemRepository {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    fn count_catalog(&self, category: Option<&str>, low_stock_only: bool) -> Result<usize, AppError> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM items WHERE is_active = 1 AND (?1 IS NULL OR category = ?1) \
+             AND (?2 = 0 OR is_low_stock = 1)",
+            params![category, low_stock_only as i64],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
     fn create(&mut self, item: &Item) -> Result<i64, AppError> {
         let id = if item.id > 0 { Some(item.id) } else { None };
         self.conn.execute(
@@ -102,12 +113,11 @@ impl ItemRepository for SqliteItemRepository {
 
     fn update(&mut self, item: &Item) -> Result<(), AppError> {
         let n = self.conn.execute(
-            "UPDATE items SET name=?2, category=?3, barcode=?4, base_unit=?5, mrp=?6, default_sale_price=?7, \
-             current_stock=?8, is_low_stock=?9, is_active=?10, created_at=?11, updated_at=?12 WHERE id=?1",
+            "UPDATE items SET name=?2, category=?3, barcode=?4, base_unit=?5, mrp=?6, \
+             default_sale_price=?7, is_active=?8, updated_at=?9 WHERE id=?1",
             params![
                 item.id, item.name, item.category, item.barcode, item.base_unit, item.mrp,
-                item.default_sale_price, item.current_stock, item.is_low_stock, item.is_active,
-                item.created_at, item.updated_at
+                item.default_sale_price, item.is_active, item.updated_at
             ],
         )?;
         if n == 0 { Err(not_found(item.id)) } else { Ok(()) }
@@ -117,6 +127,15 @@ impl ItemRepository for SqliteItemRepository {
         let n = self.conn.execute(
             "UPDATE items SET current_stock = ?2, is_low_stock = ?3 WHERE id = ?1",
             params![item_id, new_stock, is_low_stock],
+        )?;
+        if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
+    }
+
+    fn apply_stock_delta(&mut self, item_id: i64, delta: f64) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE items SET current_stock = current_stock + ?1, \
+             is_low_stock = (current_stock + ?1) < ?2 WHERE id = ?3",
+            params![delta, LOW_STOCK_THRESHOLD, item_id],
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
     }

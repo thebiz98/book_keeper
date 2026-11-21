@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::core::value_objects::LotSource;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateItemPayload {
@@ -64,4 +65,18 @@ pub struct ItemBundleSearchResult {
     #[serde(alias = "default_bundle_price")]
     pub bundle_price: Option<f64>,
     pub barcode: Option<String>,
+}
+
+/// Lot inspector row (any source): the lot joined with its header (code, source, date, vendor).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemLot {
+    pub purchase_item_id: i64,
+    pub purchase_transaction_id: i64,
+    pub transaction_code: String,
+    pub source: LotSource,
+    pub transaction_date: String,
+    pub vendor_name: Option<String>,
+    pub quantity: f64,
+    pub remaining_quantity: f64,
+    pub unit_cost: f64,
 }

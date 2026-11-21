@@ -1,5 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+/// Typed error returned by every IPC command (DD-26).
+///
+/// Wire shape is exactly `{ "type": <variant>, "details": <payload> }`:
+/// tuple variants carry `details` as a plain string (already a human message);
+/// struct variants carry `details` as an object of their named fields.
+///
+/// Message decision: the variants are NOT given a `details.message` field.
+/// Instead the frontend derives the message (`errorMessage` in `src/api/errors.ts`):
+/// `ValidationError` -> `details.message`; string `details` -> itself;
+/// `InsufficientStockError` / `NotFound` -> built from their fields, mirroring `Display`.
+/// Field names inside `details` stay snake_case on the wire and are NOT case-converted.
 #[derive(Debug, thiserror::Error, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(tag = "type", content = "details")]
 pub enum AppError {
@@ -79,6 +90,29 @@ mod tests {
                 assert_eq!(id, "999");
             }
             _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_serialized_shape_of_every_variant() {
+        use serde_json::json;
+        let cases = vec![
+            (AppError::ValidationError { field: "f".into(), message: "m".into() },
+             json!({"type":"ValidationError","details":{"field":"f","message":"m"}})),
+            (AppError::InsufficientStockError { item_id: 1, item_name: "Rice".into(), required: 5.0, available: 2.0 },
+             json!({"type":"InsufficientStockError","details":{"item_id":1,"item_name":"Rice","required":5.0,"available":2.0}})),
+            (AppError::not_found("Item", "9"),
+             json!({"type":"NotFound","details":{"entity":"Item","id":"9"}})),
+            (AppError::ConcurrencyConflict("c".into()), json!({"type":"ConcurrencyConflict","details":"c"})),
+            (AppError::DatabaseError("d".into()), json!({"type":"DatabaseError","details":"d"})),
+            (AppError::SearchIndexError("s".into()), json!({"type":"SearchIndexError","details":"s"})),
+            (AppError::MigrationError("g".into()), json!({"type":"MigrationError","details":"g"})),
+            (AppError::IoError("i".into()), json!({"type":"IoError","details":"i"})),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(serde_json::to_value(&err).unwrap(), expected);
+            let back: AppError = serde_json::from_value(expected).unwrap();
+            assert_eq!(back, err);
         }
     }
 }

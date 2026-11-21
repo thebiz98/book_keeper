@@ -1,6 +1,7 @@
 //! SQLite implementation of `PartyRepository`.
 use rusqlite::{params, OptionalExtension, Row};
 
+use crate::core::dtos::PartyDueSummary;
 use crate::core::entities::Party;
 use crate::core::error::AppError;
 use crate::core::value_objects::PartyType;
@@ -49,10 +50,6 @@ impl PartyRepository for SqlitePartyRepository {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    fn list_by_type(&self, party_type: PartyType, active_only: bool) -> Result<Vec<Party>, AppError> {
-        self.list(Some(party_type), active_only)
-    }
-
     fn create(&mut self, p: &Party) -> Result<i64, AppError> {
         let id = if p.id > 0 { Some(p.id) } else { None };
         self.conn.execute(
@@ -71,5 +68,33 @@ impl PartyRepository for SqlitePartyRepository {
             return Err(AppError::NotFound { entity: "Party".to_string(), id: p.id.to_string() });
         }
         Ok(())
+    }
+
+    fn get_party_due_summary(&self, party_type: PartyType) -> Result<Vec<PartyDueSummary>, AppError> {
+        // Customers owe on sales; vendors are owed on PURCHASE-source purchases only (DD-07).
+        let (table, source_filter) = match party_type {
+            PartyType::Customer => ("sale_transactions", ""),
+            PartyType::Vendor => ("purchase_transactions", " AND t.source = 'PURCHASE'"),
+        };
+        let sql = format!(
+            "SELECT p.id, p.name, p.phone, SUM(t.balance_due), MIN(t.transaction_date), COUNT(t.id) \
+             FROM parties p JOIN {table} t ON t.party_id = p.id AND t.balance_due > 0{source_filter} \
+             WHERE p.party_type = ?1 AND p.is_active = 1 GROUP BY p.id ORDER BY p.id"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params![enum_to_sql(&party_type)?], |r| {
+                Ok(PartyDueSummary {
+                    party_id: r.get(0)?,
+                    party_name: r.get(1)?,
+                    phone: r.get(2)?,
+                    party_type,
+                    total_due: r.get(3)?,
+                    oldest_bill_date: r.get(4)?,
+                    unpaid_bills_count: r.get::<_, i64>(5)? as usize,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 }

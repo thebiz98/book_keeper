@@ -6,7 +6,7 @@
 mod common;
 
 use common::fixtures::*;
-use common::{FifoStrategyImpl, InventoryServiceImpl, TestDb, PaymentServiceImpl, ReturnServiceImpl};
+use common::{FifoStrategy, InventoryServiceImpl, TestDb, PaymentServiceImpl, ReturnServiceImpl};
 use book_keeper::core::dtos::{CustomerReturnItemPayload, CustomerReturnPayload};
 use book_keeper::core::error::AppError;
 use book_keeper::core::value_objects::*;
@@ -31,7 +31,7 @@ fn test_tc_fifo_001_single_lot_full_depletion() {
 
     // 2. Action: deplete 10.0 base units for sale
     seed_sale_line(&mut *tx, 1, 1);
-    let strategy = FifoStrategyImpl;
+    let strategy = FifoStrategy;
     let result = strategy
         .deplete_lots_for_sale(&mut *tx, 1, 1, 10.0)
         .expect("depletion must succeed");
@@ -44,7 +44,7 @@ fn test_tc_fifo_001_single_lot_full_depletion() {
     assert_eq!(result.allocations[0].unit_cost, 5.0);
 
     // Lot #1 remaining quantity becomes 0.0
-    let active_lots = tx.purchases().list_active_lots_for_item(1).expect("list active lots");
+    let active_lots = tx.purchases().get_active_lots_for_item(1).expect("list active lots");
     assert!(active_lots.is_empty(), "Lot #1 must be fully depleted (remaining == 0.0)");
 }
 
@@ -67,7 +67,7 @@ fn test_tc_fifo_002_multi_lot_split_depletion_with_differing_costs() {
 
     // Action: Deplete 8 units
     seed_sale_line(&mut *tx, 1, 1);
-    let strategy = FifoStrategyImpl;
+    let strategy = FifoStrategy;
     let result = strategy
         .deplete_lots_for_sale(&mut *tx, 1, 1, 8.0)
         .expect("depletion must succeed");
@@ -87,7 +87,7 @@ fn test_tc_fifo_002_multi_lot_split_depletion_with_differing_costs() {
     assert_eq!(result.allocations[1].unit_cost, 6.0);
 
     // Remaining on Lot #2 must be 7.0
-    let active_lots = tx.purchases().list_active_lots_for_item(1).expect("list active lots");
+    let active_lots = tx.purchases().get_active_lots_for_item(1).expect("list active lots");
     assert_eq!(active_lots.len(), 1, "Only Lot #2 should remain active");
     assert_eq!(active_lots[0].id, 2);
     assert_eq!(active_lots[0].remaining_quantity, 7.0);
@@ -109,7 +109,7 @@ fn test_tc_fifo_003_insufficient_stock_rejection() {
     tx.purchases().create_purchase_item(&lot1).expect("create lot 1");
 
     // Action: Validate stock for 5.0 units
-    let strategy = FifoStrategyImpl;
+    let strategy = FifoStrategy;
     let err = strategy
         .validate_stock_availability(&mut *tx, 1, 5.0)
         .unwrap_err();
@@ -130,7 +130,7 @@ fn test_tc_fifo_003_insufficient_stock_rejection() {
     }
 
     // Zero mutations: Lot #1 remains at 4.0
-    let lots = tx.purchases().list_active_lots_for_item(1).expect("list active lots");
+    let lots = tx.purchases().get_active_lots_for_item(1).expect("list active lots");
     assert_eq!(lots[0].remaining_quantity, 4.0);
 }
 
@@ -155,11 +155,11 @@ fn test_tc_fifo_004_restockable_return_lot_restoration_reverse_order() {
     seed_sale_line(&mut *tx, 100, 42);
     let alloc1 = create_test_allocation(1, 100, 10, 2.0, 10.0);
     let alloc2 = create_test_allocation(2, 100, 20, 3.0, 12.0);
-    tx.allocations().create(&alloc1).expect("create alloc 1");
-    tx.allocations().create(&alloc2).expect("create alloc 2");
+    tx.allocations().create_allocation(&alloc1).expect("create alloc 1");
+    tx.allocations().create_allocation(&alloc2).expect("create alloc 2");
 
     // Action: Restore 4 units for return
-    let strategy = FifoStrategyImpl;
+    let strategy = FifoStrategy;
     strategy
         .restore_lots_for_return(&mut *tx, 100, 4.0)
         .expect("restoration must succeed");
@@ -176,7 +176,7 @@ fn test_tc_fifo_004_restockable_return_lot_restoration_reverse_order() {
 #[test]
 fn test_tc_fifo_005_scrap_return_zero_lot_restoration() {
     let uow = TestDb::new();
-    let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
+    let inventory_service = InventoryServiceImpl::new(FifoStrategy, uow.clone());
     let payment_service = PaymentServiceImpl;
     let return_service = ReturnServiceImpl::new(inventory_service, payment_service, uow.clone());
 
@@ -192,12 +192,11 @@ fn test_tc_fifo_005_scrap_return_zero_lot_restoration() {
 
     seed_sale_line(&mut *tx, 15, 7);
     let alloc = create_test_allocation(1, 15, 70, 5.0, 300.0);
-    tx.allocations().create(&alloc).expect("create alloc");
+    tx.allocations().create_allocation(&alloc).expect("create alloc");
     tx.commit().expect("commit");
 
     // Action: Customer returns 1 scrap unit
     let payload = CustomerReturnPayload {
-        return_code: Some("RET-1005".to_string()),
         return_date: "2026-11-20".to_string(),
         party_id: None,
         original_sale_id: Some(15),
@@ -213,7 +212,7 @@ fn test_tc_fifo_005_scrap_return_zero_lot_restoration() {
         }],
     };
     let ret_code = return_service.create_customer_return(payload).expect("scrap return succeeds");
-    assert_eq!(ret_code, "RET-1005");
+    assert_eq!(ret_code, "RET-1001");
 
     // Assert: Exactly 0 units restored to active lots and current stock remains unchanged
     let mut check_tx = uow.begin_transaction().expect("check tx");
@@ -241,7 +240,7 @@ fn test_tc_fifo_006_negative_stock_adjustment_fifo_depletion() {
     tx.purchases().create_purchase_item(&lot1).expect("create lot 1");
 
     // Action: Deplete 3.0 units for negative stock adjustment (damaged write-off)
-    let strategy = FifoStrategyImpl;
+    let strategy = FifoStrategy;
     seed_adjustment(&mut *tx, 1, 1);
     let adj_result = strategy
         .deplete_lots_for_adjustment(&mut *tx, 1, 1, 3.0)
@@ -257,6 +256,6 @@ fn test_tc_fifo_006_negative_stock_adjustment_fifo_depletion() {
     assert_eq!(adj_result.allocations[0].unit_cost, 12.0);
 
     // Lot #1 remaining quantity becomes 7.0
-    let active_lots = tx.purchases().list_active_lots_for_item(1).expect("list active lots");
+    let active_lots = tx.purchases().get_active_lots_for_item(1).expect("list active lots");
     assert_eq!(active_lots[0].remaining_quantity, 7.0);
 }

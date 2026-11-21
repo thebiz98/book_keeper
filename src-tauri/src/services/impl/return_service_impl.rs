@@ -36,17 +36,16 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnServiceImpl<I,
 
 impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for ReturnServiceImpl<I, P, U> {
     fn get_next_return_code(&self) -> Result<String, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        // Display-only preview: the code is assigned for real inside the create_* write transaction.
+        let mut tx = self.uow.begin_read()?;
         tx.returns().get_next_return_code()
     }
 
     fn create_customer_return(&self, payload: CustomerReturnPayload) -> Result<String, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let mut total_refund = 0.0;
-        let return_code = payload
-            .return_code
-            .clone()
-            .unwrap_or_else(|| "RET-1001".to_string());
+        // Assigned inside the write transaction; customer and vendor returns share one RET- sequence.
+        let return_code = tx.returns().get_next_return_code()?;
         let party_name = match payload.party_id {
             Some(pid) => tx.parties().find_by_id(pid)?.map(|p| p.name),
             None => None,
@@ -65,7 +64,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
         };
-        let return_id = tx.returns().create_transaction(&ret_tx)?;
+        let return_id = tx.returns().create_return_transaction(&ret_tx)?;
         for item_payload in &payload.items {
             let line_total = item_payload.quantity * item_payload.unit_price;
             total_refund += line_total;
@@ -130,10 +129,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
             });
         }
         let mut tx = self.uow.begin_transaction()?;
-        let return_code = format!(
-            "VRET-{}",
-            (tx.returns().list_returns(Some(ReturnType::Vendor), 0, 1000)?.len() as i64) + 1001
-        );
+        let return_code = tx.returns().get_next_return_code()?;
         let mut total_amount = 0.0;
         for item in &payload.items {
             total_amount += item.quantity * item.unit_cost;
@@ -211,7 +207,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
     }
 
     fn get_return_details(&self, return_id: i64) -> Result<ReturnDetailView, AppError> {
-        let mut tx = self.uow.begin_transaction()?;
+        let mut tx = self.uow.begin_read()?;
         let ret_tx = tx
             .returns()
             .find_return_by_id(return_id)?
@@ -224,7 +220,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> ReturnService for Re
         } else {
             None
         };
-        let items = tx.returns().list_items_by_transaction_id(return_id)?;
+        let items = tx.returns().find_items_by_return_id(return_id)?;
         let mut item_details = Vec::new();
         for it in items {
             // DD-30: read the write-time snapshot.

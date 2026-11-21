@@ -1,35 +1,40 @@
 use crate::app_state::AppState;
 use tauri::State;
+use crate::core::error::AppError;
 use crate::core::dtos::*;
 use crate::core::entities::Item;
 
 #[tauri::command]
-pub fn search_items_fts(state: State<'_, AppState>, query: String, limit: Option<usize>) -> Result<Vec<ItemSearchResult>, String> {
-    let r = match limit {
-        Some(l) => state.search_indexer.search_with_limit(&query, l),
-        None => state.search_indexer.search(&query),
-    };
-    r.map_err(|e| e.to_string())
+pub async fn search_items_fts(state: State<'_, AppState>, query: String, limit: Option<usize>) -> Result<Vec<ItemSearchResult>, AppError> {
+    let svc = state.search_indexer.clone();
+    super::run_blocking(move || match limit {
+        Some(l) => svc.search_with_limit(&query, l),
+        None => svc.search(&query),
+    })
+    .await
 }
 #[tauri::command]
-pub fn get_items_catalog(state: State<'_, AppState>, category: Option<String>, low_stock_only: Option<bool>, page: Option<usize>, limit: Option<usize>) -> Result<PaginatedList<Item>, String> {
-    state.item_service
-        .get_catalog(category, low_stock_only.unwrap_or(false), page.unwrap_or(1), limit.unwrap_or(50))
-        .map_err(|e| e.to_string())
+pub async fn get_items_catalog(state: State<'_, AppState>, category: Option<String>, low_stock_only: Option<bool>, page: Option<usize>, limit: Option<usize>) -> Result<PaginatedList<Item>, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.get_catalog(category, low_stock_only.unwrap_or(false), page.unwrap_or(1), limit.unwrap_or(50))).await
 }
 #[tauri::command]
-pub fn create_item(state: State<'_, AppState>, payload: CreateItemPayload) -> Result<i64, String> {
-    state.item_service.create_item(payload).map_err(|e| e.to_string())
+pub async fn create_item(state: State<'_, AppState>, payload: CreateItemPayload) -> Result<i64, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.create_item(payload)).await
 }
 #[tauri::command]
-pub fn update_item(state: State<'_, AppState>, item_id: i64, payload: UpdateItemPayload) -> Result<(), String> {
-    state.item_service.update_item(item_id, payload).map_err(|e| e.to_string())
+pub async fn update_item(state: State<'_, AppState>, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.update_item(item_id, payload)).await
 }
 #[tauri::command]
-pub fn create_bundle(state: State<'_, AppState>, payload: CreateBundlePayload) -> Result<i64, String> {
-    state.item_service.create_bundle(payload).map_err(|e| e.to_string())
+pub async fn create_bundle(state: State<'_, AppState>, payload: CreateBundlePayload) -> Result<i64, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.create_bundle(payload)).await
 }
 #[tauri::command]
-pub fn get_bundle_suggestions(state: State<'_, AppState>) -> Result<Vec<BundleSuggestion>, String> {
-    state.item_service.get_bundle_suggestions().map_err(|e| e.to_string())
+pub async fn get_bundle_suggestions(state: State<'_, AppState>) -> Result<Vec<BundleSuggestion>, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.get_bundle_suggestions()).await
 }

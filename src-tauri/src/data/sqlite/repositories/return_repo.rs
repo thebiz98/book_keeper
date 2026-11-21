@@ -5,6 +5,7 @@ use crate::core::entities::{ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::ReturnType;
 use crate::data::contracts::return_repository::ReturnRepository;
+use crate::data::sqlite::code_gen::{next_code, RETURN_CODE};
 use crate::data::sqlite::{enum_col, enum_to_sql, opt_enum_col, SqliteConn};
 
 const TX_COLS: &str = "id, return_code, return_date, return_type, party_id, party_name, original_transaction_id, settlement_type, total_amount, reason, notes, created_at";
@@ -68,10 +69,6 @@ impl ReturnRepository for SqliteReturnRepository {
         Ok(self.conn.last_insert_rowid())
     }
 
-    fn create_transaction(&mut self, t: &ReturnTransaction) -> Result<i64, AppError> {
-        self.create_return_transaction(t)
-    }
-
     fn create_return_item(&mut self, i: &ReturnItem) -> Result<i64, AppError> {
         self.conn.execute(
             &format!("INSERT INTO return_items ({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
@@ -85,6 +82,17 @@ impl ReturnRepository for SqliteReturnRepository {
         Ok(self.conn.last_insert_rowid())
     }
 
+    fn update_return_item_cost(&mut self, return_item_id: i64, cost_amount: f64) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE return_items SET cost_amount = ?1 WHERE id = ?2",
+            params![cost_amount, return_item_id],
+        )?;
+        if n == 0 {
+            return Err(AppError::NotFound { entity: "ReturnItem".to_string(), id: return_item_id.to_string() });
+        }
+        Ok(())
+    }
+
     fn find_return_by_id(&self, id: i64) -> Result<Option<ReturnTransaction>, AppError> {
         Ok(self
             .conn
@@ -92,23 +100,8 @@ impl ReturnRepository for SqliteReturnRepository {
             .optional()?)
     }
 
-    fn find_by_id(&self, id: i64) -> Result<Option<ReturnTransaction>, AppError> {
-        self.find_return_by_id(id)
-    }
-
     fn get_next_return_code(&self) -> Result<String, AppError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT return_code FROM return_transactions WHERE return_code LIKE 'RET-%'")?;
-        let codes = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
-        let max = codes.iter().filter_map(|c| c[4..].parse::<u64>().ok()).max().unwrap_or(1000);
-        Ok(format!("RET-{}", max + 1))
-    }
-
-    fn get_latest_code(&self) -> Result<Option<String>, AppError> {
-        Ok(self
-            .conn
-            .query_row("SELECT MAX(return_code) FROM return_transactions", [], |r| r.get::<_, Option<String>>(0))?)
+        next_code(&self.conn, "return_transactions", "return_code", &RETURN_CODE)
     }
 
     fn list_returns(
@@ -127,7 +120,7 @@ impl ReturnRepository for SqliteReturnRepository {
         Ok(rows)
     }
 
-    fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<ReturnItem>, AppError> {
+    fn find_items_by_return_id(&self, tx_id: i64) -> Result<Vec<ReturnItem>, AppError> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {ITEM_COLS} FROM return_items WHERE return_transaction_id = ?1 ORDER BY id"
         ))?;

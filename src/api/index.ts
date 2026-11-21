@@ -8,6 +8,8 @@ import { TauriClient } from './ipc';
 import { MockApiClient } from './mock/mockClient';
 
 export { TauriClient } from './ipc';
+export { isAppError, errorMessage, normalizeError, APP_ERROR_TYPES } from './errors';
+export type { AppError } from './errors';
 export { MockApiClient, mockApiClient } from './mock/mockClient';
 
 /**
