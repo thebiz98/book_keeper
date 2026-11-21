@@ -45,8 +45,8 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Customer Sales Return**: Returning sold items. When items are marked **Restockable**, the system restores `remaining_quantity` on the original lots (traced via `SALE_STOCK_ALLOCATION`, latest-depleted first), re-entering inventory at their original cost. `DAMAGED_SCRAP` items are not restocked.
     * **Linked return** (against a sale line): returned qty ≤ sold − already returned; same item; refund rate ≤ the line's effective rate (defaults to it). Repeated partial returns never over-restore lots.
     * **Unlinked return** (no receipt): allowed; a Restockable unit re-enters stock as a new `RETURN`-source lot at the item's latest lot cost (user enters cost if the item never had a lot).
-  * **Refund settlement (both directions)**: return value first reduces the linked bill's `balance_due` (capped at that balance); any remainder is paid out (customer) / received (vendor) as cash. With no linked bill but a known party, the value is applied to that party's oldest open bills first, remainder in cash; walk-in returns are pure cash refunds.
-  * **Defective Item Replacement**: The defective unit is returned (Scrap or Restockable) and a fresh unit of the same item (qty ≤ returned) is issued via FIFO. No money moves and revenue is not reversed; the fresh unit's cost is booked as an inventory loss on the return date. The original sale is not altered.
+  * **Refund settlement (both directions)**: a **linked (tracked) return** reduces only its own bill's `balance_due` (capped at that balance); any remainder is paid out (customer) / received (vendor) as cash — it never moves to other bills. An **unlinked (untracked) return** with a known party is applied to that party's oldest open bills first, remainder in cash; walk-in returns are pure cash refunds.
+  * **Replacement / Exchange (no-money swap)**: against a bill, one or more sold units come back — Restockable (e.g. a colour/size swap; goes back to its original lot) or Scrap (defective) — and one or more units of **any** item are issued from stock (FIFO). No money moves and revenue is not reversed; a value difference is shown as a warning only (use a refund + new sale when prices must be settled). Returned units are reversed exactly as in a refund return; issued units' cost becomes replacement COGS on the return date. The original sale is not altered.
   * **Vendor Purchase Return**: Returning stock to suppliers from a specific lot (qty ≤ lot remaining) or FIFO across the item's lots; settled per the refund rule above (payables first, then cash received).
 * **FR-08: Standalone Stock Adjustments with FIFO Depletion**
   * The user can adjust stock quantities directly via item search (name or barcode) without referencing a sale or invoice ID, with an adjustment date and a reason: `DAMAGED`, `EXPIRED`, `THEFT_LOST`, or `COUNT_CORRECTION`.
@@ -58,7 +58,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
     * Total Purchases (net of vendor returns; excludes adjustment/opening/return lots)
     * Cash Flow (actual cash in vs. cash out, from the payment ledger)
     * Total Stock Valuation: Sum of (Remaining Lot Qty × Lot Unit Cost) across all active lots
-    * Profit statement: Net Sales − COGS (net of returned units) = Gross Profit; − Inventory Losses (write-offs, scrap returns, replacement units) = Net Profit
+    * Profit statement: Net Sales − COGS (net of returned units, plus replacement units issued) = Gross Profit; − Inventory Losses (write-offs, scrap returns) = Net Profit
 * **FR-10: Lists & Operational Views**
   * Complete, filterable lists of all Sales, all Purchases, Pending Customer Dues (Receivables), and Pending Vendor Dues (Payables).
 * **FR-11: Data Portability & Local Backup** *(v1 scope)*
@@ -71,7 +71,8 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * The system supports pre-defined packaging bundles for an item (e.g., a "Box of 10 Pencils", a "Dozen of 12", a "Carton of 500 Sheets").
   * **Base Unit Integrity**: Inventory stock is always tracked and depleted via FIFO at the smallest base unit level (`base_unit`, e.g., Piece). Selling or purchasing in bundles automatically converts to base units via the bundle's multiplier (`quantity = bundle_quantity * units_per_bundle`).
   * **Dual Entry Points for Bundle Creation**:
-    1. *Dedicated Item Master Screen*: Configured during initial item creation or editing (cold start). Bundles can be edited, and deleted only if no transaction line references them. `units_per_bundle` must be > 1.
+    1. *Dedicated Item Master Screen*: Configured during initial item creation or editing (cold start). Bundles can be edited (including the multiplier) or deleted at any time. `units_per_bundle` must be > 1.
+  * **Bundles are a data-entry convenience only**: bills record base units sold/bought and the price per base unit, plus a display-only snapshot of the pack used (`pack_label`, `pack_quantity`). Bill lines hold no reference to `ITEM_BUNDLE`, so changing or deleting a bundle never affects history.
     2. *Inline on the Fly*: An inline `[+ New Bundle]` option / shortcut (`Alt + B`) in the billing/purchase unit dropdown opens a quick modal dialog to define a new bundle name, multiplier, and default price without leaving the screen.
   * **Dynamic, Self-Learning Presets (Zero UI Hardcoding)**:
     * The system dynamically queries distinct `(bundle_name, units_per_bundle)` combinations from `ITEM_BUNDLE` ordered by usage frequency.
@@ -247,9 +248,6 @@ erDiagram
     ITEM ||--o{ STOCK_ADJUSTMENT : "adjusted_via"
     ITEM ||--o{ ITEM_BUNDLE : "has_packaging"
 
-    ITEM_BUNDLE ||--o{ PURCHASE_ITEM : "packaged_as"
-    ITEM_BUNDLE ||--o{ SALE_ITEM : "packaged_as"
-
     PURCHASE_TRANSACTION ||--|{ PURCHASE_ITEM : "has_lines"
     PURCHASE_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "settled_by"
     PURCHASE_TRANSACTION ||--o{ RETURN_TRANSACTION : "returned_via"
@@ -321,9 +319,9 @@ erDiagram
         int id PK
         int purchase_transaction_id FK
         int item_id FK
-        int bundle_id FK "Optional bundle (NULL if base unit)"
-        decimal bundle_quantity "Qty in selected bundle"
-        decimal quantity "Base units (bundle_qty * multiplier) for FIFO"
+        string pack_label "Snapshot e.g. Box of 10 (NULL if base unit)"
+        decimal pack_quantity "Snapshot qty in that pack"
+        decimal quantity "Base units for FIFO"
         decimal unit_cost "Cost per base unit"
         decimal total_amount "Total cost"
         decimal remaining_quantity "Base units left for FIFO"
@@ -347,9 +345,9 @@ erDiagram
         int id PK
         int sale_transaction_id FK
         int item_id FK
-        int bundle_id FK "Optional bundle (NULL if base unit)"
-        decimal bundle_quantity "Qty in selected bundle"
-        decimal quantity "Base units (bundle_qty * multiplier) for FIFO"
+        string pack_label "Snapshot e.g. Box of 10 (NULL if base unit)"
+        decimal pack_quantity "Snapshot qty in that pack"
+        decimal quantity "Base units depleted via FIFO"
         decimal unit_price "Effective price per base unit"
         decimal total_amount "Line total"
     }
@@ -500,9 +498,9 @@ erDiagram
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Inward stock lot identifier. |
 | `purchase_transaction_id` | INTEGER | NOT NULL, FK -> `PURCHASE_TRANSACTION(id)` | Parent transaction. |
 | `item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)` | Product purchased. |
-| `bundle_id` | INTEGER | NULLABLE, FK -> `ITEM_BUNDLE(id)` | Selected bundle (NULL if bought loose in base units). |
-| `bundle_quantity` | REAL | NOT NULL | Quantity in terms of selected bundle or base unit. |
-| `quantity` | REAL | NOT NULL | Normalized base units (`bundle_quantity * multiplier`) for FIFO. |
+| `pack_label` | TEXT | NULLABLE | Display snapshot of the pack used at entry (e.g. "Box of 10"); NULL if entered in base units. No FK to `ITEM_BUNDLE`. |
+| `pack_quantity` | REAL | NOT NULL | Display snapshot: quantity in that pack (equals `quantity` when base units). |
+| `quantity` | REAL | NOT NULL | Base units (pack quantity × multiplier at entry time) for FIFO. |
 | `unit_cost` | REAL | NOT NULL | Inward cost per base unit in ₹. |
 | `total_amount` | REAL | NOT NULL | Total cost for this line item in ₹. |
 | `remaining_quantity`| REAL | NOT NULL | Base units remaining in lot; decremented via FIFO sales. |
@@ -530,9 +528,9 @@ erDiagram
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Sale line identifier. |
 | `sale_transaction_id` | INTEGER | NOT NULL, FK -> `SALE_TRANSACTION(id)` | Parent transaction. |
 | `item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)` | Product sold. |
-| `bundle_id` | INTEGER | NULLABLE, FK -> `ITEM_BUNDLE(id)` | Selected bundle (NULL if sold loose in base units). |
-| `bundle_quantity` | REAL | NOT NULL | Quantity in terms of selected bundle or base unit. |
-| `quantity` | REAL | NOT NULL | Normalized base units (`bundle_quantity * multiplier`) depleted via FIFO. |
+| `pack_label` | TEXT | NULLABLE | Display snapshot of the pack used at entry (e.g. "Box of 10"); NULL if sold in base units. No FK to `ITEM_BUNDLE`. |
+| `pack_quantity` | REAL | NOT NULL | Display snapshot: quantity in that pack (equals `quantity` when base units). |
+| `quantity` | REAL | NOT NULL | Base units (pack quantity × multiplier at entry time) depleted via FIFO. |
 | `unit_price` | REAL | NOT NULL | Effective selling rate per base unit in ₹. |
 | `total_amount` | REAL | NOT NULL | Line total in ₹. |
 
@@ -554,7 +552,7 @@ erDiagram
 * `RETURN_TRANSACTION`: Contains `return_code` (`RET-`), `return_date`, `return_type` (`CUSTOMER`, `VENDOR`), `settlement_type` (`REFUND`, `REPLACEMENT` — `REPLACEMENT` is customer-only), `total_amount` (value of `RETURNED` lines), and optional links to the party and original bill (`original_transaction_id` → sale for customer, purchase for vendor).
 * `RETURN_ITEM`: `line_type` (`RETURNED` or `REPLACEMENT_ISSUED`), item, quantity (base units), unit price, total, `cost_amount` (FIFO cost of reversed or issued units), `condition` (`RESTOCKABLE` or `DAMAGED_SCRAP`, for `RETURNED` customer lines), optional `sale_item_id` (customer) or `purchase_item_id` (vendor lot).
   * **Customer reversal:** see Assumption 10. Linked lines are capped at sold − already returned. Unlinked `RESTOCKABLE` lines create a `RETURN`-source lot at the latest lot cost (or a user-entered cost).
-  * **Replacement:** `REPLACEMENT_ISSUED` lines (same item as the returned line, qty ≤ returned) are FIFO-depleted with `STOCK_OUTFLOW_ALLOCATION(source_type = REPLACEMENT)`; their cost is an inventory loss. Revenue is not reversed and no money moves.
+  * **Replacement / exchange:** `RETURNED` lines must be linked and are reversed like refund lines (restocked or scrapped). `REPLACEMENT_ISSUED` lines (any active item, any qty, `unit_price` 0) are FIFO-depleted with `STOCK_OUTFLOW_ALLOCATION(source_type = REPLACEMENT)`; their cost is replacement COGS. Revenue is not reversed and no money moves.
   * **Vendor return:** depletes the named lot (qty ≤ its remaining) or FIFO across the item's lots, logging `STOCK_OUTFLOW_ALLOCATION(source_type = VENDOR_RETURN)`.
   * **Refund settlement (`REFUND`):** value is applied as `RETURN_CREDIT` to the linked bill (capped at its balance), else to the party's oldest open bills; any remainder becomes `REFUND_OUT` (customer) / `REFUND_IN` (vendor) cash.
 
@@ -584,15 +582,15 @@ erDiagram
 | :--- | :--- |
 | **Instant Low Stock List** | `SELECT * FROM ITEM WHERE is_active = 1 AND is_low_stock = 1 ORDER BY current_stock ASC;` |
 | **Typeahead Auto-Fill (FTS5)** | `SELECT item_id, name, category, barcode, mrp, default_sale_price FROM item_search_fts JOIN ITEM ON item_search_fts.item_id = ITEM.id WHERE ITEM.is_active = 1 AND item_search_fts MATCH ? LIMIT 8;` |
-| **Bundle to Base Unit Conversion** | `quantity = bundle_quantity * units_per_bundle; unit_price = bundle_total / quantity;` |
+| **Bundle to Base Unit Conversion** (write time only) | `quantity = pack_quantity * units_per_bundle; unit_price = line_total / quantity;` then snapshot `pack_label`, `pack_quantity` on the line |
 | **Total Stock Valuation** | `SELECT SUM(remaining_quantity * unit_cost) FROM PURCHASE_ITEM WHERE remaining_quantity > 0;` |
 | **Customer Receivables (Dues)** | `SELECT SUM(balance_due) FROM SALE_TRANSACTION WHERE payment_status IN ('UNPAID', 'PARTIAL');` |
 | **Vendor Payables (Dues)** | `SELECT SUM(balance_due) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND payment_status IN ('UNPAID', 'PARTIAL');` |
 | **Period Sales (Gross Revenue)** | `SELECT SUM(total_amount) FROM SALE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
 | **Period Sales Returns** | `SELECT SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'CUSTOMER' AND settlement_type = 'REFUND' AND return_date BETWEEN ? AND ?;` |
 | **Period Purchases (net)** | `SUM(total_amount) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND transaction_date BETWEEN ? AND ?` − `SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'VENDOR' AND return_date BETWEEN ? AND ?` |
-| **Period COGS** | `SELECT SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` |
-| **Period Inventory Losses** | `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type IN ('ADJUSTMENT','REPLACEMENT')` dated by the adjustment/return date, + `SUM(ri.cost_amount)` for customer `REFUND` returns' `RETURNED` lines with `condition = 'DAMAGED_SCRAP'` |
+| **Period COGS** | `SELECT SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` **+** `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type = 'REPLACEMENT'` whose return is dated in range |
+| **Period Inventory Losses** | `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type = 'ADJUSTMENT'` dated by adjustment date, + `SUM(ri.cost_amount)` for customer `RETURNED` lines (REFUND or REPLACEMENT returns) with `condition = 'DAMAGED_SCRAP'`, by return date |
 | **Period Profit** | Net Sales (Gross − Returns) − COGS = Gross Profit; Gross Profit − Inventory Losses = Net Profit |
 | **FIFO Depletion Query** | `SELECT id, remaining_quantity, unit_cost FROM PURCHASE_ITEM WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC;` |
 | **Linked Return Reversal** | `SELECT * FROM SALE_STOCK_ALLOCATION WHERE sale_item_id = ? AND quantity_depleted > returned_quantity ORDER BY id DESC;` then per row `UPDATE ... SET returned_quantity = returned_quantity + ?` and, if restockable, `UPDATE PURCHASE_ITEM SET remaining_quantity = remaining_quantity + ? WHERE id = ?;` |
@@ -717,8 +715,8 @@ interface CreateSalePayload {
   notes: string | null;
   items: Array<{
     item_id: number;
-    bundle_id: number | null;         // null if sold in base units
-    bundle_quantity: number;          // quantity in selected unit/bundle
+    bundle_id: number | null;         // write-time helper only: resolves multiplier + label, then snapshotted
+    bundle_quantity: number;          // quantity in selected unit/bundle (stored as pack_quantity)
     unit_price: number;               // effective rate charged per bundle/unit
   }>;
 }
@@ -777,8 +775,8 @@ interface CreatePurchasePayload {
   notes: string | null;
   items: Array<{
     item_id: number;
-    bundle_id: number | null;
-    bundle_quantity: number;
+    bundle_id: number | null;         // write-time helper only (see create_sale)
+    bundle_quantity: number;          // stored as pack_quantity
     unit_cost: number;                // inward cost per bundle or base unit
   }>;
 }
@@ -868,10 +866,10 @@ interface CreateBundlePayload {
 
 // Command: update_bundle
 // Input: { bundle_id: number, payload: Omit<CreateBundlePayload, "item_id"> }
-// units_per_bundle change rejected if any transaction line references the bundle.
+// Any field may change, including units_per_bundle; bills keep their own snapshot.
 
 // Command: delete_bundle
-// Input: { bundle_id: number }  -> rejected if any PURCHASE_ITEM / SALE_ITEM references it
+// Input: { bundle_id: number }  -> always allowed (bill lines hold no reference)
 ```
 
 #### 5. Credit & Dues Management Domain (`dues_api`)
@@ -895,6 +893,7 @@ interface PartyDueSummary {
 // Records SETTLEMENT ledger row(s). If transaction_id is provided, settles that specific bill
 // (amount <= its balance_due); if null, applies to the party's oldest open bills first
 // (ORDER BY transaction_date, id; amount <= party's total outstanding). Rejects otherwise.
+// UI: per-bill "Settle" on every open bill; lump-sum "Receive/Pay on account" on Credit & Dues.
 // Transitions payment_status to 'PAID' when balance_due reaches 0.
 interface SettlePaymentPayload {
   party_id: number;
@@ -921,14 +920,15 @@ interface SettlePaymentPayload {
 // Atomic transaction (BEGIN IMMEDIATE):
 //  1. Validate: linked lines -> sale_item belongs to original_sale_id, same item,
 //     qty <= sold - already returned, unit_price <= line effective base price.
-//     REPLACEMENT -> original_sale_id required, every RETURNED line linked, replacement_items same item,
-//     qty <= returned qty for that item, stock available.
+//     REPLACEMENT -> original_sale_id required, every RETURNED line linked, replacement_items non-empty
+//     (any active item, any qty > 0), stock available (aggregated per item). No value check.
 //  2. Insert RETURN_TRANSACTION & RETURN_ITEM lines.
 //  3. Linked lines: reverse allocations (returned_quantity), restore lots if RESTOCKABLE, set cost_amount.
 //     Unlinked RESTOCKABLE: create RETURN-source lot (latest cost, else line.unit_cost_override required).
 //  4. REFUND: RETURN_CREDIT to original sale (capped at balance) / else party's oldest open sales;
-//     remainder -> REFUND_OUT. REPLACEMENT: FIFO-issue replacement units (STOCK_OUTFLOW_ALLOCATION,
-//     source REPLACEMENT), no money.
+//     remainder -> REFUND_OUT (linked return: own bill only; unlinked: party's oldest bills).
+//     REPLACEMENT: FIFO-issue replacement units (STOCK_OUTFLOW_ALLOCATION, source REPLACEMENT,
+//     cost = replacement COGS), no money.
 //  5. Update ITEM cached stock.
 interface CustomerReturnPayload {
   original_sale_id: number | null;
@@ -945,7 +945,7 @@ interface CustomerReturnPayload {
     condition: "RESTOCKABLE" | "DAMAGED_SCRAP";
     unit_cost_override: number | null;// only for unlinked RESTOCKABLE when item has no prior lot
   }>;
-  replacement_items: Array<{ item_id: number; quantity: number }>; // REPLACEMENT only, else []
+  replacement_items: Array<{ item_id: number; quantity: number }>; // REPLACEMENT only (any item, base units), else []
 }
 
 // Command: create_vendor_return
@@ -1000,9 +1000,9 @@ interface PnLReport {
   gross_sales: number;
   sales_returns: number;              // customer REFUND returns in period
   net_sales: number;                  // gross_sales - sales_returns
-  cogs: number;                       // FIFO COGS net of returned units
+  cogs: number;                       // FIFO COGS net of returned units + replacement units issued
   gross_profit: number;               // net_sales - cogs
-  inventory_losses: number;           // write-offs + replacement issues + scrap returns
+  inventory_losses: number;           // write-offs + scrap returns
   net_profit: number;                 // gross_profit - inventory_losses
   total_purchases: number;            // PURCHASE-source purchases - vendor returns
 }

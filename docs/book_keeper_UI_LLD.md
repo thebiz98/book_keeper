@@ -347,10 +347,13 @@ interface PaymentStatusBadgeProps {
   - Selecting an option auto-fills both name and multiplier.
   - Validates name non-empty, multiplier > 1, prices ≥ 0.
   - Commits to SQLite `ITEM_BUNDLE` via API and auto-selects in the calling line item.
-  - In Item Master the same modal edits an existing bundle (`updateBundle`); delete calls `deleteBundle` and shows the backend's rejection if the bundle is referenced by any bill.
+  - In Item Master the same modal edits an existing bundle (`updateBundle`, any field incl. multiplier); delete calls `deleteBundle` (always allowed). Bills keep their own pack snapshot, so neither affects history.
+  - Cart and bill views display lines as `pack_quantity × pack_label = quantity base_unit` when a pack was used (e.g. `2 × Box of 10 = 20 PCS`), else `quantity base_unit`.
 
 #### 4. `SettlementModal`
-* Two entry modes: **party FIFO** (from Credit & Dues; lists the party's open bills oldest first and previews how the amount will be split) and **single bill** (from Sales/Purchase History `[Record Settlement]`; `transactionId` set).
+* Two entry modes:
+  - **Single bill** (`transactionId` set): the `[Settle]` button on every open bill — Sales/Purchase History rows and the party's bill list on Credit & Dues.
+  - **On account / lump sum** (`transactionId` null): `[Receive on account]` (customer) / `[Pay on account]` (vendor) on Credit & Dues; lists the party's open bills oldest first and previews how the amount will be split.
 * Amount must be > 0 and ≤ outstanding (party total or bill balance); date defaults to today.
 
 #### 5. `StockAdjustmentModal`
@@ -358,7 +361,7 @@ interface PaymentStatusBadgeProps {
 * Negative quantity validated against current stock before submit.
 
 #### 6. Returns forms (`ReturnsAdjustmentsPage`)
-* **Customer tab:** pick a bill (search by code / customer) or choose "No receipt". Linked mode lists the bill's lines with `sold`, `already returned`, `returnable` and pre-filled rate (editable down only). Per line: qty, condition. Settlement: `REFUND` (shows the preview "₹X credited to dues, ₹Y cash to hand back") or `REPLACEMENT` (linked only; pick replacement qty per returned item, ≤ returned, stock-checked). Unlinked mode: item search, qty, rate, condition, unit cost when the item has no lot history; party optional.
+* **Customer tab:** pick a bill (search by code / customer) or choose "No receipt". Linked mode lists the bill's lines with `sold`, `already returned`, `returnable` and pre-filled rate (editable down only). Per line: qty, condition. Settlement: `REFUND` (preview "₹X credited to this bill, ₹Y cash to hand back" — a linked return only credits its own bill) or `REPLACEMENT` (linked only; returned lines keep their condition — Restockable for a colour/size swap, Damaged/Scrap for a defective unit — then an "Issue" list where any item can be searched and added with a qty, stock-checked; a non-blocking warning shows the value difference at default prices; no money step). Unlinked mode: item search, qty, rate, condition, unit cost when the item has no lot history; party optional.
 * **Vendor tab:** pick a purchase bill or vendor; lines show `PURCHASE`-source lots (`getItemLots`) with remaining qty; per line qty ≤ remaining, or "FIFO" when no lot chosen. Preview of credit vs cash received.
 * Result toast shows `returnCode`, `creditedAmount`, `cashRefunded`.
 

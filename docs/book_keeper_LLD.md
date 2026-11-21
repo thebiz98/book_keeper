@@ -208,7 +208,7 @@ pub enum AdjustmentReason {
 
 // core/value_objects/settlement_type.rs
 /// Refund = apply value to dues first (RETURN_CREDIT), remainder as cash (REFUND_OUT / REFUND_IN).
-/// Replacement = customer-only defective swap; no money moves.
+/// Replacement = customer-only no-money swap (defective or variant, any item issued).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SettlementType {
     Refund,
@@ -339,10 +339,10 @@ pub struct PurchaseItem {
     pub id: i64,
     pub purchase_transaction_id: i64,
     pub item_id: i64,
-    pub bundle_id: Option<i64>,
-    pub bundle_quantity: f64,
-    pub quantity: f64,            // Normalized base units (bundle_qty * multiplier)
-    pub unit_cost: f64,           // Cost per base unit in ₹
+    pub pack_label: Option<String>, // Display snapshot ("Box of 10"); None = base units. No bundle FK (DD-28)
+    pub pack_quantity: f64,         // Display snapshot: qty in that pack
+    pub quantity: f64,              // Base units (pack_quantity × multiplier at entry)
+    pub unit_cost: f64,             // Cost per base unit in ₹
     pub total_amount: f64,
     pub remaining_quantity: f64,  // Active lot base units available for FIFO
 }
@@ -368,10 +368,10 @@ pub struct SaleItem {
     pub id: i64,
     pub sale_transaction_id: i64,
     pub item_id: i64,
-    pub bundle_id: Option<i64>,
-    pub bundle_quantity: f64,
-    pub quantity: f64,            // Normalized base units
-    pub unit_price: f64,          // Effective selling rate per base unit
+    pub pack_label: Option<String>, // Display snapshot ("Box of 10"); None = base units. No bundle FK (DD-28)
+    pub pack_quantity: f64,         // Display snapshot: qty in that pack
+    pub quantity: f64,              // Base units
+    pub unit_price: f64,            // Effective selling rate per base unit
     pub total_amount: f64,
 }
 
@@ -706,9 +706,7 @@ pub trait BundleRepository {
     fn find_by_barcode(&self, barcode: &str) -> Result<Option<ItemBundle>, AppError>;
     fn create(&mut self, bundle: &ItemBundle) -> Result<i64, AppError>;
     fn update(&mut self, bundle: &ItemBundle) -> Result<(), AppError>;
-    fn delete(&mut self, bundle_id: i64) -> Result<(), AppError>;
-    /// Count of PURCHASE_ITEM + SALE_ITEM rows referencing the bundle (guards delete / multiplier change).
-    fn count_references(&self, bundle_id: i64) -> Result<usize, AppError>;
+    fn delete(&mut self, bundle_id: i64) -> Result<(), AppError>; // hard delete; bill lines don't reference bundles
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError>;
 }
 
@@ -1196,7 +1194,7 @@ pub trait ItemService: Send + Sync {
 ```
 
 * **Validation**: item `name` non-empty, trimmed, unique (case-insensitive); `barcode` unique across items and bundles when present; `default_sale_price >= 0`; `mrp` null or `> 0`. Bundle: `bundle_name` non-empty, `units_per_bundle > 1`, prices null or `>= 0`, unique `(item_id, bundle_name)`.
-* **Bundle edit/delete guard**: `delete_bundle` and any `units_per_bundle` change are rejected when `bundle_repo.count_references(bundle_id) > 0` (historical lines store `bundle_quantity` against that multiplier).
+* **Bundles are freely editable (DD-28)**: any field, including `units_per_bundle`, may change and bundles may be deleted at any time. Bill lines store base `quantity` plus a display snapshot (`pack_label`, `pack_quantity`) and never reference `ITEM_BUNDLE`. Reindex the item after bundle changes (bundle barcodes are FTS rows).
 
 * **Used by**:
   * `InventoryService` — to validate items are active and resolve bundle multipliers.
@@ -1244,8 +1242,8 @@ pub struct CreateSalePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateSaleItemPayload {
     pub item_id: i64,
-    pub bundle_id: Option<i64>,             // Null if sold loose in base units
-    pub bundle_quantity: f64,               // Units entered in selected packaging
+    pub bundle_id: Option<i64>,             // Write-time helper only: resolves multiplier + label; not stored
+    pub bundle_quantity: f64,               // Units entered in selected packaging (stored as pack_quantity)
     pub unit_price: f64,                    // Rate charged per selected bundle/unit (₹)
 }
 
@@ -1279,7 +1277,7 @@ pub struct SaleSummaryResponse {
    * Any mismatch → `ValidationError { field: "paid_amount" }`. If status ≠ `Paid` and `party_id` is `None` → `ValidationError { field: "party_id", message: "customer required for credit" }`.
    * Edge: `total == 0` is only valid with `Paid` and `paid == 0`.
 5. **Persist Transaction Header**: `next_code = sale_repo.get_next_transaction_code()`; insert `SaleTransaction` with `total_amount`, `paid_amount = 0`, `balance_due = total_amount`, `payment_status = Unpaid` (placeholder; fixed by step 7 or left Unpaid).
-6. **Line Insertion & Stock Depletion**: for each line insert `SaleItem` (`quantity = base_qty`, `unit_price = effective_base_price`, `total_amount = line_total`), then `inventory_service.deplete_stock_for_sale(uow, sale_item_id, item.id, base_qty)` (strategy depletion + allocations + stock cache).
+6. **Line Insertion & Stock Depletion**: for each line insert `SaleItem` (`quantity = base_qty`, `unit_price = effective_base_price`, `total_amount = line_total`, `pack_label = bundle.bundle_name` or `None`, `pack_quantity = line.bundle_quantity`; no bundle id stored), then `inventory_service.deplete_stock_for_sale(uow, sale_item_id, item.id, base_qty)` (strategy depletion + allocations + stock cache).
 7. **Upfront Payment**: if `upfront > 0`: `payment_service.record_payment(uow, { kind: Upfront, transaction_type: Sale, transaction_id: sale_id, settlement_date: transaction_date, amount_paid: upfront, .. })` — this is the only place the header money fields are set.
 8. `uow.commit()`
 9. Return `SaleSummaryResponse { sale_id, transaction_code, total_amount, paid_amount: upfront, balance_due: total − upfront, change_amount: change, payment_status }` (values re-read from the header after commit).
@@ -1317,8 +1315,8 @@ pub struct CreatePurchasePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePurchaseItemPayload {
     pub item_id: i64,
-    pub bundle_id: Option<i64>,             // Null if bought loose in base units
-    pub bundle_quantity: f64,               // Inward quantity in bundle or base units
+    pub bundle_id: Option<i64>,             // Write-time helper only; not stored (DD-28)
+    pub bundle_quantity: f64,               // Inward quantity in bundle or base units (stored as pack_quantity)
     pub unit_cost: f64,                     // Inward cost per selected unit/bundle (₹)
 }
 ```
@@ -1337,7 +1335,7 @@ pub struct CreatePurchaseItemPayload {
    * `Paid` ⇒ `paid == total`; `Partial` ⇒ `0 < paid < total`; `Unpaid` ⇒ `paid == 0`; mismatch → `ValidationError`.
    * Status ≠ `Paid` requires `party_id`.
 5. **Header**: insert `PurchaseTransaction { source: Purchase, transaction_code: get_next_transaction_code(Purchase), paid_amount: 0, balance_due: total_amount, payment_status: Unpaid, notes: supplier_invoice_ref + notes }`. (`supplier_invoice_ref` is stored in its own column.)
-6. **Inward Lot Storage & Stock Cache**: for each line insert `PurchaseItem` with `quantity = remaining_quantity = base_qty`, `unit_cost = unit_cost_base`, then `inventory_service.add_stock_for_purchase(uow, &purchase_item)`.
+6. **Inward Lot Storage & Stock Cache**: for each line insert `PurchaseItem` with `quantity = remaining_quantity = base_qty`, `unit_cost = unit_cost_base`, `pack_label`/`pack_quantity` snapshot (no bundle id), then `inventory_service.add_stock_for_purchase(uow, &purchase_item)`.
 7. **Upfront Payment**: if `paid > 0`: `payment_service.record_payment(uow, { kind: Upfront, transaction_type: Purchase, transaction_id: purchase_id, settlement_date: transaction_date, amount_paid: paid, .. })`.
 8. `uow.commit()`
 9. Return `{ purchase_id, transaction_code }`.
@@ -1373,19 +1371,19 @@ pub struct ReturnResult {
    * If `original_sale_id` is set: the sale exists; `party_id` defaults to the sale's party and must match if given.
    * For each **linked** line (`sale_item_id` set): the sale line exists, belongs to `original_sale_id` (which is then required), `line.item_id == sale_item.item_id`, and `quantity <= sale_item.quantity − sale_repo.get_returned_quantity_for_line(sale_item_id)` — summing duplicates of the same `sale_item_id` within the payload; `unit_price <= sale_item.unit_price + EPS`.
    * **Unlinked** line (`sale_item_id` None): only allowed with `settlement_type = Refund`; item must exist and be active.
-   * `Replacement`: `original_sale_id` required; every returned line linked; `replacement_items` non-empty, each `item_id` must appear among the returned lines with `Σ replacement qty <= Σ returned qty` for that item; aggregated stock check for replacement items (`validate_stock_availability`).
+   * `Replacement`: `original_sale_id` required; every returned line linked; `replacement_items` non-empty, each an active item (any item — same or different, e.g. colour swap) with `quantity > 0`; aggregated stock check for replacement items (`validate_stock_availability`). No value-equality check (UI warns on difference).
    * `Refund`: `replacement_items` must be empty.
 2. `uow.begin_transaction()`
 3. Insert `ReturnTransaction { return_code: RET-XXXX, return_type: Customer, settlement_type, total_amount: round2(Σ quantity × unit_price), .. }` (for `Replacement`, `total_amount` is still the returned value, but it is excluded from Sales Returns).
 4. For each returned line: insert `ReturnItem { line_type: Returned, condition, .. }`, then:
-   * **Linked:** `cost = inventory_service.reverse_sale_line(uow, sale_item_id, item_id, qty, restock = condition == Restockable)`.
-     * Exception: `Replacement` + `DamagedScrap` → no reversal (cost stays in COGS), `cost = 0`.
+   * **Linked (Refund or Replacement alike):** `cost = inventory_service.reverse_sale_line(uow, sale_item_id, item_id, qty, restock = condition == Restockable)`.
    * **Unlinked + Restockable:** `inventory_service.create_source_lot(uow, Return, return_date, item_id, qty, unit_cost_override, notes = "Return RET-XXXX")`; `cost = qty × lot cost`.
    * **Unlinked + DamagedScrap:** no stock change, `cost = 0`.
    * `return_repo.update_return_item_cost(id, round2(cost))`.
 5. **Settlement**:
    * `Refund`: `value = total_amount`; `credited = accounting_service.apply_return_credit(uow, Sale, party_id, original_sale_id, return_id, return_date, value)`; `cash = round2(value − credited)`; if `cash > 0`: `payment_service.record_refund(uow, { kind: RefundOut, transaction_type: Sale, transaction_id: original_sale_id, return_id, amount: cash, .. })`.
-   * `Replacement`: for each replacement item insert `ReturnItem { line_type: ReplacementIssued, unit_price: 0, total_amount: 0 }`, then `cost = inventory_service.issue_stock_outflow(uow, Replacement, return_id, item_id, qty)` and store it in `cost_amount`. No ledger rows.
+   * `Replacement`: for each replacement item insert `ReturnItem { line_type: ReplacementIssued, unit_price: 0, total_amount: 0 }`, then `cost = inventory_service.issue_stock_outflow(uow, Replacement, return_id, item_id, qty)` and store it in `cost_amount` (reported as replacement COGS). No ledger rows.
+   * Settlement scope: a linked return credits **only** `original_sale_id`; the party-wide FIFO credit (`target_bill = None`) is used only for unlinked returns.
 6. `uow.commit()`
 7. Return `ReturnResult`.
 
@@ -1425,9 +1423,9 @@ Dates are inclusive `YYYY-MM-DD` strings compared lexically. All sums `COALESCE(
 | `gross_sales` | Σ `sale_transaction.total_amount` where `transaction_date` in range |
 | `sales_returns` | Σ `return_transaction.total_amount` where `return_type = CUSTOMER AND settlement_type = REFUND` and `return_date` in range |
 | `net_sales` | `gross_sales − sales_returns` |
-| `cogs` | Σ `(a.quantity_depleted − a.returned_quantity) × a.unit_cost` over `sale_stock_allocation` of sales dated in range |
+| `cogs` | Σ `(a.quantity_depleted − a.returned_quantity) × a.unit_cost` over `sale_stock_allocation` of sales dated in range **+** Σ `REPLACEMENT` outflow allocations `quantity_depleted × unit_cost` for returns dated in range |
 | `gross_profit` | `net_sales − cogs` |
-| `inventory_losses` | Σ outflow allocations (`ADJUSTMENT` by adjustment date; `REPLACEMENT` by return date) `quantity_depleted × unit_cost` + Σ `return_item.cost_amount` (customer `REFUND` returns, `line_type = RETURNED`, `condition = DAMAGED_SCRAP`, by return date) |
+| `inventory_losses` | Σ `ADJUSTMENT` outflow allocations `quantity_depleted × unit_cost` (by adjustment date) + Σ `return_item.cost_amount` (customer returns of either settlement type, `line_type = RETURNED`, `condition = DAMAGED_SCRAP`, by return date) |
 | `net_profit` | `gross_profit − inventory_losses` |
 | `total_purchases` | Σ `purchase_transaction.total_amount` (`source = PURCHASE`, in range) − Σ vendor `return_transaction.total_amount` (in range) |
 | `today_sales_count` / `today_purchase_count` | Count of sale bills / `PURCHASE`-source purchase bills dated today |
@@ -2035,7 +2033,7 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 | **TC-REP-001** | Consolidated Dashboard Metrics Speed & Integrity | Active sales, purchases, and active lots | `get_dashboard_metrics()` | • Returns today sales, purchases, net profit, stock valuation, dues, cash drawer in single payload.<br>• Query executes in < 2ms. |
 | **TC-REP-002** | Periodic Net Profit Calculation | Period sales = 10,000 ₹.<br>Depleted allocations COGS = 7,200 ₹ | `get_pnl_report(from, to)` | • `gross_sales` = `10,000.0`.<br>• `cogs` = `7,200.0`.<br>• `net_profit` = `2,800.0`. |
 | **TC-REP-003** | Stock Valuation Accuracy | Lot A: 10 @ 20 ₹ = 200<br>Lot B: 5 @ 10 ₹ = 50 | `get_stock_valuation_report()` | • `total_valuation` = `250.0 ₹`. |
-| **TC-REP-004** | Full P&L statement | Sales 1,000 (COGS 600); restockable REFUND return of value 100 (cost 60); scrap REFUND return value 50 (cost 30); write-off cost 20; replacement issue cost 10 | `get_pnl_report` | • `gross_sales 1000`, `sales_returns 150`, `net_sales 850`, `cogs 510`, `gross_profit 340`, `inventory_losses 60`, `net_profit 280`. |
+| **TC-REP-004** | Full P&L statement | Sales 1,000 (COGS 600); restockable REFUND return of value 100 (cost 60); scrap REFUND return value 50 (cost 30); write-off cost 20; REPLACEMENT returning 1 restockable unit (cost 10) and issuing 1 unit of another item (cost 12) | `get_pnl_report` | • `gross_sales 1000`, `sales_returns 150`, `net_sales 850`, `cogs 600 − 60 − 30 − 10 + 12 = 512`, `gross_profit 338`, `inventory_losses 20 + 30 = 50`, `net_profit 288`. |
 | **TC-REP-005** | Cash flow buckets from ledger | Sale UPFRONT 500, SETTLEMENT 200, REFUND_OUT 50; purchase UPFRONT 300, SETTLEMENT 100, REFUND_IN 40; RETURN_CREDIT 70 | `get_cash_flow_report` | • In = 740, out = 450, net = 290; RETURN_CREDIT excluded. |
 | **TC-REP-006** | Non-purchase lots excluded | ADJ and OPN lots exist | dashboard + purchases + payables | • Not counted; valuation includes them. |
 
@@ -2051,8 +2049,10 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 | **TC-RET-004** | Item / line mismatch & price cap | Line item A @ 10/unit | Return item B on that line; or A @ 12 | • Both rejected. |
 | **TC-RET-005** | Unlinked restockable return | Item with latest lot cost 6; walk-in | Unlinked RESTOCKABLE 2 @ 10 | • `RETURN`-source lot (RTL-) of 2 @ 6; REFUND_OUT 20; stock +2. |
 | **TC-RET-006** | Unlinked return for known customer | Customer has open bills 15 (older) and 40 | Unlinked value 30 | • RETURN_CREDIT 15 + 15 (FIFO); no cash. |
-| **TC-RET-007** | Defective replacement | Sale line 2 units; stock available | REPLACEMENT: 1 returned DAMAGED_SCRAP, 1 issued | • Original allocations untouched; outflow row REPLACEMENT; loss = issued cost; no ledger rows; not in sales returns. |
-| **TC-RET-008** | Replacement validation | — | Replacement item differs, or qty > returned, or no stock | • Rejected. |
+| **TC-RET-007** | Defective replacement (same item) | Sale line 2 units @ cost 8; stock available | REPLACEMENT: 1 returned DAMAGED_SCRAP, 1 of same item issued (cost 9) | • Allocation `returned_quantity` 1; `cost_amount` 8 → inventory loss; outflow row REPLACEMENT cost 9 → COGS; no ledger rows; not in sales returns. |
+| **TC-RET-008** | Colour swap (different item, resellable) | Sold "Pen Blue" (cost 5); "Pen Red" in stock (cost 5.5) | REPLACEMENT: 1 Blue RESTOCKABLE returned, 1 Red issued | • Blue lot +1; Blue allocation `returned_quantity` 1 (COGS −5); Red lot −1 (COGS +5.5); stock caches correct; no money; no loss. |
+| **TC-RET-011** | Replacement validation | — | Unlinked returned line, empty issue list, issued item out of stock | • Each rejected; nothing written. |
+| **TC-RET-012** | Linked return never touches other bills | Customer has SAL-A (due 50) and SAL-B (paid) | Linked return on SAL-B value 30 | • No RETURN_CREDIT on SAL-A; REFUND_OUT 30. |
 | **TC-RET-009** | Vendor return on open purchase | Purchase 1,000, balance 300 | Return lots worth 500 | • RETURN_CREDIT 300 + REFUND_IN 200; purchases report net −500. |
 | **TC-RET-010** | Vendor return lot must be PURCHASE-source | ADJ lot | Named-lot vendor return on it | • Rejected. |
 

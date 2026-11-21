@@ -34,12 +34,12 @@ This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagre
 - A `REFUND` return's value is used in this order:
   1. It reduces the linked bill's `balance_due` as a `RETURN_CREDIT` row, capped at that balance.
   2. Any remainder is cash: `REFUND_OUT` for customers, `REFUND_IN` for vendors.
-- With no linked bill but a party selected, the value is applied as `RETURN_CREDIT` across that party's oldest open bills (the same FIFO settlement ordering used for dues), and the remainder is cash. A walk-in return is all cash.
+- **A linked (tracked) return only ever touches its own bill.** Leftover value is refunded in cash; it is never moved to the party's other bills.
+- **Unlinked (untracked) returns only:** with a party selected, the value is applied as `RETURN_CREDIT` across that party's oldest open bills (the same FIFO ordering used for dues), and the remainder is cash. A walk-in return is all cash.
 
-**DD-04 — Settlement entry points (D-15).**
-- Per-bill settlement is offered from Sales History and Purchase History.
-- FIFO settlement across open bills is offered from the Credit & Dues page.
-- The amount must not exceed the outstanding total (of the bill, or the party's combined total).
+**DD-04 — Settlement entry points (D-15).** Both modes exist:
+- **Per-bill "Settle":** on every open bill. Available in Sales History, Purchase History, and the party's bill list on the Credit & Dues page. `transaction_id` is set and the amount must be ≤ that bill's balance.
+- **Lump sum ("Receive on account" / "Pay on account"):** on the Credit & Dues page. It clears the party's oldest open bills first and shows a preview of the split. `transaction_id` is null and the amount must be ≤ the party's total outstanding.
 
 ## Stock & returns
 
@@ -60,13 +60,20 @@ This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagre
   - `DAMAGED_SCRAP` lines only increment `returned_quantity`.
   - The FIFO cost of the reversed units is stored as `RETURN_ITEM.cost_amount`.
 
-**DD-06 — Defective replacement (D-03).**
-- `RETURN_ITEM.line_type` ∈ `RETURNED | REPLACEMENT_ISSUED` tells the two kinds of line apart.
-- A `REPLACEMENT` return has two parts:
-  - the returned defective lines (linked; `DAMAGED_SCRAP` or `RESTOCKABLE`);
-  - replacement lines for the same item, with `qty ≤` the returned qty.
-- Replacement units are depleted FIFO, and their allocations are logged in `STOCK_OUTFLOW_ALLOCATION (source_type = REPLACEMENT, source_id = return_id)`. Their cost is an inventory loss on the return date.
-- No money moves and revenue is not reversed. `DAMAGED_SCRAP` defective lines in a replacement do not touch the sale allocations: the original cost stays in COGS.
+**DD-06 — Replacement / exchange is a no-money swap of any item (D-03; revised 2026-11-21).**
+- Covers defective swaps (same item) and variant swaps such as colour or size (a different item). `RETURN_ITEM.line_type` ∈ `RETURNED | REPLACEMENT_ISSUED` tells the two kinds of line apart.
+- A `REPLACEMENT` return has:
+  - one or more **returned** lines, linked to the original bill, each `RESTOCKABLE` (resellable, e.g. a colour swap) or `DAMAGED_SCRAP` (defective);
+  - one or more **issued** lines: any active items, any quantities, stock-checked.
+- **No money moves and revenue is not reversed.** Price differences are not settled. If the values differ materially, the cashier does a `REFUND` return plus a new sale instead. The UI shows the value difference (at default prices) as a warning only.
+- **Returned lines are reversed exactly as in a `REFUND` return** (DD-05):
+  - `returned_quantity` is incremented on the sale allocations;
+  - `RESTOCKABLE` units go back to their original lots at their original cost;
+  - `cost_amount` stores the reversed cost.
+- **Issued lines** are depleted FIFO, with allocations logged in `STOCK_OUTFLOW_ALLOCATION (source_type = REPLACEMENT, source_id = return_id)`. Their cost becomes **replacement COGS** on the return date.
+- Net effect:
+  - **Colour swap:** the old unit's cost comes out of COGS and the new unit's cost goes in. The total cost of goods equals one unit.
+  - **Defective swap:** the old unit's cost moves to inventory losses (scrap) and the new unit's cost goes into COGS.
 
 **DD-07 — Lot source (D-06).**
 - `PURCHASE_TRANSACTION.source` ∈ `PURCHASE | ADJUSTMENT | OPENING | RETURN`.
@@ -91,9 +98,9 @@ This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagre
 - **Gross Sales** = Σ sale `total_amount` in the period.
 - **Sales Returns** = Σ `REFUND`-type customer return totals, by return date.
 - **Net Sales** = Gross Sales − Sales Returns.
-- **COGS** = Σ (quantity_depleted − returned_quantity) × unit_cost, over allocations of sales in the period.
+- **COGS** = Σ (quantity_depleted − returned_quantity) × unit_cost over allocations of sales in the period, + Σ `REPLACEMENT` outflow cost (by return date).
 - **Gross Profit** = Net Sales − COGS.
-- **Inventory Losses** = negative-adjustment outflow cost + `REPLACEMENT` outflow cost + Σ `RETURN_ITEM.cost_amount` where `condition = DAMAGED_SCRAP` (on `REFUND` returns), by event date.
+- **Inventory Losses** = negative-adjustment outflow cost (by adjustment date) + Σ `RETURN_ITEM.cost_amount` for customer `RETURNED` lines with `condition = DAMAGED_SCRAP`, in both `REFUND` and `REPLACEMENT` returns (by return date).
 - **Net Profit** = Gross Profit − Inventory Losses.
 - **Purchases report** = Σ `PURCHASE`-source totals − Σ vendor return totals.
 
@@ -155,7 +162,7 @@ The footer payment-status inputs are removed. Notes stay in the footer.
   - `get_recent_transactions(limit)`
   - `list_returns(filter)`
   - `update_bundle`
-  - `delete_bundle` (rejected if any transaction line references the bundle)
+  - `delete_bundle` (always allowed; see DD-28)
 - `get_party_ledger` is exposed in the UI.
 - The sales and purchase history row DTOs carry the party name, the line count and the date.
 - `SalesHistoryFilter.search_query` matches the code or the party name.
@@ -177,3 +184,14 @@ The footer payment-status inputs are removed. Notes stay in the footer.
 **DD-26 — Error contract.** `invokeCmd` rejects with the typed `AppError` `{ type, details }` defined in LLD §10.1. The UI shows `details.message`.
 
 **DD-27 — Mock parity.** The mock API client enforces the same business rules as the backend. The UI must behave identically against either one.
+
+**DD-28 — Bills are decoupled from bundles (2026-11-21).** A bundle is only a data-entry convenience.
+- `SALE_ITEM` and `PURCHASE_ITEM` store:
+  - `quantity` (base units);
+  - `unit_price` / `unit_cost` per base unit;
+  - `total_amount`;
+  - a display-only snapshot: `pack_label` (e.g. "Box of 10", null when entered in base units) and `pack_quantity` (e.g. 2).
+- There is **no `bundle_id` column and no FK** from bill lines to `ITEM_BUNDLE`.
+- Payloads may still send `bundle_id`. The backend uses it only at write time, to resolve the multiplier and label (the bundle must belong to the item), then snapshots both.
+- Bundles can be edited, including the multiplier, or deleted at any time; history is unaffected.
+- FIFO, returns and reports work purely in base units.

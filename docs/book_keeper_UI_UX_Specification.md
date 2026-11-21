@@ -110,7 +110,7 @@ The application maintains a persistent desktop shell across all views.
   5. **Unit Rate (₹):** Pre-populated with default base or bundle price; editable.
   6. **Add Trigger (`Enter`):** Appends line item to Cart Table (blocked with the inline Negative Stock Alert if cart total for the item would exceed stock) and resets cursor to Search Input.
 * **Cart Line Items Table:**
-  - Columns: `#`, `Item Name`, `Packaging / Unit`, `Quantity (Base Units)`, `MRP (₹)`, `Rate (₹)`, `Line Total (₹)`, `Remove [Del]`.
+  - Columns: `#`, `Item Name`, `Packaging / Unit` (e.g. `2 × Box of 10`), `Quantity (Base Units)`, `MRP (₹)`, `Rate (₹)`, `Line Total (₹)`, `Remove [Del]`.
 * **Checkout Footer:**
   - Totals: Total line items, total base units, Subtotal (₹).
   - Remarks / Notes field.
@@ -171,7 +171,7 @@ The application maintains a persistent desktop shell across all views.
   - **Packaging Bundles Sub-table:**
     - List of bundles (e.g. "Dozen" = 12 PCS, "Box" = 50 PCS).
     - `[+ Add Bundle]` opens the bundle modal with **dynamic suggestions from existing bundles** (no hard-coded presets) + custom names, Multiplier (> 1), Bundle MRP, Bundle Sale Price, Outer Barcode.
-    - Edit / Delete per bundle; delete and multiplier changes are refused if any bill uses the bundle.
+    - Edit (any field, including multiplier) / Delete per bundle at any time. Bundles are only an entry shortcut; past bills keep their own record of units, price and the pack label used.
   - Stock is read-only here (changed only via purchases, sales, returns, adjustments). No archive/delete of items in v1.
 * **Batch Lot Inspector (Row Expand):**
   - Lists the item's lots (`get_item_lots`): Lot Date, Code, Source (`Purchase` / `Adjustment` / `Opening` / `Return`), Vendor, Original Qty, Remaining Qty, Unit Cost; active lots first.
@@ -185,7 +185,8 @@ The application maintains a persistent desktop shell across all views.
   - **Tab 2: Vendor Payables** (Money owed by the shop).
 * **Dues Table:**
   - Columns: `Party Name`, `Phone`, `Unsettled Bills Count`, `Earliest Bill Date`, `Total Invoiced (₹)`, `Total Paid (₹)`, `Net Due Balance (₹)`, `Actions`.
-* **Settlement Action Modal (`Settle Payment`):**
+* **Party Row Expand — Open Bills:** each unpaid/partial bill of the party (code, date, total, paid, balance) with its own `[Settle]` button (single-bill mode).
+* **Settlement Action Modal (`Receive on account` / `Pay on account` — lump sum):**
   - Displays list of unpaid/partial bills for the selected party, oldest first, with a live preview of how the amount will be split.
   - Form Fields:
     - `Settlement Date` (defaults to today).
@@ -229,8 +230,8 @@ The application maintains a persistent desktop shell across all views.
     - `RESTOCKABLE` — Item re-enters active inventory (original lot when linked; a new return lot at latest cost when unlinked — cost asked if the item never had stock).
     - `DAMAGED_SCRAP` — Item is written off to scrap.
   - Settlement:
-    - `REFUND` — value first reduces the bill's balance due (or, with no bill, the customer's oldest dues); any remainder is cash handed back. Preview shows "₹X credited · ₹Y cash".
-    - `REPLACEMENT` (with bill only) — issues fresh units of the same item (qty ≤ returned) from stock; no money moves.
+    - `REFUND` — with a bill: value reduces **that bill's** balance due only; any remainder is cash handed back. No receipt: value reduces the selected customer's oldest dues, remainder cash (walk-in: all cash). Preview shows "₹X credited · ₹Y cash".
+    - `REPLACEMENT` / Exchange (with bill only) — returned units keep their condition (`RESTOCKABLE` for a colour/size swap, `DAMAGED_SCRAP` for a defective unit); then add any item(s) and quantities to issue from stock. No money moves; a value-difference warning is shown (do a Refund + new sale if the difference must be paid).
 * **Tab 2: Vendor Purchase Return:**
   - Bill / vendor selection, then lot selection (supplier lots only, remaining qty shown) or FIFO; return quantity ≤ remaining.
   - Value = lot cost × qty. Reduces the bill's (or vendor's oldest) payable first; any remainder is cash received from the supplier.
@@ -250,7 +251,7 @@ The application maintains a persistent desktop shell across all views.
      - Gross Sales (₹)
      - Less Sales Returns (₹) → **Net Sales**
      - Less FIFO COGS, net of returned units (₹) → **Gross Profit**
-     - Less Inventory Losses (write-offs, scrap returns, replacement units) (₹)
+     - Less Inventory Losses (write-offs, scrap returns) (₹) — COGS above includes units issued in replacements
      - **= Net Profit (₹)**
      - Also shown: Total Purchases (net of vendor returns).
   2. **FIFO Inventory Valuation Report:**
