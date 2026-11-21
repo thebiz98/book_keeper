@@ -6,63 +6,83 @@
 import type {
   AdjustmentReason,
   CashFlowReport,
-  Item,
+  DashboardMetrics,
+  ItemBundle,
+  ItemLot,
   ItemSearchResult,
   LowStockItem,
-  PartyBalance,
-  PartyLedgerView,
-  PartyType,
   Party,
+  PartyDueSummary,
+  PartyLedgerView,
+  PartyListRow,
+  PartyType,
   PaymentStatus,
-  PnlReport,
-  Purchase,
+  PnLReport,
   PurchaseDetailView,
+  PurchaseHistoryRow,
+  RecentTransaction,
   ReturnDetailView,
-  Sale,
+  ReturnTransaction,
+  ReturnType,
   SaleDetailView,
+  SaleHistoryRow,
   SettlementType,
   ShopSettings,
   StockAdjustment,
   StockCondition,
   StockValuationReport,
+  TransactionType,
+  TrendDataPoint,
 } from './index';
 
-export interface PaginatedList<T> {
+/** Rust Paginated<T>. Page count on the client is ceil(total / limit). */
+export interface Paginated<T> {
   items: T[];
-  totalCount: number;
+  total: number;
   page: number;
   limit: number;
-  totalPages: number;
 }
 
+export type PaymentStatusFilter = 'ALL' | PaymentStatus;
+
+/** Filter for get_sales_history and get_purchases_history. Dates are YYYY-MM-DD, inclusive. */
 export interface HistoryFilter {
   startDate?: string | null;
   endDate?: string | null;
-  paymentStatus?: PaymentStatus | null;
+  paymentStatus?: PaymentStatusFilter | null;
   partyId?: number | null;
+  searchQuery?: string | null;
+  page?: number | null;
+  limit?: number | null;
+}
+
+export interface ReturnsFilter {
+  returnType?: ReturnType | null;
+  startDate?: string | null;
+  endDate?: string | null;
   page?: number | null;
   limit?: number | null;
 }
 
 export interface CatalogFilter {
   category?: string | null;
-  lowStockOnly?: boolean;
-  page?: number;
-  limit?: number;
+  lowStockOnly?: boolean | null;
+  search?: string | null;
+  page?: number | null;
+  limit?: number | null;
 }
 
 export interface CreateSaleItemPayload {
   itemId: number;
   bundleId: number | null;
   bundleQuantity: number;
-  unitPrice: number | null;
+  unitPrice: number;
 }
 
 export interface CreateSalePayload {
-  /** @deprecated Ignored by the backend: codes are assigned inside the write transaction. */
-  transactionCode?: string | null;
   transactionDate: string;
   partyId: number | null;
+  paymentStatus: PaymentStatus;
   paidAmount: number;
   paymentMode: string | null;
   notes: string | null;
@@ -76,7 +96,6 @@ export interface SaleSummaryResponse {
   paidAmount: number;
   balanceDue: number;
   changeAmount: number;
-  changeReturned: number;
   paymentStatus: PaymentStatus;
 }
 
@@ -88,23 +107,35 @@ export interface CreatePurchaseItemPayload {
 }
 
 export interface CreatePurchasePayload {
-  /** @deprecated Ignored by the backend: codes are assigned inside the write transaction. */
-  transactionCode?: string | null;
   transactionDate: string;
   partyId: number | null;
+  supplierInvoiceRef: string | null;
+  paymentStatus: PaymentStatus;
   paidAmount: number;
   paymentMode: string | null;
   notes: string | null;
   items: CreatePurchaseItemPayload[];
 }
 
+export interface PurchaseSummaryResponse {
+  purchaseId: number;
+  transactionCode: string;
+}
+
 export interface SettlePaymentPayload {
   partyId: number;
-  amount: number;
+  transactionType: TransactionType;
+  /** null = lump-sum settlement across open bills (oldest first). */
+  transactionId: number | null;
   settlementDate: string;
+  amountPaid: number;
   paymentMode: string | null;
-  specificBillId: number | null;
   notes: string | null;
+}
+
+export interface SettlementResult {
+  settlementIds: number[];
+  billsTouched: number[];
 }
 
 export interface CreateBundlePayload {
@@ -116,6 +147,13 @@ export interface CreateBundlePayload {
   barcode: string | null;
 }
 
+export interface UpdateBundlePayload {
+  bundleName: string;
+  unitsPerBundle: number;
+  mrp: number | null;
+  defaultBundlePrice: number | null;
+  barcode: string | null;
+}
 export interface CreateItemPayload {
   name: string;
   category: string | null;
@@ -158,11 +196,15 @@ export interface CustomerReturnItemPayload {
   quantity: number;
   unitPrice: number;
   condition: StockCondition;
+  unitCostOverride: number | null;
+}
+
+export interface ReplacementItemPayload {
+  itemId: number;
+  quantity: number;
 }
 
 export interface CustomerReturnPayload {
-  /** @deprecated Ignored by the backend: codes are assigned inside the write transaction. */
-  returnCode?: string | null;
   originalSaleId: number | null;
   partyId: number | null;
   returnDate: string;
@@ -170,15 +212,16 @@ export interface CustomerReturnPayload {
   reason?: string | null;
   notes: string | null;
   items: CustomerReturnItemPayload[];
+  replacementItems: ReplacementItemPayload[];
 }
 
 export interface VendorReturnItemPayload {
   itemId: number;
   purchaseItemId: number | null;
   quantity: number;
-  unitCost: number;
 }
 
+/** Vendor returns must use settlementType REFUND. Unit cost comes from the lot. */
 export interface VendorReturnPayload {
   originalPurchaseId: number | null;
   partyId: number | null;
@@ -189,91 +232,117 @@ export interface VendorReturnPayload {
   items: VendorReturnItemPayload[];
 }
 
+export interface ReturnResult {
+  returnId: number;
+  returnCode: string;
+  creditedAmount: number;
+  cashRefunded: number;
+}
+
 export interface StockAdjustmentPayload {
   adjustmentDate: string;
   itemId: number;
+  /** Positive adds stock, negative writes off. */
   quantity: number;
   reason: AdjustmentReason;
+  /** Lot cost for positive adjustments. */
+  unitCost: number | null;
   notes: string | null;
 }
 
-export interface DashboardMetrics {
-  todaySales: number;
-  todayPurchases: number;
-  todaySalesAmount: number;
-  todaySalesCount: number;
-  todayPurchaseAmount: number;
-  todayPurchaseCount: number;
-  todayNetProfit: number;
-  totalStockValuation: number;
-  customerReceivables: number;
-  vendorPayables: number;
-  liveCashInDrawer: number;
+export interface StockAdjustmentResult {
+  adjustmentId: number;
+  lossValue: number;
 }
 
-export interface TrendDataPoint {
-  date: string;
-  salesAmount: number;
-  purchaseAmount: number;
+export type ConflictStrategy = 'SKIP' | 'OVERWRITE' | 'ADD_STOCK';
+
+export interface ImportRowError {
+  row: number;
+  field: string;
+  message: string;
+}
+
+export interface ImportDuplicate {
+  row: number;
+  name: string;
+  existingItemId: number;
+}
+
+export interface ImportValidationReport {
+  validCount: number;
+  rowsWithErrors: ImportRowError[];
+  duplicates: ImportDuplicate[];
 }
 
 export interface ImportSummary {
-  totalRows: number;
-  importedCount: number;
-  skippedCount: number;
-  errors: string[];
+  created: number;
+  updated: number;
+  skipped: number;
+  stockLotsCreated: number;
 }
 
 export interface ApiClient {
   // Sales
   getNextSaleCode(): Promise<string>;
   createSale(payload: CreateSalePayload): Promise<SaleSummaryResponse>;
-  getSalesHistory(filter?: HistoryFilter): Promise<PaginatedList<Sale>>;
+  getSalesHistory(filter?: HistoryFilter): Promise<Paginated<SaleHistoryRow>>;
   getSaleDetails(saleId: number): Promise<SaleDetailView>;
 
   // Purchases
   getNextPurchaseCode(): Promise<string>;
-  createPurchase(payload: CreatePurchasePayload): Promise<number>;
-  getPurchasesHistory(filter?: HistoryFilter): Promise<PaginatedList<Purchase>>;
+  createPurchase(payload: CreatePurchasePayload): Promise<PurchaseSummaryResponse>;
+  getPurchasesHistory(filter?: HistoryFilter): Promise<Paginated<PurchaseHistoryRow>>;
   getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailView>;
 
   // Items & Catalog
   searchItemsFts(query: string, limit?: number): Promise<ItemSearchResult[]>;
-  getItemsCatalog(filter?: CatalogFilter): Promise<PaginatedList<Item>>;
+  getItemsCatalog(filter?: CatalogFilter): Promise<Paginated<ItemSearchResult>>;
+  listCategories(): Promise<string[]>;
   createItem(payload: CreateItemPayload): Promise<number>;
   updateItem(itemId: number, payload: UpdateItemPayload): Promise<void>;
   getBundleSuggestions(): Promise<BundleSuggestion[]>;
-  createBundle(payload: CreateBundlePayload): Promise<number>;
+  createBundle(payload: CreateBundlePayload): Promise<ItemBundle>;
+  updateBundle(bundleId: number, payload: UpdateBundlePayload): Promise<ItemBundle>;
+  deleteBundle(bundleId: number): Promise<void>;
 
   // Dues & Ledger
-  getPartyDuesSummary(partyType: PartyType): Promise<PartyBalance[]>;
-  settleBillPayment(payload: SettlePaymentPayload): Promise<void>;
+  getPartyDuesSummary(partyType: PartyType): Promise<PartyDueSummary[]>;
+  settleBillPayment(payload: SettlePaymentPayload): Promise<SettlementResult>;
   getPartyLedger(partyId: number): Promise<PartyLedgerView>;
 
   // Parties
   createParty(payload: CreatePartyPayload): Promise<number>;
   updateParty(partyId: number, payload: UpdatePartyPayload): Promise<void>;
   getParty(partyId: number): Promise<Party>;
-  listParties(partyType?: PartyType, activeOnly?: boolean): Promise<Party[]>;
-  searchParties(query: string, partyType?: PartyType): Promise<Party[]>;
+  listParties(partyType?: PartyType, activeOnly?: boolean): Promise<PartyListRow[]>;
+  searchParties(query: string, partyType?: PartyType): Promise<PartyListRow[]>;
 
   // Returns & Adjustments
   getNextReturnCode(): Promise<string>;
-  createCustomerReturn(payload: CustomerReturnPayload): Promise<string>;
-  createVendorReturn(payload: VendorReturnPayload): Promise<string>;
+  createCustomerReturn(payload: CustomerReturnPayload): Promise<ReturnResult>;
+  createVendorReturn(payload: VendorReturnPayload): Promise<ReturnResult>;
   getReturnDetails(returnId: number): Promise<ReturnDetailView>;
-  createStockAdjustment(payload: StockAdjustmentPayload): Promise<number>;
+  listReturns(filter?: ReturnsFilter): Promise<Paginated<ReturnTransaction>>;
+  createStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentResult>;
+  /**
+   * NOTE: get_item_lots is implemented in adjustment_controller.rs but is NOT yet in
+   * main.rs generate_handler!. It will reject until the backend registers it.
+   */
+  getItemLots(itemId: number): Promise<ItemLot[]>;
   listStockAdjustments(
     itemId?: number,
     page?: number,
     limit?: number
-  ): Promise<PaginatedList<StockAdjustment>>;
+  ): Promise<Paginated<StockAdjustment>>;
 
   // Reports
   getDashboardMetrics(): Promise<DashboardMetrics>;
   getLowStockAlerts(): Promise<LowStockItem[]>;
+  /** period: '7d' | '30d' | '1y'. */
   getSalesPurchaseTrend(period: string): Promise<TrendDataPoint[]>;
-  getPnLReport(fromDate: string, toDate: string): Promise<PnlReport>;
+  getRecentTransactions(limit: number): Promise<RecentTransaction[]>;
+  getPnLReport(fromDate: string, toDate: string): Promise<PnLReport>;
   getStockValuationReport(): Promise<StockValuationReport>;
   getCashFlowReport(fromDate: string, toDate: string): Promise<CashFlowReport>;
 
@@ -284,5 +353,9 @@ export interface ApiClient {
   verifyDatabaseIntegrity(): Promise<boolean>;
 
   // Items import
-  importItemsFromExcel(filePath: string): Promise<ImportSummary>;
+  validateItemsImport(filePath: string): Promise<ImportValidationReport>;
+  executeItemsImport(
+    filePath: string,
+    conflictStrategy: ConflictStrategy
+  ): Promise<ImportSummary>;
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Truck, Search } from 'lucide-react';
 import { api } from '@/api';
-import type { PartyBalance, PartyType } from '@/types';
+import type { PartyDueSummary, PartyType } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { SettlementModal } from '@/components/domain/SettlementModal';
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button';
 
 export const CreditDuesPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<PartyType>('CUSTOMER');
-  const [duesList, setDuesList] = useState<PartyBalance[]>([]);
+  const [duesList, setDuesList] = useState<PartyDueSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -42,7 +42,7 @@ export const CreditDuesPage: React.FC = () => {
   });
 
   const totalOutstanding = filteredDues.reduce((acc, d) => {
-    return acc + d.totalDue;
+    return acc + d.balanceDue;
   }, 0);
 
   const handleSettled = (settledAmount: number) => {
@@ -149,8 +149,8 @@ export const CreditDuesPage: React.FC = () => {
               filteredDues.map((due, idx) => {
                 const name = due.partyName;
                 const phone = due.phone || '—';
-                const count = due.unpaidBillsCount;
-                const balance = due.totalDue;
+                const count = due.unsettledBillsCount;
+                const balance = due.balanceDue;
 
                 return (
                   <TableRow key={due.partyId}>
@@ -203,6 +203,7 @@ export const CreditDuesPage: React.FC = () => {
           partyId={selectedParty.id}
           partyName={selectedParty.name}
           totalDue={selectedParty.totalDue}
+          transactionType={activeTab === 'CUSTOMER' ? 'SALE' : 'PURCHASE'}
           onSettled={handleSettled}
         />
       )}

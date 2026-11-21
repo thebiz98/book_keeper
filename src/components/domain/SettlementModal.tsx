@@ -13,6 +13,8 @@ export interface SettlementModalProps {
   partyId: number;
   partyName: string;
   totalDue: number;
+  /** SALE for customers, PURCHASE for vendors. TODO(F6-c): make required and wire from callers. */
+  transactionType?: 'SALE' | 'PURCHASE';
   onSettled?: (amount: number) => void;
 }
 
@@ -22,6 +24,7 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   partyId,
   partyName,
   totalDue,
+  transactionType = 'SALE',
   onSettled,
 }) => {
   const [amount, setAmount] = useState<number>(totalDue);
@@ -55,10 +58,11 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
     try {
       await api.settleBillPayment({
         partyId,
-        amount,
+        transactionType,
+        transactionId: null,
+        amountPaid: amount,
         paymentMode,
         notes: notes.trim() || null,
-        specificBillId: null,
         settlementDate: new Date().toISOString().split('T')[0],
       });
       onSettled?.(amount);

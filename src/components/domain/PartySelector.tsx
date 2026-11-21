@@ -34,7 +34,7 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
       .catch(() => {});
     api
       .getPartyDuesSummary(partyType)
-      .then((rows) => setDues(Object.fromEntries(rows.map((r) => [r.partyId, r.totalDue]))))
+      .then((rows) => setDues(Object.fromEntries(rows.map((r) => [r.partyId, r.balanceDue]))))
       .catch(() => {});
   }, [partyType]);
 

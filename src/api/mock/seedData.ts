@@ -1,4 +1,9 @@
-import type { Item, ItemBundle, Party, ShopSettings, BundleSuggestion } from '@/types';
+import type {
+  BundleSuggestion,
+  ItemBundle,
+  Party,
+  ShopSettings,
+} from '@/types';
 
 const SEED_TS = '2026-11-01T00:00:00Z';
 
@@ -6,12 +11,24 @@ const SEED_TS = '2026-11-01T00:00:00Z';
 export type MockBundle = ItemBundle;
 
 /** Mock item: Rust Item entity plus mock-only internals (cost, bundles). */
-export interface MockItem extends Item {
+export interface MockItem {
+  id: number;
+  name: string;
+  category: string | null;
+  barcode: string | null;
+  baseUnit: string;
+  mrp: number | null;
+  defaultSalePrice: number;
+  currentStock: number;
+  isLowStock: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
   costPrice: number;
   bundles: MockBundle[];
 }
 
-/** Mock party: Rust Party entity plus mock-only ledger state. */
+/** Mock party: Rust Party entity plus fixture ledger stats (PartyListRow / PartyDueSummary). */
 export interface MockParty extends Party {
   balanceDue: number;
   oldestBillDate: string | null;

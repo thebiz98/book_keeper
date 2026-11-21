@@ -37,7 +37,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
   const [vendReturnItem, setVendReturnItem] = useState<ItemSearchResult | null>(null);
   const [vendReturnQty, setVendReturnQty] = useState(1);
   const [vendResolution, setVendResolution] = useState<SettlementType>('REFUND');
-  const [vendRefundAmount, setVendRefundAmount] = useState(0);
+  const [, setVendRefundAmount] = useState(0);
   const [vendNotes, setVendNotes] = useState('');
   const [isSubmittingVend, setIsSubmittingVend] = useState(false);
 
@@ -69,7 +69,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
         custResolution === 'REFUND' && custReturnQty > 0
           ? custRefundAmount / custReturnQty
           : custReturnItem.defaultSalePrice;
-      const returnCode = await api.createCustomerReturn({
+      const result = await api.createCustomerReturn({
         originalSaleId: null,
         partyId: null,
         returnDate: new Date().toISOString().split('T')[0],
@@ -82,8 +82,11 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
             quantity: custReturnQty,
             unitPrice,
             condition: custCondition,
+            unitCostOverride: null,
           },
         ],
+        // TODO(F6-c): replacement item picker for settlementType REPLACEMENT.
+        replacementItems: [],
       });
       if (custResolution === 'REFUND' && custRefundAmount > 0) {
         recordCashFlow({ refunds: custRefundAmount });
@@ -91,7 +94,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
 
       setFeedback({
         type: 'success',
-        message: `Customer return recorded successfully (${returnCode}).`,
+        message: `Customer return recorded successfully (${result.returnCode}).`,
       });
       setCustReturnItem(null);
       setCustReturnQty(1);
@@ -113,10 +116,11 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
     setIsSubmittingVend(true);
     setFeedback(null);
     try {
-      const returnCode = await api.createVendorReturn({
+      const result = await api.createVendorReturn({
         originalPurchaseId: null,
         partyId: null,
         returnDate: new Date().toISOString().split('T')[0],
+        // TODO(F6-c): vendor returns must be REFUND; unit cost comes from the lot (pick a lot via getItemLots).
         settlementType: vendResolution,
         reason: null,
         notes: vendNotes.trim() || null,
@@ -125,13 +129,12 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
             itemId: vendReturnItem.itemId,
             purchaseItemId: null,
             quantity: vendReturnQty,
-            unitCost: vendReturnQty > 0 ? vendRefundAmount / vendReturnQty : 0,
           },
         ],
       });
       setFeedback({
         type: 'success',
-        message: `Vendor return recorded successfully (${returnCode}).`,
+        message: `Vendor return recorded successfully (${result.returnCode}).`,
       });
       setVendReturnItem(null);
       setVendReturnQty(1);

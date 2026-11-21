@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Package, Sparkles } from 'lucide-react';
 import { api } from '@/api';
-import type { BundleSuggestion } from '@/types';
+import type { BundleSuggestion, ItemBundle } from '@/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { TextInput } from '../ui/TextInput';
@@ -10,7 +10,7 @@ import { NumericInput } from '../ui/NumericInput';
 export interface BundleCreationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onBundleCreated?: (bundleId: number) => void;
+  onBundleCreated?: (bundle: ItemBundle) => void;
   initialItemId?: number;
   baseUnit?: string;
 }

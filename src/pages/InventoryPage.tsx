@@ -8,7 +8,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
-import type { Item } from '@/types';
+import type { ItemSearchResult } from '@/types';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
@@ -20,10 +20,8 @@ import { TextInput } from '@/components/ui/TextInput';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { Select } from '@/components/ui/Select';
 
-type InventoryRow = Pick<
-  Item,
-  'id' | 'name' | 'category' | 'barcode' | 'baseUnit' | 'mrp' | 'defaultSalePrice' | 'currentStock'
->;
+// TODO(F6-b): render ItemSearchResult directly (itemId, bundles, isLowStock) and drop the `id` alias.
+type InventoryRow = ItemSearchResult & { id: number };
 
 export const InventoryPage: React.FC = () => {
   const [items, setItems] = useState<InventoryRow[]>([]);
@@ -56,10 +54,10 @@ export const InventoryPage: React.FC = () => {
   const handleImport = async () => {
     if (!importPath.trim()) return;
     try {
-      const r = await api.importItemsFromExcel(importPath.trim());
+      // TODO(F6-b): real import dialog (validateItemsImport report + conflict strategy picker).
+      const r = await api.executeItemsImport(importPath.trim(), 'SKIP');
       setImportMsg(
-        `Imported ${r.importedCount}, skipped ${r.skippedCount} of ${r.totalRows} rows.` +
-          (r.errors.length ? ` Errors: ${r.errors.join('; ')}` : '')
+        `Created ${r.created}, updated ${r.updated}, skipped ${r.skipped}, lots ${r.stockLotsCreated}.`
       );
       fetchItems();
     } catch (err: any) {
@@ -84,7 +82,7 @@ export const InventoryPage: React.FC = () => {
           lowStockOnly,
           limit: 100,
         })
-        .then((res) => setItems(res.items))
+        .then((res) => setItems(res.items.map((r) => ({ ...r, id: r.itemId }))))
         .catch(() => setItems([]))
         .finally(() => setIsLoading(false));
     }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Receipt, Search, Eye, DollarSign } from 'lucide-react';
 import { api } from '@/api';
-import type { PaymentStatus, Sale, SaleDetailView } from '@/types';
+import type { PaymentStatus, SaleHistoryRow, SaleDetailView } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -9,15 +9,16 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { SettlementModal } from '@/components/domain/SettlementModal';
 
+// TODO(F6-c): server-side filters/pagination (searchQuery, dates, page/limit), real settlements, party_name snapshot.
 export const SalesHistoryPage: React.FC = () => {
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [sales, setSales] = useState<SaleHistoryRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | PaymentStatus>('ALL');
   const [datePreset, setDatePreset] = useState<'ALL' | 'TODAY' | '7D' | 'THIS_MONTH'>('ALL');
 
   // Receipt Modal State
-  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [selectedSale, setSelectedSale] = useState<SaleHistoryRow | null>(null);
   const [saleDetails, setSaleDetails] = useState<SaleDetailView | null>(null);
   const [customerNames, setCustomerNames] = useState<Record<number, string>>({});
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
@@ -38,14 +39,14 @@ export const SalesHistoryPage: React.FC = () => {
       .catch(() => setCustomerNames({}));
   };
 
-  const customerOf = (s: Sale): string =>
+  const customerOf = (s: SaleHistoryRow): string =>
     (s.partyId !== null && customerNames[s.partyId]) || 'Walk-in Customer';
 
   useEffect(() => {
     loadSales();
   }, []);
 
-  const openReceipt = async (sale: Sale) => {
+  const openReceipt = async (sale: SaleHistoryRow) => {
     setSelectedSale(sale);
     setSaleDetails(null);
     setIsReceiptOpen(true);
@@ -294,7 +295,7 @@ export const SalesHistoryPage: React.FC = () => {
                     </TableRow>
                   ) : (
                     (saleDetails?.items ?? []).map((it, i) => {
-                      const qty = it.saleItem.bundleQuantity;
+                      const qty = it.saleItem.packQuantity;
                       const total = it.saleItem.totalAmount;
                       const rate = qty > 0 ? total / qty : 0;
                       return (

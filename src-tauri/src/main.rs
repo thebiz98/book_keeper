@@ -28,6 +28,7 @@ fn main() {
             purchase_controller::create_purchase,
             sale_controller::create_sale,
             adjustment_controller::create_stock_adjustment,
+            adjustment_controller::get_item_lots,
             return_controller::create_vendor_return,
             item_controller::get_bundle_suggestions,
             report_controller::get_cash_flow_report,

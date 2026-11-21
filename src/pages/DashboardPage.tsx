@@ -10,7 +10,7 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { api } from '@/api';
-import type { DashboardMetrics, LowStockItem, Sale, TrendDataPoint } from '@/types';
+import type { DashboardMetrics, LowStockItem, SaleHistoryRow, TrendDataPoint } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
@@ -25,7 +25,8 @@ export const DashboardPage: React.FC = () => {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [lowStockAlerts, setLowStockAlerts] = useState<LowStockItem[]>([]);
   const [trendData, setTrendData] = useState<TrendDataPoint[]>([]);
-  const [recentSales, setRecentSales] = useState<Sale[]>([]);
+  // TODO(F6-c): use getRecentTransactions (mixed sales/purchases/returns) and drop the parties lookup.
+  const [recentSales, setRecentSales] = useState<SaleHistoryRow[]>([]);
   const [customerNames, setCustomerNames] = useState<Record<number, string>>({});
 
   useEffect(() => {
@@ -51,7 +52,7 @@ export const DashboardPage: React.FC = () => {
     };
   }, []);
 
-  const todayGross = metrics?.todaySales ?? 0;
+  const todayGross = metrics?.todaySalesAmount ?? 0;
   const receivables = metrics?.customerReceivables ?? 0;
   const netProfit = metrics?.todayNetProfit ?? 0;
   const stockValuation = metrics?.totalStockValuation ?? 0;

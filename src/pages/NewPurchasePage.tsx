@@ -129,6 +129,9 @@ export const NewPurchasePage: React.FC = () => {
     const payload: CreatePurchasePayload = {
       transactionDate: inwardDate,
       partyId: vendorId ?? null,
+      // TODO(F6-b): send supplierInvoiceRef as its own field instead of packing it into notes.
+      supplierInvoiceRef: vendorInvoiceRef.trim() || null,
+      paymentStatus,
       notes: vendorInvoiceRef
         ? `Supplier Inv #${vendorInvoiceRef}. ${notes}`.trim()
         : notes.trim() || null,

@@ -105,6 +105,8 @@ export const NewSalePage: React.FC = () => {
     const payload: CreateSalePayload = {
       transactionDate: invoiceDate,
       partyId: customerId,
+      // TODO(F6-a): derive status from tendered vs total; send tendered cash (change handled by backend).
+      paymentStatus,
       paidAmount: paymentStatus === 'UNPAID' ? 0 : paidAmount,
       paymentMode: 'CASH',
       notes: null,

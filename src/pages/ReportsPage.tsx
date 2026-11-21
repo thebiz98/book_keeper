@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { api } from '@/api';
-import type { CashFlowReport, PnlReport, StockValuationReport } from '@/types';
+import type { CashFlowReport, PnLReport, StockValuationReport } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { Tabs } from '@/components/ui/Tabs';
 
+// TODO(F6-c): show the full P&L/cash-flow breakdown, local-date presets (lib/dates), error states.
 export const ReportsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'pnl' | 'valuation' | 'cashflow'>('pnl');
   const [datePreset, setDatePreset] = useState<'today' | 'week' | 'month' | 'year'>('month');
 
   // Reports data
-  const [pnl, setPnl] = useState<PnlReport | null>(null);
+  const [pnl, setPnl] = useState<PnLReport | null>(null);
   const [valuation, setValuation] = useState<StockValuationReport | null>(null);
   const [cashFlow, setCashFlow] = useState<CashFlowReport | null>(null);
 
@@ -124,22 +125,22 @@ export const ReportsPage: React.FC = () => {
                 </span>
               </div>
               <div className="flex justify-between items-center py-1 text-slate-500">
-                <span>Less: Trade Discounts</span>
+                <span>Less: Sales Returns</span>
                 <span className="font-mono text-rose-500">
-                  -<CurrencyDisplay amount={pnl?.totalDiscounts ?? 0} />
+                  -<CurrencyDisplay amount={pnl?.salesReturns ?? 0} />
                 </span>
               </div>
               <div className="flex justify-between items-center py-1 text-slate-500">
-                <span>Less: Customer Cash Refunds</span>
+                <span>Less: Inventory Losses</span>
                 <span className="font-mono text-rose-500">
-                  -<CurrencyDisplay amount={pnl?.returnsRefunded ?? 0} />
+                  -<CurrencyDisplay amount={pnl?.inventoryLosses ?? 0} />
                 </span>
               </div>
               <div className="border-t border-slate-200 dark:border-slate-800 pt-2 flex justify-between items-center font-medium">
                 <span>Net Sales Revenue</span>
                 <span className="font-mono font-semibold">
                   <CurrencyDisplay
-                    amount={(pnl?.grossSales ?? 0) - (pnl?.totalDiscounts ?? 0) - (pnl?.returnsRefunded ?? 0)}
+                    amount={pnl?.netSales ?? 0}
                   />
                 </span>
               </div>
@@ -175,7 +176,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Active Catalog Items</span>
               <div className="text-2xl font-bold mt-1 text-slate-900 dark:text-slate-100">
-                {valuation?.totalItemsCount ?? 0}
+                {valuation?.categoriesBreakdown.reduce((n, c) => n + c.itemsCount, 0) ?? 0}
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Stationery master products</span>
             </div>
@@ -209,7 +210,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Cash Inflows</span>
               <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">
-                <CurrencyDisplay amount={cashFlow?.totalInflow ?? 0} />
+                <CurrencyDisplay amount={(cashFlow ? cashFlow.salesCashInflow + cashFlow.customerSettlementsInflow + cashFlow.vendorRefundsInflow : 0)} />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Counter cash + customer dues</span>
             </div>
@@ -217,7 +218,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Cash Outflows</span>
               <div className="text-2xl font-bold mt-1 text-rose-600 dark:text-rose-400">
-                <CurrencyDisplay amount={cashFlow?.totalOutflow ?? 0} />
+                <CurrencyDisplay amount={(cashFlow ? cashFlow.purchaseCashOutflow + cashFlow.vendorSettlementsOutflow + cashFlow.refundsCashOutflow : 0)} />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Inward purchases + vendor dues</span>
             </div>
@@ -225,7 +226,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Net Drawer Cash Flow</span>
               <div className="text-2xl font-bold mt-1">
-                <CurrencyDisplay amount={cashFlow?.netCashFlow ?? 0} colored size="hero" />
+                <CurrencyDisplay amount={cashFlow?.netCashBalance ?? 0} colored size="hero" />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Live net liquidity</span>
             </div>

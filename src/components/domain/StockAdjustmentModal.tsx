@@ -68,6 +68,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
         adjustmentDate: new Date().toISOString().split('T')[0],
         quantity: delta,
         reason,
+        unitCost: null, // TODO(F6-c): unit cost input for positive adjustments
         notes: notes.trim() || null,
       });
       onAdjusted?.();

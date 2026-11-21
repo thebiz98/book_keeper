@@ -1,45 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { errorMessage, normalizeError } from './errors';
 import { camelToSnake, snakeToCamel } from './caseConvert';
-import type {
-  ApiClient,
-  BundleSuggestion,
-  CashFlowReport,
-  CatalogFilter,
-  CreateBundlePayload,
-  CreateItemPayload,
-  CreatePartyPayload,
-  CreatePurchasePayload,
-  CreateSalePayload,
-  CustomerReturnPayload,
-  DashboardMetrics,
-  HistoryFilter,
-  ImportSummary,
-  Item,
-  ItemSearchResult,
-  LowStockItem,
-  PaginatedList,
-  Party,
-  PartyBalance,
-  PartyLedgerView,
-  PartyType,
-  PnlReport,
-  Purchase,
-  PurchaseDetailView,
-  ReturnDetailView,
-  Sale,
-  SaleDetailView,
-  SaleSummaryResponse,
-  SettlePaymentPayload,
-  ShopSettings,
-  StockAdjustment,
-  StockAdjustmentPayload,
-  StockValuationReport,
-  TrendDataPoint,
-  UpdateItemPayload,
-  UpdatePartyPayload,
-  VendorReturnPayload,
-} from '@/types';
+import type { ApiClient } from '@/types';
 
 /**
  * Single normalization layer for Tauri IPC.
@@ -75,159 +37,112 @@ export async function invokeCmd<T>(
 /** Production ApiClient calling Tauri v2 backend commands. */
 export class TauriClient implements ApiClient {
   // --- Sales ---
-  getNextSaleCode() {
-    return invokeCmd<string>('get_next_sale_code');
-  }
-  createSale(payload: CreateSalePayload) {
-    return invokeCmd<SaleSummaryResponse>('create_sale', { payload });
-  }
-  getSalesHistory(filter?: HistoryFilter) {
-    return invokeCmd<PaginatedList<Sale>>('get_sales_history', {
-      filter: filter ?? {},
-    });
-  }
-  getSaleDetails(saleId: number) {
-    return invokeCmd<SaleDetailView>('get_sale_details', { saleId });
-  }
+  getNextSaleCode: ApiClient['getNextSaleCode'] = () => invokeCmd('get_next_sale_code');
+  createSale: ApiClient['createSale'] = (payload) => invokeCmd('create_sale', { payload });
+  getSalesHistory: ApiClient['getSalesHistory'] = (filter) =>
+    invokeCmd('get_sales_history', { filter: filter ?? {} });
+  getSaleDetails: ApiClient['getSaleDetails'] = (saleId) =>
+    invokeCmd('get_sale_details', { saleId });
 
   // --- Purchases ---
-  getNextPurchaseCode() {
-    return invokeCmd<string>('get_next_purchase_code');
-  }
-  createPurchase(payload: CreatePurchasePayload) {
-    return invokeCmd<number>('create_purchase', { payload });
-  }
-  getPurchasesHistory(filter?: HistoryFilter) {
-    return invokeCmd<PaginatedList<Purchase>>('get_purchases_history', {
-      filter: filter ?? {},
-    });
-  }
-  getPurchaseDetails(purchaseId: number) {
-    return invokeCmd<PurchaseDetailView>('get_purchase_details', { purchaseId });
-  }
+  getNextPurchaseCode: ApiClient['getNextPurchaseCode'] = () =>
+    invokeCmd('get_next_purchase_code');
+  createPurchase: ApiClient['createPurchase'] = (payload) =>
+    invokeCmd('create_purchase', { payload });
+  getPurchasesHistory: ApiClient['getPurchasesHistory'] = (filter) =>
+    invokeCmd('get_purchases_history', { filter: filter ?? {} });
+  getPurchaseDetails: ApiClient['getPurchaseDetails'] = (purchaseId) =>
+    invokeCmd('get_purchase_details', { purchaseId });
 
   // --- Items & Catalog ---
-  searchItemsFts(query: string, limit?: number) {
-    return invokeCmd<ItemSearchResult[]>('search_items_fts', {
-      query,
-      limit: limit ?? null,
-    });
-  }
-  getItemsCatalog(filter?: CatalogFilter) {
-    return invokeCmd<PaginatedList<Item>>('get_items_catalog', {
+  searchItemsFts: ApiClient['searchItemsFts'] = (query, limit) =>
+    invokeCmd('search_items_fts', { query, limit: limit ?? null });
+  getItemsCatalog: ApiClient['getItemsCatalog'] = (filter) =>
+    invokeCmd('get_items_catalog', {
       category: filter?.category ?? null,
       lowStockOnly: filter?.lowStockOnly ?? null,
+      search: filter?.search ?? null,
       page: filter?.page ?? null,
       limit: filter?.limit ?? null,
     });
-  }
-  createItem(payload: CreateItemPayload) {
-    return invokeCmd<number>('create_item', { payload });
-  }
-  updateItem(itemId: number, payload: UpdateItemPayload) {
-    return invokeCmd<void>('update_item', { itemId, payload });
-  }
-  getBundleSuggestions() {
-    return invokeCmd<BundleSuggestion[]>('get_bundle_suggestions');
-  }
-  createBundle(payload: CreateBundlePayload) {
-    return invokeCmd<number>('create_bundle', { payload });
-  }
+  listCategories: ApiClient['listCategories'] = () => invokeCmd('list_categories');
+  createItem: ApiClient['createItem'] = (payload) => invokeCmd('create_item', { payload });
+  updateItem: ApiClient['updateItem'] = (itemId, payload) =>
+    invokeCmd('update_item', { itemId, payload });
+  getBundleSuggestions: ApiClient['getBundleSuggestions'] = () =>
+    invokeCmd('get_bundle_suggestions');
+  createBundle: ApiClient['createBundle'] = (payload) =>
+    invokeCmd('create_bundle', { payload });
+  updateBundle: ApiClient['updateBundle'] = (bundleId, payload) =>
+    invokeCmd('update_bundle', { bundleId, payload });
+  deleteBundle: ApiClient['deleteBundle'] = (bundleId) =>
+    invokeCmd('delete_bundle', { bundleId });
 
   // --- Dues & Khata ---
-  getPartyDuesSummary(partyType: PartyType) {
-    return invokeCmd<PartyBalance[]>('get_party_dues_summary', { partyType });
-  }
-  settleBillPayment(payload: SettlePaymentPayload) {
-    return invokeCmd<void>('settle_bill_payment', { payload });
-  }
-  getPartyLedger(partyId: number) {
-    return invokeCmd<PartyLedgerView>('get_party_ledger', { partyId });
-  }
+  getPartyDuesSummary: ApiClient['getPartyDuesSummary'] = (partyType) =>
+    invokeCmd('get_party_dues_summary', { partyType });
+  settleBillPayment: ApiClient['settleBillPayment'] = (payload) =>
+    invokeCmd('settle_bill_payment', { payload });
+  getPartyLedger: ApiClient['getPartyLedger'] = (partyId) =>
+    invokeCmd('get_party_ledger', { partyId });
 
   // --- Parties ---
-  createParty(payload: CreatePartyPayload) {
-    return invokeCmd<number>('create_party', { payload });
-  }
-  updateParty(partyId: number, payload: UpdatePartyPayload) {
-    return invokeCmd<void>('update_party', { partyId, payload });
-  }
-  getParty(partyId: number) {
-    return invokeCmd<Party>('get_party', { partyId });
-  }
-  listParties(partyType?: PartyType, activeOnly = true) {
-    return invokeCmd<Party[]>('list_parties', {
-      partyType: partyType ?? null,
-      activeOnly,
-    });
-  }
-  searchParties(query: string, partyType?: PartyType) {
-    return invokeCmd<Party[]>('search_parties', {
-      query,
-      partyType: partyType ?? null,
-    });
-  }
+  createParty: ApiClient['createParty'] = (payload) => invokeCmd('create_party', { payload });
+  updateParty: ApiClient['updateParty'] = (partyId, payload) =>
+    invokeCmd('update_party', { partyId, payload });
+  getParty: ApiClient['getParty'] = (partyId) => invokeCmd('get_party', { partyId });
+  listParties: ApiClient['listParties'] = (partyType, activeOnly) =>
+    invokeCmd('list_parties', { partyType: partyType ?? null, activeOnly: activeOnly ?? null });
+  searchParties: ApiClient['searchParties'] = (query, partyType) =>
+    invokeCmd('search_parties', { query, partyType: partyType ?? null });
 
   // --- Returns & Adjustments ---
-  getNextReturnCode() {
-    return invokeCmd<string>('get_next_return_code');
-  }
-  createCustomerReturn(payload: CustomerReturnPayload) {
-    return invokeCmd<string>('create_customer_return', { payload });
-  }
-  createVendorReturn(payload: VendorReturnPayload) {
-    return invokeCmd<string>('create_vendor_return', { payload });
-  }
-  getReturnDetails(returnId: number) {
-    return invokeCmd<ReturnDetailView>('get_return_details', { returnId });
-  }
-  createStockAdjustment(payload: StockAdjustmentPayload) {
-    return invokeCmd<number>('create_stock_adjustment', { payload });
-  }
-  listStockAdjustments(itemId?: number, page = 1, limit = 50) {
-    return invokeCmd<PaginatedList<StockAdjustment>>('list_stock_adjustments', {
+  getNextReturnCode: ApiClient['getNextReturnCode'] = () => invokeCmd('get_next_return_code');
+  createCustomerReturn: ApiClient['createCustomerReturn'] = (payload) =>
+    invokeCmd('create_customer_return', { payload });
+  createVendorReturn: ApiClient['createVendorReturn'] = (payload) =>
+    invokeCmd('create_vendor_return', { payload });
+  getReturnDetails: ApiClient['getReturnDetails'] = (returnId) =>
+    invokeCmd('get_return_details', { returnId });
+  listReturns: ApiClient['listReturns'] = (filter) =>
+    invokeCmd('list_returns', { filter: filter ?? {} });
+  createStockAdjustment: ApiClient['createStockAdjustment'] = (payload) =>
+    invokeCmd('create_stock_adjustment', { payload });
+  getItemLots: ApiClient['getItemLots'] = (itemId) => invokeCmd('get_item_lots', { itemId });
+  listStockAdjustments: ApiClient['listStockAdjustments'] = (itemId, page, limit) =>
+    invokeCmd('list_stock_adjustments', {
       itemId: itemId ?? null,
-      page,
-      limit,
+      page: page ?? null,
+      limit: limit ?? null,
     });
-  }
 
   // --- Reports ---
-  getDashboardMetrics() {
-    return invokeCmd<DashboardMetrics>('get_dashboard_metrics');
-  }
-  getLowStockAlerts() {
-    return invokeCmd<LowStockItem[]>('get_low_stock_alerts');
-  }
-  getSalesPurchaseTrend(period: string) {
-    return invokeCmd<TrendDataPoint[]>('get_sales_purchase_trend', { period });
-  }
-  getPnLReport(fromDate: string, toDate: string) {
-    return invokeCmd<PnlReport>('get_pnl_report', { fromDate, toDate });
-  }
-  getStockValuationReport() {
-    return invokeCmd<StockValuationReport>('get_stock_valuation_report');
-  }
-  getCashFlowReport(fromDate: string, toDate: string) {
-    return invokeCmd<CashFlowReport>('get_cash_flow_report', { fromDate, toDate });
-  }
+  getDashboardMetrics: ApiClient['getDashboardMetrics'] = () =>
+    invokeCmd('get_dashboard_metrics');
+  getLowStockAlerts: ApiClient['getLowStockAlerts'] = () => invokeCmd('get_low_stock_alerts');
+  getSalesPurchaseTrend: ApiClient['getSalesPurchaseTrend'] = (period) =>
+    invokeCmd('get_sales_purchase_trend', { period });
+  getRecentTransactions: ApiClient['getRecentTransactions'] = (limit) =>
+    invokeCmd('get_recent_transactions', { limit });
+  getPnLReport: ApiClient['getPnLReport'] = (fromDate, toDate) =>
+    invokeCmd('get_pnl_report', { fromDate, toDate });
+  getStockValuationReport: ApiClient['getStockValuationReport'] = () =>
+    invokeCmd('get_stock_valuation_report');
+  getCashFlowReport: ApiClient['getCashFlowReport'] = (fromDate, toDate) =>
+    invokeCmd('get_cash_flow_report', { fromDate, toDate });
 
   // --- Settings & Maintenance ---
-  getShopSettings() {
-    return invokeCmd<ShopSettings>('get_shop_settings');
-  }
-  updateShopSettings(settings: ShopSettings) {
-    return invokeCmd<void>('update_shop_settings', { settings });
-  }
-  backupDatabase(destinationPath: string) {
-    return invokeCmd<string>('backup_database', { destinationPath });
-  }
-  verifyDatabaseIntegrity() {
-    return invokeCmd<boolean>('verify_database_integrity');
-  }
+  getShopSettings: ApiClient['getShopSettings'] = () => invokeCmd('get_shop_settings');
+  updateShopSettings: ApiClient['updateShopSettings'] = (settings) =>
+    invokeCmd('update_shop_settings', { settings });
+  backupDatabase: ApiClient['backupDatabase'] = (destinationPath) =>
+    invokeCmd('backup_database', { destinationPath });
+  verifyDatabaseIntegrity: ApiClient['verifyDatabaseIntegrity'] = () =>
+    invokeCmd('verify_database_integrity');
 
   // --- Items import ---
-  importItemsFromExcel(filePath: string) {
-    return invokeCmd<ImportSummary>('import_items_from_excel', { filePath });
-  }
+  validateItemsImport: ApiClient['validateItemsImport'] = (filePath) =>
+    invokeCmd('validate_items_import', { filePath });
+  executeItemsImport: ApiClient['executeItemsImport'] = (filePath, conflictStrategy) =>
+    invokeCmd('execute_items_import', { filePath, conflictStrategy });
 }

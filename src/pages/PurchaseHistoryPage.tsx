@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Truck, Search, Eye, DollarSign } from 'lucide-react';
 import { api } from '@/api';
-import type { PaymentStatus, Purchase, PurchaseDetailView } from '@/types';
+import type { PaymentStatus, PurchaseHistoryRow, PurchaseDetailView } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -9,15 +9,16 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { SettlementModal } from '@/components/domain/SettlementModal';
 
+// TODO(F6-c): server-side filters/pagination (searchQuery, dates, page/limit), real settlements, party_name snapshot.
 export const PurchaseHistoryPage: React.FC = () => {
-  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [purchases, setPurchases] = useState<PurchaseHistoryRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | PaymentStatus>('ALL');
   const [datePreset, setDatePreset] = useState<'ALL' | 'TODAY' | '7D' | 'THIS_MONTH'>('ALL');
 
   // Purchase Details Modal
-  const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
+  const [selectedPurchase, setSelectedPurchase] = useState<PurchaseHistoryRow | null>(null);
   const [purchaseDetails, setPurchaseDetails] = useState<PurchaseDetailView | null>(null);
   const [vendorNames, setVendorNames] = useState<Record<number, string>>({});
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -38,14 +39,14 @@ export const PurchaseHistoryPage: React.FC = () => {
       .catch(() => setVendorNames({}));
   };
 
-  const vendorOf = (p: Purchase): string =>
+  const vendorOf = (p: PurchaseHistoryRow): string =>
     (p.partyId !== null && vendorNames[p.partyId]) || 'General Supplier';
 
   useEffect(() => {
     loadPurchases();
   }, []);
 
-  const openDetails = async (purchase: Purchase) => {
+  const openDetails = async (purchase: PurchaseHistoryRow) => {
     setSelectedPurchase(purchase);
     setPurchaseDetails(null);
     setIsDetailsOpen(true);
@@ -59,7 +60,7 @@ export const PurchaseHistoryPage: React.FC = () => {
   const filteredPurchases = purchases.filter((p) => {
     const code = p.transactionCode.toLowerCase();
     const vendor = vendorOf(p).toLowerCase();
-    const supplierRef = (p.notes ?? '').toLowerCase();
+    const supplierRef = (p.supplierInvoiceRef ?? '').toLowerCase();
     const matchesSearch =
       !searchQuery.trim() ||
       code.includes(searchQuery.toLowerCase()) ||
@@ -298,7 +299,7 @@ export const PurchaseHistoryPage: React.FC = () => {
                     </TableRow>
                   ) : (
                     (purchaseDetails?.items ?? []).map((it, i) => {
-                      const qty = it.purchaseItem.bundleQuantity;
+                      const qty = it.purchaseItem.packQuantity;
                       const total = it.purchaseItem.totalAmount;
                       const cost = qty > 0 ? total / qty : 0;
                       return (
@@ -349,6 +350,7 @@ export const PurchaseHistoryPage: React.FC = () => {
           partyId={settlingVendor.id}
           partyName={settlingVendor.name}
           totalDue={settlingVendor.due}
+          transactionType="PURCHASE"
           onSettled={() => {
             setSettlingVendor(null);
             loadPurchases();

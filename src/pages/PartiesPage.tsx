@@ -43,7 +43,7 @@ export const PartiesPage: React.FC = () => {
     const req = trimmed ? api.searchParties(trimmed, tab) : api.listParties(tab, true);
     api
       .getPartyDuesSummary(tab)
-      .then((rows) => setDues(Object.fromEntries(rows.map((r) => [r.partyId, r.totalDue]))))
+      .then((rows) => setDues(Object.fromEntries(rows.map((r) => [r.partyId, r.balanceDue]))))
       .catch(() => setDues({}));
     req
       .then((data) => setParties(data))
