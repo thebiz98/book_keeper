@@ -1,10 +1,9 @@
 pub mod accounting_service;
 pub mod backup_service;
-pub mod import_export_service;
 pub mod inventory_allocation_strategy;
 pub mod inventory_service;
+pub mod item_import_service;
 pub mod item_service;
-pub mod migration_service;
 pub mod party_service;
 pub mod payment_service;
 pub mod purchase_service;
@@ -15,13 +14,12 @@ pub mod shop_setting_service;
 
 pub use accounting_service::AccountingService;
 pub use backup_service::BackupService;
-pub use import_export_service::{DataExportImportService, ImportExportService};
 pub use inventory_allocation_strategy::{
     AdjustmentDepletionResult, DepletionResult, InventoryAllocationStrategy,
 };
 pub use inventory_service::InventoryService;
+pub use item_import_service::ItemImportService;
 pub use item_service::ItemService;
-pub use migration_service::MigrationService;
 pub use party_service::PartyService;
 pub use payment_service::PaymentService;
 pub use purchase_service::PurchaseService;

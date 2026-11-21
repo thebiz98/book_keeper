@@ -50,6 +50,23 @@ export const InventoryPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // TEMP: replaced by import dialog in T11
+  const [importPath, setImportPath] = useState('');
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const handleImport = async () => {
+    if (!importPath.trim()) return;
+    try {
+      const r = await api.importItemsFromExcel(importPath.trim());
+      setImportMsg(
+        `Imported ${r.importedCount}, skipped ${r.skippedCount} of ${r.totalRows} rows.` +
+          (r.errors.length ? ` Errors: ${r.errors.join('; ')}` : '')
+      );
+      fetchItems();
+    } catch (err: any) {
+      setImportMsg(`Import failed: ${err?.message ?? String(err)}`);
+    }
+  };
+
   const fetchItems = () => {
     setIsLoading(true);
     if (searchQuery.trim().length >= 2) {
@@ -194,6 +211,21 @@ export const InventoryPage: React.FC = () => {
             Add Item
           </Button>
         </div>
+      </div>
+
+      {/* TEMP: replaced by import dialog in T11 */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <input
+          type="text"
+          placeholder="Path to .xlsx file to import"
+          value={importPath}
+          onChange={(e) => setImportPath(e.target.value)}
+          className="flex-1 max-w-md text-xs px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+        />
+        <Button variant="outline" size="sm" onClick={handleImport}>
+          Import Items
+        </Button>
+        {importMsg && <span className="text-slate-600 dark:text-slate-300">{importMsg}</span>}
       </div>
 
       {/* Catalog Table */}

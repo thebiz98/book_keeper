@@ -70,48 +70,6 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
         Ok(())
     }
 
-    fn archive_party(&self, id: i64) -> Result<(), AppError> {
-        let mut tx = self.uow.begin_transaction()?;
-        let party = tx
-            .parties()
-            .find_by_id(id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Party".to_string(),
-                id: id.to_string(),
-            })?;
-
-        // 1. Check dues via party_due_summary
-        let summaries = tx.parties().get_party_due_summary(party.party_type)?;
-        if summaries.iter().any(|s| s.party_id == id && s.total_due > 0.0) {
-            return Err(AppError::ValidationError {
-                field: "balance_due".to_string(),
-                message: "Cannot archive party with outstanding dues".to_string(),
-            });
-        }
-
-        // 2. Also check unpaid sales directly
-        let unpaid_sales = tx.sales().list_unpaid_by_party_id(id)?;
-        if unpaid_sales.iter().any(|s| s.balance_due > 0.0) {
-            return Err(AppError::ValidationError {
-                field: "balance_due".to_string(),
-                message: "Cannot archive party with outstanding dues".to_string(),
-            });
-        }
-
-        // 3. Also check unpaid purchases directly
-        let purchases = tx.purchases().list_purchases(None, None, None, Some(id), 0, usize::MAX)?;
-        if purchases.iter().any(|p| p.balance_due > 0.0) {
-            return Err(AppError::ValidationError {
-                field: "balance_due".to_string(),
-                message: "Cannot archive party with outstanding dues".to_string(),
-            });
-        }
-
-        tx.parties().archive(id)?;
-        tx.commit()?;
-        Ok(())
-    }
-
     fn get_party(&self, id: i64) -> Result<Party, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         tx.parties()

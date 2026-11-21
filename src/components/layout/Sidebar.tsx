@@ -11,7 +11,6 @@ import {
   Users,
   BarChart3,
   Settings,
-  Database,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/useAppStore';
@@ -104,12 +103,6 @@ const SYSTEM_ITEMS: NavItem[] = [
     label: 'Settings & Backup',
     icon: Settings,
     hotkey: 'Ctrl+B',
-  },
-  {
-    id: 'migration',
-    aliases: ['migration', 'data-migration'],
-    label: 'Data Migration',
-    icon: Database,
   },
 ];
 

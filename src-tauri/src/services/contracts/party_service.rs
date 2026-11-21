@@ -5,7 +5,6 @@ use crate::core::value_objects::PartyType;
 pub trait PartyService: Send + Sync {
     fn create_party(&self, payload: CreatePartyPayload) -> Result<i64, AppError>;
     fn update_party(&self, id: i64, payload: UpdatePartyPayload) -> Result<(), AppError>;
-    fn archive_party(&self, id: i64) -> Result<(), AppError>;
     fn get_party(&self, id: i64) -> Result<Party, AppError>;
     fn list_parties(
         &self,
@@ -26,10 +25,6 @@ impl<T: PartyService + ?Sized> PartyService for std::sync::Arc<T> {
 
     fn update_party(&self, id: i64, payload: UpdatePartyPayload) -> Result<(), AppError> {
         (**self).update_party(id, payload)
-    }
-
-    fn archive_party(&self, id: i64) -> Result<(), AppError> {
-        (**self).archive_party(id)
     }
 
     fn get_party(&self, id: i64) -> Result<Party, AppError> {

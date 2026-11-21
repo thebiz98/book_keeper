@@ -3,7 +3,7 @@
 *Last updated: 2026-11-21.* Status per milestone lives in `PROJECT.md` (the single tracker). Test layout and gate are in `TEST_INFRA.md`.
 
 ## State
-All milestones M1–M6 are done. Gate (`bash run_e2e_tests.sh`): 59 backend tests on real SQLite, clippy clean, `tsc` clean, 102 Vitest tests, `vite build` succeeds.
+All milestones M1–M6 are done. Gate (`bash run_e2e_tests.sh`): 54 backend tests on real SQLite, clippy clean, `tsc` clean, 101 Vitest tests, `vite build` succeeds.
 
 | Layer | Location |
 |---|---|

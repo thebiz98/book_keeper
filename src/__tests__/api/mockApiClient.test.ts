@@ -107,18 +107,6 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
       expect(results).toEqual([]);
     });
 
-    it('TC-MOCK-010: archived items are excluded from active search results', async () => {
-      // Archive an item
-      const catalog = await client.getItemsCatalog({ limit: 5 });
-      const targetItem = catalog.items[0];
-
-      await client.archiveItem(targetItem.id);
-
-      // Searching for exact item name should now exclude it
-      const results = await client.searchItemsFts(targetItem.name);
-      const found = results.find((r) => r.itemId === targetItem.id);
-      expect(found).toBeUndefined();
-    });
   });
 
   describe('4. Counter Billing Checkout & Stock Depletion', () => {

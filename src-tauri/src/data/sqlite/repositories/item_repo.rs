@@ -120,9 +120,4 @@ impl ItemRepository for SqliteItemRepository {
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
     }
-
-    fn archive(&mut self, item_id: i64) -> Result<(), AppError> {
-        let n = self.conn.execute("UPDATE items SET is_active = 0 WHERE id = ?1", params![item_id])?;
-        if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
-    }
 }

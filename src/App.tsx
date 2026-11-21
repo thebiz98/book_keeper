@@ -18,7 +18,6 @@ import { ReturnsAdjustmentsPage } from '@/pages/ReturnsAdjustmentsPage';
 import { PartiesPage } from '@/pages/PartiesPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
-import { MigrationPage } from '@/pages/MigrationPage';
 
 const ROUTES: Record<string, React.FC> = {
   dashboard: DashboardPage,
@@ -39,8 +38,6 @@ const ROUTES: Record<string, React.FC> = {
   parties: PartiesPage,
   reports: ReportsPage,
   settings: SettingsPage,
-  migration: MigrationPage,
-  'data-migration': MigrationPage,
 };
 
 const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({

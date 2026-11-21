@@ -5,9 +5,6 @@
 
 mod common;
 
-use std::fs::File;
-use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use common::fixtures::*;
@@ -19,7 +16,6 @@ use book_keeper::data::contracts::search_indexer::ItemSearchIndexer;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::accounting_service::AccountingService;
 use book_keeper::services::contracts::inventory_service::InventoryService;
-use book_keeper::services::contracts::migration_service::MigrationService;
 use book_keeper::services::contracts::purchase_service::PurchaseService;
 use book_keeper::services::contracts::report_service::ReportService;
 use book_keeper::services::contracts::return_service::ReturnService;
@@ -33,7 +29,6 @@ struct ComboTestHarness {
     return_service: ReturnServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>,
     accounting_service: AccountingServiceImpl<PaymentServiceImpl>,
     report_service: ReportServiceImpl,
-    migration_service: MigrationServiceImpl,
     indexer: book_keeper::data::sqlite::fts_indexer::SqliteFts5SearchIndexer,
 }
 
@@ -47,7 +42,6 @@ fn create_combo_harness() -> ComboTestHarness {
     let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let accounting_service = AccountingServiceImpl::new(payment_service, uow.clone());
     let report_service = ReportServiceImpl::with_fixed_today(uow.clone(), "2026-11-20");
-    let migration_service = MigrationServiceImpl::new(uow.clone());
     let indexer = uow.indexer();
 
     ComboTestHarness {
@@ -58,46 +52,8 @@ fn create_combo_harness() -> ComboTestHarness {
         return_service,
         accounting_service,
         report_service,
-        migration_service,
         indexer,
     }
-}
-
-/// Helper to generate a minimal valid VedBill zip archive
-fn create_test_vb_archive(archive_path: &str, item_count: usize) {
-    let temp_db_path = std::env::temp_dir().join(format!("vb_src_{}.db", uuid::Uuid::new_v4()));
-    {
-        let conn = rusqlite::Connection::open(&temp_db_path).expect("open temp sqlite");
-        conn.execute_batch(r#"
-            CREATE TABLE items (id TEXT PRIMARY KEY, name TEXT, salePrice REAL, purchasePrice REAL, mrp REAL, primaryQuantity REAL);
-            CREATE TABLE parties (id TEXT PRIMARY KEY, name TEXT, phone TEXT, type TEXT);
-            CREATE TABLE documents (id TEXT PRIMARY KEY, documentType TEXT, documentNumber TEXT, documentDate TEXT, total REAL);
-            CREATE TABLE document_items (id TEXT PRIMARY KEY, documentId TEXT, itemId TEXT, quantity REAL, rate REAL, amount REAL);
-        "#).expect("create tables");
-
-        for i in 1..=item_count {
-            conn.execute(
-                "INSERT INTO items (id, name, salePrice, purchasePrice, mrp, primaryQuantity) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![format!("itm-{}", i), format!("Combo Item {}", i), 25.0, 15.0, 30.0, 50.0],
-            ).expect("insert item");
-        }
-    }
-
-    let file = File::create(archive_path).expect("create zip file");
-    let mut zip = zip::ZipWriter::new(file);
-    let options = zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-
-    zip.start_file("company_manifest.json", options).unwrap();
-    let manifest_json = r#"{"company_name":"Combo Test Store","version":"2.4","backup_date":"2026-11-20"}"#;
-    zip.write_all(manifest_json.as_bytes()).unwrap();
-
-    zip.start_file("company.db", options).unwrap();
-    let mut db_bytes = Vec::new();
-    File::open(&temp_db_path).unwrap().read_to_end(&mut db_bytes).unwrap();
-    zip.write_all(&db_bytes).unwrap();
-
-    zip.finish().unwrap();
-    let _ = std::fs::remove_file(&temp_db_path);
 }
 
 // ============================================================================
@@ -300,58 +256,6 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
     let suggestions = check_tx.bundles().list_suggestions().unwrap();
     assert!(!suggestions.is_empty());
     assert_eq!(suggestions[0].bundle_name, "Box of 10");
-}
-
-/// Combo 4: Legacy Migration -> FTS5 Reindex -> Counter Checkout -> Cash Flow
-#[test]
-fn test_tc_t3_cmb_004_legacy_migration_reindex_checkout_cash_flow() {
-    let harness = create_combo_harness();
-    let archive_path = std::env::temp_dir().join(format!("mig_combo_{}.vb", uuid::Uuid::new_v4()));
-    let archive_str = archive_path.to_str().unwrap();
-    create_test_vb_archive(archive_str, 5);
-
-    // 1. Migration
-    let mig_res = harness.migration_service.execute_migration(archive_str).expect("migration succeeds");
-    assert!(mig_res.success);
-    assert_eq!(mig_res.items_imported, 5);
-
-    // 2. FTS5 Indexing of imported catalog
-    {
-        let items = {
-            let mut tx = harness.uow.begin_transaction().unwrap();
-            tx.items().list_catalog(None, false, 0, 10).unwrap()
-        }; // read tx released before the indexer writes
-        for itm in &items {
-            harness.indexer.index_item(itm).expect("index");
-        }
-    }
-
-    // 3. Search and Checkout
-    let found = harness.indexer.search("Combo Item 1").expect("search");
-    assert!(!found.is_empty());
-    let item_id = found[0].item_id;
-
-    let sale_payload = CreateSalePayload {
-        transaction_code: Some("SAL-C4".to_string()),
-        transaction_date: "2026-11-20".to_string(),
-        party_id: None,
-        payment_mode: Some("CASH".to_string()),
-        paid_amount: 50.0,
-        notes: None,
-        items: vec![CreateSaleItemPayload {
-            item_id,
-            bundle_id: None,
-            bundle_quantity: 2.0,
-            unit_price: Some(25.0),
-        }],
-    };
-    harness.sale_service.create_sale(sale_payload).expect("sale checkout");
-
-    // 4. Cash Flow Audit
-    let cash_flow = harness.report_service.get_cash_flow_report("2026-11-01", "2026-11-30").expect("cash flow");
-    assert_eq!(cash_flow.total_inflow, 50.0);
-
-    let _ = std::fs::remove_file(&archive_path);
 }
 
 /// Combo 5: Vendor Credit Purchase -> Vendor Return -> Dues Offset -> Net Profit Audit

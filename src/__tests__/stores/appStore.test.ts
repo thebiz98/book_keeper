@@ -57,7 +57,7 @@ describe('useAppStore - Desktop Shell, Hotkey Routes & Cash Drawer', () => {
       expect(useAppStore.getState().activeRoute).toBe('inventory');
     });
 
-    it('TC-APP-006: supports secondary views (reports, settings, returns, migration)', () => {
+    it('TC-APP-006: supports secondary views (reports, settings, returns, inventory)', () => {
       const store = useAppStore.getState();
       store.setActiveRoute('reports');
       expect(useAppStore.getState().activeRoute).toBe('reports');
@@ -68,8 +68,8 @@ describe('useAppStore - Desktop Shell, Hotkey Routes & Cash Drawer', () => {
       store.setActiveRoute('returns');
       expect(useAppStore.getState().activeRoute).toBe('returns');
 
-      store.setActiveRoute('data-migration');
-      expect(useAppStore.getState().activeRoute).toBe('data-migration');
+      store.setActiveRoute('inventory');
+      expect(useAppStore.getState().activeRoute).toBe('inventory');
     });
   });
 

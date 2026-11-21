@@ -214,50 +214,11 @@ export interface TrendDataPoint {
   purchaseAmount: number;
 }
 
-export interface BackupFileInfo {
-  fileName: string;
-  filePath: string;
-  fileSizeBytes: number;
-  modifiedAt: string;
-}
-
-export interface TableStats {
-  itemsCount: number;
-  partiesCount: number;
-  salesCount: number;
-  purchasesCount: number;
-  documentItemsCount: number;
-}
-
-export interface BackupInspection {
-  companyName: string;
-  schemaVersion: number;
-  createdAt: string;
-  backupFilePath: string;
-  backupFileSizeBytes: number;
-  tableStats: TableStats;
-}
-
-export interface MigrationReport {
-  success: boolean;
-  itemsImported: number;
-  partiesImported: number;
-  salesImported: number;
-  purchasesImported: number;
-  durationMs: number;
-  errors: string[];
-}
-
 export interface ImportSummary {
   totalRows: number;
   importedCount: number;
   skippedCount: number;
   errors: string[];
-}
-
-export interface TransactionExportFilter {
-  fromDate?: string;
-  toDate?: string;
 }
 
 export interface ApiClient {
@@ -278,7 +239,6 @@ export interface ApiClient {
   getItemsCatalog(filter?: CatalogFilter): Promise<PaginatedList<Item>>;
   createItem(payload: CreateItemPayload): Promise<number>;
   updateItem(itemId: number, payload: UpdateItemPayload): Promise<void>;
-  archiveItem(itemId: number): Promise<void>;
   getBundleSuggestions(): Promise<BundleSuggestion[]>;
   createBundle(payload: CreateBundlePayload): Promise<number>;
 
@@ -290,7 +250,6 @@ export interface ApiClient {
   // Parties
   createParty(payload: CreatePartyPayload): Promise<number>;
   updateParty(partyId: number, payload: UpdatePartyPayload): Promise<void>;
-  archiveParty(partyId: number): Promise<void>;
   getParty(partyId: number): Promise<Party>;
   listParties(partyType?: PartyType, activeOnly?: boolean): Promise<Party[]>;
   searchParties(query: string, partyType?: PartyType): Promise<Party[]>;
@@ -321,14 +280,6 @@ export interface ApiClient {
   backupDatabase(destinationPath: string): Promise<string>;
   verifyDatabaseIntegrity(): Promise<boolean>;
 
-  // Migration & Excel
-  scanBackupDirectory(directoryPath?: string): Promise<BackupFileInfo[]>;
-  inspectBackupFile(filePath: string): Promise<BackupInspection>;
-  executeMigration(filePath: string): Promise<MigrationReport>;
-  exportItemsToExcel(destinationPath: string): Promise<string>;
+  // Items import
   importItemsFromExcel(filePath: string): Promise<ImportSummary>;
-  exportTransactionsToExcel(
-    destinationPath: string,
-    filter?: TransactionExportFilter | null
-  ): Promise<string>;
 }

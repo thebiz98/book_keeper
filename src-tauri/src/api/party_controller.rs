@@ -12,10 +12,6 @@ pub fn update_party(state: State<'_, AppState>, party_id: i64, payload: UpdatePa
     state.party_service.update_party(party_id, payload).map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub fn archive_party(state: State<'_, AppState>, party_id: i64) -> Result<(), String> {
-    state.party_service.archive_party(party_id).map_err(|e| e.to_string())
-}
-#[tauri::command]
 pub fn get_party(state: State<'_, AppState>, party_id: i64) -> Result<Party, String> {
     state.party_service.get_party(party_id).map_err(|e| e.to_string())
 }

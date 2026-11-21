@@ -26,10 +26,6 @@ pub fn update_item(state: State<'_, AppState>, item_id: i64, payload: UpdateItem
     state.item_service.update_item(item_id, payload).map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub fn archive_item(state: State<'_, AppState>, item_id: i64) -> Result<(), String> {
-    state.item_service.archive_item(item_id).map_err(|e| e.to_string())
-}
-#[tauri::command]
 pub fn create_bundle(state: State<'_, AppState>, payload: CreateBundlePayload) -> Result<i64, String> {
     state.item_service.create_bundle(payload).map_err(|e| e.to_string())
 }

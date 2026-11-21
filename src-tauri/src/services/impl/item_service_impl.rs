@@ -197,23 +197,6 @@ impl<U: UnitOfWork> ItemService for ItemServiceImpl<U> {
         Ok(())
     }
 
-    fn archive_item(&self, item_id: i64) -> Result<(), AppError> {
-        let mut tx = self.uow.begin_transaction()?;
-        let _ = tx
-            .items()
-            .find_by_id(item_id)?
-            .ok_or_else(|| AppError::NotFound {
-                entity: "Item".to_string(),
-                id: item_id.to_string(),
-            })?;
-
-        tx.items().archive(item_id)?;
-        tx.commit()?;
-
-        let _ = self.search_indexer.remove_item(item_id);
-        Ok(())
-    }
-
     fn create_bundle(&self, payload: CreateBundlePayload) -> Result<i64, AppError> {
         if payload.bundle_name.trim().is_empty() {
             return Err(AppError::ValidationError {

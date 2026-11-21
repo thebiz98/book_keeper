@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Plus, Search, Pencil, Archive, User, Truck } from 'lucide-react';
+import { Users, Plus, Search, Pencil, User, Truck } from 'lucide-react';
 import { api } from '@/api';
 import type { Party, PartyType } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
-import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -37,7 +36,6 @@ export const PartiesPage: React.FC = () => {
 
   const [form, setForm] = useState<PartyForm | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [archiveTarget, setArchiveTarget] = useState<Party | null>(null);
 
   const load = useCallback(() => {
     setIsLoading(true);
@@ -87,18 +85,6 @@ export const PartiesPage: React.FC = () => {
       setError(err?.message || 'Failed to save party');
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleArchive = async () => {
-    if (!archiveTarget) return;
-    try {
-      await api.archiveParty(archiveTarget.id);
-      setArchiveTarget(null);
-      load();
-    } catch (err: any) {
-      setArchiveTarget(null);
-      setError(err?.message || 'Failed to archive party');
     }
   };
 
@@ -189,9 +175,6 @@ export const PartiesPage: React.FC = () => {
                       <Button variant="ghost" size="xs" title="Edit" onClick={() => editParty(p)}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="ghost" size="xs" title="Archive" onClick={() => setArchiveTarget(p)}>
-                        <Archive className="h-3.5 w-3.5" />
-                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -247,16 +230,6 @@ export const PartiesPage: React.FC = () => {
           </div>
         )}
       </Modal>
-
-      <ConfirmDialog
-        isOpen={archiveTarget !== null}
-        title="Archive Party?"
-        message={`Archive "${archiveTarget?.name ?? ''}"? Their history is kept but they will no longer appear in selectors.`}
-        variant="danger"
-        confirmText="Archive"
-        onConfirm={handleArchive}
-        onCancel={() => setArchiveTarget(null)}
-      />
     </div>
   );
 };

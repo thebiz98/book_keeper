@@ -14,8 +14,6 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            item_controller::archive_item,
-            party_controller::archive_party,
             settings_controller::backup_database,
             item_controller::create_bundle,
             return_controller::create_customer_return,
@@ -25,9 +23,6 @@ fn main() {
             sale_controller::create_sale,
             adjustment_controller::create_stock_adjustment,
             return_controller::create_vendor_return,
-            migration_controller::execute_migration,
-            migration_controller::export_items_to_excel,
-            migration_controller::export_transactions_to_excel,
             item_controller::get_bundle_suggestions,
             report_controller::get_cash_flow_report,
             report_controller::get_dashboard_metrics,
@@ -48,11 +43,9 @@ fn main() {
             report_controller::get_sales_purchase_trend,
             settings_controller::get_shop_settings,
             report_controller::get_stock_valuation_report,
-            migration_controller::import_items_from_excel,
-            migration_controller::inspect_backup_file,
+            import_controller::import_items_from_excel,
             party_controller::list_parties,
             adjustment_controller::list_stock_adjustments,
-            migration_controller::scan_backup_directory,
             item_controller::search_items_fts,
             party_controller::search_parties,
             dues_controller::settle_bill_payment,

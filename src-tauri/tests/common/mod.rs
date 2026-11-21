@@ -24,7 +24,6 @@ use book_keeper::services::contracts::inventory_allocation_strategy::{
     AdjustmentDepletionResult, DepletionResult, InventoryAllocationStrategy,
 };
 use book_keeper::services::contracts::inventory_service::InventoryService;
-use book_keeper::services::contracts::migration_service::MigrationService;
 use book_keeper::services::contracts::payment_service::PaymentService;
 use book_keeper::services::contracts::purchase_service::PurchaseService;
 use book_keeper::services::contracts::report_service::ReportService;
@@ -94,8 +93,6 @@ pub use book_keeper::services::{
     FifoStrategy, FifoStrategyImpl,
     PaymentServiceImpl,
     BackupServiceImpl,
-    ImportExportServiceImpl,
-    DataExportImportServiceImpl,
 };
 
 pub type InventoryServiceImpl<S = FifoStrategy> = book_keeper::services::InventoryServiceImpl<S, TestDb>;
@@ -104,7 +101,7 @@ pub type PurchaseServiceImpl<I, P> = book_keeper::services::PurchaseServiceImpl<
 pub type ReturnServiceImpl<I, P> = book_keeper::services::ReturnServiceImpl<I, P, TestDb>;
 pub type AccountingServiceImpl<P> = book_keeper::services::AccountingServiceImpl<P, TestDb>;
 pub type ReportServiceImpl = book_keeper::services::ReportServiceImpl<TestDb>;
-pub type MigrationServiceImpl = book_keeper::services::MigrationServiceImpl<TestDb>;
+pub type ItemImportServiceImpl = book_keeper::services::ItemImportServiceImpl<TestDb>;
 pub type ItemServiceImpl = book_keeper::services::ItemServiceImpl<TestDb>;
 pub type PartyServiceImpl = book_keeper::services::PartyServiceImpl<TestDb>;
 pub type ShopSettingServiceImpl = book_keeper::services::ShopSettingServiceImpl<TestDb>;

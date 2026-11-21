@@ -16,7 +16,6 @@ pub trait PartyRepository {
     }
     fn create(&mut self, party: &Party) -> Result<i64, AppError>;
     fn update(&mut self, party: &Party) -> Result<(), AppError>;
-    fn archive(&mut self, id: i64) -> Result<(), AppError>;
     fn get_party_due_summary(&self, _party_type: PartyType) -> Result<Vec<PartyDueSummary>, AppError> {
         Ok(Vec::new())
     }

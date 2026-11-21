@@ -24,8 +24,6 @@ const ROUTE_TITLES: Record<string, string> = {
   reports: 'Financial Reports & P&L Analysis',
   parties: 'Parties & Accounts Directory',
   settings: 'Shop Configuration & Backups',
-  migration: 'Legacy VedBill Data Migration',
-  'data-migration': 'Legacy VedBill Data Migration',
 };
 
 export const Header: React.FC = () => {

@@ -72,12 +72,4 @@ impl PartyRepository for SqlitePartyRepository {
         }
         Ok(())
     }
-
-    fn archive(&mut self, id: i64) -> Result<(), AppError> {
-        let n = self.conn.execute("UPDATE parties SET is_active = 0 WHERE id = ?1", params![id])?;
-        if n == 0 {
-            return Err(AppError::NotFound { entity: "Party".to_string(), id: id.to_string() });
-        }
-        Ok(())
-    }
 }

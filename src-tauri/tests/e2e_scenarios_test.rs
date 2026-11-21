@@ -1,5 +1,5 @@
 // tests/e2e_scenarios_test.rs
-//! Test Suite: Tier 4 Real-World Application Scenarios (S1 to S5)
+//! Test Suite: Tier 4 Real-World Application Scenarios (S1 to S4)
 //! Derived from TEST_INFRA.md § Real-World Application Scenarios and Spec Miner Report
 
 mod common;
@@ -12,7 +12,6 @@ use book_keeper::data::contracts::search_indexer::ItemSearchIndexer;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::accounting_service::AccountingService;
 use book_keeper::services::contracts::inventory_service::InventoryService;
-use book_keeper::services::contracts::migration_service::MigrationService;
 use book_keeper::services::contracts::purchase_service::PurchaseService;
 use book_keeper::services::contracts::report_service::ReportService;
 use book_keeper::services::contracts::return_service::ReturnService;
@@ -339,80 +338,4 @@ fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
     assert_eq!(summary.payment_status, PaymentStatus::Paid);
 
     println!("=== SCENARIO S4 PASSED SUCCESSFULLY! ===");
-}
-
-fn create_scenario_vb_archive(archive_path: &str, company_name: &str, item_count: usize, party_count: usize) {
-    let temp_db_path = std::env::temp_dir().join(format!("scen_src_{}.db", uuid::Uuid::new_v4()));
-    {
-        let conn = rusqlite::Connection::open(&temp_db_path).expect("open temp sqlite");
-        conn.execute_batch(r#"
-            CREATE TABLE items (id TEXT PRIMARY KEY, name TEXT, salePrice REAL, purchasePrice REAL, mrp REAL, primaryQuantity REAL);
-            CREATE TABLE parties (id TEXT PRIMARY KEY, name TEXT, phone TEXT, type TEXT);
-            CREATE TABLE documents (id TEXT PRIMARY KEY, documentType TEXT, documentNumber TEXT, documentDate TEXT, total REAL);
-            CREATE TABLE document_items (id TEXT PRIMARY KEY, documentId TEXT, itemId TEXT, quantity REAL, rate REAL, amount REAL);
-        "#).expect("create vdbill tables");
-
-        for i in 1..=item_count {
-            conn.execute(
-                "INSERT INTO items (id, name, salePrice, purchasePrice, mrp, primaryQuantity) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![format!("itm-{}", i), format!("Migrated Item {}", i), 20.0, 10.0, 25.0, 10.0],
-            ).expect("insert test item");
-        }
-
-        for i in 1..=party_count {
-            conn.execute(
-                "INSERT INTO parties (id, name, phone, type) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![format!("pty-{}", i), format!("Migrated Party {}", i), "9876543210", "customer"],
-            ).expect("insert test party");
-        }
-    }
-
-    use std::fs::File;
-    use std::io::{Read, Write};
-    let file = File::create(archive_path).expect("create zip file");
-    let mut zip = zip::ZipWriter::new(file);
-    let options = zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-
-    zip.start_file("company_manifest.json", options).unwrap();
-    let manifest_json = format!(
-        r#"{{"company_name":"{}","version":"2.4","backup_date":"2026-11-14"}}"#,
-        company_name
-    );
-    zip.write_all(manifest_json.as_bytes()).unwrap();
-
-    zip.start_file("company.db", options).unwrap();
-    let mut db_bytes = Vec::new();
-    File::open(&temp_db_path).unwrap().read_to_end(&mut db_bytes).unwrap();
-    zip.write_all(&db_bytes).unwrap();
-
-    zip.finish().unwrap();
-    let _ = std::fs::remove_file(&temp_db_path);
-}
-
-/// Scenario S5: Legacy VedBill Cutover & Reconciliation
-#[test]
-fn test_scenario_s5_legacy_vedbill_cutover_and_reconciliation() {
-    println!("=== EXECUTING SCENARIO S5: VEDBILL CUTOVER & RECONCILIATION ===");
-    let uow = TestDb::new();
-    let migration_service = MigrationServiceImpl::new(uow.clone());
-
-    let archive_path = std::env::temp_dir().join(format!("vedbill_cutover_test_{}.vb", uuid::Uuid::new_v4()));
-    let archive_path_str = archive_path.to_str().unwrap();
-    create_scenario_vb_archive(archive_path_str, "Gupta Stationery Mart", 166, 12);
-
-    let preview = migration_service.inspect_backup_file(archive_path_str).unwrap();
-    assert_eq!(preview.table_stats.items_count, 166);
-    assert_eq!(preview.table_stats.parties_count, 12);
-
-    let result = migration_service.execute_migration(archive_path_str).unwrap();
-    assert!(result.success);
-    assert_eq!(result.items_imported, 166);
-    assert_eq!(result.parties_imported, 12);
-
-    let mut tx = uow.begin_transaction().unwrap();
-    let catalog = tx.items().list_catalog(None, false, 0, 200).unwrap();
-    assert_eq!(catalog.len(), 166);
-
-    let _ = std::fs::remove_file(archive_path);
-    println!("=== SCENARIO S5 PASSED SUCCESSFULLY! ===");
 }

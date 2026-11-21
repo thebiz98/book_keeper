@@ -2,8 +2,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { camelToSnake, snakeToCamel } from './caseConvert';
 import type {
   ApiClient,
-  BackupFileInfo,
-  BackupInspection,
   BundleSuggestion,
   CashFlowReport,
   CatalogFilter,
@@ -19,7 +17,6 @@ import type {
   Item,
   ItemSearchResult,
   LowStockItem,
-  MigrationReport,
   PaginatedList,
   Party,
   PartyBalance,
@@ -37,7 +34,6 @@ import type {
   StockAdjustment,
   StockAdjustmentPayload,
   StockValuationReport,
-  TransactionExportFilter,
   TrendDataPoint,
   UpdateItemPayload,
   UpdatePartyPayload,
@@ -129,9 +125,6 @@ export class TauriClient implements ApiClient {
   updateItem(itemId: number, payload: UpdateItemPayload) {
     return invokeCmd<void>('update_item', { itemId, payload });
   }
-  archiveItem(itemId: number) {
-    return invokeCmd<void>('archive_item', { itemId });
-  }
   getBundleSuggestions() {
     return invokeCmd<BundleSuggestion[]>('get_bundle_suggestions');
   }
@@ -156,9 +149,6 @@ export class TauriClient implements ApiClient {
   }
   updateParty(partyId: number, payload: UpdatePartyPayload) {
     return invokeCmd<void>('update_party', { partyId, payload });
-  }
-  archiveParty(partyId: number) {
-    return invokeCmd<void>('archive_party', { partyId });
   }
   getParty(partyId: number) {
     return invokeCmd<Party>('get_party', { partyId });
@@ -234,31 +224,8 @@ export class TauriClient implements ApiClient {
     return invokeCmd<boolean>('verify_database_integrity');
   }
 
-  // --- Migration & Excel ---
-  scanBackupDirectory(directoryPath?: string) {
-    return invokeCmd<BackupFileInfo[]>('scan_backup_directory', {
-      directoryPath: directoryPath ?? null,
-    });
-  }
-  inspectBackupFile(filePath: string) {
-    return invokeCmd<BackupInspection>('inspect_backup_file', { filePath });
-  }
-  executeMigration(filePath: string) {
-    return invokeCmd<MigrationReport>('execute_migration', { filePath });
-  }
-  exportItemsToExcel(destinationPath: string) {
-    return invokeCmd<string>('export_items_to_excel', { destinationPath });
-  }
+  // --- Items import ---
   importItemsFromExcel(filePath: string) {
     return invokeCmd<ImportSummary>('import_items_from_excel', { filePath });
-  }
-  exportTransactionsToExcel(
-    destinationPath: string,
-    filter?: TransactionExportFilter | null
-  ) {
-    return invokeCmd<string>('export_transactions_to_excel', {
-      destinationPath,
-      filter: filter ?? null,
-    });
   }
 }

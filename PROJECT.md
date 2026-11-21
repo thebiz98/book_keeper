@@ -21,12 +21,12 @@ Offline-first retail accounting and inventory management desktop application bui
 | 6 | `ReturnServiceImpl` | Customer & vendor returns with lot restoration and dues adjustment | M1 | Survey Backend |
 | 7 | `AccountingServiceImpl` | Khata dues overview, party due details, FIFO debt settlement | M1 | Survey Backend |
 | 8 | `ReportServiceImpl` | P&L calculation, inventory valuation, cash flow, dashboard metrics | M1 | Survey Backend |
-| 9 | `MigrationServiceImpl` | VedBill `.vb` zip archive scanning, inspection, and atomic migration | M1 | Survey Backend |
+| 9 | _(removed)_ `MigrationServiceImpl` | VedBill migration deferred (DD-16) | M1 | Survey Backend |
 | 10 | `ItemServiceImpl` | Master item CRUD, packaging bundles, FTS5 sync | M1 | Survey Backend |
 | 11 | `PartyServiceImpl` | Customer/vendor master data, soft delete dues check guard | M1 | Survey Backend |
 | 12 | `ShopSettingServiceImpl` | Single-row shop setting profile upsert | M1 | Survey Backend |
 | 13 | `BackupServiceImpl` | SQLite online zero-downtime backup and integrity check | M1 | Survey Backend |
-| 14 | `ImportExportServiceImpl` | Excel workbook import/export via calamine and rust_xlsxwriter | M1 | Survey Backend |
+| 14 | `ItemImportServiceImpl` | Items import from Excel via calamine (exports deferred, DD-16; rewrite pending in T9) | M1 | Survey Backend |
 | 15 | `SqliteConnectionPool` | Connection pooling with WAL mode, foreign keys, synchronous NORMAL | M2 | Survey Backend |
 | 16 | Schema Migrations v1 | 13 tables, indices, FTS5 table, default shop setting row | M2 | Survey Backend |
 | 17 | `SqliteUnitOfWork` | Atomic transactions with `BEGIN IMMEDIATE` write locking | M2 | Survey Backend |
@@ -35,13 +35,13 @@ Offline-first retail accounting and inventory management desktop application bui
 | 20 | `build_sqlite_app_state` | AppState bootstrapping function connecting pool, UoW, and services | M2 | Survey Backend |
 | 21 | Sales Controller | Tauri IPC commands: `get_next_sale_code`, `create_sale`, `get_sales_history`, `get_sale_details` | M3 | Survey API |
 | 22 | Purchase Controller | Tauri IPC commands: `get_next_purchase_code`, `create_purchase`, `get_purchases_history`, `get_purchase_details` | M3 | Survey API |
-| 23 | Item Controller | Tauri IPC commands: `search_items_fts`, `get_items_catalog`, `create_item`, `update_item`, `archive_item`, `create_bundle`, `get_bundle_suggestions` | M3 | Survey API |
+| 23 | Item Controller | Tauri IPC commands: `search_items_fts`, `get_items_catalog`, `create_item`, `update_item`, `create_bundle`, `get_bundle_suggestions` | M3 | Survey API |
 | 24 | Dues Controller | Tauri IPC commands: `get_party_dues_summary`, `settle_bill_payment`, `get_party_ledger` | M3 | Survey API |
 | 25 | Return Controller | Tauri IPC commands: `get_next_return_code`, `create_customer_return`, `create_vendor_return`, `get_return_details` | M3 | Survey API |
 | 26 | Adjustment Controller | Tauri IPC commands: `create_stock_adjustment`, `list_stock_adjustments` | M3 | Survey API |
 | 27 | Report Controller | Tauri IPC commands: `get_dashboard_metrics`, `get_low_stock_alerts`, `get_sales_purchase_trend`, `get_pnl_report`, `get_stock_valuation_report`, `get_cash_flow_report` | M3 | Survey API |
-| 28 | Party Controller | Tauri IPC commands: `create_party`, `update_party`, `archive_party`, `get_party`, `list_parties`, `search_parties` | M3 | Survey API |
-| 29 | Migration Controller | Tauri IPC commands: `scan_backup_directory`, `inspect_backup_file`, `execute_migration`, `export_items_to_excel`, `import_items_from_excel`, `export_transactions_to_excel` | M3 | Survey API |
+| 28 | Party Controller | Tauri IPC commands: `create_party`, `update_party`, `get_party`, `list_parties`, `search_parties` | M3 | Survey API |
+| 29 | Import Controller | Tauri IPC command: `import_items_from_excel` | M3 | Survey API |
 | 30 | Settings Controller | Tauri IPC commands: `get_shop_settings`, `update_shop_settings`, `backup_database`, `verify_database_integrity` | M3 | Survey API |
 | 31 | `main.rs` IPC Registration | Register all 46 commands with `invoke_handler(tauri::generate_handler![...])` and `.manage(app_state)` | M3 | Survey API |
 | 32 | `useCartStore` | Zustand cart store with bundle multipliers, stock protection, cart merging | M4 | Survey Frontend |
@@ -50,7 +50,7 @@ Offline-first retail accounting and inventory management desktop application bui
 | 35 | `ApiClient` & Mock/Tauri Client | Typed API client interface with 160+ stationery seed items and Tauri IPC fallback | M4 | Survey Frontend |
 | 36 | Retail Molecules | `CurrencyDisplay` (en-IN, font-mono), `StockStatusBadge` (0 danger, <5 warn, >=5 success) | M5 | Survey Frontend |
 | 37 | Domain Organisms | `RapidBillingRow` (sequential focus cycle, Alt+B modal), `SaleSummaryModal` (hero total, change calc) | M5 | Survey Frontend |
-| 38 | Screen Pages | 12 pages (Billing, Purchases, Inventory, Dues, Dashboard, Reports, Settings, Migration, etc.) | M5 | Survey Frontend |
+| 38 | Screen Pages | 12 pages (Billing, Purchases, Inventory, Dues, Dashboard, Reports, Settings, etc.) | M5 | Survey Frontend |
 | 39 | Application Shell | `App.tsx`, `main.tsx`, `index.html` with hotkey bindings (F1-F6) | M5 | Survey Frontend |
 | 40 | Dual-Track E2E Test Suite | Automated verification suite across backend and frontend, validating production readiness | M6 | Survey E2E |
 | 41 | Phased Commits & Checkpointing | Logical, phased git commits and updated `CHECKPOINT.md` reflecting clean production build | M6 | Survey Lifecycle |
@@ -102,7 +102,7 @@ src-tauri/
 │   │   ├── adjustment_controller.rs
 │   │   ├── report_controller.rs
 │   │   ├── party_controller.rs
-│   │   ├── migration_controller.rs
+│   │   ├── import_controller.rs
 │   │   └── settings_controller.rs
 │   ├── services/
 │   │   ├── contracts/
@@ -116,12 +116,11 @@ src-tauri/
 │   │       ├── return_service_impl.rs
 │   │       ├── accounting_service_impl.rs
 │   │       ├── report_service_impl.rs
-│   │       ├── migration_service_impl.rs
+│   │       ├── item_import_service_impl.rs
 │   │       ├── item_service_impl.rs
 │   │       ├── party_service_impl.rs
 │   │       ├── shop_setting_service_impl.rs
 │   │       ├── backup_service_impl.rs
-│   │       └── import_export_service_impl.rs
 │   ├── data/
 │   │   ├── contracts/
 │   │   └── sqlite/
@@ -181,5 +180,4 @@ src/
 │       ├── ReportsPage.tsx
 │       ├── PartiesPage.tsx
 │       ├── SettingsPage.tsx
-│       └── MigrationPage.tsx
 ```

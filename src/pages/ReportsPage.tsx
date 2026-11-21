@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, Download } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 import { api } from '@/api';
 import type { CashFlowReport, PnlReport, StockValuationReport } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
-import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
 
 export const ReportsPage: React.FC = () => {
@@ -67,15 +66,6 @@ export const ReportsPage: React.FC = () => {
               </button>
             ))}
           </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<Download size={14} />}
-            onClick={() => alert('Report export initiated.')}
-          >
-            Export
-          </Button>
         </div>
       </div>
 

@@ -16,8 +16,7 @@
 | `search_indexer_test` | FTS5 prefix and barcode search (§11.7) |
 | `accounting_service_test` | Khata dues and FIFO settlement (§11.8) |
 | `report_service_test` | Dashboard (today-scoped), P&L, valuation (§11.9) |
-| `migration_service_test` | VedBill `.vb` scan, inspect, migrate (§11.10) |
-| `e2e_lifecycle_test`, `e2e_scenarios_test` | Lifecycle and real-world counter scenarios S1–S5 |
+| `e2e_lifecycle_test`, `e2e_scenarios_test` | Lifecycle and real-world counter scenarios S1–S4 |
 | `e2e_tier3_combinations_test` | Cross-feature combinations |
 | `sqlite_smoke_test` | `build_sqlite_app_state` bootstrap end to end |
 

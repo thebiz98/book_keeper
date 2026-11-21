@@ -1,7 +1,5 @@
 import type {
   ApiClient,
-  BackupFileInfo,
-  BackupInspection,
   BundleSuggestion,
   CashFlowReport,
   CatalogFilter,
@@ -17,7 +15,6 @@ import type {
   Item,
   ItemSearchResult,
   LowStockItem,
-  MigrationReport,
   PaginatedList,
   Party,
   PartyBalance,
@@ -38,7 +35,6 @@ import type {
   StockAdjustment,
   StockAdjustmentPayload,
   StockValuationReport,
-  TransactionExportFilter,
   TrendDataPoint,
   UpdateItemPayload,
   UpdatePartyPayload,
@@ -245,11 +241,6 @@ export class MockApiClient implements ApiClient {
     const item = this.findItem(itemId);
     if (!item) throw new Error(`Item ${itemId} not found`);
     Object.assign(item, payload, { updatedAt: nowIso() });
-  }
-
-  async archiveItem(itemId: number): Promise<void> {
-    const item = this.findItem(itemId);
-    if (item) item.isActive = false;
   }
 
   async getBundleSuggestions(): Promise<BundleSuggestion[]> {
@@ -510,11 +501,6 @@ export class MockApiClient implements ApiClient {
     Object.assign(party, payload, { updatedAt: nowIso() });
   }
 
-  async archiveParty(partyId: number): Promise<void> {
-    const party = this.findParty(partyId);
-    if (party) party.isActive = false;
-  }
-
   async searchParties(query: string, partyType?: PartyType): Promise<Party[]> {
     const q = (query || '').toLowerCase();
     return this.parties.filter(
@@ -710,61 +696,9 @@ export class MockApiClient implements ApiClient {
     return true;
   }
 
-  // --- Migration & Excel ---
-  async scanBackupDirectory(directoryPath?: string): Promise<BackupFileInfo[]> {
-    const dir = (directoryPath || '/backup').replace(/\/$/, '');
-    return [
-      {
-        fileName: 'vedbill_backup.db',
-        filePath: `${dir}/vedbill_backup.db`,
-        fileSizeBytes: 245760,
-        modifiedAt: nowIso(),
-      },
-    ];
-  }
-
-  async inspectBackupFile(filePath: string): Promise<BackupInspection> {
-    return {
-      companyName: this.settings.shopName,
-      schemaVersion: 1,
-      createdAt: nowIso(),
-      backupFilePath: filePath,
-      backupFileSizeBytes: 245760,
-      tableStats: {
-        itemsCount: this.items.length,
-        partiesCount: this.parties.length,
-        salesCount: this.sales.length,
-        purchasesCount: this.purchases.length,
-        documentItemsCount: 0,
-      },
-    };
-  }
-
-  async executeMigration(_filePath: string): Promise<MigrationReport> {
-    return {
-      success: true,
-      itemsImported: this.items.length,
-      partiesImported: this.parties.length,
-      salesImported: 0,
-      purchasesImported: 0,
-      durationMs: 0,
-      errors: [],
-    };
-  }
-
-  async exportItemsToExcel(destinationPath: string): Promise<string> {
-    return destinationPath || '/export/items.xlsx';
-  }
-
+  // --- Items import ---
   async importItemsFromExcel(_filePath: string): Promise<ImportSummary> {
     return { totalRows: 0, importedCount: 0, skippedCount: 0, errors: [] };
-  }
-
-  async exportTransactionsToExcel(
-    destinationPath: string,
-    _filter?: TransactionExportFilter | null
-  ): Promise<string> {
-    return destinationPath || '/export/transactions.xlsx';
   }
 }
 

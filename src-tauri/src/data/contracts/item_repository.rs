@@ -20,5 +20,4 @@ pub trait ItemRepository {
         new_stock: f64,
         is_low_stock: bool,
     ) -> Result<(), AppError>;
-    fn archive(&mut self, item_id: i64) -> Result<(), AppError>;
 }

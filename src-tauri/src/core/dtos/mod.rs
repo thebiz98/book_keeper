@@ -1,7 +1,7 @@
 pub mod adjustment_dto;
 pub mod dues_dto;
 pub mod item_dto;
-pub mod migration_dto;
+pub mod import_dto;
 pub mod pagination;
 pub mod payment_dto;
 pub mod purchase_dto;
@@ -15,7 +15,7 @@ pub use item_dto::{
     BundleSuggestion, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult,
     ItemSearchResult, UpdateItemPayload,
 };
-pub use migration_dto::{BackupFileInfo, ImportSummary, MigrationPreview, MigrationResult, TableStats};
+pub use import_dto::ImportSummary;
 pub use pagination::PaginatedList;
 pub use payment_dto::{RecordPaymentPayload, RecordRefundPayload};
 pub use purchase_dto::{

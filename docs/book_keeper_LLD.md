@@ -787,7 +787,7 @@ The service layer is structured to guarantee clean separation of concerns, singl
 | **`PurchaseService`** | Inward batch orchestration, cost normalization, lot creation | Stock cache updates (delegates to `InventoryService`), payment recording (delegates to `PaymentService`) |
 | **`ReturnService`** | Return orchestration, condition assessment, replacement logic | Stock mutations (delegates to `InventoryService`), payment/refund recording (delegates to `PaymentService`) |
 | **`ReportService`** | Read-only KPI aggregations, P&L, cash flow, stock valuation | Everything — pure reads |
-| **`PartyService`** | Customer/vendor master data CRUD, search, archive guards | Everything else |
+| **`PartyService`** | Customer/vendor master data CRUD, search | Everything else |
 
 ```mermaid
 graph TD

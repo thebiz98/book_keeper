@@ -3,11 +3,10 @@ use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::backup_service::BackupService;
-use crate::services::contracts::import_export_service::DataExportImportService;
+use crate::services::contracts::item_import_service::ItemImportService;
 use crate::services::contracts::inventory_allocation_strategy::InventoryAllocationStrategy;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::item_service::ItemService;
-use crate::services::contracts::migration_service::MigrationService;
 use crate::services::contracts::party_service::PartyService;
 use crate::services::contracts::payment_service::PaymentService;
 use crate::services::contracts::purchase_service::PurchaseService;
@@ -29,8 +28,7 @@ pub struct AppState {
     pub return_service: Arc<dyn ReturnService>,
     pub report_service: Arc<dyn ReportService>,
     pub party_service: Arc<dyn PartyService>,
-    pub migration_service: Arc<dyn MigrationService>,
-    pub import_export_service: Arc<dyn DataExportImportService>,
+    pub item_import_service: Arc<dyn ItemImportService>,
     pub backup_service: Arc<dyn BackupService>,
     pub shop_setting_service: Arc<dyn ShopSettingService>,
 }
@@ -73,10 +71,8 @@ pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, cra
     ));
     let report_service: Arc<dyn ReportService> = Arc::new(ReportServiceImpl::new(uow.clone()));
     let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone()));
-    let migration_service: Arc<dyn MigrationService> =
-        Arc::new(MigrationServiceImpl::with_indexer(uow.clone(), search_indexer.clone()));
-    let import_export_service: Arc<dyn DataExportImportService> =
-        Arc::new(ImportExportServiceImpl::new(uow.clone()));
+    let item_import_service: Arc<dyn ItemImportService> =
+        Arc::new(ItemImportServiceImpl::new(uow.clone()));
     let backup_service: Arc<dyn BackupService> = Arc::new(BackupServiceImpl::new(db_path));
     let shop_setting_service: Arc<dyn ShopSettingService> =
         Arc::new(ShopSettingServiceImpl::new(uow.clone()));
@@ -94,8 +90,7 @@ pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, cra
         return_service,
         report_service,
         party_service,
-        migration_service,
-        import_export_service,
+        item_import_service,
         backup_service,
         shop_setting_service,
     })
