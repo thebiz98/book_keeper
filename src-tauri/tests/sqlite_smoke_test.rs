@@ -77,3 +77,35 @@ fn sqlite_end_to_end_smoke() {
         let _ = std::fs::remove_file(format!("{}{}", path.display(), ext));
     }
 }
+
+#[test]
+fn sales_history_honours_start_end_date_filter() {
+    use book_keeper::core::dtos::SalesHistoryFilter;
+    let path = std::env::temp_dir().join(format!("bk_hist_{}.db", uuid::Uuid::new_v4()));
+    let state = build_sqlite_app_state(&path).expect("build state");
+    let item_id = state.item_service.create_item(CreateItemPayload {
+        name: "Pencil".into(), category: None, barcode: None, base_unit: "pcs".into(), mrp: None,
+        default_sale_price: 5.0, initial_stock: None, initial_cost: None, bundles: None,
+    }).expect("item");
+    state.purchase_service.create_purchase(CreatePurchasePayload {
+        transaction_code: None, transaction_date: "2026-01-01".into(), party_id: None, paid_amount: 50.0,
+        payment_mode: Some("CASH".into()), notes: None,
+        items: vec![CreatePurchaseItemPayload { item_id, bundle_id: None, bundle_quantity: 10.0, unit_cost: 5.0 }],
+    }).expect("purchase");
+    for date in ["2026-01-05", "2026-02-05"] {
+        state.sale_service.create_sale(CreateSalePayload {
+            transaction_code: None, transaction_date: date.into(), party_id: None, paid_amount: 5.0,
+            payment_mode: Some("CASH".into()), notes: None,
+            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: Some(5.0) }],
+        }).expect("sale");
+    }
+    // Frontend shape: start_date / end_date only.
+    let filter: SalesHistoryFilter = serde_json::from_value(serde_json::json!({
+        "start_date": "2026-02-01", "end_date": "2026-02-28", "page": 1, "limit": 50
+    })).expect("filter json");
+    let page = state.sale_service.get_sales_history(filter).expect("history");
+    assert_eq!(page.items.len(), 1, "only the February sale is in range");
+    for ext in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), ext));
+    }
+}

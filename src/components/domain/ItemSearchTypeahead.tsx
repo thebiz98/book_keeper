@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/api';
+import type { ItemSearchResult } from '@/types';
 import { StockStatusBadge } from '../common/StockStatusBadge';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 
 export interface ItemSearchTypeaheadProps {
-  onSelectItem: (item: any) => void;
+  onSelectItem: (item: ItemSearchResult) => void;
   placeholder?: string;
   autoFocus?: boolean;
   className?: string;
@@ -19,7 +20,7 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
   className,
 }) => {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<ItemSearchResult[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -71,7 +72,7 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
     return () => clearTimeout(timer);
   }, [query]);
 
-  const handleSelect = (item: any) => {
+  const handleSelect = (item: ItemSearchResult) => {
     onSelectItem(item);
     setQuery('');
     setIsOpen(false);
@@ -129,13 +130,13 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
           ) : (
             results.map((item, idx) => {
               const isHighlighted = idx === highlightedIndex;
-              const stock = item.currentStock ?? item.current_stock ?? 0;
-              const unit = item.baseUnit ?? item.base_unit ?? 'PCS';
-              const price = item.defaultSalePrice ?? item.default_sale_price ?? item.price ?? 0;
+              const stock = item.currentStock;
+              const unit = item.baseUnit;
+              const price = item.defaultSalePrice;
 
               return (
                 <div
-                  key={item.id ?? idx}
+                  key={item.itemId}
                   onClick={() => handleSelect(item)}
                   onMouseEnter={() => setHighlightedIndex(idx)}
                   className={cn(

@@ -49,11 +49,11 @@ export const SettingsPage: React.FC = () => {
       .getShopSettings()
       .then((s) => {
         if (!s) return;
-        setId(s.id ?? 1);
-        setShopName(s.shopName ?? s.shop_name ?? '');
+        setId(s.id);
+        setShopName(s.shopName);
         setPhone(s.phone ?? '');
         setAddress(s.address ?? '');
-        setTaxId(s.taxId ?? s.tax_id ?? s.gstNumber ?? s.gst_number ?? '');
+        setTaxId(s.taxId ?? '');
       })
       .catch((err: any) =>
         setProfileNotice({ kind: 'error', text: err?.message || 'Failed to load settings' })

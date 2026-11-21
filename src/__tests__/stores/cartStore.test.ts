@@ -97,8 +97,7 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
         currentStock: 100.0,
       };
       const bundle = {
-        name: 'Box of 10',
-        multiplier: 10,
+        bundleName: 'Box of 10',
         unitsPerBundle: 10,
         salePrice: 240.0, // Discounted bundle rate (24 ₹/pc)
       };
@@ -132,8 +131,7 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
 
       // Change packaging to Dozen (12 units, ₹55/dozen)
       store.setBundle(11, {
-        name: 'Dozen',
-        multiplier: 12,
+        bundleName: 'Dozen',
         unitsPerBundle: 12,
         salePrice: 55.0,
       });
@@ -157,8 +155,8 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
       };
 
       store.addItem(mockItem, 3, {
-        name: 'Pack of 5',
-        multiplier: 5,
+        bundleName: 'Pack of 5',
+        unitsPerBundle: 5,
         salePrice: 180.0,
       });
       expect(useCartStore.getState().items[0].baseQuantity).toBe(15);
@@ -222,8 +220,7 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
 
       // Adding 2 Boxes of 10 requires 20 PCS, but only 15 available
       const bundle = {
-        name: 'Box of 10',
-        multiplier: 10,
+        bundleName: 'Box of 10',
         unitsPerBundle: 10,
         salePrice: 480.0,
       };
@@ -352,8 +349,8 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
         defaultSalePrice: 30.0,
         currentStock: 50.0,
       }, 3);
-      store.setCustomer({ id: 9, name: 'Sharmaji', balanceDue: 250.0 });
-      store.setPaymentStatus('PARTIAL', 50.0);
+      store.setCustomer({ id: 9, name: 'Sharmaji' });
+      store.setPaymentStatus('Partial', 50.0);
 
       expect(useCartStore.getState().items).toHaveLength(1);
       expect(useCartStore.getState().selectedCustomer).not.toBeNull();
@@ -366,7 +363,7 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
       expect(cleared.totalBaseUnits).toBe(0);
       expect(cleared.totalItems).toBe(0);
       expect(cleared.selectedCustomer).toBeNull();
-      expect(cleared.paymentStatus).toBe('PAID');
+      expect(cleared.paymentStatus).toBe('Paid');
       expect(cleared.paidAmount).toBe(0);
       expect(cleared.balanceDue).toBe(0);
     });
@@ -387,12 +384,12 @@ describe('useCartStore - Retail Billing Cart State Management', () => {
       expect(useCartStore.getState().balanceDue).toBe(0);
 
       // Case B: PARTIAL payment of ₹400 -> balance due = 600
-      store.setPaymentStatus('PARTIAL', 400.0);
+      store.setPaymentStatus('Partial', 400.0);
       expect(useCartStore.getState().paidAmount).toBe(400.0);
       expect(useCartStore.getState().balanceDue).toBe(600.0);
 
       // Case C: Full UNPAID credit sale -> balance due = 1000
-      store.setPaymentStatus('UNPAID');
+      store.setPaymentStatus('Unpaid');
       expect(useCartStore.getState().paidAmount).toBe(0.0);
       expect(useCartStore.getState().balanceDue).toBe(1000.0);
     });

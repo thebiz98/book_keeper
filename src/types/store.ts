@@ -3,10 +3,12 @@
  * Compatible with docs/book_keeper_UI_LLD.md and src/__tests__/modules.d.ts.
  */
 
+import type { PaymentStatus } from './index';
+
 export interface CartItem {
   itemId: number;
   name: string;
-  barcode?: string;
+  barcode?: string | null;
   baseUnit: string;
   unitsPerBundle: number;
   bundleId?: number;
@@ -14,7 +16,7 @@ export interface CartItem {
   quantity: number;
   baseQuantity: number;
   rate: number;
-  mrp?: number;
+  mrp?: number | null;
   lineTotal: number;
   availableStock: number;
   defaultSalePrice?: number;
@@ -23,38 +25,27 @@ export interface CartItem {
 export interface ItemInput {
   id: number;
   name: string;
-  barcode?: string;
-  base_unit?: string;
-  baseUnit?: string;
-  default_sale_price?: number;
-  defaultSalePrice?: number;
-  mrp?: number;
-  current_stock?: number;
-  currentStock?: number;
+  barcode?: string | null;
+  baseUnit: string;
+  defaultSalePrice: number;
+  mrp?: number | null;
+  currentStock: number;
 }
 
 export interface BundleInput {
   id?: number;
-  name: string;
-  bundle_name?: string;
-  bundleName?: string;
-  multiplier: number;
-  units_per_bundle?: number;
-  unitsPerBundle?: number;
-  sale_price?: number;
-  salePrice?: number;
-  mrp?: number;
+  bundleName: string;
+  unitsPerBundle: number;
+  /** Price per bundle. */
+  salePrice?: number | null;
+  mrp?: number | null;
 }
 
 export interface CustomerInput {
   id: number;
   name: string;
-  phone?: string;
-  balanceDue?: number;
-  balance_due?: number;
+  phone?: string | null;
 }
-
-export type PaymentStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
 
 export interface CartState {
   items: CartItem[];
@@ -62,7 +53,7 @@ export interface CartState {
   totalBaseUnits: number;
   totalItems: number;
   selectedCustomer: CustomerInput | null;
-  paymentStatus: 'PAID' | 'PARTIAL' | 'UNPAID';
+  paymentStatus: PaymentStatus;
   paidAmount: number;
   balanceDue: number;
 
@@ -73,7 +64,7 @@ export interface CartState {
   removeItem: (itemId: number) => void;
   clearCart: () => void;
   setCustomer: (customer: CustomerInput | null) => void;
-  setPaymentStatus: (status: 'PAID' | 'PARTIAL' | 'UNPAID', paidAmount?: number) => void;
+  setPaymentStatus: (status: PaymentStatus, paidAmount?: number) => void;
   setPaidAmount: (amount: number) => void;
 }
 

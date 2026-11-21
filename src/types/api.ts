@@ -1,322 +1,334 @@
 /**
- * API Client contracts, payloads, and DTOs matching Tauri IPC and MockApiClient.
+ * API client contracts, payloads, and DTOs. camelCase mirrors of the Rust DTOs
+ * in src-tauri/src/core/dtos; the IPC layer converts keys at the boundary.
  */
 
 import type {
-  Item,
-  PackagingBundle,
-  Party,
-  Sale,
-  Purchase,
-  PartyBalance,
-  PnlReport,
-  StockValuationReport,
+  AdjustmentReason,
   CashFlowReport,
+  Item,
+  ItemSearchResult,
+  LowStockItem,
+  PartyBalance,
+  PartyLedgerView,
+  PartyType,
+  Party,
+  PaymentStatus,
+  PnlReport,
+  Purchase,
+  PurchaseDetailView,
+  ReturnDetailView,
+  Sale,
+  SaleDetailView,
+  SettlementType,
   ShopSettings,
+  StockAdjustment,
+  StockCondition,
+  StockValuationReport,
 } from './index';
 
 export interface PaginatedList<T> {
   items: T[];
-  totalCount?: number;
-  total_count?: number;
-  total: number;
+  totalCount: number;
   page: number;
   limit: number;
   totalPages: number;
-  total_pages?: number;
+}
+
+export interface HistoryFilter {
+  startDate?: string | null;
+  endDate?: string | null;
+  paymentStatus?: PaymentStatus | null;
+  partyId?: number | null;
+  page?: number | null;
+  limit?: number | null;
+}
+
+export interface CatalogFilter {
+  category?: string | null;
+  lowStockOnly?: boolean;
+  page?: number;
+  limit?: number;
 }
 
 export interface CreateSaleItemPayload {
-  itemId?: number;
-  item_id?: number;
-  bundleId?: number | null;
-  bundle_id?: number | null;
-  quantity?: number;
-  bundleQuantity?: number;
-  bundle_quantity?: number;
-  unitsPerBundle?: number;
-  units_per_bundle?: number;
-  rate?: number;
-  unitPrice?: number;
-  unit_price?: number;
+  itemId: number;
+  bundleId: number | null;
+  bundleQuantity: number;
+  unitPrice: number | null;
 }
 
 export interface CreateSalePayload {
-  transactionCode?: string;
-  transaction_code?: string;
-  saleCode?: string;
-  sale_code?: string;
-  transactionDate?: string;
-  transaction_date?: string;
-  date?: string;
-  partyId?: number | null;
-  party_id?: number | null;
-  customerId?: number | null;
-  paidAmount?: number;
-  paid_amount?: number;
-  paymentMode?: string | null;
-  payment_mode?: string | null;
-  paymentStatus?: string;
-  payment_status?: string;
-  notes?: string | null;
+  transactionCode?: string | null;
+  transactionDate: string;
+  partyId: number | null;
+  paidAmount: number;
+  paymentMode: string | null;
+  notes: string | null;
   items: CreateSaleItemPayload[];
 }
 
 export interface SaleSummaryResponse {
   saleId: number;
-  sale_id?: number;
   transactionCode: string;
-  transaction_code?: string;
-  saleCode?: string;
-  sale_code?: string;
   totalAmount: number;
-  total_amount?: number;
   paidAmount: number;
-  paid_amount?: number;
   balanceDue: number;
-  balance_due?: number;
-  changeAmount?: number;
-  change_amount?: number;
-  changeReturned?: number;
-  change_returned?: number;
-  paymentStatus: string;
-  payment_status?: string;
-  date?: string;
-  items?: any[];
+  changeAmount: number;
+  changeReturned: number;
+  paymentStatus: PaymentStatus;
 }
 
 export interface CreatePurchaseItemPayload {
-  itemId?: number;
-  item_id?: number;
-  bundleId?: number | null;
-  bundle_id?: number | null;
-  quantity?: number;
-  bundleQuantity?: number;
-  bundle_quantity?: number;
-  unitsPerBundle?: number;
-  units_per_bundle?: number;
-  unitCost?: number;
-  unit_cost?: number;
+  itemId: number;
+  bundleId: number | null;
+  bundleQuantity: number;
+  unitCost: number;
 }
 
 export interface CreatePurchasePayload {
-  transactionCode?: string;
-  transaction_code?: string;
-  purchaseCode?: string;
-  purchase_code?: string;
-  transactionDate?: string;
-  transaction_date?: string;
-  date?: string;
-  partyId?: number | null;
-  party_id?: number | null;
-  vendorId?: number | null;
-  paidAmount?: number;
-  paid_amount?: number;
-  paymentMode?: string | null;
-  payment_mode?: string | null;
-  paymentStatus?: string;
-  payment_status?: string;
-  notes?: string | null;
+  transactionCode?: string | null;
+  transactionDate: string;
+  partyId: number | null;
+  paidAmount: number;
+  paymentMode: string | null;
+  notes: string | null;
   items: CreatePurchaseItemPayload[];
 }
 
 export interface SettlePaymentPayload {
-  partyId?: number;
-  party_id?: number;
+  partyId: number;
   amount: number;
-  settlementDate?: string;
-  settlement_date?: string;
-  date?: string;
-  paymentMode?: string | null;
-  payment_mode?: string | null;
-  specificBillId?: number | null;
-  specific_bill_id?: number | null;
-  notes?: string | null;
+  settlementDate: string;
+  paymentMode: string | null;
+  specificBillId: number | null;
+  notes: string | null;
+}
+
+export interface CreateBundlePayload {
+  itemId: number | null;
+  bundleName: string;
+  unitsPerBundle: number;
+  mrp: number | null;
+  defaultBundlePrice: number | null;
+  barcode: string | null;
 }
 
 export interface CreateItemPayload {
   name: string;
-  category?: string | null;
-  barcode?: string | null;
-  baseUnit?: string;
-  base_unit?: string;
-  mrp?: number | null;
-  defaultSalePrice?: number;
-  default_sale_price?: number;
-  initialStock?: number;
-  initial_stock?: number;
-  initialCost?: number;
-  initial_cost?: number;
-  bundles?: CreateBundlePayload[];
+  category: string | null;
+  barcode: string | null;
+  baseUnit: string;
+  mrp: number | null;
+  defaultSalePrice: number;
+  initialStock: number | null;
+  initialCost: number | null;
+  bundles: CreateBundlePayload[] | null;
 }
 
 export interface UpdateItemPayload {
   name: string;
-  category?: string | null;
-  barcode?: string | null;
-  baseUnit?: string;
-  base_unit?: string;
-  mrp?: number | null;
-  defaultSalePrice?: number;
-  default_sale_price?: number;
-  currentStock?: number;
-  current_stock?: number;
-}
-
-export interface CreateBundlePayload {
-  itemId?: number | null;
-  item_id?: number | null;
-  bundleName: string;
-  bundle_name?: string;
-  multiplier?: number;
-  unitsPerBundle: number;
-  units_per_bundle?: number;
-  salePrice?: number | null;
-  sale_price?: number | null;
-  defaultBundlePrice?: number | null;
-  default_bundle_price?: number | null;
-  mrp?: number | null;
-  barcode?: string | null;
+  category: string | null;
+  barcode: string | null;
+  baseUnit: string;
+  mrp: number | null;
+  defaultSalePrice: number;
 }
 
 export interface BundleSuggestion {
   bundleName: string;
-  bundle_name?: string;
-  name?: string;
   unitsPerBundle: number;
-  units_per_bundle?: number;
-  multiplier?: number;
-  usageCount?: number;
-  usage_count?: number;
+  usageCount: number;
+}
+
+export interface CreatePartyPayload {
+  name: string;
+  phone: string | null;
+  partyType: PartyType;
+  notes: string | null;
+}
+
+export type UpdatePartyPayload = CreatePartyPayload;
+
+export interface CustomerReturnItemPayload {
+  itemId: number;
+  saleItemId: number | null;
+  quantity: number;
+  unitPrice: number;
+  condition: StockCondition;
+}
+
+export interface CustomerReturnPayload {
+  returnCode?: string | null;
+  originalSaleId: number | null;
+  partyId: number | null;
+  returnDate: string;
+  settlementType: SettlementType;
+  reason?: string | null;
+  notes: string | null;
+  items: CustomerReturnItemPayload[];
+}
+
+export interface VendorReturnItemPayload {
+  itemId: number;
+  purchaseItemId: number | null;
+  quantity: number;
+  unitCost: number;
+}
+
+export interface VendorReturnPayload {
+  originalPurchaseId: number | null;
+  partyId: number | null;
+  returnDate: string;
+  settlementType: SettlementType;
+  reason: string | null;
+  notes: string | null;
+  items: VendorReturnItemPayload[];
+}
+
+export interface StockAdjustmentPayload {
+  adjustmentDate: string;
+  itemId: number;
+  quantity: number;
+  reason: AdjustmentReason;
+  notes: string | null;
 }
 
 export interface DashboardMetrics {
-  todaySales?: number;
-  today_sales?: number;
-  todayGrossSales?: number;
-  todayPurchases?: number;
-  today_purchases?: number;
-  todayNetProfit?: number;
-  today_net_profit?: number;
-  totalStockValuation?: number;
-  total_stock_valuation?: number;
-  stockValuation?: number;
-  customerReceivables?: number;
-  customer_receivables?: number;
-  vendorPayables?: number;
-  vendor_payables?: number;
-  liveCashInDrawer?: number;
-  live_cash_in_drawer?: number;
-  cashDrawer?: number;
+  todaySales: number;
+  todayPurchases: number;
+  todaySalesAmount: number;
+  todaySalesCount: number;
+  todayPurchaseAmount: number;
+  todayPurchaseCount: number;
+  todayNetProfit: number;
+  totalStockValuation: number;
+  customerReceivables: number;
+  vendorPayables: number;
+  liveCashInDrawer: number;
 }
 
 export interface TrendDataPoint {
   date: string;
-  salesAmount?: number;
-  sales_amount?: number;
-  purchaseAmount?: number;
-  purchase_amount?: number;
+  salesAmount: number;
+  purchaseAmount: number;
 }
 
 export interface BackupFileInfo {
-  path: string;
-  fileName?: string;
-  file_name?: string;
-  sizeBytes?: number;
-  size_bytes?: number;
-  modifiedAt?: string;
-  modified_at?: string;
+  fileName: string;
+  filePath: string;
+  fileSizeBytes: number;
+  modifiedAt: string;
+}
+
+export interface TableStats {
+  itemsCount: number;
+  partiesCount: number;
+  salesCount: number;
+  purchasesCount: number;
+  documentItemsCount: number;
 }
 
 export interface BackupInspection {
-  path?: string;
-  itemsCount?: number;
-  items_count?: number;
-  partiesCount?: number;
-  parties_count?: number;
-  salesCount?: number;
-  sales_count?: number;
-  purchasesCount?: number;
-  purchases_count?: number;
-  warnings?: string[];
+  companyName: string;
+  schemaVersion: number;
+  createdAt: string;
+  backupFilePath: string;
+  backupFileSizeBytes: number;
+  tableStats: TableStats;
 }
 
 export interface MigrationReport {
-  success?: boolean;
-  itemsImported?: number;
-  items_imported?: number;
-  partiesImported?: number;
-  parties_imported?: number;
-  salesImported?: number;
-  sales_imported?: number;
-  purchasesImported?: number;
-  purchases_imported?: number;
-  errors?: string[];
-  warnings?: string[];
+  success: boolean;
+  itemsImported: number;
+  partiesImported: number;
+  salesImported: number;
+  purchasesImported: number;
+  durationMs: number;
+  errors: string[];
+}
+
+export interface ImportSummary {
+  totalRows: number;
+  importedCount: number;
+  skippedCount: number;
+  errors: string[];
+}
+
+export interface TransactionExportFilter {
+  fromDate?: string;
+  toDate?: string;
 }
 
 export interface ApiClient {
   // Sales
   getNextSaleCode(): Promise<string>;
-  createSale(payload: CreateSalePayload | any): Promise<SaleSummaryResponse | any>;
-  getSalesHistory(filter?: any): Promise<PaginatedList<Sale> | any>;
-  getSaleDetails(saleId: number): Promise<any>;
+  createSale(payload: CreateSalePayload): Promise<SaleSummaryResponse>;
+  getSalesHistory(filter?: HistoryFilter): Promise<PaginatedList<Sale>>;
+  getSaleDetails(saleId: number): Promise<SaleDetailView>;
 
   // Purchases
   getNextPurchaseCode(): Promise<string>;
-  createPurchase(payload: CreatePurchasePayload | any): Promise<any>;
-  getPurchasesHistory(filter?: any): Promise<PaginatedList<Purchase> | any>;
-  getPurchaseDetails(purchaseId: number): Promise<any>;
+  createPurchase(payload: CreatePurchasePayload): Promise<number>;
+  getPurchasesHistory(filter?: HistoryFilter): Promise<PaginatedList<Purchase>>;
+  getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailView>;
 
   // Items & Catalog
-  searchItemsFts(query: string, limit?: number): Promise<Item[] | any[]>;
-  getItemsCatalog(filter?: any, lowStockOnlyArg?: boolean): Promise<{ total: number; items: Item[]; page?: number; limit?: number; totalPages?: number } | any>;
-  createItem(payload: CreateItemPayload | any): Promise<Item | any>;
-  updateItem(itemId: number, payload: UpdateItemPayload | any): Promise<Item | boolean | any>;
-  archiveItem(itemId: number): Promise<boolean>;
-  getBundleSuggestions(): Promise<BundleSuggestion[] | any[]>;
-  createBundle(payload: CreateBundlePayload | any): Promise<PackagingBundle | any>;
+  searchItemsFts(query: string, limit?: number): Promise<ItemSearchResult[]>;
+  getItemsCatalog(filter?: CatalogFilter): Promise<PaginatedList<Item>>;
+  createItem(payload: CreateItemPayload): Promise<number>;
+  updateItem(itemId: number, payload: UpdateItemPayload): Promise<void>;
+  archiveItem(itemId: number): Promise<void>;
+  getBundleSuggestions(): Promise<BundleSuggestion[]>;
+  createBundle(payload: CreateBundlePayload): Promise<number>;
 
   // Dues & Ledger
-  getPartyDuesSummary(partyType: 'CUSTOMER' | 'VENDOR' | 'Customer' | 'Vendor'): Promise<PartyBalance[] | any[]>;
-  settleBillPayment(payload: SettlePaymentPayload | any): Promise<boolean>;
-  getPartyLedger(partyId: number): Promise<any>;
+  getPartyDuesSummary(partyType: PartyType): Promise<PartyBalance[]>;
+  settleBillPayment(payload: SettlePaymentPayload): Promise<void>;
+  getPartyLedger(partyId: number): Promise<PartyLedgerView>;
 
   // Parties
-  createParty(payload: any): Promise<any>;
-  updateParty(partyId: number, payload: any): Promise<boolean>;
-  archiveParty(partyId: number): Promise<boolean>;
-  getParty(partyId: number): Promise<Party | any>;
-  listParties(partyType?: 'CUSTOMER' | 'VENDOR' | 'Customer' | 'Vendor', activeOnly?: boolean): Promise<Party[] | any[]>;
-  searchParties(query: string, partyType?: 'CUSTOMER' | 'VENDOR' | 'Customer' | 'Vendor'): Promise<Party[] | any[]>;
+  createParty(payload: CreatePartyPayload): Promise<number>;
+  updateParty(partyId: number, payload: UpdatePartyPayload): Promise<void>;
+  archiveParty(partyId: number): Promise<void>;
+  getParty(partyId: number): Promise<Party>;
+  listParties(partyType?: PartyType, activeOnly?: boolean): Promise<Party[]>;
+  searchParties(query: string, partyType?: PartyType): Promise<Party[]>;
 
   // Returns & Adjustments
   getNextReturnCode(): Promise<string>;
-  createCustomerReturn(payload: any): Promise<any>;
-  createVendorReturn(payload: any): Promise<any>;
-  getReturnDetails(returnId: number): Promise<any>;
-  createStockAdjustment(payload: any): Promise<any>;
-  listStockAdjustments(itemId?: number, page?: number, limit?: number): Promise<any>;
+  createCustomerReturn(payload: CustomerReturnPayload): Promise<string>;
+  createVendorReturn(payload: VendorReturnPayload): Promise<string>;
+  getReturnDetails(returnId: number): Promise<ReturnDetailView>;
+  createStockAdjustment(payload: StockAdjustmentPayload): Promise<number>;
+  listStockAdjustments(
+    itemId?: number,
+    page?: number,
+    limit?: number
+  ): Promise<PaginatedList<StockAdjustment>>;
 
   // Reports
-  getDashboardMetrics(): Promise<DashboardMetrics | any>;
-  getLowStockAlerts(): Promise<Item[] | any[]>;
-  getSalesPurchaseTrend(period: '7d' | '30d' | '1y' | string): Promise<TrendDataPoint[] | any[]>;
-  getPnLReport(fromDate: string, toDate: string): Promise<PnlReport | any>;
-  getStockValuationReport(): Promise<StockValuationReport | any>;
-  getCashFlowReport(fromDate: string, toDate: string): Promise<CashFlowReport | any>;
+  getDashboardMetrics(): Promise<DashboardMetrics>;
+  getLowStockAlerts(): Promise<LowStockItem[]>;
+  getSalesPurchaseTrend(period: string): Promise<TrendDataPoint[]>;
+  getPnLReport(fromDate: string, toDate: string): Promise<PnlReport>;
+  getStockValuationReport(): Promise<StockValuationReport>;
+  getCashFlowReport(fromDate: string, toDate: string): Promise<CashFlowReport>;
 
   // Settings & System
-  getShopSettings(): Promise<ShopSettings | any>;
-  updateShopSettings(settings: ShopSettings | any): Promise<boolean>;
+  getShopSettings(): Promise<ShopSettings>;
+  updateShopSettings(settings: ShopSettings): Promise<void>;
   backupDatabase(destinationPath: string): Promise<string>;
   verifyDatabaseIntegrity(): Promise<boolean>;
 
   // Migration & Excel
-  scanBackupDirectory(directoryPath: string): Promise<BackupFileInfo[]>;
+  scanBackupDirectory(directoryPath?: string): Promise<BackupFileInfo[]>;
   inspectBackupFile(filePath: string): Promise<BackupInspection>;
   executeMigration(filePath: string): Promise<MigrationReport>;
   exportItemsToExcel(destinationPath: string): Promise<string>;
-  importItemsFromExcel(filePath: string): Promise<MigrationReport>;
-  exportTransactionsToExcel(destinationPath: string, filter?: any): Promise<string>;
+  importItemsFromExcel(filePath: string): Promise<ImportSummary>;
+  exportTransactionsToExcel(
+    destinationPath: string,
+    filter?: TransactionExportFilter | null
+  ): Promise<string>;
 }

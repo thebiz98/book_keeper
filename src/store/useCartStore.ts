@@ -6,12 +6,13 @@ import type {
   CustomerInput,
   CartState,
 } from '@/types/store';
+import type { PaymentStatus } from '@/types';
 
 export type { CartItem, ItemInput, BundleInput, CustomerInput, CartState };
 
 function computeTotals(
   items: CartItem[],
-  status: 'PAID' | 'PARTIAL' | 'UNPAID',
+  status: 'Paid' | 'Partial' | 'Unpaid',
   paidAmount: number
 ) {
   const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
@@ -19,11 +20,11 @@ function computeTotals(
   const totalItems = items.length;
 
   let balanceDue = 0;
-  if (status === 'PAID') {
+  if (status === 'Paid') {
     balanceDue = 0;
-  } else if (status === 'PARTIAL') {
+  } else if (status === 'Partial') {
     balanceDue = Math.max(0, subtotal - paidAmount);
-  } else if (status === 'UNPAID') {
+  } else if (status === 'Unpaid') {
     balanceDue = subtotal;
   }
 
@@ -36,7 +37,7 @@ const initialState = {
   totalBaseUnits: 0,
   totalItems: 0,
   selectedCustomer: null as CustomerInput | null,
-  paymentStatus: 'PAID' as 'PAID' | 'PARTIAL' | 'UNPAID',
+  paymentStatus: 'Paid' as PaymentStatus,
   paidAmount: 0,
   balanceDue: 0,
 };
@@ -45,13 +46,13 @@ export const useCartStore = create<CartState>((set, get) => ({
   ...initialState,
 
   addItem: (item: ItemInput, quantity = 1, bundle: BundleInput | null = null): boolean => {
-    const availableStock = item.currentStock ?? item.current_stock ?? 0;
+    const availableStock = item.currentStock;
     if (availableStock <= 0 || quantity <= 0) {
       return false;
     }
 
     const multiplier = bundle
-      ? (bundle.unitsPerBundle ?? bundle.units_per_bundle ?? bundle.multiplier ?? 1)
+      ? bundle.unitsPerBundle
       : 1;
     const addedBaseQuantity = quantity * multiplier;
 
@@ -85,9 +86,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       return false;
     }
 
-    const defaultRate = item.defaultSalePrice ?? item.default_sale_price ?? 0;
+    const defaultRate = item.defaultSalePrice;
     const bundleRate = bundle
-      ? (bundle.salePrice ?? bundle.sale_price)
+      ? bundle.salePrice
       : undefined;
     const rate = bundleRate != null ? bundleRate : defaultRate;
 
@@ -95,12 +96,10 @@ export const useCartStore = create<CartState>((set, get) => ({
       itemId: item.id,
       name: item.name,
       barcode: item.barcode,
-      baseUnit: item.baseUnit ?? item.base_unit ?? '',
+      baseUnit: item.baseUnit,
       unitsPerBundle: multiplier,
       bundleId: bundle?.id,
-      bundleName: bundle
-        ? (bundle.bundleName ?? bundle.bundle_name ?? bundle.name)
-        : undefined,
+      bundleName: bundle ? bundle.bundleName : undefined,
       quantity,
       baseQuantity: addedBaseQuantity,
       rate,
@@ -157,12 +156,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     const updatedItems = [...items];
 
     if (bundle != null) {
-      const multiplier =
-        bundle.unitsPerBundle ?? bundle.units_per_bundle ?? bundle.multiplier ?? 1;
-      const bundleRate =
-        (bundle.salePrice ?? bundle.sale_price) != null
-          ? (bundle.salePrice ?? bundle.sale_price)!
-          : item.rate;
+      const multiplier = bundle.unitsPerBundle;
+      const bundleRate = bundle.salePrice ?? item.rate;
 
       const baseQuantity = item.quantity * multiplier;
       const rate = bundleRate;
@@ -171,7 +166,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       updatedItems[index] = {
         ...item,
         unitsPerBundle: multiplier,
-        bundleName: bundle.bundleName ?? bundle.bundle_name ?? bundle.name,
+        bundleName: bundle.bundleName,
         rate,
         baseQuantity,
         lineTotal,
@@ -231,15 +226,15 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   setPaymentStatus: (
-    status: 'PAID' | 'PARTIAL' | 'UNPAID',
+    status: 'Paid' | 'Partial' | 'Unpaid',
     paidAmount?: number
   ): void => {
     const { subtotal } = get();
     let currentPaid = get().paidAmount;
 
-    if (status === 'PAID') {
+    if (status === 'Paid') {
       set({ paymentStatus: status, balanceDue: 0 });
-    } else if (status === 'PARTIAL') {
+    } else if (status === 'Partial') {
       if (paidAmount !== undefined) {
         currentPaid = paidAmount;
       }
@@ -248,7 +243,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         paidAmount: currentPaid,
         balanceDue: Math.max(0, subtotal - currentPaid),
       });
-    } else if (status === 'UNPAID') {
+    } else if (status === 'Unpaid') {
       set({
         paymentStatus: status,
         paidAmount: 0,
@@ -260,11 +255,11 @@ export const useCartStore = create<CartState>((set, get) => ({
   setPaidAmount: (amount: number): void => {
     const { subtotal, paymentStatus } = get();
     let balanceDue = 0;
-    if (paymentStatus === 'PAID') {
+    if (paymentStatus === 'Paid') {
       balanceDue = 0;
-    } else if (paymentStatus === 'PARTIAL') {
+    } else if (paymentStatus === 'Partial') {
       balanceDue = Math.max(0, subtotal - amount);
-    } else if (paymentStatus === 'UNPAID') {
+    } else if (paymentStatus === 'Unpaid') {
       balanceDue = subtotal;
     }
     set({ paidAmount: amount, balanceDue });

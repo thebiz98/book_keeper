@@ -8,6 +8,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { api } from '@/api';
+import type { Item } from '@/types';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
@@ -19,8 +20,13 @@ import { TextInput } from '@/components/ui/TextInput';
 import { NumericInput } from '@/components/ui/NumericInput';
 import { Select } from '@/components/ui/Select';
 
+type InventoryRow = Pick<
+  Item,
+  'id' | 'name' | 'category' | 'barcode' | 'baseUnit' | 'mrp' | 'defaultSalePrice' | 'currentStock'
+>;
+
 export const InventoryPage: React.FC = () => {
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<InventoryRow[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [lowStockOnly, setLowStockOnly] = useState(false);
@@ -30,7 +36,7 @@ export const InventoryPage: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
-  const [selectedItemForAction, setSelectedItemForAction] = useState<any>(null);
+  const [selectedItemForAction, setSelectedItemForAction] = useState<InventoryRow | null>(null);
 
   // Add Item Form State
   const [newItemName, setNewItemName] = useState('');
@@ -50,20 +56,18 @@ export const InventoryPage: React.FC = () => {
       api
         .searchItemsFts(searchQuery.trim(), 50)
         .then((res) => {
-          setItems(Array.isArray(res) ? res : []);
+          setItems(res.map((r) => ({ ...r, id: r.itemId })));
         })
         .catch(() => setItems([]))
         .finally(() => setIsLoading(false));
     } else {
       api
-        .getItemsCatalog({ category: selectedCategory === 'ALL' ? undefined : selectedCategory, limit: 100 }, lowStockOnly)
-        .then((res) => {
-          if (res && Array.isArray(res.items)) {
-            setItems(res.items);
-          } else if (Array.isArray(res)) {
-            setItems(res);
-          }
+        .getItemsCatalog({
+          category: selectedCategory === 'ALL' ? undefined : selectedCategory,
+          lowStockOnly,
+          limit: 100,
         })
+        .then((res) => setItems(res.items))
         .catch(() => setItems([]))
         .finally(() => setIsLoading(false));
     }
@@ -96,6 +100,7 @@ export const InventoryPage: React.FC = () => {
       defaultSalePrice: newItemPrice,
       mrp: newItemMrp,
       initialStock: newItemStock,
+      bundles: null,
     };
 
     try {
@@ -107,15 +112,15 @@ export const InventoryPage: React.FC = () => {
       setNewItemMrp(0);
       setNewItemStock(0);
       fetchItems();
-    } catch (err: any) {
-      setFormError(err?.message || 'Failed to create item');
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to create item');
     } finally {
       setIsSaving(false);
     }
   };
 
   const filteredItems = items.filter((it) => {
-    const stock = it.currentStock ?? it.current_stock ?? 0;
+    const stock = it.currentStock;
     if (lowStockOnly && stock >= 5) return false;
     return true;
   });
@@ -201,7 +206,6 @@ export const InventoryPage: React.FC = () => {
               <TableHead>Item Name</TableHead>
               <TableHead>Category</TableHead>
               <TableHead className="text-center">Stock Health</TableHead>
-              <TableHead align="right">Cost Price</TableHead>
               <TableHead align="right">Sale Price</TableHead>
               <TableHead align="right">MRP</TableHead>
               <TableHead className="text-center w-28">Actions</TableHead>
@@ -210,22 +214,21 @@ export const InventoryPage: React.FC = () => {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={9} className="py-12 text-center text-slate-400 text-xs">
+                <TableCell colSpan={8} className="py-12 text-center text-slate-400 text-xs">
                   Loading item catalog...
                 </TableCell>
               </TableRow>
             ) : filteredItems.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="py-12 text-center text-slate-400 text-xs">
+                <TableCell colSpan={8} className="py-12 text-center text-slate-400 text-xs">
                   No inventory items match current filter criteria.
                 </TableCell>
               </TableRow>
             ) : (
               filteredItems.map((item, idx) => {
-                const stock = item.currentStock ?? item.current_stock ?? 0;
-                const unit = item.baseUnit ?? item.base_unit ?? 'PCS';
-                const cost = item.costPrice ?? item.cost_price ?? item.cost ?? 0;
-                const salePrice = item.defaultSalePrice ?? item.default_sale_price ?? item.price ?? 0;
+                const stock = item.currentStock;
+                const unit = item.baseUnit;
+                const salePrice = item.defaultSalePrice;
                 const mrp = item.mrp ?? 0;
 
                 return (
@@ -244,9 +247,6 @@ export const InventoryPage: React.FC = () => {
                     </TableCell>
                     <TableCell className="text-center">
                       <StockStatusBadge currentStock={stock} baseUnit={unit} />
-                    </TableCell>
-                    <TableCell align="right" mono className="text-slate-500 text-xs">
-                      <CurrencyDisplay amount={cost} size="sm" />
                     </TableCell>
                     <TableCell align="right" mono className="font-bold text-slate-900 dark:text-slate-100">
                       <CurrencyDisplay amount={salePrice} size="sm" />
@@ -392,8 +392,8 @@ export const InventoryPage: React.FC = () => {
           onClose={() => setIsAdjustModalOpen(false)}
           itemId={selectedItemForAction.id}
           itemName={selectedItemForAction.name}
-          currentStock={selectedItemForAction.currentStock ?? selectedItemForAction.current_stock ?? 0}
-          baseUnit={selectedItemForAction.baseUnit ?? selectedItemForAction.base_unit ?? 'PCS'}
+          currentStock={selectedItemForAction.currentStock}
+          baseUnit={selectedItemForAction.baseUnit}
           onAdjusted={fetchItems}
         />
       )}
@@ -404,7 +404,7 @@ export const InventoryPage: React.FC = () => {
           isOpen={isBundleModalOpen}
           onClose={() => setIsBundleModalOpen(false)}
           initialItemId={selectedItemForAction.id}
-          baseUnit={selectedItemForAction.baseUnit ?? selectedItemForAction.base_unit ?? 'PCS'}
+          baseUnit={selectedItemForAction.baseUnit}
           onBundleCreated={fetchItems}
         />
       )}

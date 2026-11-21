@@ -1,330 +1,316 @@
 /**
- * Core Domain Models for Book Keeper.
- * Derived from src-tauri/src/core/entities/ & dtos/.
+ * Core domain models for Book Keeper.
+ * camelCase mirrors of src-tauri/src/core/entities & dtos. The IPC layer
+ * (src/api/caseConvert.ts) converts Rust snake_case keys to camelCase.
+ * Enums are the Rust variant names.
  */
 
 export * from './store';
 export * from './api';
 
-export type PartyType = 'CUSTOMER' | 'VENDOR' | 'Customer' | 'Vendor';
-
-export interface PackagingBundle {
-  id: number;
-  itemId?: number;
-  item_id?: number;
-  name?: string;
-  bundleName: string;
-  bundle_name?: string;
-  multiplier?: number;
-  unitsPerBundle: number;
-  units_per_bundle?: number;
-  salePrice?: number | null;
-  sale_price?: number | null;
-  defaultBundlePrice?: number | null;
-  default_bundle_price?: number | null;
-  mrp?: number | null;
-  barcode?: string | null;
-}
+export type PartyType = 'Customer' | 'Vendor';
+export type PaymentStatus = 'Paid' | 'Partial' | 'Unpaid';
+export type AdjustmentReason =
+  | 'AuditCorrection'
+  | 'DamageWriteOff'
+  | 'Expiry'
+  | 'Theft'
+  | 'FoundStock'
+  | 'InitialSetup'
+  | 'Damaged'
+  | 'Expired';
+export type SettlementType =
+  | 'CashRefund'
+  | 'ReduceDue'
+  | 'DefectiveReplacement'
+  | 'SpecificBill'
+  | 'FifoDues';
+export type StockCondition = 'Restockable' | 'DamagedScrap';
+export type ReturnType = 'Customer' | 'Vendor' | 'CustomerReturn' | 'VendorReturn';
 
 export interface Item {
   id: number;
-  itemId?: number;
-  item_id?: number;
   name: string;
-  category?: string | null;
-  barcode?: string | null;
+  category: string | null;
+  barcode: string | null;
   baseUnit: string;
-  base_unit?: string;
-  mrp?: number | null;
-  costPrice?: number;
-  cost_price?: number;
+  mrp: number | null;
   defaultSalePrice: number;
-  default_sale_price?: number;
   currentStock: number;
-  current_stock?: number;
-  isLowStock?: boolean;
-  is_low_stock?: boolean;
-  isActive?: boolean;
-  is_active?: boolean;
-  createdAt?: string;
-  created_at?: string;
-  updatedAt?: string;
-  updated_at?: string;
-  bundles?: PackagingBundle[];
+  isLowStock: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ItemBundle {
+  id: number;
+  itemId: number;
+  bundleName: string;
+  unitsPerBundle: number;
+  mrp: number | null;
+  defaultBundlePrice: number | null;
+  barcode: string | null;
+}
+
+export interface ItemBundleSearchResult {
+  bundleId: number;
+  bundleName: string;
+  unitsPerBundle: number;
+  bundlePrice: number | null;
+  barcode: string | null;
+}
+
+export interface ItemSearchResult {
+  itemId: number;
+  name: string;
+  category: string | null;
+  barcode: string | null;
+  baseUnit: string;
+  mrp: number | null;
+  defaultSalePrice: number;
+  currentStock: number;
+  isLowStock: boolean;
+  bundles: ItemBundleSearchResult[];
+}
+
+export interface LowStockItem {
+  id: number;
+  itemId: number;
+  name: string;
+  category: string | null;
+  baseUnit: string;
+  currentStock: number;
+  defaultSalePrice: number;
+  mrp: number | null;
 }
 
 export interface Party {
   id: number;
-  partyId?: number;
-  party_id?: number;
   name: string;
-  partyName?: string;
-  party_name?: string;
-  phone?: string | null;
-  address?: string | null;
+  phone: string | null;
   partyType: PartyType;
-  party_type?: PartyType;
-  balanceDue?: number;
-  balance_due?: number;
-  netDueBalance?: number;
-  totalDue?: number;
-  total_due?: number;
-  oldestBillDate?: string | null;
-  oldest_bill_date?: string | null;
-  unpaidBillsCount?: number;
-  unpaid_bills_count?: number;
-  notes?: string | null;
-  isActive?: boolean;
-  is_active?: boolean;
-  createdAt?: string;
-  created_at?: string;
-  updatedAt?: string;
-  updated_at?: string;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SaleItem {
-  id?: number;
-  saleTransactionId?: number;
-  sale_transaction_id?: number;
-  itemId: number;
-  item_id?: number;
-  name?: string;
-  itemName?: string;
-  item_name?: string;
-  bundleId?: number | null;
-  bundle_id?: number | null;
-  bundleName?: string | null;
-  bundle_name?: string | null;
-  bundleQuantity?: number;
-  bundle_quantity?: number;
-  quantity: number;
-  baseQuantity?: number;
-  rate?: number;
-  unitPrice?: number;
-  unit_price?: number;
-  totalAmount?: number;
-  total_amount?: number;
-  lineTotal?: number;
-  unitsPerBundle?: number;
-  units_per_bundle?: number;
-}
-
-export interface Sale {
   id: number;
-  saleId?: number;
-  sale_id?: number;
-  transactionCode: string;
-  transaction_code?: string;
-  saleCode?: string;
-  sale_code?: string;
-  transactionDate: string;
-  transaction_date?: string;
-  date?: string;
-  partyId?: number | null;
-  party_id?: number | null;
-  customerId?: number | null;
-  customerName?: string | null;
-  paymentMode?: string | null;
-  payment_mode?: string | null;
-  paymentStatus: string;
-  payment_status?: string;
-  totalAmount: number;
-  total_amount?: number;
-  paidAmount: number;
-  paid_amount?: number;
-  balanceDue: number;
-  balance_due?: number;
-  changeAmount?: number;
-  change_amount?: number;
-  changeReturned?: number;
-  change_returned?: number;
-  notes?: string | null;
-  createdAt?: string;
-  created_at?: string;
-  items?: SaleItem[];
-}
-
-export interface PurchaseItem {
-  id?: number;
-  purchaseTransactionId?: number;
-  purchase_transaction_id?: number;
+  saleTransactionId: number;
   itemId: number;
-  item_id?: number;
-  itemName?: string;
-  item_name?: string;
-  bundleId?: number | null;
-  bundle_id?: number | null;
-  bundleName?: string | null;
-  bundle_name?: string | null;
-  bundleQuantity?: number;
-  bundle_quantity?: number;
+  bundleId: number | null;
+  bundleQuantity: number;
   quantity: number;
-  unitCost: number;
-  unit_cost?: number;
-  totalAmount?: number;
-  total_amount?: number;
-  remainingQuantity?: number;
-  remaining_quantity?: number;
-  unitsPerBundle?: number;
-  units_per_bundle?: number;
-}
-
-export interface Purchase {
-  id: number;
-  purchaseId?: number;
-  purchase_id?: number;
-  transactionCode: string;
-  transaction_code?: string;
-  purchaseCode?: string;
-  purchase_code?: string;
-  transactionDate: string;
-  transaction_date?: string;
-  date?: string;
-  partyId?: number | null;
-  party_id?: number | null;
-  vendorId?: number | null;
-  vendorName?: string | null;
-  paymentMode?: string | null;
-  payment_mode?: string | null;
-  paymentStatus: string;
-  payment_status?: string;
+  unitPrice: number;
   totalAmount: number;
-  total_amount?: number;
-  paidAmount: number;
-  paid_amount?: number;
-  balanceDue: number;
-  balance_due?: number;
-  notes?: string | null;
-  createdAt?: string;
-  created_at?: string;
-  items?: PurchaseItem[];
 }
 
 export interface StockLot {
   id: number;
-  saleItemId?: number;
-  sale_item_id?: number;
+  saleItemId: number;
   purchaseItemId: number;
-  purchase_item_id?: number;
   quantityDepleted: number;
-  quantity_depleted?: number;
   unitCost: number;
-  unit_cost?: number;
+}
+
+export interface Sale {
+  id: number;
+  transactionCode: string;
+  transactionDate: string;
+  partyId: number | null;
+  paymentMode: string | null;
+  paymentStatus: PaymentStatus;
+  totalAmount: number;
+  paidAmount: number;
+  balanceDue: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface SaleItemDetail {
+  saleItem: SaleItem;
+  itemName: string;
+  bundleName: string | null;
+  allocations: StockLot[];
+}
+
+export interface PurchaseItem {
+  id: number;
+  purchaseTransactionId: number;
+  itemId: number;
+  bundleId: number | null;
+  bundleQuantity: number;
+  quantity: number;
+  unitCost: number;
+  totalAmount: number;
+  remainingQuantity: number;
+}
+
+export interface Purchase {
+  id: number;
+  transactionCode: string;
+  transactionDate: string;
+  partyId: number | null;
+  paymentMode: string | null;
+  paymentStatus: PaymentStatus;
+  totalAmount: number;
+  paidAmount: number;
+  balanceDue: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface PurchaseItemDetail {
+  purchaseItem: PurchaseItem;
+  itemName: string;
+  bundleName: string | null;
 }
 
 export interface Payment {
-  id?: number;
+  id: number;
   settlementDate: string;
-  settlement_date?: string;
-  date?: string;
-  partyId?: number | null;
-  party_id?: number | null;
-  transactionType: 'SALE' | 'PURCHASE';
-  transaction_type?: string;
+  partyId: number | null;
+  transactionType: string;
   transactionId: number;
-  transaction_id?: number;
   amountPaid: number;
-  amount_paid?: number;
-  amount?: number;
-  paymentMode?: string | null;
-  payment_mode?: string | null;
-  notes?: string | null;
-  createdAt?: string;
-  created_at?: string;
+  paymentMode: string | null;
+  notes: string | null;
+  createdAt: string;
 }
 
+export interface SaleDetailView {
+  sale: Sale;
+  party: Party | null;
+  items: SaleItemDetail[];
+  settlements: Payment[];
+}
+
+export interface PurchaseDetailView {
+  purchase: Purchase;
+  party: Party | null;
+  items: PurchaseItemDetail[];
+  settlements: Payment[];
+}
+
+export interface ReturnTransaction {
+  id: number;
+  returnCode: string;
+  returnDate: string;
+  returnType: ReturnType;
+  partyId: number | null;
+  originalTransactionId: number | null;
+  settlementType: SettlementType;
+  totalAmount: number;
+  reason: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface ReturnItem {
+  id: number;
+  returnTransactionId: number;
+  itemId: number;
+  saleItemId: number | null;
+  purchaseItemId: number | null;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  condition: StockCondition;
+}
+
+export interface ReturnItemDetail {
+  returnItem: ReturnItem;
+  itemName: string;
+}
+
+export interface ReturnDetailView {
+  returnTx: ReturnTransaction;
+  party: Party | null;
+  items: ReturnItemDetail[];
+}
+
+export interface StockAdjustment {
+  id: number;
+  adjustmentDate: string;
+  itemId: number;
+  quantity: number;
+  reason: AdjustmentReason;
+  notes: string | null;
+  createdAt: string;
+}
+
+/** Rust PartyDueSummary. */
 export interface PartyBalance {
   partyId: number;
-  party_id?: number;
-  id?: number;
   partyName: string;
-  party_name?: string;
-  name?: string;
-  phone?: string | null;
+  phone: string | null;
   partyType: PartyType;
-  party_type?: PartyType;
-  totalDue?: number;
-  total_due?: number;
-  netDueBalance?: number;
-  balanceDue?: number;
-  balance_due?: number;
-  oldestBillDate?: string | null;
-  oldest_bill_date?: string | null;
-  unpaidBillsCount?: number;
-  unpaid_bills_count?: number;
+  totalDue: number;
+  oldestBillDate: string | null;
+  unpaidBillsCount: number;
+}
+
+export interface PartyLedgerEntry {
+  date: string;
+  transactionCode: string;
+  transactionType: string;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+  notes: string | null;
+}
+
+export interface PartyLedgerView {
+  party: Party;
+  currentBalance: number;
+  entries: PartyLedgerEntry[];
 }
 
 export interface PnlReport {
-  fromDate?: string;
-  from_date?: string;
-  toDate?: string;
-  to_date?: string;
+  fromDate: string;
+  toDate: string;
   grossSales: number;
-  gross_sales?: number;
   cogs: number;
-  cost_of_goods_sold?: number;
   netProfit: number;
-  net_profit?: number;
-  totalDiscounts?: number;
-  total_discounts?: number;
-  returnsRefunded?: number;
-  returns_refunded?: number;
+  totalDiscounts: number;
+  returnsRefunded: number;
 }
 
 export interface CategoryValuation {
   category: string;
-  itemsCount?: number;
-  items_count?: number;
+  itemsCount: number;
   valuation: number;
 }
 
 export interface StockValuationReport {
   totalValuation: number;
-  total_valuation?: number;
-  activeLotsCount?: number;
-  active_lots_count?: number;
-  totalItemsCount?: number;
-  total_items_count?: number;
-  categoriesBreakdown?: CategoryValuation[];
-  categories_breakdown?: CategoryValuation[];
-  categories?: CategoryValuation[];
+  activeLotsCount: number;
+  totalItemsCount: number;
+  categoriesBreakdown: CategoryValuation[];
+  categories: CategoryValuation[];
 }
 
 export interface CashFlowReport {
-  fromDate?: string;
-  from_date?: string;
-  toDate?: string;
-  to_date?: string;
-  totalInflow?: number;
-  total_inflow?: number;
-  totalOutflow?: number;
-  total_outflow?: number;
-  netCashFlow?: number;
-  net_cash_flow?: number;
-  closingDrawerBalance?: number;
-  closing_drawer_balance?: number;
-  salesCashInflow?: number;
-  sales_cash_inflow?: number;
-  customerSettlementsInflow?: number;
-  customer_settlements_inflow?: number;
-  purchaseCashOutflow?: number;
-  purchase_cash_outflow?: number;
-  vendorSettlementsOutflow?: number;
-  vendor_settlements_outflow?: number;
-  refundsCashOutflow?: number;
-  refunds_cash_outflow?: number;
-  netCashBalance?: number;
-  net_cash_balance?: number;
+  fromDate: string;
+  toDate: string;
+  totalInflow: number;
+  totalOutflow: number;
+  netCashFlow: number;
+  closingDrawerBalance: number;
+  salesCashInflow: number;
+  customerSettlementsInflow: number;
+  purchaseCashOutflow: number;
+  vendorSettlementsOutflow: number;
+  refundsCashOutflow: number;
+  netCashBalance: number;
 }
 
 export interface ShopSettings {
-  id?: number;
+  id: number;
   shopName: string;
-  shop_name?: string;
-  phone?: string | null;
-  address?: string | null;
-  taxId?: string | null;
-  tax_id?: string | null;
-  gstNumber?: string | null;
-  gst_number?: string | null;
+  phone: string | null;
+  address: string | null;
+  taxId: string | null;
 }

@@ -1,64 +1,21 @@
-export interface MockBundle {
-  id: number;
-  bundleId: number;
-  item_id: number;
-  itemId: number;
-  bundle_name: string;
-  bundleName: string;
-  name: string;
-  units_per_bundle: number;
-  unitsPerBundle: number;
-  multiplier: number;
-  sale_price?: number;
-  salePrice?: number;
-  default_bundle_price?: number;
-  defaultBundlePrice?: number;
-  mrp?: number;
-  barcode?: string;
-}
+import type { Item, ItemBundle, Party, ShopSettings, BundleSuggestion } from '@/types';
 
-export interface MockItem {
-  id: number;
-  itemId: number;
-  name: string;
-  category: string;
-  barcode: string;
-  base_unit: string;
-  baseUnit: string;
-  cost_price: number;
+const SEED_TS = '2026-11-01T00:00:00Z';
+
+/** Mock bundle: same shape as the Rust ItemBundle entity. */
+export type MockBundle = ItemBundle;
+
+/** Mock item: Rust Item entity plus mock-only internals (cost, bundles). */
+export interface MockItem extends Item {
   costPrice: number;
-  default_sale_price: number;
-  defaultSalePrice: number;
-  mrp: number;
-  current_stock: number;
-  currentStock: number;
-  is_low_stock: boolean;
-  isLowStock: boolean;
-  is_active: boolean;
-  isActive: boolean;
   bundles: MockBundle[];
 }
 
-export interface MockParty {
-  id: number;
-  partyId: number;
-  name: string;
-  partyName: string;
-  phone?: string;
-  address?: string;
-  partyType: 'CUSTOMER' | 'VENDOR';
-  party_type: 'CUSTOMER' | 'VENDOR';
+/** Mock party: Rust Party entity plus mock-only ledger state. */
+export interface MockParty extends Party {
   balanceDue: number;
-  balance_due: number;
-  netDueBalance: number;
-  totalDue: number;
-  total_due: number;
-  oldestBillDate?: string | null;
-  oldest_bill_date?: string | null;
+  oldestBillDate: string | null;
   unpaidBillsCount: number;
-  unpaid_bills_count: number;
-  isActive: boolean;
-  is_active: boolean;
 }
 
 function makeBundle(
@@ -71,20 +28,11 @@ function makeBundle(
 ): MockBundle {
   return {
     id,
-    bundleId: id,
-    item_id: itemId,
     itemId,
-    bundle_name: name,
     bundleName: name,
-    name,
-    units_per_bundle: units,
     unitsPerBundle: units,
-    multiplier: units,
-    sale_price: salePrice,
-    salePrice,
-    default_bundle_price: salePrice,
-    defaultBundlePrice: salePrice,
-    mrp,
+    mrp: mrp ?? null,
+    defaultBundlePrice: salePrice ?? null,
     barcode: `890103099${id}`,
   };
 }
@@ -101,26 +49,20 @@ function makeItem(
   stock: number,
   bundles: MockBundle[] = []
 ): MockItem {
-  const isLow = stock < 5;
   return {
     id,
-    itemId: id,
     name,
     category,
     barcode,
-    base_unit: baseUnit,
     baseUnit,
-    cost_price: costPrice,
     costPrice,
-    default_sale_price: salePrice,
     defaultSalePrice: salePrice,
     mrp,
-    current_stock: stock,
     currentStock: stock,
-    is_low_stock: isLow,
-    isLowStock: isLow,
-    is_active: true,
+    isLowStock: stock < 5,
     isActive: true,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
     bundles,
   };
 }
@@ -431,314 +373,194 @@ export const initialItems: MockItem[] = [
 export const initialCustomers: MockParty[] = [
   {
     id: 1,
-    partyId: 1,
     name: 'Delhi Public School (Stationery Dept)',
-    partyName: 'Delhi Public School (Stationery Dept)',
     phone: '9811023456',
-    address: 'Sector 14, Rohini, New Delhi - 110085',
-    partyType: 'CUSTOMER',
-    party_type: 'CUSTOMER',
+    partyType: 'Customer',
     balanceDue: 4500.0,
-    balance_due: 4500.0,
-    netDueBalance: 4500.0,
-    totalDue: 4500.0,
-    total_due: 4500.0,
     oldestBillDate: '2026-10-15',
-    oldest_bill_date: '2026-10-15',
     unpaidBillsCount: 2,
-    unpaid_bills_count: 2,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 2,
-    partyId: 2,
     name: 'Apex Coaching Classes',
-    partyName: 'Apex Coaching Classes',
     phone: '9823456789',
-    address: '22 Commercial Complex, Kalu Sarai, New Delhi',
-    partyType: 'CUSTOMER',
-    party_type: 'CUSTOMER',
+    partyType: 'Customer',
     balanceDue: 1850.0,
-    balance_due: 1850.0,
-    netDueBalance: 1850.0,
-    totalDue: 1850.0,
-    total_due: 1850.0,
     oldestBillDate: '2026-11-01',
-    oldest_bill_date: '2026-11-01',
     unpaidBillsCount: 1,
-    unpaid_bills_count: 1,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 3,
-    partyId: 3,
     name: 'Shree Ram Associates (CA Office)',
-    partyName: 'Shree Ram Associates (CA Office)',
     phone: '9871122334',
-    address: 'Plot 4B, Nehru Place, New Delhi',
-    partyType: 'CUSTOMER',
-    party_type: 'CUSTOMER',
+    partyType: 'Customer',
     balanceDue: 750.0,
-    balance_due: 750.0,
-    netDueBalance: 750.0,
-    totalDue: 750.0,
-    total_due: 750.0,
     oldestBillDate: '2026-11-10',
-    oldest_bill_date: '2026-11-10',
     unpaidBillsCount: 1,
-    unpaid_bills_count: 1,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 4,
-    partyId: 4,
     name: 'Ramesh Kumar (Regular Student)',
-    partyName: 'Ramesh Kumar (Regular Student)',
     phone: '9899112233',
-    address: 'H.No. 45, Gali 2, Laxmi Nagar, Delhi',
-    partyType: 'CUSTOMER',
-    party_type: 'CUSTOMER',
+    partyType: 'Customer',
     balanceDue: 220.0,
-    balance_due: 220.0,
-    netDueBalance: 220.0,
-    totalDue: 220.0,
-    total_due: 220.0,
     oldestBillDate: '2026-11-15',
-    oldest_bill_date: '2026-11-15',
     unpaidBillsCount: 1,
-    unpaid_bills_count: 1,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 5,
-    partyId: 5,
     name: 'Sunbeam English Academy',
-    partyName: 'Sunbeam English Academy',
     phone: '9810987654',
-    address: 'Main Road, Model Town, Delhi',
-    partyType: 'CUSTOMER',
-    party_type: 'CUSTOMER',
+    partyType: 'Customer',
     balanceDue: 3200.0,
-    balance_due: 3200.0,
-    netDueBalance: 3200.0,
-    totalDue: 3200.0,
-    total_due: 3200.0,
     oldestBillDate: '2026-10-28',
-    oldest_bill_date: '2026-10-28',
     unpaidBillsCount: 2,
-    unpaid_bills_count: 2,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 6,
-    partyId: 6,
     name: 'Walk-in Retail Cash Customer',
-    partyName: 'Walk-in Retail Cash Customer',
     phone: '9800000000',
-    address: 'Counter Cash Customer',
-    partyType: 'CUSTOMER',
-    party_type: 'CUSTOMER',
+    partyType: 'Customer',
     balanceDue: 0.0,
-    balance_due: 0.0,
-    netDueBalance: 0.0,
-    totalDue: 0.0,
-    total_due: 0.0,
     oldestBillDate: null,
-    oldest_bill_date: null,
     unpaidBillsCount: 0,
-    unpaid_bills_count: 0,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
 ];
 
 export const initialVendors: MockParty[] = [
   {
     id: 101,
-    partyId: 101,
     name: 'Hindustan Paper & Stationery Mart',
-    partyName: 'Hindustan Paper & Stationery Mart',
     phone: '9811234567',
-    address: 'Nai Sarak Wholesale Market, Chawri Bazar, Delhi - 110006',
-    partyType: 'VENDOR',
-    party_type: 'VENDOR',
+    partyType: 'Vendor',
     balanceDue: 12500.0,
-    balance_due: 12500.0,
-    netDueBalance: 12500.0,
-    totalDue: 12500.0,
-    total_due: 12500.0,
     oldestBillDate: '2026-10-10',
-    oldest_bill_date: '2026-10-10',
     unpaidBillsCount: 2,
-    unpaid_bills_count: 2,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 102,
-    partyId: 102,
     name: 'ITC Paperboards & Stationery Distributors',
-    partyName: 'ITC Paperboards & Stationery Distributors',
     phone: '9822334455',
-    address: 'Industrial Area Phase 2, Okhla, New Delhi',
-    partyType: 'VENDOR',
-    party_type: 'VENDOR',
+    partyType: 'Vendor',
     balanceDue: 8400.0,
-    balance_due: 8400.0,
-    netDueBalance: 8400.0,
-    totalDue: 8400.0,
-    total_due: 8400.0,
     oldestBillDate: '2026-10-20',
-    oldest_bill_date: '2026-10-20',
     unpaidBillsCount: 1,
-    unpaid_bills_count: 1,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 103,
-    partyId: 103,
     name: 'Kangaro Tools & Fasteners Agency',
-    partyName: 'Kangaro Tools & Fasteners Agency',
     phone: '9833445566',
-    address: 'Sadar Bazar Wholesale Hub, Delhi',
-    partyType: 'VENDOR',
-    party_type: 'VENDOR',
+    partyType: 'Vendor',
     balanceDue: 3100.0,
-    balance_due: 3100.0,
-    netDueBalance: 3100.0,
-    totalDue: 3100.0,
-    total_due: 3100.0,
     oldestBillDate: '2026-11-05',
-    oldest_bill_date: '2026-11-05',
     unpaidBillsCount: 1,
-    unpaid_bills_count: 1,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 104,
-    partyId: 104,
     name: 'Camlin Kokuyo Regional Depot',
-    partyName: 'Camlin Kokuyo Regional Depot',
     phone: '9844556677',
-    address: 'Transport Nagar, Ring Road, Delhi',
-    partyType: 'VENDOR',
-    party_type: 'VENDOR',
+    partyType: 'Vendor',
     balanceDue: 5600.0,
-    balance_due: 5600.0,
-    netDueBalance: 5600.0,
-    totalDue: 5600.0,
-    total_due: 5600.0,
     oldestBillDate: '2026-10-18',
-    oldest_bill_date: '2026-10-18',
     unpaidBillsCount: 1,
-    unpaid_bills_count: 1,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
   {
     id: 105,
-    partyId: 105,
     name: 'Pidilite Adhesives Wholesale Supplier',
-    partyName: 'Pidilite Adhesives Wholesale Supplier',
     phone: '9855667788',
-    address: 'Godown No 14, Gandhi Nagar, Delhi',
-    partyType: 'VENDOR',
-    party_type: 'VENDOR',
+    partyType: 'Vendor',
     balanceDue: 1800.0,
-    balance_due: 1800.0,
-    netDueBalance: 1800.0,
-    totalDue: 1800.0,
-    total_due: 1800.0,
     oldestBillDate: '2026-11-02',
-    oldest_bill_date: '2026-11-02',
     unpaidBillsCount: 1,
-    unpaid_bills_count: 1,
     isActive: true,
-    is_active: true,
+    notes: null,
+    createdAt: SEED_TS,
+    updatedAt: SEED_TS,
   },
 ];
 
-export const initialShopSettings = {
+export const initialShopSettings: ShopSettings = {
   id: 1,
   shopName: 'Aggarwal Stationery & Book Store',
-  shop_name: 'Aggarwal Stationery & Book Store',
   phone: '+91 98123 45678',
   address: 'Shop 14, Central Market, Lajpat Nagar, New Delhi - 110024',
   taxId: '07AAAAA0000A1Z5',
-  tax_id: '07AAAAA0000A1Z5',
-  gstNumber: '07AAAAA0000A1Z5',
-  gst_number: '07AAAAA0000A1Z5',
 };
 
-export const initialBundleSuggestions = [
+export const initialBundleSuggestions: BundleSuggestion[] = [
   {
     bundleName: 'Box of 10',
-    name: 'Box of 10',
     unitsPerBundle: 10,
-    units_per_bundle: 10,
-    multiplier: 10,
     usageCount: 42,
-    usage_count: 42,
   },
   {
     bundleName: 'Pack of 5',
-    name: 'Pack of 5',
     unitsPerBundle: 5,
-    units_per_bundle: 5,
-    multiplier: 5,
     usageCount: 35,
-    usage_count: 35,
   },
   {
     bundleName: 'Box of 20',
-    name: 'Box of 20',
     unitsPerBundle: 20,
-    units_per_bundle: 20,
-    multiplier: 20,
     usageCount: 28,
-    usage_count: 28,
   },
   {
     bundleName: 'Dozen Pack',
-    name: 'Dozen Pack',
     unitsPerBundle: 12,
-    units_per_bundle: 12,
-    multiplier: 12,
     usageCount: 19,
-    usage_count: 19,
   },
   {
     bundleName: 'Pack of 6',
-    name: 'Pack of 6',
     unitsPerBundle: 6,
-    units_per_bundle: 6,
-    multiplier: 6,
     usageCount: 15,
-    usage_count: 15,
   },
   {
     bundleName: 'Box of 5 Reams',
-    name: 'Box of 5 Reams',
     unitsPerBundle: 5,
-    units_per_bundle: 5,
-    multiplier: 5,
     usageCount: 12,
-    usage_count: 12,
   },
   {
     bundleName: 'Carton of 100',
-    name: 'Carton of 100',
     unitsPerBundle: 100,
-    units_per_bundle: 100,
-    multiplier: 100,
     usageCount: 9,
-    usage_count: 9,
   },
 ];

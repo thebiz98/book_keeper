@@ -2,8 +2,48 @@ import type {
   ApiClient,
   BackupFileInfo,
   BackupInspection,
+  BundleSuggestion,
+  CashFlowReport,
+  CatalogFilter,
+  CreateBundlePayload,
+  CreateItemPayload,
+  CreatePartyPayload,
+  CreatePurchasePayload,
+  CreateSalePayload,
+  CustomerReturnPayload,
+  DashboardMetrics,
+  HistoryFilter,
+  ImportSummary,
+  Item,
+  ItemSearchResult,
+  LowStockItem,
   MigrationReport,
-} from '@/types/api';
+  PaginatedList,
+  Party,
+  PartyBalance,
+  PartyLedgerView,
+  PartyType,
+  PaymentStatus,
+  PnlReport,
+  Purchase,
+  PurchaseDetailView,
+  PurchaseItem,
+  ReturnDetailView,
+  Sale,
+  SaleDetailView,
+  SaleItem,
+  SaleSummaryResponse,
+  SettlePaymentPayload,
+  ShopSettings,
+  StockAdjustment,
+  StockAdjustmentPayload,
+  StockValuationReport,
+  TransactionExportFilter,
+  TrendDataPoint,
+  UpdateItemPayload,
+  UpdatePartyPayload,
+  VendorReturnPayload,
+} from '@/types';
 import {
   initialItems,
   initialCustomers,
@@ -17,21 +57,52 @@ import {
 
 export type { MockItem, MockParty, MockBundle };
 
+interface SaleRecord {
+  sale: Sale;
+  items: SaleItem[];
+}
+
+interface PurchaseRecord {
+  purchase: Purchase;
+  items: PurchaseItem[];
+}
+
+const LOW_STOCK_THRESHOLD = 5;
+const nowIso = () => new Date().toISOString();
+
+function paginate<T>(all: T[], page = 1, limit = 50): PaginatedList<T> {
+  const start = (page - 1) * limit;
+  return {
+    items: all.slice(start, start + limit),
+    totalCount: all.length,
+    page,
+    limit,
+    totalPages: Math.ceil(all.length / limit) || 1,
+  };
+}
+
+function statusFor(total: number, paid: number): PaymentStatus {
+  if (paid >= total) return 'Paid';
+  return paid > 0 ? 'Partial' : 'Unpaid';
+}
+
+/** In-memory ApiClient returning the same camelCase shapes as the Tauri client. */
 export class MockApiClient implements ApiClient {
   private items: MockItem[];
   private parties: MockParty[];
-  private sales: any[];
-  private purchases: any[];
-  private settings: typeof initialShopSettings;
-  private bundleSuggestions: any[];
-  private saleCounter: number = 1001;
-  private purchaseCounter: number = 1001;
-  private cashDrawer: {
-    salesCash: number;
-    customerDuesSettled: number;
-    purchaseCash: number;
-    vendorDuesSettled: number;
-    refunds: number;
+  private sales: SaleRecord[] = [];
+  private purchases: PurchaseRecord[] = [];
+  private adjustments: StockAdjustment[] = [];
+  private settings: ShopSettings;
+  private bundleSuggestions: BundleSuggestion[];
+  private saleCounter = 1001;
+  private purchaseCounter = 1001;
+  private cashDrawer = {
+    salesCash: 4000.0,
+    customerDuesSettled: 500.0,
+    purchaseCash: 1500.0,
+    vendorDuesSettled: 200.0,
+    refunds: 100.0,
   };
 
   constructor() {
@@ -42,796 +113,593 @@ export class MockApiClient implements ApiClient {
     ];
     this.settings = structuredClone(initialShopSettings);
     this.bundleSuggestions = structuredClone(initialBundleSuggestions);
-    this.sales = [];
-    this.purchases = [];
-    this.cashDrawer = {
-      salesCash: 4000.0,
-      customerDuesSettled: 500.0,
-      purchaseCash: 1500.0,
-      vendorDuesSettled: 200.0,
-      refunds: 100.0,
-    };
   }
 
-  // 1. searchItemsFts
-  async searchItemsFts(query: string, limit: number = 50): Promise<MockItem[]> {
-    const q = (query || '').trim().toLowerCase();
-    if (!q) {
-      return this.items
-        .filter((i) => i.is_active !== false && i.isActive !== false)
-        .slice(0, limit);
-    }
-
-    // Barcode exact match
-    const exactBarcode = this.items.find(
-      (i) =>
-        i.is_active !== false &&
-        i.isActive !== false &&
-        i.barcode === query.trim()
-    );
-    if (exactBarcode) {
-      return [exactBarcode];
-    }
-
-    return this.items
-      .filter((i) => {
-        if (i.is_active === false || i.isActive === false) return false;
-        const text = `${i.name} ${i.category} ${i.barcode || ''}`.toLowerCase();
-        return text.includes(q);
-      })
-      .slice(0, limit);
+  // --- helpers ---
+  private findItem(id: number | null | undefined): MockItem | undefined {
+    return this.items.find((i) => i.id === id);
   }
 
-  // 2. getItemsCatalog
-  async getItemsCatalog(
-    filterOrCategory?: any,
-    lowStockOnlyArg?: boolean
-  ): Promise<{
-    items: MockItem[];
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  }> {
-    let category: string | undefined;
-    let lowStockOnly: boolean | undefined = lowStockOnlyArg;
-    let limit = 500;
-    let page = 1;
+  private findParty(id: number | null | undefined): MockParty | undefined {
+    return this.parties.find((p) => p.id === id);
+  }
 
-    if (typeof filterOrCategory === 'object' && filterOrCategory !== null) {
-      category = filterOrCategory.category;
-      lowStockOnly =
-        filterOrCategory.lowStockOnly ??
-        filterOrCategory.low_stock_only ??
-        lowStockOnlyArg;
-      limit = filterOrCategory.limit ?? 500;
-      page = filterOrCategory.page ?? 1;
-    } else if (typeof filterOrCategory === 'string') {
-      category = filterOrCategory;
-    }
+  private unitsFor(item: MockItem | undefined, bundleId: number | null): number {
+    if (bundleId === null) return 1;
+    return item?.bundles.find((b) => b.id === bundleId)?.unitsPerBundle ?? 1;
+  }
 
-    let filtered = this.items.filter(
-      (i) => i.is_active !== false && i.isActive !== false
-    );
-    if (category) {
-      filtered = filtered.filter(
-        (i) => i.category.toLowerCase() === category!.toLowerCase()
-      );
-    }
-    if (lowStockOnly) {
-      filtered = filtered.filter(
-        (i) => (i.currentStock ?? i.current_stock) < 5
-      );
-    }
+  private adjustStock(item: MockItem, delta: number): void {
+    item.currentStock = Math.max(0, item.currentStock + delta);
+    item.isLowStock = item.currentStock < LOW_STOCK_THRESHOLD;
+  }
 
-    const total = filtered.length;
-    const startIndex = (page - 1) * limit;
-    const paginatedItems = filtered.slice(startIndex, startIndex + limit);
+  private addDue(party: MockParty | undefined, delta: number): void {
+    if (party) party.balanceDue = Math.max(0, party.balanceDue + delta);
+  }
 
+  private activeItems(): MockItem[] {
+    return this.items.filter((i) => i.isActive);
+  }
+
+  private toSearchResult(i: MockItem): ItemSearchResult {
     return {
-      items: paginatedItems,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit) || 1,
+      itemId: i.id,
+      name: i.name,
+      category: i.category,
+      barcode: i.barcode,
+      baseUnit: i.baseUnit,
+      mrp: i.mrp,
+      defaultSalePrice: i.defaultSalePrice,
+      currentStock: i.currentStock,
+      isLowStock: i.isLowStock,
+      bundles: i.bundles.map((b) => ({
+        bundleId: b.id,
+        bundleName: b.bundleName,
+        unitsPerBundle: b.unitsPerBundle,
+        bundlePrice: b.defaultBundlePrice,
+        barcode: b.barcode,
+      })),
     };
   }
 
-  // 3. createItem, updateItem, archiveItem
-  async createItem(payload: any): Promise<MockItem> {
-    const nextId = Math.max(0, ...this.items.map((i) => i.id)) + 1;
-    const stock = Number(
-      payload.initial_stock ??
-        payload.initialStock ??
-        payload.current_stock ??
-        0
+  private filterHistory<T extends { transactionDate: string; paymentStatus: PaymentStatus; partyId: number | null }>(
+    rows: T[],
+    f?: HistoryFilter
+  ): T[] {
+    return rows.filter(
+      (r) =>
+        (!f?.startDate || r.transactionDate >= f.startDate) &&
+        (!f?.endDate || r.transactionDate <= f.endDate) &&
+        (!f?.paymentStatus || r.paymentStatus === f.paymentStatus) &&
+        (!f?.partyId || r.partyId === f.partyId)
     );
-    const cost = Number(
-      payload.initial_cost ?? payload.cost_price ?? payload.costPrice ?? 0
-    );
-    const sale = Number(
-      payload.default_sale_price ?? payload.defaultSalePrice ?? 0
-    );
-    const mrp = Number(payload.mrp ?? sale);
+  }
 
-    const newItem: MockItem = {
-      id: nextId,
-      itemId: nextId,
+  // --- Items & Catalog ---
+  async searchItemsFts(query: string, limit = 50): Promise<ItemSearchResult[]> {
+    const q = (query || '').trim().toLowerCase();
+    const active = this.activeItems();
+    if (!q) return active.slice(0, limit).map((i) => this.toSearchResult(i));
+
+    const exact = active.find((i) => i.barcode === query.trim());
+    if (exact) return [this.toSearchResult(exact)];
+
+    return active
+      .filter((i) =>
+        `${i.name} ${i.category ?? ''} ${i.barcode ?? ''}`.toLowerCase().includes(q)
+      )
+      .slice(0, limit)
+      .map((i) => this.toSearchResult(i));
+  }
+
+  async getItemsCatalog(filter?: CatalogFilter): Promise<PaginatedList<Item>> {
+    let rows: Item[] = this.activeItems();
+    if (filter?.category) {
+      const c = filter.category.toLowerCase();
+      rows = rows.filter((i) => (i.category ?? '').toLowerCase() === c);
+    }
+    if (filter?.lowStockOnly) {
+      rows = rows.filter((i) => i.currentStock < LOW_STOCK_THRESHOLD);
+    }
+    return paginate(rows, filter?.page ?? 1, filter?.limit ?? 500);
+  }
+
+  async createItem(payload: CreateItemPayload): Promise<number> {
+    const id = Math.max(0, ...this.items.map((i) => i.id)) + 1;
+    const stock = payload.initialStock ?? 0;
+    const ts = nowIso();
+    this.items.push({
+      id,
       name: payload.name,
       category: payload.category || 'General Stationery',
-      barcode: payload.barcode || `890103038${nextId}`,
-      base_unit: payload.base_unit || payload.baseUnit || 'PCS',
-      baseUnit: payload.base_unit || payload.baseUnit || 'PCS',
-      cost_price: cost,
-      costPrice: cost,
-      default_sale_price: sale,
-      defaultSalePrice: sale,
-      mrp,
-      current_stock: stock,
+      barcode: payload.barcode || `890103038${id}`,
+      baseUnit: payload.baseUnit || 'PCS',
+      mrp: payload.mrp ?? payload.defaultSalePrice,
+      defaultSalePrice: payload.defaultSalePrice,
       currentStock: stock,
-      is_low_stock: stock < 5,
-      isLowStock: stock < 5,
-      is_active: true,
+      isLowStock: stock < LOW_STOCK_THRESHOLD,
       isActive: true,
-      bundles: payload.bundles || [],
-    };
-    this.items.push(newItem);
-    return newItem;
-  }
-
-  async updateItem(itemId: number, payload: any): Promise<MockItem> {
-    const idx = this.items.findIndex(
-      (i) => i.id === itemId || i.itemId === itemId
-    );
-    if (idx === -1) {
-      throw new Error(`Item ${itemId} not found`);
+      createdAt: ts,
+      updatedAt: ts,
+      costPrice: payload.initialCost ?? 0,
+      bundles: [],
+    });
+    const created = this.items[this.items.length - 1];
+    let nextBundleId = Math.floor(Math.random() * 100000);
+    for (const b of payload.bundles ?? []) {
+      created.bundles.push({
+        id: nextBundleId++,
+        itemId: id,
+        bundleName: b.bundleName,
+        unitsPerBundle: b.unitsPerBundle,
+        mrp: b.mrp,
+        defaultBundlePrice: b.defaultBundlePrice,
+        barcode: b.barcode,
+      });
     }
-    const curr = this.items[idx];
-    const updated = {
-      ...curr,
-      ...payload,
-      id: curr.id,
-      itemId: curr.itemId,
-      current_stock:
-        payload.current_stock ?? payload.currentStock ?? curr.current_stock,
-      currentStock:
-        payload.current_stock ?? payload.currentStock ?? curr.currentStock,
-    };
-    updated.is_low_stock = updated.current_stock < 5;
-    updated.isLowStock = updated.is_low_stock;
-    this.items[idx] = updated;
-    return updated;
+    return id;
   }
 
-  async archiveItem(itemId: number): Promise<boolean> {
-    const item = this.items.find(
-      (i) => i.id === itemId || i.itemId === itemId
-    );
-    if (!item) return false;
-    item.is_active = false;
-    item.isActive = false;
-    (item as any).isArchived = true;
-    return true;
+  async updateItem(itemId: number, payload: UpdateItemPayload): Promise<void> {
+    const item = this.findItem(itemId);
+    if (!item) throw new Error(`Item ${itemId} not found`);
+    Object.assign(item, payload, { updatedAt: nowIso() });
   }
 
-  // 4. Sales Workflow
+  async archiveItem(itemId: number): Promise<void> {
+    const item = this.findItem(itemId);
+    if (item) item.isActive = false;
+  }
+
+  async getBundleSuggestions(): Promise<BundleSuggestion[]> {
+    return this.bundleSuggestions;
+  }
+
+  async createBundle(payload: CreateBundlePayload): Promise<number> {
+    const id = Math.floor(Math.random() * 100000);
+    const item = this.findItem(payload.itemId);
+    item?.bundles.push({
+      id,
+      itemId: payload.itemId ?? 0,
+      bundleName: payload.bundleName,
+      unitsPerBundle: payload.unitsPerBundle,
+      mrp: payload.mrp,
+      defaultBundlePrice: payload.defaultBundlePrice,
+      barcode: payload.barcode,
+    });
+    return id;
+  }
+
+  // --- Sales ---
   async getNextSaleCode(): Promise<string> {
     return `SAL-${this.saleCounter++}`;
   }
 
-  async createSale(payload: any): Promise<any> {
-    const saleCode =
-      payload.saleCode ||
-      payload.transaction_code ||
-      (await this.getNextSaleCode());
+  async createSale(payload: CreateSalePayload): Promise<SaleSummaryResponse> {
+    const code = payload.transactionCode || (await this.getNextSaleCode());
+    const id = this.sales.length + 1;
     let total = 0;
+    const lines: SaleItem[] = [];
 
-    for (const line of payload.items || []) {
-      const targetId = line.itemId ?? line.item_id;
-      const item = this.items.find(
-        (i) => i.id === targetId || i.itemId === targetId
-      );
-      const qty = Number(line.quantity ?? line.bundle_quantity ?? 1);
-      const mult = Number(line.unitsPerBundle ?? line.units_per_bundle ?? 1);
-      const rate = Number(
-        line.rate ?? line.unit_price ?? item?.default_sale_price ?? 0
-      );
-      total += qty * rate;
-
-      if (item) {
-        const deducted = qty * mult;
-        item.current_stock = Math.max(0, item.current_stock - deducted);
-        item.currentStock = item.current_stock;
-        item.is_low_stock = item.current_stock < 5;
-        item.isLowStock = item.is_low_stock;
-      }
+    for (const line of payload.items) {
+      const item = this.findItem(line.itemId);
+      const units = this.unitsFor(item, line.bundleId);
+      const rate = line.unitPrice ?? item?.defaultSalePrice ?? 0;
+      const lineTotal = line.bundleQuantity * rate;
+      total += lineTotal;
+      if (item) this.adjustStock(item, -(line.bundleQuantity * units));
+      lines.push({
+        id: lines.length + 1,
+        saleTransactionId: id,
+        itemId: line.itemId,
+        bundleId: line.bundleId,
+        bundleQuantity: line.bundleQuantity,
+        quantity: line.bundleQuantity * units,
+        unitPrice: units > 0 ? rate / units : rate,
+        totalAmount: lineTotal,
+      });
     }
 
-    const paid = Number(payload.paidAmount ?? payload.paid_amount ?? total);
+    const paid = payload.paidAmount;
     const balance = Math.max(0, total - paid);
     const change = Math.max(0, paid - total);
-
-    const customerId = payload.customerId ?? payload.party_id;
-    if (customerId) {
-      const cust = this.parties.find((p) => p.id === customerId);
-      if (cust && balance > 0) {
-        cust.balance_due += balance;
-        cust.balanceDue = cust.balance_due;
-        cust.netDueBalance = cust.balance_due;
-        cust.total_due = cust.balance_due;
-      }
-    }
-
+    if (balance > 0) this.addDue(this.findParty(payload.partyId), balance);
     this.cashDrawer.salesCash += Math.min(paid, total);
 
-    const saleRecord = {
-      saleId: this.sales.length + 1,
-      sale_id: this.sales.length + 1,
-      saleCode,
-      sale_code: saleCode,
-      transactionCode: saleCode,
-      transaction_code: saleCode,
+    const paymentStatus = statusFor(total, paid);
+    const sale: Sale = {
+      id,
+      transactionCode: code,
+      transactionDate: payload.transactionDate,
+      partyId: payload.partyId,
+      paymentMode: payload.paymentMode,
+      paymentStatus,
       totalAmount: total,
-      total_amount: total,
       paidAmount: paid,
-      paid_amount: paid,
       balanceDue: balance,
-      balance_due: balance,
+      notes: payload.notes,
+      createdAt: nowIso(),
+    };
+    this.sales.push({ sale, items: lines });
+    return {
+      saleId: id,
+      transactionCode: code,
+      totalAmount: total,
+      paidAmount: paid,
+      balanceDue: balance,
       changeAmount: change,
-      change_amount: change,
       changeReturned: change,
-      change_returned: change,
-      paymentStatus:
-        payload.paymentStatus ||
-        (balance === 0 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID'),
-      payment_status:
-        payload.paymentStatus ||
-        (balance === 0 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID'),
-      date: payload.date || payload.transaction_date || '2026-11-20',
-      items: payload.items,
-    };
-    this.sales.push(saleRecord);
-    return saleRecord;
-  }
-
-  async getSalesHistory(_filter?: any): Promise<any> {
-    return {
-      items: this.sales,
-      total: this.sales.length,
-      page: 1,
-      limit: 50,
-      totalPages: 1,
+      paymentStatus,
     };
   }
 
-  async getSaleDetails(saleId: number): Promise<any> {
-    const sale = this.sales.find(
-      (s) => s.saleId === saleId || s.sale_id === saleId
+  async getSalesHistory(filter?: HistoryFilter): Promise<PaginatedList<Sale>> {
+    const rows = this.filterHistory(
+      this.sales.map((r) => r.sale),
+      filter
     );
+    return paginate(rows, filter?.page ?? 1, filter?.limit ?? 50);
+  }
+
+  async getSaleDetails(saleId: number): Promise<SaleDetailView> {
+    const rec = this.sales.find((s) => s.sale.id === saleId);
+    if (!rec) throw new Error(`Sale ${saleId} not found`);
     return {
-      sale,
-      party: this.parties.find((p) => p.id === sale?.customerId),
-      items: sale?.items || [],
+      sale: rec.sale,
+      party: this.findParty(rec.sale.partyId) ?? null,
+      items: rec.items.map((saleItem) => ({
+        saleItem,
+        itemName: this.findItem(saleItem.itemId)?.name ?? '',
+        bundleName:
+          this.findItem(saleItem.itemId)?.bundles.find((b) => b.id === saleItem.bundleId)
+            ?.bundleName ?? null,
+        allocations: [],
+      })),
       settlements: [],
     };
   }
 
-  // 5. Purchase Workflow
+  // --- Purchases ---
   async getNextPurchaseCode(): Promise<string> {
     return `PUR-${this.purchaseCounter++}`;
   }
 
-  async createPurchase(payload: any): Promise<any> {
-    const purchaseCode =
-      payload.purchaseCode ||
-      payload.transaction_code ||
-      (await this.getNextPurchaseCode());
+  async createPurchase(payload: CreatePurchasePayload): Promise<number> {
+    const code = payload.transactionCode || (await this.getNextPurchaseCode());
+    const id = this.purchases.length + 1;
     let total = 0;
+    const lines: PurchaseItem[] = [];
 
-    for (const line of payload.items || []) {
-      const targetId = line.itemId ?? line.item_id;
-      const item = this.items.find(
-        (i) => i.id === targetId || i.itemId === targetId
-      );
-      const qty = Number(line.quantity ?? line.bundle_quantity ?? 1);
-      const mult = Number(line.unitsPerBundle ?? line.units_per_bundle ?? 1);
-      const cost = Number(
-        line.unitCost ?? line.unit_cost ?? item?.cost_price ?? 0
-      );
-      total += qty * cost;
-
-      if (item) {
-        const added = qty * mult;
-        item.current_stock += added;
-        item.currentStock = item.current_stock;
-        item.is_low_stock = item.current_stock < 5;
-        item.isLowStock = item.is_low_stock;
-      }
+    for (const line of payload.items) {
+      const item = this.findItem(line.itemId);
+      const units = this.unitsFor(item, line.bundleId);
+      const lineTotal = line.bundleQuantity * line.unitCost;
+      total += lineTotal;
+      if (item) this.adjustStock(item, line.bundleQuantity * units);
+      lines.push({
+        id: lines.length + 1,
+        purchaseTransactionId: id,
+        itemId: line.itemId,
+        bundleId: line.bundleId,
+        bundleQuantity: line.bundleQuantity,
+        quantity: line.bundleQuantity * units,
+        unitCost: units > 0 ? line.unitCost / units : line.unitCost,
+        totalAmount: lineTotal,
+        remainingQuantity: line.bundleQuantity * units,
+      });
     }
 
-    const paid = Number(payload.paidAmount ?? payload.paid_amount ?? total);
+    const paid = payload.paidAmount;
     const balance = Math.max(0, total - paid);
-
-    const vendorId = payload.vendorId ?? payload.party_id;
-    if (vendorId) {
-      const vendor = this.parties.find((p) => p.id === vendorId);
-      if (vendor && balance > 0) {
-        vendor.balance_due += balance;
-        vendor.balanceDue = vendor.balance_due;
-        vendor.netDueBalance = vendor.balance_due;
-        vendor.total_due = vendor.balance_due;
-      }
-    }
-
+    if (balance > 0) this.addDue(this.findParty(payload.partyId), balance);
     this.cashDrawer.purchaseCash += Math.min(paid, total);
 
-    const record = {
-      purchaseId: this.purchases.length + 1,
-      purchase_id: this.purchases.length + 1,
-      purchaseCode,
-      purchase_code: purchaseCode,
-      transaction_code: purchaseCode,
+    const purchase: Purchase = {
+      id,
+      transactionCode: code,
+      transactionDate: payload.transactionDate,
+      partyId: payload.partyId,
+      paymentMode: payload.paymentMode,
+      paymentStatus: statusFor(total, paid),
       totalAmount: total,
       paidAmount: paid,
       balanceDue: balance,
+      notes: payload.notes,
+      createdAt: nowIso(),
     };
-    this.purchases.push(record);
-    return record;
+    this.purchases.push({ purchase, items: lines });
+    return id;
   }
 
-  async getPurchasesHistory(_filter?: any): Promise<any> {
-    return {
-      items: this.purchases,
-      total: this.purchases.length,
-      page: 1,
-      limit: 50,
-      totalPages: 1,
-    };
+  async getPurchasesHistory(filter?: HistoryFilter): Promise<PaginatedList<Purchase>> {
+    const rows = this.filterHistory(
+      this.purchases.map((r) => r.purchase),
+      filter
+    );
+    return paginate(rows, filter?.page ?? 1, filter?.limit ?? 50);
   }
 
-  async getPurchaseDetails(purchaseId: number): Promise<any> {
+  async getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailView> {
+    const rec = this.purchases.find((p) => p.purchase.id === purchaseId);
+    if (!rec) throw new Error(`Purchase ${purchaseId} not found`);
     return {
-      purchase: this.purchases.find(
-        (p) => p.purchaseId === purchaseId || p.purchase_id === purchaseId
-      ),
-      items: [],
+      purchase: rec.purchase,
+      party: this.findParty(rec.purchase.partyId) ?? null,
+      items: rec.items.map((purchaseItem) => ({
+        purchaseItem,
+        itemName: this.findItem(purchaseItem.itemId)?.name ?? '',
+        bundleName:
+          this.findItem(purchaseItem.itemId)?.bundles.find(
+            (b) => b.id === purchaseItem.bundleId
+          )?.bundleName ?? null,
+      })),
       settlements: [],
     };
   }
 
-  // 6. Parties & Accounting
-  async listParties(
-    partyType?: 'CUSTOMER' | 'VENDOR' | 'Customer' | 'Vendor',
-    activeOnly: boolean = true
-  ): Promise<any[]> {
-    const normalizedType = partyType ? partyType.toUpperCase() : null;
-    return this.parties.filter((p) => {
-      if (activeOnly && p.is_active === false) return false;
-      if (normalizedType && p.party_type !== normalizedType) return false;
-      return true;
-    });
-  }
-
-  async getParty(partyId: number): Promise<any> {
-    return this.parties.find(
-      (p) => p.id === partyId || p.partyId === partyId
+  // --- Parties & Accounting ---
+  async listParties(partyType?: PartyType, activeOnly = true): Promise<Party[]> {
+    return this.parties.filter(
+      (p) => (!activeOnly || p.isActive) && (!partyType || p.partyType === partyType)
     );
   }
 
-  async getPartyDuesSummary(
-    partyType: 'CUSTOMER' | 'VENDOR' | 'Customer' | 'Vendor'
-  ): Promise<any[]> {
-    const normalizedType = partyType.toUpperCase();
+  async getParty(partyId: number): Promise<Party> {
+    const party = this.findParty(partyId);
+    if (!party) throw new Error(`Party ${partyId} not found`);
+    return party;
+  }
+
+  async getPartyDuesSummary(partyType: PartyType): Promise<PartyBalance[]> {
     return this.parties
-      .filter(
-        (p) =>
-          p.party_type === normalizedType &&
-          (p.balance_due > 0 || p.netDueBalance > 0)
-      )
+      .filter((p) => p.partyType === partyType && p.balanceDue > 0)
       .map((p) => ({
         partyId: p.id,
-        party_id: p.id,
-        id: p.id,
         partyName: p.name,
-        party_name: p.name,
-        name: p.name,
         phone: p.phone,
-        partyType: p.party_type,
-        party_type: p.party_type,
-        totalDue: p.balance_due,
-        total_due: p.balance_due,
-        balanceDue: p.balance_due,
-        balance_due: p.balance_due,
-        netDueBalance: p.balance_due,
-        oldestBillDate: p.oldest_bill_date,
-        oldest_bill_date: p.oldest_bill_date,
-        unpaidBillsCount: p.unpaid_bills_count,
-        unpaid_bills_count: p.unpaid_bills_count,
+        partyType: p.partyType,
+        totalDue: p.balanceDue,
+        oldestBillDate: p.oldestBillDate,
+        unpaidBillsCount: p.unpaidBillsCount,
       }));
   }
 
-  async settleBillPayment(payload: any): Promise<boolean> {
-    const partyId = payload.partyId ?? payload.party_id ?? payload.id;
-    const amount = Number(payload.amount ?? 0);
-    const party = this.parties.find(
-      (p) => p.id === partyId || p.partyId === partyId
-    );
-    if (!party) return false;
-
-    party.balance_due = Math.max(0, party.balance_due - amount);
-    party.balanceDue = party.balance_due;
-    party.netDueBalance = party.balance_due;
-    party.total_due = party.balance_due;
-
-    if (party.party_type === 'CUSTOMER') {
-      this.cashDrawer.customerDuesSettled += amount;
+  async settleBillPayment(payload: SettlePaymentPayload): Promise<void> {
+    const party = this.findParty(payload.partyId);
+    if (!party) throw new Error(`Party ${payload.partyId} not found`);
+    this.addDue(party, -payload.amount);
+    if (party.partyType === 'Customer') {
+      this.cashDrawer.customerDuesSettled += payload.amount;
     } else {
-      this.cashDrawer.vendorDuesSettled += amount;
+      this.cashDrawer.vendorDuesSettled += payload.amount;
     }
-    return true;
   }
 
-  async getPartyLedger(partyId: number): Promise<any> {
-    return { partyId, entries: [] };
-  }
-
-  async createParty(payload: any): Promise<any> {
-    const nextId = Math.max(0, ...this.parties.map((p) => p.id)) + 1;
-    const rawType = (payload.party_type || payload.partyType || 'CUSTOMER').toUpperCase();
-    const partyType = rawType === 'VENDOR' ? 'VENDOR' : 'CUSTOMER';
-    const newParty: MockParty = {
-      id: nextId,
-      partyId: nextId,
-      name: payload.name,
-      partyName: payload.name,
-      phone: payload.phone,
-      address: payload.address,
-      partyType,
-      party_type: partyType,
-      balanceDue: 0,
-      balance_due: 0,
-      netDueBalance: 0,
-      totalDue: 0,
-      total_due: 0,
-      oldestBillDate: null,
-      oldest_bill_date: null,
-      unpaidBillsCount: 0,
-      unpaid_bills_count: 0,
-      isActive: true,
-      is_active: true,
+  async getPartyLedger(partyId: number): Promise<PartyLedgerView> {
+    const party = await this.getParty(partyId);
+    return {
+      party,
+      currentBalance: this.findParty(partyId)?.balanceDue ?? 0,
+      entries: [],
     };
-    this.parties.push(newParty);
-    return { party_id: nextId, partyId: nextId };
   }
 
-  async updateParty(partyId: number, payload: any): Promise<boolean> {
-    const party = this.parties.find(
-      (p) => p.id === partyId || p.partyId === partyId
-    );
-    if (!party) return false;
-    Object.assign(party, payload);
-    return true;
-  }
-
-  async archiveParty(partyId: number): Promise<boolean> {
-    const party = this.parties.find(
-      (p) => p.id === partyId || p.partyId === partyId
-    );
-    if (!party) return false;
-    party.isActive = false;
-    party.is_active = false;
-    return true;
-  }
-
-  async searchParties(
-    query: string,
-    partyType?: 'CUSTOMER' | 'VENDOR' | 'Customer' | 'Vendor'
-  ): Promise<any[]> {
-    const q = (query || '').toLowerCase();
-    const normalizedType = partyType ? partyType.toUpperCase() : null;
-    return this.parties.filter((p) => {
-      if (normalizedType && p.party_type !== normalizedType) return false;
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.phone && p.phone.includes(q))
-      );
+  async createParty(payload: CreatePartyPayload): Promise<number> {
+    const id = Math.max(0, ...this.parties.map((p) => p.id)) + 1;
+    const ts = nowIso();
+    this.parties.push({
+      id,
+      name: payload.name,
+      phone: payload.phone,
+      partyType: payload.partyType,
+      notes: payload.notes,
+      isActive: true,
+      createdAt: ts,
+      updatedAt: ts,
+      balanceDue: 0,
+      oldestBillDate: null,
+      unpaidBillsCount: 0,
     });
+    return id;
   }
 
-  // 7. Reports & Dashboard
-  async getLowStockAlerts(): Promise<any[]> {
-    return this.items
-      .filter(
-        (i) =>
-          i.is_active !== false &&
-          i.isActive !== false &&
-          (i.currentStock ?? i.current_stock) < 5
-      )
+  async updateParty(partyId: number, payload: UpdatePartyPayload): Promise<void> {
+    const party = this.findParty(partyId);
+    if (!party) throw new Error(`Party ${partyId} not found`);
+    Object.assign(party, payload, { updatedAt: nowIso() });
+  }
+
+  async archiveParty(partyId: number): Promise<void> {
+    const party = this.findParty(partyId);
+    if (party) party.isActive = false;
+  }
+
+  async searchParties(query: string, partyType?: PartyType): Promise<Party[]> {
+    const q = (query || '').toLowerCase();
+    return this.parties.filter(
+      (p) =>
+        (!partyType || p.partyType === partyType) &&
+        (p.name.toLowerCase().includes(q) || (p.phone?.includes(q) ?? false))
+    );
+  }
+
+  // --- Reports & Dashboard ---
+  async getLowStockAlerts(): Promise<LowStockItem[]> {
+    return this.activeItems()
+      .filter((i) => i.currentStock < LOW_STOCK_THRESHOLD)
       .map((i) => ({
         id: i.id,
         itemId: i.id,
-        item_id: i.id,
         name: i.name,
         category: i.category,
-        base_unit: i.base_unit,
-        baseUnit: i.base_unit,
-        current_stock: i.current_stock,
-        currentStock: i.current_stock,
-        default_sale_price: i.default_sale_price,
-        defaultSalePrice: i.default_sale_price,
+        baseUnit: i.baseUnit,
+        currentStock: i.currentStock,
+        defaultSalePrice: i.defaultSalePrice,
         mrp: i.mrp,
       }));
   }
 
-  async getDashboardMetrics(): Promise<any> {
-    const totalValuation = this.items.reduce(
-      (sum, item) => sum + item.current_stock * item.cost_price,
-      0
-    );
-    const customerReceivables = this.parties
-      .filter((p) => p.party_type === 'CUSTOMER')
-      .reduce((sum, p) => sum + (p.balance_due || 0), 0);
-    const vendorPayables = this.parties
-      .filter((p) => p.party_type === 'VENDOR')
-      .reduce((sum, p) => sum + (p.balance_due || 0), 0);
-    const liveCash =
-      this.cashDrawer.salesCash +
-      this.cashDrawer.customerDuesSettled -
-      (this.cashDrawer.purchaseCash +
-        this.cashDrawer.vendorDuesSettled +
-        this.cashDrawer.refunds);
+  private stockValuation(): number {
+    return this.items.reduce((sum, i) => sum + i.currentStock * i.costPrice, 0);
+  }
 
+  private dueTotal(type: PartyType): number {
+    return this.parties
+      .filter((p) => p.partyType === type)
+      .reduce((sum, p) => sum + p.balanceDue, 0);
+  }
+
+  async getDashboardMetrics(): Promise<DashboardMetrics> {
+    const d = this.cashDrawer;
     return {
-      todayGrossSales: 4200.0,
       todaySales: 4200.0,
-      today_sales: 4200.0,
       todayPurchases: 1500.0,
-      today_purchases: 1500.0,
+      todaySalesAmount: 4200.0,
+      todaySalesCount: 12,
+      todayPurchaseAmount: 1500.0,
+      todayPurchaseCount: 2,
       todayNetProfit: 1450.0,
-      today_net_profit: 1450.0,
-      totalStockValuation: totalValuation,
-      stockValuation: totalValuation,
-      total_stock_valuation: totalValuation,
-      customerReceivables,
-      customer_receivables: customerReceivables,
-      vendorPayables,
-      vendor_payables: vendorPayables,
-      liveCashInDrawer: liveCash,
-      cashDrawer: liveCash,
-      live_cash_in_drawer: liveCash,
+      totalStockValuation: this.stockValuation(),
+      customerReceivables: this.dueTotal('Customer'),
+      vendorPayables: this.dueTotal('Vendor'),
+      liveCashInDrawer:
+        d.salesCash + d.customerDuesSettled - (d.purchaseCash + d.vendorDuesSettled + d.refunds),
     };
   }
 
-  async getPnLReport(fromDate: string, toDate: string): Promise<any> {
+  async getPnLReport(fromDate: string, toDate: string): Promise<PnlReport> {
     const grossSales = 45000.0;
     const cogs = 28500.0;
-    const netProfit = grossSales - cogs;
     return {
       fromDate,
-      from_date: fromDate,
       toDate,
-      to_date: toDate,
       grossSales,
-      gross_sales: grossSales,
       cogs,
-      cost_of_goods_sold: cogs,
-      netProfit,
-      net_profit: netProfit,
+      netProfit: grossSales - cogs,
       totalDiscounts: 850.0,
-      total_discounts: 850.0,
       returnsRefunded: 350.0,
-      returns_refunded: 350.0,
     };
   }
 
-  async getStockValuationReport(): Promise<any> {
-    const totalValuation = this.items.reduce(
-      (sum, item) => sum + item.current_stock * item.cost_price,
-      0
-    );
+  async getStockValuationReport(): Promise<StockValuationReport> {
     return {
-      totalValuation,
-      total_valuation: totalValuation,
-      totalItemsCount: this.items.length,
-      total_items_count: this.items.length,
+      totalValuation: this.stockValuation(),
       activeLotsCount: this.items.length,
-      active_lots_count: this.items.length,
+      totalItemsCount: this.items.length,
       categoriesBreakdown: [],
       categories: [],
     };
   }
 
-  async getCashFlowReport(fromDate: string, toDate: string): Promise<any> {
-    const inflow =
-      this.cashDrawer.salesCash + this.cashDrawer.customerDuesSettled;
-    const outflow =
-      this.cashDrawer.purchaseCash +
-      this.cashDrawer.vendorDuesSettled +
-      this.cashDrawer.refunds;
+  async getCashFlowReport(fromDate: string, toDate: string): Promise<CashFlowReport> {
+    const d = this.cashDrawer;
+    const inflow = d.salesCash + d.customerDuesSettled;
+    const outflow = d.purchaseCash + d.vendorDuesSettled + d.refunds;
     return {
       fromDate,
-      from_date: fromDate,
       toDate,
-      to_date: toDate,
       totalInflow: inflow,
-      total_inflow: inflow,
       totalOutflow: outflow,
-      total_outflow: outflow,
       netCashFlow: inflow - outflow,
-      net_cash_flow: inflow - outflow,
       closingDrawerBalance: inflow - outflow,
-      closing_drawer_balance: inflow - outflow,
+      salesCashInflow: d.salesCash,
+      customerSettlementsInflow: d.customerDuesSettled,
+      purchaseCashOutflow: d.purchaseCash,
+      vendorSettlementsOutflow: d.vendorDuesSettled,
+      refundsCashOutflow: d.refunds,
+      netCashBalance: inflow - outflow,
     };
   }
 
-  async getSalesPurchaseTrend(
-    _period: '7d' | '30d' | '1y' | string
-  ): Promise<any[]> {
-    return [
-      {
-        date: '2026-11-14',
-        sales_amount: 3200,
-        purchase_amount: 1100,
-        salesAmount: 3200,
-        purchaseAmount: 1100,
-      },
-      {
-        date: '2026-11-15',
-        sales_amount: 4100,
-        purchase_amount: 800,
-        salesAmount: 4100,
-        purchaseAmount: 800,
-      },
-      {
-        date: '2026-11-16',
-        sales_amount: 2900,
-        purchase_amount: 1500,
-        salesAmount: 2900,
-        purchaseAmount: 1500,
-      },
-      {
-        date: '2026-11-17',
-        sales_amount: 5200,
-        purchase_amount: 2200,
-        salesAmount: 5200,
-        purchaseAmount: 2200,
-      },
-      {
-        date: '2026-11-18',
-        sales_amount: 3800,
-        purchase_amount: 950,
-        salesAmount: 3800,
-        purchaseAmount: 950,
-      },
-      {
-        date: '2026-11-19',
-        sales_amount: 4600,
-        purchase_amount: 1400,
-        salesAmount: 4600,
-        purchaseAmount: 1400,
-      },
-      {
-        date: '2026-11-20',
-        sales_amount: 4200,
-        purchase_amount: 1500,
-        salesAmount: 4200,
-        purchaseAmount: 1500,
-      },
+  async getSalesPurchaseTrend(_period: string): Promise<TrendDataPoint[]> {
+    const rows: [string, number, number][] = [
+      ['2026-11-14', 3200, 1100],
+      ['2026-11-15', 4100, 800],
+      ['2026-11-16', 2900, 1500],
+      ['2026-11-17', 5200, 2200],
+      ['2026-11-18', 3800, 950],
+      ['2026-11-19', 4600, 1400],
+      ['2026-11-20', 4200, 1500],
     ];
+    return rows.map(([date, salesAmount, purchaseAmount]) => ({
+      date,
+      salesAmount,
+      purchaseAmount,
+    }));
   }
 
-  // 8. Bundles, Returns & Adjustments
-  async getBundleSuggestions(): Promise<any[]> {
-    return this.bundleSuggestions;
-  }
-
-  async createBundle(payload: any): Promise<any> {
-    const item = this.items.find(
-      (i) => i.id === payload.item_id || i.itemId === payload.itemId
-    );
-    const bundle = {
-      id: Math.floor(Math.random() * 100000),
-      bundleId: Math.floor(Math.random() * 100000),
-      bundleName: payload.bundle_name || payload.bundleName,
-      name: payload.bundle_name || payload.bundleName,
-      unitsPerBundle:
-        payload.units_per_bundle || payload.unitsPerBundle || payload.multiplier || 1,
-      units_per_bundle:
-        payload.units_per_bundle || payload.unitsPerBundle || payload.multiplier || 1,
-      multiplier:
-        payload.units_per_bundle || payload.unitsPerBundle || payload.multiplier || 1,
-      bundlePrice: payload.bundle_price || payload.bundlePrice,
-      mrp: payload.mrp,
-      barcode: payload.barcode,
-    };
-    if (item) {
-      item.bundles.push(bundle as any);
-    }
-    return bundle;
-  }
-
+  // --- Returns & Adjustments ---
   async getNextReturnCode(): Promise<string> {
     return `RET-${Math.floor(1000 + Math.random() * 9000)}`;
   }
 
-  async createCustomerReturn(payload: any): Promise<any> {
-    for (const line of payload.items || []) {
-      const item = this.items.find(
-        (i) => i.id === (line.itemId ?? line.item_id)
-      );
-      if (item) {
-        item.current_stock += Number(line.quantity ?? 1);
-        item.currentStock = item.current_stock;
-      }
+  async createCustomerReturn(payload: CustomerReturnPayload): Promise<string> {
+    let refund = 0;
+    for (const line of payload.items) {
+      const item = this.findItem(line.itemId);
+      if (item && line.condition === 'Restockable') this.adjustStock(item, line.quantity);
+      refund += line.quantity * line.unitPrice;
     }
-    if (payload.refundAmount) {
-      this.cashDrawer.refunds += Number(payload.refundAmount);
+    if (payload.settlementType === 'CashRefund') this.cashDrawer.refunds += refund;
+    return payload.returnCode || `RET-SAL-${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+
+  async createVendorReturn(payload: VendorReturnPayload): Promise<string> {
+    for (const line of payload.items) {
+      const item = this.findItem(line.itemId);
+      if (item) this.adjustStock(item, -line.quantity);
     }
+    return `RET-PUR-${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+
+  async getReturnDetails(returnId: number): Promise<ReturnDetailView> {
     return {
-      return_code: `RET-SAL-${Math.floor(1000 + Math.random() * 9000)}`,
+      returnTx: {
+        id: returnId,
+        returnCode: `RET-${returnId}`,
+        returnDate: '2026-11-20',
+        returnType: 'Customer',
+        partyId: null,
+        originalTransactionId: null,
+        settlementType: 'CashRefund',
+        totalAmount: 0,
+        reason: null,
+        notes: null,
+        createdAt: nowIso(),
+      },
+      party: null,
+      items: [],
     };
   }
 
-  async createVendorReturn(payload: any): Promise<any> {
-    for (const line of payload.items || []) {
-      const item = this.items.find(
-        (i) => i.id === (line.itemId ?? line.item_id)
-      );
-      if (item) {
-        item.current_stock = Math.max(
-          0,
-          item.current_stock - Number(line.quantity ?? 1)
-        );
-        item.currentStock = item.current_stock;
-      }
-    }
-    return {
-      return_code: `RET-PUR-${Math.floor(1000 + Math.random() * 9000)}`,
-    };
-  }
-
-  async getReturnDetails(returnId: number): Promise<any> {
-    return { returnId, items: [] };
-  }
-
-  async createStockAdjustment(payload: any): Promise<any> {
-    const item = this.items.find(
-      (i) => i.id === (payload.itemId ?? payload.item_id)
-    );
-    if (item) {
-      item.current_stock = Math.max(
-        0,
-        item.current_stock +
-          Number(payload.quantityDelta ?? payload.quantity_delta ?? 0)
-      );
-      item.currentStock = item.current_stock;
-    }
-    return { adjustment_id: Math.floor(1000 + Math.random() * 9000) };
+  async createStockAdjustment(payload: StockAdjustmentPayload): Promise<number> {
+    const item = this.findItem(payload.itemId);
+    if (item) this.adjustStock(item, payload.quantity);
+    const id = this.adjustments.length + 1;
+    this.adjustments.push({ id, ...payload, createdAt: nowIso() });
+    return id;
   }
 
   async listStockAdjustments(
-    _itemId?: number,
-    _page?: number,
-    _limit?: number
-  ): Promise<any> {
-    return { items: [], total: 0, page: 1, limit: 50, totalPages: 1 };
+    itemId?: number,
+    page = 1,
+    limit = 50
+  ): Promise<PaginatedList<StockAdjustment>> {
+    return paginate(
+      this.adjustments.filter((a) => itemId === undefined || a.itemId === itemId),
+      page,
+      limit
+    );
   }
 
-  // 9. Shop Settings & Backup
-  async getShopSettings(): Promise<any> {
+  // --- Shop Settings & Backup ---
+  async getShopSettings(): Promise<ShopSettings> {
     return this.settings;
   }
 
-  async updateShopSettings(settings: any): Promise<boolean> {
-    this.settings = {
-      ...this.settings,
-      ...settings,
-      shopName:
-        settings.shopName || settings.shop_name || this.settings.shopName,
-      shop_name:
-        settings.shopName || settings.shop_name || this.settings.shop_name,
-    };
-    return true;
+  async updateShopSettings(settings: ShopSettings): Promise<void> {
+    this.settings = { ...this.settings, ...settings };
   }
 
   async backupDatabase(destinationPath: string): Promise<string> {
@@ -842,27 +710,33 @@ export class MockApiClient implements ApiClient {
     return true;
   }
 
-  // 10. Migration & Excel
-  async scanBackupDirectory(directoryPath: string): Promise<BackupFileInfo[]> {
+  // --- Migration & Excel ---
+  async scanBackupDirectory(directoryPath?: string): Promise<BackupFileInfo[]> {
     const dir = (directoryPath || '/backup').replace(/\/$/, '');
     return [
       {
-        path: `${dir}/vedbill_backup.db`,
         fileName: 'vedbill_backup.db',
-        sizeBytes: 245760,
-        modifiedAt: new Date().toISOString(),
+        filePath: `${dir}/vedbill_backup.db`,
+        fileSizeBytes: 245760,
+        modifiedAt: nowIso(),
       },
     ];
   }
 
   async inspectBackupFile(filePath: string): Promise<BackupInspection> {
     return {
-      path: filePath,
-      itemsCount: this.items.length,
-      partiesCount: this.parties.length,
-      salesCount: this.sales.length,
-      purchasesCount: this.purchases.length,
-      warnings: [],
+      companyName: this.settings.shopName,
+      schemaVersion: 1,
+      createdAt: nowIso(),
+      backupFilePath: filePath,
+      backupFileSizeBytes: 245760,
+      tableStats: {
+        itemsCount: this.items.length,
+        partiesCount: this.parties.length,
+        salesCount: this.sales.length,
+        purchasesCount: this.purchases.length,
+        documentItemsCount: 0,
+      },
     };
   }
 
@@ -873,8 +747,8 @@ export class MockApiClient implements ApiClient {
       partiesImported: this.parties.length,
       salesImported: 0,
       purchasesImported: 0,
+      durationMs: 0,
       errors: [],
-      warnings: [],
     };
   }
 
@@ -882,13 +756,13 @@ export class MockApiClient implements ApiClient {
     return destinationPath || '/export/items.xlsx';
   }
 
-  async importItemsFromExcel(_filePath: string): Promise<MigrationReport> {
-    return { success: true, itemsImported: 0, errors: [], warnings: [] };
+  async importItemsFromExcel(_filePath: string): Promise<ImportSummary> {
+    return { totalRows: 0, importedCount: 0, skippedCount: 0, errors: [] };
   }
 
   async exportTransactionsToExcel(
     destinationPath: string,
-    _filter?: any
+    _filter?: TransactionExportFilter | null
   ): Promise<string> {
     return destinationPath || '/export/transactions.xlsx';
   }

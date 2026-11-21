@@ -18,13 +18,13 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
     it('TC-MOCK-001: provides seeded catalog containing at least 160 stationery items', async () => {
       const response = await client.getItemsCatalog({});
       expect(response).toBeDefined();
-      expect(response.total).toBeGreaterThanOrEqual(160);
+      expect(response.totalCount).toBeGreaterThanOrEqual(160);
       expect(response.items.length).toBeGreaterThan(0);
     });
 
     it('TC-MOCK-002: seed dataset contains diverse stationery retail categories', async () => {
       const response = await client.getItemsCatalog({ limit: 200 });
-      const categories = new Set(response.items.map((i: any) => i.category));
+      const categories = new Set(response.items.map((i) => i.category));
 
       // Key stationery categories from specification:
       // Notebooks, Pens, Adhesives, Files & Folders, Paper, Geometry/Drawing
@@ -38,7 +38,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
 
       // Verify every alert item has current_stock < 5
       for (const alert of lowStockAlerts) {
-        expect(alert.currentStock ?? alert.current_stock).toBeLessThan(5);
+        expect(alert.currentStock).toBeLessThan(5);
       }
     });
 
@@ -48,7 +48,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
       expect(suggestions.length).toBeGreaterThan(0);
 
       // Verify presence of standard packaging tiers like Box, Pack, Dozen
-      const bundleNames = suggestions.map((s: any) => s.bundleName || s.name);
+      const bundleNames = suggestions.map((s) => s.bundleName);
       const hasStandardBundle = bundleNames.some((name: string) =>
         /box|pack|dozen|carton/i.test(name)
       );
@@ -58,21 +58,21 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
 
   describe('2. Parties & Dues Khata Seed Profile', () => {
     it('TC-MOCK-005: provides seeded customer directory with active dues balances', async () => {
-      const customers = await client.listParties('CUSTOMER');
+      const customers = await client.listParties('Customer');
       expect(customers).toBeDefined();
       expect(customers.length).toBeGreaterThan(0);
 
-      const duesSummary = await client.getPartyDuesSummary('CUSTOMER');
+      const duesSummary = await client.getPartyDuesSummary('Customer');
       expect(duesSummary).toBeDefined();
       expect(duesSummary.length).toBeGreaterThan(0);
 
       // Verify outstanding balance fields exist
       const firstDue = duesSummary[0];
-      expect(firstDue.netDueBalance ?? firstDue.balance_due).toBeGreaterThan(0);
+      expect(firstDue.totalDue).toBeGreaterThan(0);
     });
 
     it('TC-MOCK-006: provides seeded vendor directory', async () => {
-      const vendors = await client.listParties('VENDOR');
+      const vendors = await client.listParties('Vendor');
       expect(vendors).toBeDefined();
       expect(vendors.length).toBeGreaterThan(0);
     });
@@ -94,10 +94,10 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
     it('TC-MOCK-008: exact barcode search returns matching item directly', async () => {
       // First get any catalog item with a barcode
       const catalog = await client.getItemsCatalog({ limit: 10 });
-      const itemWithBarcode = catalog.items.find((i: any) => Boolean(i.barcode));
+      const itemWithBarcode = catalog.items.find((i) => Boolean(i.barcode));
 
       expect(itemWithBarcode).toBeDefined();
-      const results = await client.searchItemsFts(itemWithBarcode!.barcode);
+      const results = await client.searchItemsFts(itemWithBarcode!.barcode!);
       expect(results.length).toBeGreaterThanOrEqual(1);
       expect(results[0].barcode).toBe(itemWithBarcode!.barcode);
     });
@@ -116,7 +116,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
 
       // Searching for exact item name should now exclude it
       const results = await client.searchItemsFts(targetItem.name);
-      const found = results.find((r: any) => r.id === targetItem.id);
+      const found = results.find((r) => r.itemId === targetItem.id);
       expect(found).toBeUndefined();
     });
   });
@@ -129,27 +129,28 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
 
     it('TC-MOCK-012: createSale persists sale and decrements item stock in memory', async () => {
       const catalog = await client.getItemsCatalog({ limit: 5 });
-      const item = catalog.items.find((i: any) => (i.currentStock ?? i.current_stock) > 10);
+      const item = catalog.items.find((i) => i.currentStock > 10);
 
       expect(item).toBeDefined();
       if (!item) throw new Error('seed item not found');
-      const initialStock = item.currentStock ?? item.current_stock;
+      const initialStock = item.currentStock;
       const saleCode = await client.getNextSaleCode();
 
       const payload = {
-        saleCode,
-        date: '2026-11-20',
-        customerId: null,
+        transactionCode: saleCode,
+        transactionDate: '2026-11-20',
+        partyId: null,
+        paymentMode: 'CASH',
+        notes: null,
         items: [
           {
             itemId: item.id,
-            quantity: 2,
-            unitsPerBundle: 1,
-            rate: item.defaultSalePrice ?? item.default_sale_price ?? 20.0,
+            bundleId: null,
+            bundleQuantity: 2,
+            unitPrice: item.defaultSalePrice,
           },
         ],
-        paidAmount: (item.defaultSalePrice ?? item.default_sale_price ?? 20.0) * 2,
-        paymentStatus: 'PAID',
+        paidAmount: item.defaultSalePrice * 2,
       };
 
       const result = await client.createSale(payload);
@@ -157,9 +158,9 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
 
       // Check that item stock was decremented
       const updatedCatalog = await client.getItemsCatalog({ limit: 100 });
-      const updatedItem = updatedCatalog.items.find((i: any) => i.id === item.id);
+      const updatedItem = updatedCatalog.items.find((i) => i.id === item.id);
       if (!updatedItem) throw new Error('updated item not found');
-      const newStock = updatedItem.currentStock ?? updatedItem.current_stock;
+      const newStock = updatedItem.currentStock;
       expect(newStock).toBe(initialStock - 2);
     });
   });
@@ -173,63 +174,67 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
     it('TC-MOCK-014: createPurchase increments item stock in memory', async () => {
       const catalog = await client.getItemsCatalog({ limit: 5 });
       const item = catalog.items[0];
-      const initialStock = item.currentStock ?? item.current_stock;
+      const initialStock = item.currentStock;
 
       const payload = {
-        purchaseCode: await client.getNextPurchaseCode(),
-        date: '2026-11-20',
-        vendorId: 1,
+        transactionCode: await client.getNextPurchaseCode(),
+        transactionDate: '2026-11-20',
+        partyId: 101,
+        paymentMode: 'CASH',
+        notes: null,
         items: [
           {
             itemId: item.id,
-            quantity: 50,
-            unitsPerBundle: 1,
+            bundleId: null,
+            bundleQuantity: 50,
             unitCost: 10.0,
           },
         ],
         paidAmount: 500.0,
-        paymentStatus: 'PAID',
       };
 
       const res = await client.createPurchase(payload);
       expect(res).toBeDefined();
 
       const updatedCatalog = await client.getItemsCatalog({ limit: 100 });
-      const updatedItem = updatedCatalog.items.find((i: any) => i.id === item.id);
+      const updatedItem = updatedCatalog.items.find((i) => i.id === item.id);
       if (!updatedItem) throw new Error('updated item not found');
-      expect(updatedItem.currentStock ?? updatedItem.current_stock).toBe(initialStock + 50);
+      expect(updatedItem.currentStock).toBe(initialStock + 50);
     });
   });
 
   describe('6. Accounting, Dues Settlement & Reports', () => {
     it('TC-MOCK-015: settleBillPayment decrements customer dues', async () => {
-      const dues = await client.getPartyDuesSummary('CUSTOMER');
+      const dues = await client.getPartyDuesSummary('Customer');
       expect(dues.length).toBeGreaterThan(0);
       const party = dues[0];
-      const initialDue = party.netDueBalance ?? party.balance_due;
+      const initialDue = party.totalDue;
 
       const success = await client.settleBillPayment({
-        partyId: party.partyId ?? party.id,
+        partyId: party.partyId,
         amount: Math.min(100.0, initialDue),
-        date: '2026-11-20',
+        settlementDate: '2026-11-20',
+        paymentMode: 'CASH',
+        specificBillId: null,
+        notes: null,
       });
-      expect(success).toBe(true);
+      expect(success).toBeUndefined();
     });
 
     it('TC-MOCK-016: getDashboardMetrics returns structured financial indicators', async () => {
       const metrics = await client.getDashboardMetrics();
       expect(metrics).toBeDefined();
-      expect(typeof (metrics.todayGrossSales ?? metrics.todaySales)).toBe('number');
-      expect(typeof (metrics.totalStockValuation ?? metrics.stockValuation)).toBe('number');
-      expect(typeof (metrics.liveCashInDrawer ?? metrics.cashDrawer)).toBe('number');
+      expect(typeof (metrics.todaySales)).toBe('number');
+      expect(typeof (metrics.totalStockValuation)).toBe('number');
+      expect(typeof (metrics.liveCashInDrawer)).toBe('number');
     });
 
     it('TC-MOCK-017: getPnLReport computes Gross Sales - COGS = Net Profit', async () => {
       const pnl = await client.getPnLReport('2026-01-01', '2026-12-31');
       expect(pnl).toBeDefined();
-      const gross = pnl.grossSales ?? pnl.gross_sales;
-      const cogs = pnl.cogs ?? pnl.cost_of_goods_sold;
-      const net = pnl.netProfit ?? pnl.net_profit;
+      const gross = pnl.grossSales;
+      const cogs = pnl.cogs;
+      const net = pnl.netProfit;
 
       expect(gross).toBeGreaterThanOrEqual(0);
       expect(cogs).toBeGreaterThanOrEqual(0);
@@ -240,7 +245,7 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
     it('TC-MOCK-018: getStockValuationReport returns positive total inventory valuation', async () => {
       const valuation = await client.getStockValuationReport();
       expect(valuation).toBeDefined();
-      const total = valuation.totalValuation ?? valuation.total_valuation;
+      const total = valuation.totalValuation;
       expect(total).toBeGreaterThan(0);
     });
   });
@@ -249,16 +254,16 @@ describe('MockApiClient - Retail Stationery Seed Dataset & Async IPC Abstraction
     it('TC-MOCK-019: getShopSettings and updateShopSettings manage shop profile', async () => {
       const settings = await client.getShopSettings();
       expect(settings).toBeDefined();
-      expect(settings.shopName || settings.shop_name).toBeDefined();
+      expect(settings.shopName).toBeDefined();
 
       const success = await client.updateShopSettings({
         ...settings,
         shopName: 'Gupta Stationery Mart',
       });
-      expect(success).toBe(true);
+      expect(success).toBeUndefined();
 
       const updated = await client.getShopSettings();
-      expect(updated.shopName || updated.shop_name).toBe('Gupta Stationery Mart');
+      expect(updated.shopName).toBe('Gupta Stationery Mart');
     });
 
     it('TC-MOCK-020: backupDatabase returns simulated destination path', async () => {

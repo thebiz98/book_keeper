@@ -10,6 +10,7 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { api } from '@/api';
+import type { DashboardMetrics, LowStockItem, Sale, TrendDataPoint } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
@@ -21,25 +22,28 @@ export const DashboardPage: React.FC = () => {
   const setActiveRoute = useAppStore((s) => s.setActiveRoute);
   const liveCashInDrawer = useAppStore((s) => s.liveCashInDrawer);
 
-  const [metrics, setMetrics] = useState<any>(null);
-  const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
-  const [trendData, setTrendData] = useState<any[]>([]);
-  const [recentSales, setRecentSales] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [lowStockAlerts, setLowStockAlerts] = useState<LowStockItem[]>([]);
+  const [trendData, setTrendData] = useState<TrendDataPoint[]>([]);
+  const [recentSales, setRecentSales] = useState<Sale[]>([]);
+  const [customerNames, setCustomerNames] = useState<Record<number, string>>({});
 
   useEffect(() => {
     let isMounted = true;
 
     Promise.all([
       api.getDashboardMetrics().catch(() => null),
-      api.getLowStockAlerts().catch(() => []),
-      api.getSalesPurchaseTrend('7d').catch(() => []),
-      api.getSalesHistory({ limit: 6 }).catch(() => ({ items: [] })),
-    ]).then(([metricsRes, alertsRes, trendRes, salesRes]) => {
+      api.getLowStockAlerts().catch(() => [] as LowStockItem[]),
+      api.getSalesPurchaseTrend('7d').catch(() => [] as TrendDataPoint[]),
+      api.getSalesHistory({ limit: 6 }).catch(() => null),
+      api.listParties('Customer', false).catch(() => []),
+    ]).then(([metricsRes, alertsRes, trendRes, salesRes, customers]) => {
       if (!isMounted) return;
       if (metricsRes) setMetrics(metricsRes);
-      if (Array.isArray(alertsRes)) setLowStockAlerts(alertsRes);
-      if (Array.isArray(trendRes)) setTrendData(trendRes);
-      if (salesRes && Array.isArray(salesRes.items)) setRecentSales(salesRes.items);
+      setLowStockAlerts(alertsRes);
+      setTrendData(trendRes);
+      if (salesRes) setRecentSales(salesRes.items);
+      setCustomerNames(Object.fromEntries(customers.map((c) => [c.id, c.name])));
     });
 
     return () => {
@@ -47,10 +51,10 @@ export const DashboardPage: React.FC = () => {
     };
   }, []);
 
-  const todayGross = metrics?.todayGrossSales ?? metrics?.todaySales ?? 0;
+  const todayGross = metrics?.todaySales ?? 0;
   const receivables = metrics?.customerReceivables ?? 0;
   const netProfit = metrics?.todayNetProfit ?? 0;
-  const stockValuation = metrics?.totalStockValuation ?? metrics?.stockValuation ?? 0;
+  const stockValuation = metrics?.totalStockValuation ?? 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -212,15 +216,15 @@ export const DashboardPage: React.FC = () => {
               </div>
             ) : (
               <div className="flex flex-col gap-2">
-                {trendData.map((dp, idx) => {
-                  const sAmt = dp.salesAmount ?? dp.sales_amount ?? 0;
-                  const pAmt = dp.purchaseAmount ?? dp.purchase_amount ?? 0;
-                  const maxAmt = Math.max(1000, ...trendData.map((t) => Math.max(t.salesAmount ?? 0, t.purchaseAmount ?? 0)));
+                {trendData.map((dp) => {
+                  const sAmt = dp.salesAmount;
+                  const pAmt = dp.purchaseAmount;
+                  const maxAmt = Math.max(1000, ...trendData.map((t) => Math.max(t.salesAmount, t.purchaseAmount)));
                   const sPct = Math.min(100, (sAmt / maxAmt) * 100);
                   const pPct = Math.min(100, (pAmt / maxAmt) * 100);
 
                   return (
-                    <div key={dp.date || idx} className="flex items-center gap-3 text-xs">
+                    <div key={dp.date} className="flex items-center gap-3 text-xs">
                       <span className="w-20 font-mono text-slate-500 text-[11px] shrink-0">
                         {dp.date}
                       </span>
@@ -286,12 +290,12 @@ export const DashboardPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-50 dark:divide-slate-800/60 font-mono">
                     {recentSales.map((s) => (
-                      <tr key={s.id || s.saleCode} className="hover:bg-slate-50/50">
+                      <tr key={s.id} className="hover:bg-slate-50/50">
                         <td className="py-2 font-semibold text-slate-800 dark:text-slate-200">
-                          {s.saleCode || s.transactionCode}
+                          {s.transactionCode}
                         </td>
                         <td className="py-2 font-sans text-slate-600 dark:text-slate-400">
-                          {s.customerName || 'Walk-in Customer'}
+                          {(s.partyId !== null && customerNames[s.partyId]) || 'Walk-in Customer'}
                         </td>
                         <td className="py-2 text-right font-bold text-slate-900 dark:text-slate-100">
                           <CurrencyDisplay amount={s.totalAmount} size="sm" />
@@ -329,8 +333,8 @@ export const DashboardPage: React.FC = () => {
           ) : (
             <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 overflow-y-auto max-h-[460px]">
               {lowStockAlerts.map((item) => {
-                const stock = item.currentStock ?? item.current_stock ?? 0;
-                const unit = item.baseUnit ?? item.base_unit ?? 'PCS';
+                const stock = item.currentStock;
+                const unit = item.baseUnit;
 
                 return (
                   <div key={item.id} className="py-2.5 flex items-center justify-between gap-2">

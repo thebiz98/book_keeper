@@ -127,10 +127,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         tx.purchases().list_transactions(&PurchaseFilter {
             party_id: filter.party_id,
             payment_status: filter.payment_status,
-            start_date: filter.from_date.clone(),
-            end_date: filter.to_date.clone(),
-            from_date: filter.from_date,
-            to_date: filter.to_date,
+            // Accept either naming (frontend sends start/end; legacy callers from/to).
+            start_date: filter.start_date.clone().or_else(|| filter.from_date.clone()),
+            end_date: filter.end_date.clone().or_else(|| filter.to_date.clone()),
+            from_date: filter.start_date.or(filter.from_date),
+            to_date: filter.end_date.or(filter.to_date),
             page: filter.page,
             limit: filter.limit,
         })

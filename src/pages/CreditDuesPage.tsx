@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Truck, Search } from 'lucide-react';
 import { api } from '@/api';
+import type { PartyBalance, PartyType } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { SettlementModal } from '@/components/domain/SettlementModal';
@@ -8,13 +9,13 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Button } from '@/components/ui/Button';
 
 export const CreditDuesPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'CUSTOMER' | 'VENDOR'>('CUSTOMER');
-  const [duesList, setDuesList] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<PartyType>('Customer');
+  const [duesList, setDuesList] = useState<PartyBalance[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   // Settlement modal state
-  const [selectedParty, setSelectedParty] = useState<any>(null);
+  const [selectedParty, setSelectedParty] = useState<{ id: number; name: string; totalDue: number } | null>(null);
   const [isSettlementOpen, setIsSettlementOpen] = useState(false);
 
   const recordCashFlow = useAppStore((s) => s.recordCashFlow);
@@ -23,13 +24,7 @@ export const CreditDuesPage: React.FC = () => {
     setIsLoading(true);
     api
       .getPartyDuesSummary(activeTab)
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setDuesList(data);
-        } else {
-          setDuesList([]);
-        }
-      })
+      .then((data) => setDuesList(data))
       .catch(() => setDuesList([]))
       .finally(() => setIsLoading(false));
   };
@@ -41,18 +36,17 @@ export const CreditDuesPage: React.FC = () => {
   const filteredDues = duesList.filter((d) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
-    const name = (d.partyName || d.party_name || d.name || '').toLowerCase();
+    const name = d.partyName.toLowerCase();
     const phone = (d.phone || '').toLowerCase();
     return name.includes(q) || phone.includes(q);
   });
 
   const totalOutstanding = filteredDues.reduce((acc, d) => {
-    const val = d.netDueBalance ?? d.balance_due ?? d.totalDue ?? 0;
-    return acc + val;
+    return acc + d.totalDue;
   }, 0);
 
   const handleSettled = (settledAmount: number) => {
-    if (activeTab === 'CUSTOMER') {
+    if (activeTab === 'Customer') {
       recordCashFlow({ customerDuesSettled: settledAmount });
     } else {
       recordCashFlow({ vendorDuesSettled: settledAmount });
@@ -68,9 +62,9 @@ export const CreditDuesPage: React.FC = () => {
           <div className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs">
             <button
               type="button"
-              onClick={() => setActiveTab('CUSTOMER')}
+              onClick={() => setActiveTab('Customer')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                activeTab === 'CUSTOMER'
+                activeTab === 'Customer'
                   ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
@@ -81,9 +75,9 @@ export const CreditDuesPage: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setActiveTab('VENDOR')}
+              onClick={() => setActiveTab('Vendor')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                activeTab === 'VENDOR'
+                activeTab === 'Vendor'
                   ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
@@ -98,7 +92,7 @@ export const CreditDuesPage: React.FC = () => {
         <div className="flex items-center gap-4">
           <div className="flex flex-col text-right">
             <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              {activeTab === 'CUSTOMER' ? 'Total Receivables Owed' : 'Total Payables Due'}
+              {activeTab === 'Customer' ? 'Total Receivables Owed' : 'Total Payables Due'}
             </span>
             <div className="text-xl font-bold font-mono text-rose-600 dark:text-rose-400">
               <CurrencyDisplay amount={totalOutstanding} size="xl" colored />
@@ -153,13 +147,13 @@ export const CreditDuesPage: React.FC = () => {
               </TableRow>
             ) : (
               filteredDues.map((due, idx) => {
-                const name = due.partyName || due.party_name || due.name || 'Account';
+                const name = due.partyName;
                 const phone = due.phone || '—';
-                const count = due.unsettledBillsCount ?? due.billCount ?? 1;
-                const balance = due.netDueBalance ?? due.balance_due ?? due.totalDue ?? 0;
+                const count = due.unpaidBillsCount;
+                const balance = due.totalDue;
 
                 return (
-                  <TableRow key={due.partyId || due.id || idx}>
+                  <TableRow key={due.partyId}>
                     <TableCell className="text-center text-slate-400 select-none">
                       {idx + 1}
                     </TableCell>
@@ -183,7 +177,7 @@ export const CreditDuesPage: React.FC = () => {
                         size="xs"
                         onClick={() => {
                           setSelectedParty({
-                            id: due.partyId || due.id,
+                            id: due.partyId,
                             name,
                             totalDue: balance,
                           });

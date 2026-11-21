@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Receipt, Search, Eye, DollarSign } from 'lucide-react';
 import { api } from '@/api';
+import type { PaymentStatus, Sale, SaleDetailView } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -9,15 +10,16 @@ import { Modal } from '@/components/ui/Modal';
 import { SettlementModal } from '@/components/domain/SettlementModal';
 
 export const SalesHistoryPage: React.FC = () => {
-  const [sales, setSales] = useState<any[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | PaymentStatus>('ALL');
   const [datePreset, setDatePreset] = useState<'ALL' | 'TODAY' | '7D' | 'THIS_MONTH'>('ALL');
 
   // Receipt Modal State
-  const [selectedSale, setSelectedSale] = useState<any>(null);
-  const [saleDetails, setSaleDetails] = useState<any>(null);
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [saleDetails, setSaleDetails] = useState<SaleDetailView | null>(null);
+  const [customerNames, setCustomerNames] = useState<Record<number, string>>({});
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
 
   // Settlement Modal State
@@ -27,43 +29,43 @@ export const SalesHistoryPage: React.FC = () => {
     setIsLoading(true);
     api
       .getSalesHistory()
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res?.items || [];
-        setSales(list);
-      })
+      .then((res) => setSales(res.items))
       .catch(() => setSales([]))
       .finally(() => setIsLoading(false));
+    api
+      .listParties('Customer', false)
+      .then((rows) => setCustomerNames(Object.fromEntries(rows.map((c) => [c.id, c.name]))))
+      .catch(() => setCustomerNames({}));
   };
+
+  const customerOf = (s: Sale): string =>
+    (s.partyId !== null && customerNames[s.partyId]) || 'Walk-in Customer';
 
   useEffect(() => {
     loadSales();
   }, []);
 
-  const openReceipt = async (sale: any) => {
+  const openReceipt = async (sale: Sale) => {
     setSelectedSale(sale);
+    setSaleDetails(null);
     setIsReceiptOpen(true);
-    const saleId = sale.saleId ?? sale.sale_id ?? sale.id;
-    if (saleId && api.getSaleDetails) {
-      try {
-        const details = await api.getSaleDetails(saleId);
-        setSaleDetails(details);
-      } catch {
-        setSaleDetails(null);
-      }
+    try {
+      setSaleDetails(await api.getSaleDetails(sale.id));
+    } catch {
+      setSaleDetails(null);
     }
   };
 
   const filteredSales = sales.filter((s) => {
-    const code = (s.saleCode || s.sale_code || s.transactionCode || s.transaction_code || '').toLowerCase();
-    const customer = (s.customerName || s.customer_name || s.partyName || s.party_name || 'Walk-in Customer').toLowerCase();
+    const code = s.transactionCode.toLowerCase();
+    const customer = customerOf(s).toLowerCase();
     const matchesSearch = !searchQuery.trim() || code.includes(searchQuery.toLowerCase()) || customer.includes(searchQuery.toLowerCase());
 
-    const status = (s.paymentStatus || s.payment_status || 'PAID').toUpperCase();
-    const matchesStatus = statusFilter === 'ALL' || status === statusFilter;
+    const matchesStatus = statusFilter === 'ALL' || s.paymentStatus === statusFilter;
 
     // Date filtering
     let matchesDate = true;
-    const saleDateStr = s.date || s.transactionDate || s.transaction_date || s.created_at;
+    const saleDateStr = s.transactionDate;
     if (saleDateStr && datePreset !== 'ALL') {
       const saleDate = new Date(saleDateStr);
       const now = new Date();
@@ -110,7 +112,7 @@ export const SalesHistoryPage: React.FC = () => {
 
         {/* Status Filter */}
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-md text-xs font-medium">
-          {(['ALL', 'PAID', 'PARTIAL', 'UNPAID'] as const).map((st) => (
+          {(['ALL', 'Paid', 'Partial', 'Unpaid'] as const).map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -172,17 +174,18 @@ export const SalesHistoryPage: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredSales.map((sale, idx) => {
-                const code = sale.saleCode || sale.sale_code || sale.transactionCode || `SAL-${sale.id || idx + 1}`;
-                const customer = sale.customerName || sale.customer_name || sale.partyName || 'Walk-in Customer';
-                const total = sale.totalAmount ?? sale.total_amount ?? 0;
-                const paid = sale.paidAmount ?? sale.paid_amount ?? total;
-                const due = sale.balanceDue ?? sale.balance_due ?? 0;
-                const status = sale.paymentStatus || sale.payment_status || (due === 0 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID');
-                const date = sale.date || sale.transactionDate || sale.created_at || 'Today';
+              filteredSales.map((sale) => {
+                const code = sale.transactionCode;
+                const customer = customerOf(sale);
+                const total = sale.totalAmount;
+                const paid = sale.paidAmount;
+                const due = sale.balanceDue;
+                const status = sale.paymentStatus;
+                const partyId = sale.partyId;
+                const date = sale.transactionDate;
 
                 return (
-                  <TableRow key={sale.id || sale.saleId || idx}>
+                  <TableRow key={sale.id}>
                     <TableCell mono className="font-semibold text-blue-600 dark:text-blue-400">
                       {code}
                     </TableCell>
@@ -210,14 +213,14 @@ export const SalesHistoryPage: React.FC = () => {
                         >
                           View
                         </Button>
-                        {due > 0 && sale.customerId && (
+                        {due > 0 && partyId !== null && (
                           <Button
                             variant="secondary"
                             size="xs"
                             leftIcon={<DollarSign size={12} />}
                             onClick={() =>
                               setSettlingParty({
-                                id: sale.customerId,
+                                id: partyId,
                                 name: customer,
                                 due,
                               })
@@ -241,7 +244,7 @@ export const SalesHistoryPage: React.FC = () => {
         <Modal
           isOpen={isReceiptOpen}
           onClose={() => setIsReceiptOpen(false)}
-          title={`Receipt: ${selectedSale.saleCode || selectedSale.sale_code || selectedSale.transactionCode || 'Sale'}`}
+          title={`Receipt: ${selectedSale.transactionCode}`}
           size="lg"
         >
           <div className="space-y-4">
@@ -249,23 +252,23 @@ export const SalesHistoryPage: React.FC = () => {
               <div>
                 <span className="text-slate-500">Customer: </span>
                 <span className="font-medium text-slate-800 dark:text-slate-200">
-                  {selectedSale.customerName || selectedSale.customer_name || 'Walk-in Customer'}
+                  {customerOf(selectedSale)}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500">Date: </span>
                 <span className="font-mono text-slate-800 dark:text-slate-200">
-                  {selectedSale.date || selectedSale.transactionDate || 'Today'}
+                  {selectedSale.transactionDate}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500">Payment Status: </span>
-                <PaymentStatusBadge status={selectedSale.paymentStatus || selectedSale.payment_status || 'PAID'} />
+                <PaymentStatusBadge status={selectedSale.paymentStatus} />
               </div>
               <div>
                 <span className="text-slate-500">Invoice: </span>
                 <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">
-                  {selectedSale.saleCode || selectedSale.sale_code || selectedSale.transactionCode}
+                  {selectedSale.transactionCode}
                 </span>
               </div>
             </div>
@@ -283,21 +286,21 @@ export const SalesHistoryPage: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {((saleDetails?.items || selectedSale.items || []) as any[]).length === 0 ? (
+                  {(saleDetails?.items ?? []).length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} align="center" className="py-4 text-slate-500">
                         Line items unavailable for historical record.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    ((saleDetails?.items || selectedSale.items || []) as any[]).map((it: any, i: number) => {
-                      const qty = it.quantity ?? it.bundle_quantity ?? 1;
-                      const rate = it.rate ?? it.unit_price ?? 0;
-                      const total = qty * rate;
+                    (saleDetails?.items ?? []).map((it, i) => {
+                      const qty = it.saleItem.bundleQuantity;
+                      const total = it.saleItem.totalAmount;
+                      const rate = qty > 0 ? total / qty : 0;
                       return (
                         <TableRow key={i}>
                           <TableCell mono className="text-xs text-slate-400">{i + 1}</TableCell>
-                          <TableCell className="font-medium">{it.itemName || it.item_name || it.name || `Item #${it.itemId || i + 1}`}</TableCell>
+                          <TableCell className="font-medium">{it.itemName}</TableCell>
                           <TableCell align="right" mono>{qty}</TableCell>
                           <TableCell align="right" mono>
                             <CurrencyDisplay amount={rate} />
@@ -317,22 +320,16 @@ export const SalesHistoryPage: React.FC = () => {
             <div className="flex flex-col items-end gap-1 pt-2 border-t border-slate-200 dark:border-slate-800 text-sm">
               <div className="flex items-center gap-8">
                 <span className="text-slate-500 font-medium">Grand Total:</span>
-                <CurrencyDisplay amount={selectedSale.totalAmount ?? selectedSale.total_amount ?? 0} size="md" />
+                <CurrencyDisplay amount={selectedSale.totalAmount} size="md" />
               </div>
               <div className="flex items-center gap-8">
                 <span className="text-slate-500 font-medium">Paid Amount:</span>
-                <CurrencyDisplay amount={selectedSale.paidAmount ?? selectedSale.paid_amount ?? 0} size="md" />
+                <CurrencyDisplay amount={selectedSale.paidAmount} size="md" />
               </div>
-              {(selectedSale.balanceDue ?? selectedSale.balance_due ?? 0) > 0 && (
+              {(selectedSale.balanceDue) > 0 && (
                 <div className="flex items-center gap-8 text-rose-600 dark:text-rose-400 font-semibold">
                   <span>Balance Due:</span>
-                  <CurrencyDisplay amount={selectedSale.balanceDue ?? selectedSale.balance_due ?? 0} colored size="md" />
-                </div>
-              )}
-              {(selectedSale.changeAmount ?? selectedSale.changeReturned ?? 0) > 0 && (
-                <div className="flex items-center gap-8 text-emerald-600 dark:text-emerald-400 font-semibold">
-                  <span>Change Returned:</span>
-                  <CurrencyDisplay amount={selectedSale.changeAmount ?? selectedSale.changeReturned ?? 0} size="md" />
+                  <CurrencyDisplay amount={selectedSale.balanceDue} colored size="md" />
                 </div>
               )}
             </div>

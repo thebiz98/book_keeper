@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { User, Truck, Search, Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/api';
+import type { Party, PartyType } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 
 export interface PartySelectorProps {
-  partyType: 'CUSTOMER' | 'VENDOR';
+  partyType: PartyType;
   selectedPartyId?: number | null;
-  onSelectParty: (party: any) => void;
+  onSelectParty: (party: Party | null) => void;
   allowWalkIn?: boolean;
   className?: string;
 }
@@ -19,7 +20,8 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
   allowWalkIn = true,
   className,
 }) => {
-  const [parties, setParties] = useState<any[]>([]);
+  const [parties, setParties] = useState<Party[]>([]);
+  const [dues, setDues] = useState<Record<number, number>>({});
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
 
@@ -27,10 +29,12 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
     api
       .listParties(partyType, true)
       .then((data) => {
-        if (Array.isArray(data)) {
-          setParties(data);
-        }
+        setParties(data);
       })
+      .catch(() => {});
+    api
+      .getPartyDuesSummary(partyType)
+      .then((rows) => setDues(Object.fromEntries(rows.map((r) => [r.partyId, r.totalDue]))))
       .catch(() => {});
   }, [partyType]);
 
@@ -44,7 +48,7 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
     return name.includes(q) || phone.includes(q);
   });
 
-  const handleSelect = (party: any) => {
+  const handleSelect = (party: Party) => {
     onSelectParty(party);
     setIsOpen(false);
     setSearch('');
@@ -56,8 +60,8 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
     setSearch('');
   };
 
-  const Icon = partyType === 'CUSTOMER' ? User : Truck;
-  const walkInLabel = partyType === 'CUSTOMER' ? 'Walk-in Customer' : 'Standard Vendor';
+  const Icon = partyType === 'Customer' ? User : Truck;
+  const walkInLabel = partyType === 'Customer' ? 'Walk-in Customer' : 'Standard Vendor';
 
   return (
     <div className={cn('relative w-full', className)}>
@@ -73,9 +77,9 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
               {selectedParty.phone && (
                 <span className="text-xs text-slate-400 font-mono">({selectedParty.phone})</span>
               )}
-              {selectedParty.balanceDue > 0 && (
+              {(dues[selectedParty.id] ?? 0) > 0 && (
                 <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                  Due: <CurrencyDisplay amount={selectedParty.balanceDue} size="sm" />
+                  Due: <CurrencyDisplay amount={dues[selectedParty.id] ?? 0} size="sm" />
                 </span>
               )}
             </div>
@@ -120,7 +124,7 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
           ) : (
             filteredParties.map((p) => {
               const isSelected = p.id === selectedPartyId;
-              const due = p.balanceDue ?? p.balance_due ?? 0;
+              const due = dues[p.id] ?? 0;
 
               return (
                 <div

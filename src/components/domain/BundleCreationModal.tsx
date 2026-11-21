@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Package, Sparkles } from 'lucide-react';
 import { api } from '@/api';
+import type { BundleSuggestion } from '@/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { TextInput } from '../ui/TextInput';
@@ -9,7 +10,7 @@ import { NumericInput } from '../ui/NumericInput';
 export interface BundleCreationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onBundleCreated?: (bundle: any) => void;
+  onBundleCreated?: (bundleId: number) => void;
   initialItemId?: number;
   baseUnit?: string;
 }
@@ -26,7 +27,7 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
   const [salePrice, setSalePrice] = useState<number>(0);
   const [mrp, setMrp] = useState<number>(0);
   const [barcode, setBarcode] = useState('');
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<BundleSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,19 +44,15 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
       api
         .getBundleSuggestions()
         .then((sugs) => {
-          if (Array.isArray(sugs)) {
-            setSuggestions(sugs.slice(0, 4));
-          }
+          setSuggestions(sugs.slice(0, 4));
         })
         .catch(() => {});
     }
   }, [isOpen]);
 
-  const handleApplySuggestion = (sug: any) => {
-    const name = sug.bundleName || sug.name || '';
-    const mult = sug.unitsPerBundle || sug.units_per_bundle || sug.multiplier || 10;
-    setBundleName(name);
-    setMultiplier(mult);
+  const handleApplySuggestion = (sug: BundleSuggestion) => {
+    setBundleName(sug.bundleName);
+    setMultiplier(sug.unitsPerBundle);
   };
 
   const handleSave = async () => {
@@ -75,7 +72,7 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
       itemId: initialItemId ?? null,
       bundleName: bundleName.trim(),
       unitsPerBundle: multiplier,
-      salePrice: salePrice > 0 ? salePrice : null,
+      defaultBundlePrice: salePrice > 0 ? salePrice : null,
       mrp: mrp > 0 ? mrp : null,
       barcode: barcode.trim() || null,
     };
@@ -125,8 +122,8 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
             </div>
             <div className="flex flex-wrap gap-1.5">
               {suggestions.map((sug, idx) => {
-                const name = sug.bundleName || sug.name;
-                const mult = sug.unitsPerBundle || sug.units_per_bundle || sug.multiplier;
+                const name = sug.bundleName;
+                const mult = sug.unitsPerBundle;
                 return (
                   <button
                     key={idx}

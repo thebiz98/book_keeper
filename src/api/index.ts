@@ -49,8 +49,8 @@ export function setApiClient(client: ApiClient): void {
 export const api: ApiClient = new Proxy({} as ApiClient, {
   get(_target, prop: string | symbol) {
     const client = getApiClient();
-    const value = (client as any)[prop];
-    return typeof value === 'function' ? value.bind(client) : value;
+    const value: unknown = Reflect.get(client, prop);
+    return typeof value === "function" ? value.bind(client) : value;
   },
 });
 

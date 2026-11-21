@@ -57,7 +57,8 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
         partyId,
         amount,
         paymentMode,
-        notes: notes.trim() || undefined,
+        notes: notes.trim() || null,
+        specificBillId: null,
         settlementDate: new Date().toISOString().split('T')[0],
       });
       onSettled?.(amount);

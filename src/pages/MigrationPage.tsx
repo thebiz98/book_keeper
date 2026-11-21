@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Database, FolderSearch, FileSearch, Play, FileSpreadsheet } from 'lucide-react';
 import { api } from '@/api';
-import type { BackupFileInfo, BackupInspection, MigrationReport } from '@/types/api';
+import type { BackupFileInfo, BackupInspection, ImportSummary, MigrationReport } from '@/types';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
@@ -17,18 +17,18 @@ const ReportView: React.FC<{ report: MigrationReport }> = ({ report }) => (
   <div className="flex flex-col gap-1 rounded-md border border-slate-200 dark:border-slate-800 p-3">
     <span
       className={`text-xs font-semibold ${
-        report.success === false ? 'text-rose-600' : 'text-emerald-600'
+        !report.success ? 'text-rose-600' : 'text-emerald-600'
       }`}
     >
-      {report.success === false ? 'Completed with errors' : 'Completed successfully'}
+      {!report.success ? 'Completed with errors' : 'Completed successfully'}
     </span>
     <div className="flex flex-wrap gap-4">
-      {countLine('Items', report.itemsImported ?? report.items_imported)}
-      {countLine('Parties', report.partiesImported ?? report.parties_imported)}
-      {countLine('Sales', report.salesImported ?? report.sales_imported)}
-      {countLine('Purchases', report.purchasesImported ?? report.purchases_imported)}
+      {countLine('Items', report.itemsImported)}
+      {countLine('Parties', report.partiesImported)}
+      {countLine('Sales', report.salesImported)}
+      {countLine('Purchases', report.purchasesImported)}
     </div>
-    {[...(report.errors ?? []), ...(report.warnings ?? [])].map((m, i) => (
+    {report.errors.map((m, i) => (
       <span key={i} className="text-xs text-amber-600 dark:text-amber-400">
         {m}
       </span>
@@ -55,8 +55,8 @@ export const MigrationPage: React.FC = () => {
     setError(null);
     try {
       await fn();
-    } catch (err: any) {
-      setError(err?.message || `${name} failed`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `${name} failed`);
     } finally {
       setBusy(null);
     }
@@ -65,7 +65,7 @@ export const MigrationPage: React.FC = () => {
   const handleScan = () =>
     run('scan', async () => {
       const found = await api.scanBackupDirectory(dir.trim());
-      setFiles(Array.isArray(found) ? found : []);
+      setFiles(found);
       setInspection(null);
       setReport(null);
     });
@@ -83,14 +83,14 @@ export const MigrationPage: React.FC = () => {
     });
   };
 
-  const excelAction = (label: string, fn: (path: string) => Promise<string | MigrationReport>) =>
+  const excelAction = (label: string, fn: (path: string) => Promise<string | ImportSummary>) =>
     run(label, async () => {
       if (!excelPath.trim()) throw new Error('Enter a file path first');
       const res = await fn(excelPath.trim());
       setExcelMsg(
         typeof res === 'string'
           ? `${label} complete: ${res}`
-          : `${label} complete: ${res.itemsImported ?? res.items_imported ?? 0} items imported`
+          : `${label} complete: ${res.importedCount} of ${res.totalRows} rows imported, ${res.skippedCount} skipped${res.errors.length ? ` (${res.errors.join('; ')})` : ''}`
       );
     });
 
@@ -134,17 +134,17 @@ export const MigrationPage: React.FC = () => {
           {files.length > 0 && (
             <ul className="flex flex-col gap-1">
               {files.map((f) => (
-                <li key={f.path}>
+                <li key={f.filePath}>
                   <label className="flex items-center gap-2 text-xs cursor-pointer">
                     <input
                       type="radio"
                       name="backup-file"
-                      checked={selected === f.path}
-                      onChange={() => setSelected(f.path)}
+                      checked={selected === f.filePath}
+                      onChange={() => setSelected(f.filePath)}
                     />
-                    <span className="font-mono">{f.fileName ?? f.file_name ?? f.path}</span>
+                    <span className="font-mono">{f.fileName}</span>
                     <span className="text-slate-400">
-                      {Math.round((f.sizeBytes ?? f.size_bytes ?? 0) / 1024)} KB
+                      {Math.round(f.fileSizeBytes / 1024)} KB
                     </span>
                   </label>
                 </li>
@@ -175,15 +175,10 @@ export const MigrationPage: React.FC = () => {
 
           {inspection && (
             <div className="flex flex-wrap gap-4 rounded-md border border-slate-200 dark:border-slate-800 p-3">
-              {countLine('Items', inspection.itemsCount ?? inspection.items_count)}
-              {countLine('Parties', inspection.partiesCount ?? inspection.parties_count)}
-              {countLine('Sales', inspection.salesCount ?? inspection.sales_count)}
-              {countLine('Purchases', inspection.purchasesCount ?? inspection.purchases_count)}
-              {(inspection.warnings ?? []).map((w, i) => (
-                <span key={i} className="text-xs text-amber-600 dark:text-amber-400">
-                  {w}
-                </span>
-              ))}
+              {countLine('Items', inspection.tableStats.itemsCount)}
+              {countLine('Parties', inspection.tableStats.partiesCount)}
+              {countLine('Sales', inspection.tableStats.salesCount)}
+              {countLine('Purchases', inspection.tableStats.purchasesCount)}
             </div>
           )}
           {report && <ReportView report={report} />}

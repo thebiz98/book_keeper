@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Truck, Search, Eye, DollarSign } from 'lucide-react';
 import { api } from '@/api';
+import type { PaymentStatus, Purchase, PurchaseDetailView } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -9,15 +10,16 @@ import { Modal } from '@/components/ui/Modal';
 import { SettlementModal } from '@/components/domain/SettlementModal';
 
 export const PurchaseHistoryPage: React.FC = () => {
-  const [purchases, setPurchases] = useState<any[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PARTIAL' | 'UNPAID'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | PaymentStatus>('ALL');
   const [datePreset, setDatePreset] = useState<'ALL' | 'TODAY' | '7D' | 'THIS_MONTH'>('ALL');
 
   // Purchase Details Modal
-  const [selectedPurchase, setSelectedPurchase] = useState<any>(null);
-  const [purchaseDetails, setPurchaseDetails] = useState<any>(null);
+  const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
+  const [purchaseDetails, setPurchaseDetails] = useState<PurchaseDetailView | null>(null);
+  const [vendorNames, setVendorNames] = useState<Record<number, string>>({});
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   // Settlement Modal State for paying vendor dues
@@ -27,47 +29,47 @@ export const PurchaseHistoryPage: React.FC = () => {
     setIsLoading(true);
     api
       .getPurchasesHistory()
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res?.items || [];
-        setPurchases(list);
-      })
+      .then((res) => setPurchases(res.items))
       .catch(() => setPurchases([]))
       .finally(() => setIsLoading(false));
+    api
+      .listParties('Vendor', false)
+      .then((rows) => setVendorNames(Object.fromEntries(rows.map((v) => [v.id, v.name]))))
+      .catch(() => setVendorNames({}));
   };
+
+  const vendorOf = (p: Purchase): string =>
+    (p.partyId !== null && vendorNames[p.partyId]) || 'General Supplier';
 
   useEffect(() => {
     loadPurchases();
   }, []);
 
-  const openDetails = async (purchase: any) => {
+  const openDetails = async (purchase: Purchase) => {
     setSelectedPurchase(purchase);
+    setPurchaseDetails(null);
     setIsDetailsOpen(true);
-    const purchaseId = purchase.purchaseId ?? purchase.purchase_id ?? purchase.id;
-    if (purchaseId && api.getPurchaseDetails) {
-      try {
-        const details = await api.getPurchaseDetails(purchaseId);
-        setPurchaseDetails(details);
-      } catch {
-        setPurchaseDetails(null);
-      }
+    try {
+      setPurchaseDetails(await api.getPurchaseDetails(purchase.id));
+    } catch {
+      setPurchaseDetails(null);
     }
   };
 
   const filteredPurchases = purchases.filter((p) => {
-    const code = (p.purchaseCode || p.purchase_code || p.transactionCode || '').toLowerCase();
-    const vendor = (p.vendorName || p.vendor_name || p.partyName || p.party_name || '').toLowerCase();
-    const supplierRef = (p.supplierInvoiceRef || p.supplier_invoice_ref || p.notes || '').toLowerCase();
+    const code = p.transactionCode.toLowerCase();
+    const vendor = vendorOf(p).toLowerCase();
+    const supplierRef = (p.notes ?? '').toLowerCase();
     const matchesSearch =
       !searchQuery.trim() ||
       code.includes(searchQuery.toLowerCase()) ||
       vendor.includes(searchQuery.toLowerCase()) ||
       supplierRef.includes(searchQuery.toLowerCase());
 
-    const status = (p.paymentStatus || p.payment_status || 'PAID').toUpperCase();
-    const matchesStatus = statusFilter === 'ALL' || status === statusFilter;
+    const matchesStatus = statusFilter === 'ALL' || p.paymentStatus === statusFilter;
 
     let matchesDate = true;
-    const purchaseDateStr = p.date || p.transactionDate || p.inwardDate || p.created_at;
+    const purchaseDateStr = p.transactionDate;
     if (purchaseDateStr && datePreset !== 'ALL') {
       const pDate = new Date(purchaseDateStr);
       const now = new Date();
@@ -114,7 +116,7 @@ export const PurchaseHistoryPage: React.FC = () => {
 
         {/* Status Filter */}
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-md text-xs font-medium">
-          {(['ALL', 'PAID', 'PARTIAL', 'UNPAID'] as const).map((st) => (
+          {(['ALL', 'Paid', 'Partial', 'Unpaid'] as const).map((st) => (
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
@@ -176,17 +178,18 @@ export const PurchaseHistoryPage: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredPurchases.map((purchase, idx) => {
-                const code = purchase.purchaseCode || purchase.purchase_code || purchase.transactionCode || `PUR-${purchase.id || idx + 1}`;
-                const vendor = purchase.vendorName || purchase.vendor_name || purchase.partyName || 'General Supplier';
-                const total = purchase.totalAmount ?? purchase.total_amount ?? 0;
-                const paid = purchase.paidAmount ?? purchase.paid_amount ?? total;
-                const due = purchase.balanceDue ?? purchase.balance_due ?? 0;
-                const status = purchase.paymentStatus || purchase.payment_status || (due === 0 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID');
-                const date = purchase.date || purchase.transactionDate || purchase.inwardDate || 'Today';
+              filteredPurchases.map((purchase) => {
+                const code = purchase.transactionCode;
+                const vendor = vendorOf(purchase);
+                const total = purchase.totalAmount;
+                const paid = purchase.paidAmount;
+                const due = purchase.balanceDue;
+                const status = purchase.paymentStatus;
+                const partyId = purchase.partyId;
+                const date = purchase.transactionDate;
 
                 return (
-                  <TableRow key={purchase.id || purchase.purchaseId || idx}>
+                  <TableRow key={purchase.id}>
                     <TableCell mono className="font-semibold text-blue-600 dark:text-blue-400">
                       {code}
                     </TableCell>
@@ -214,14 +217,14 @@ export const PurchaseHistoryPage: React.FC = () => {
                         >
                           View
                         </Button>
-                        {due > 0 && purchase.partyId && (
+                        {due > 0 && partyId !== null && (
                           <Button
                             variant="secondary"
                             size="xs"
                             leftIcon={<DollarSign size={12} />}
                             onClick={() =>
                               setSettlingVendor({
-                                id: purchase.partyId,
+                                id: partyId,
                                 name: vendor,
                                 due,
                               })
@@ -245,7 +248,7 @@ export const PurchaseHistoryPage: React.FC = () => {
         <Modal
           isOpen={isDetailsOpen}
           onClose={() => setIsDetailsOpen(false)}
-          title={`Purchase Details: ${selectedPurchase.purchaseCode || selectedPurchase.purchase_code || 'Inward Batch'}`}
+          title={`Purchase Details: ${selectedPurchase.transactionCode}`}
           size="lg"
         >
           <div className="space-y-4">
@@ -253,23 +256,23 @@ export const PurchaseHistoryPage: React.FC = () => {
               <div>
                 <span className="text-slate-500">Supplier / Vendor: </span>
                 <span className="font-medium text-slate-800 dark:text-slate-200">
-                  {selectedPurchase.vendorName || selectedPurchase.vendor_name || 'General Supplier'}
+                  {vendorOf(selectedPurchase)}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500">Inward Date: </span>
                 <span className="font-mono text-slate-800 dark:text-slate-200">
-                  {selectedPurchase.date || selectedPurchase.transactionDate || 'Today'}
+                  {selectedPurchase.transactionDate}
                 </span>
               </div>
               <div>
                 <span className="text-slate-500">Payment Status: </span>
-                <PaymentStatusBadge status={selectedPurchase.paymentStatus || selectedPurchase.payment_status || 'PAID'} />
+                <PaymentStatusBadge status={selectedPurchase.paymentStatus} />
               </div>
               <div>
                 <span className="text-slate-500">Purchase Code: </span>
                 <span className="font-mono font-semibold text-blue-600 dark:text-blue-400">
-                  {selectedPurchase.purchaseCode || selectedPurchase.purchase_code}
+                  {selectedPurchase.transactionCode}
                 </span>
               </div>
             </div>
@@ -287,21 +290,21 @@ export const PurchaseHistoryPage: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {((purchaseDetails?.items || selectedPurchase.items || []) as any[]).length === 0 ? (
+                  {(purchaseDetails?.items ?? []).length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} align="center" className="py-4 text-slate-500">
                         Inward line item details archived.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    ((purchaseDetails?.items || selectedPurchase.items || []) as any[]).map((it: any, i: number) => {
-                      const qty = it.quantity ?? it.bundle_quantity ?? 1;
-                      const cost = it.unitCost ?? it.unit_cost ?? 0;
-                      const total = qty * cost;
+                    (purchaseDetails?.items ?? []).map((it, i) => {
+                      const qty = it.purchaseItem.bundleQuantity;
+                      const total = it.purchaseItem.totalAmount;
+                      const cost = qty > 0 ? total / qty : 0;
                       return (
                         <TableRow key={i}>
                           <TableCell mono className="text-xs text-slate-400">{i + 1}</TableCell>
-                          <TableCell className="font-medium">{it.itemName || it.item_name || it.name || `Item #${it.itemId || i + 1}`}</TableCell>
+                          <TableCell className="font-medium">{it.itemName}</TableCell>
                           <TableCell align="right" mono>{qty}</TableCell>
                           <TableCell align="right" mono>
                             <CurrencyDisplay amount={cost} />
@@ -321,16 +324,16 @@ export const PurchaseHistoryPage: React.FC = () => {
             <div className="flex flex-col items-end gap-1 pt-2 border-t border-slate-200 dark:border-slate-800 text-sm">
               <div className="flex items-center gap-8">
                 <span className="text-slate-500 font-medium">Total Inward Cost:</span>
-                <CurrencyDisplay amount={selectedPurchase.totalAmount ?? selectedPurchase.total_amount ?? 0} size="md" />
+                <CurrencyDisplay amount={selectedPurchase.totalAmount} size="md" />
               </div>
               <div className="flex items-center gap-8">
                 <span className="text-slate-500 font-medium">Paid to Vendor:</span>
-                <CurrencyDisplay amount={selectedPurchase.paidAmount ?? selectedPurchase.paid_amount ?? 0} size="md" />
+                <CurrencyDisplay amount={selectedPurchase.paidAmount} size="md" />
               </div>
-              {(selectedPurchase.balanceDue ?? selectedPurchase.balance_due ?? 0) > 0 && (
+              {(selectedPurchase.balanceDue) > 0 && (
                 <div className="flex items-center gap-8 text-rose-600 dark:text-rose-400 font-semibold">
                   <span>Vendor Payable Due:</span>
-                  <CurrencyDisplay amount={selectedPurchase.balanceDue ?? selectedPurchase.balance_due ?? 0} colored size="md" />
+                  <CurrencyDisplay amount={selectedPurchase.balanceDue} colored size="md" />
                 </div>
               )}
             </div>

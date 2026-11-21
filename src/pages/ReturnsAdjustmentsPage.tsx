@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { RotateCcw, AlertTriangle, ArrowRightLeft, CheckCircle2 } from 'lucide-react';
 import { api } from '@/api';
+import type {
+  ItemSearchResult,
+  SettlementType,
+  StockAdjustment,
+  StockCondition,
+} from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
@@ -19,36 +25,31 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Tab 1: Customer Return State
-  const [custReturnItem, setCustReturnItem] = useState<any>(null);
+  const [custReturnItem, setCustReturnItem] = useState<ItemSearchResult | null>(null);
   const [custReturnQty, setCustReturnQty] = useState(1);
-  const [custCondition, setCustCondition] = useState<'RESTOCKABLE' | 'DAMAGED'>('RESTOCKABLE');
-  const [custResolution, setCustResolution] = useState<'CASH_REFUND' | 'REDUCE_DUE' | 'REPLACEMENT'>('CASH_REFUND');
+  const [custCondition, setCustCondition] = useState<StockCondition>('Restockable');
+  const [custResolution, setCustResolution] = useState<SettlementType>('CashRefund');
   const [custRefundAmount, setCustRefundAmount] = useState(0);
   const [custNotes, setCustNotes] = useState('');
   const [isSubmittingCust, setIsSubmittingCust] = useState(false);
 
   // Tab 2: Vendor Return State
-  const [vendReturnItem, setVendReturnItem] = useState<any>(null);
+  const [vendReturnItem, setVendReturnItem] = useState<ItemSearchResult | null>(null);
   const [vendReturnQty, setVendReturnQty] = useState(1);
-  const [vendResolution, setVendResolution] = useState<'CASH_REFUND' | 'REDUCE_PAYABLE'>('REDUCE_PAYABLE');
+  const [vendResolution, setVendResolution] = useState<SettlementType>('ReduceDue');
   const [vendRefundAmount, setVendRefundAmount] = useState(0);
   const [vendNotes, setVendNotes] = useState('');
   const [isSubmittingVend, setIsSubmittingVend] = useState(false);
 
   // Tab 3: Stock Adjustments State
-  const [adjustments, setAdjustments] = useState<any[]>([]);
+  const [adjustments, setAdjustments] = useState<StockAdjustment[]>([]);
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
 
   const loadAdjustments = () => {
-    if (api.listStockAdjustments) {
-      api
-        .listStockAdjustments()
-        .then((res) => {
-          const list = Array.isArray(res) ? res : res?.items || [];
-          setAdjustments(list);
-        })
-        .catch(() => setAdjustments([]));
-    }
+    api
+      .listStockAdjustments()
+      .then((res) => setAdjustments(res.items))
+      .catch(() => setAdjustments([]));
   };
 
   useEffect(() => {
@@ -64,27 +65,33 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
     setIsSubmittingCust(true);
     setFeedback(null);
     try {
-      const payload = {
+      const unitPrice =
+        custResolution === 'CashRefund' && custReturnQty > 0
+          ? custRefundAmount / custReturnQty
+          : custReturnItem.defaultSalePrice;
+      const returnCode = await api.createCustomerReturn({
+        originalSaleId: null,
+        partyId: null,
+        returnDate: new Date().toISOString().split('T')[0],
+        settlementType: custResolution,
+        notes: custNotes.trim() || null,
         items: [
           {
-            itemId: custReturnItem.id ?? custReturnItem.itemId,
+            itemId: custReturnItem.itemId,
+            saleItemId: null,
             quantity: custReturnQty,
+            unitPrice,
             condition: custCondition,
           },
         ],
-        resolution: custResolution,
-        refundAmount: custResolution === 'CASH_REFUND' ? custRefundAmount : 0,
-        notes: custNotes,
-      };
-
-      const res = await api.createCustomerReturn(payload);
-      if (custResolution === 'CASH_REFUND' && custRefundAmount > 0) {
+      });
+      if (custResolution === 'CashRefund' && custRefundAmount > 0) {
         recordCashFlow({ refunds: custRefundAmount });
       }
 
       setFeedback({
         type: 'success',
-        message: `Customer return recorded successfully (${res?.return_code || 'RET-SAL'}).`,
+        message: `Customer return recorded successfully (${returnCode}).`,
       });
       setCustReturnItem(null);
       setCustReturnQty(1);
@@ -106,22 +113,25 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
     setIsSubmittingVend(true);
     setFeedback(null);
     try {
-      const payload = {
+      const returnCode = await api.createVendorReturn({
+        originalPurchaseId: null,
+        partyId: null,
+        returnDate: new Date().toISOString().split('T')[0],
+        settlementType: vendResolution,
+        reason: null,
+        notes: vendNotes.trim() || null,
         items: [
           {
-            itemId: vendReturnItem.id ?? vendReturnItem.itemId,
+            itemId: vendReturnItem.itemId,
+            purchaseItemId: null,
             quantity: vendReturnQty,
+            unitCost: vendReturnQty > 0 ? vendRefundAmount / vendReturnQty : 0,
           },
         ],
-        resolution: vendResolution,
-        refundAmount: vendRefundAmount,
-        notes: vendNotes,
-      };
-
-      const res = await api.createVendorReturn(payload);
+      });
       setFeedback({
         type: 'success',
-        message: `Vendor return recorded successfully (${res?.return_code || 'RET-PUR'}).`,
+        message: `Vendor return recorded successfully (${returnCode}).`,
       });
       setVendReturnItem(null);
       setVendReturnQty(1);
@@ -206,7 +216,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                       {custReturnItem.name}
                     </span>
                     <span className="text-xs text-slate-500 ml-2">
-                      (Stock: {custReturnItem.currentStock ?? custReturnItem.current_stock ?? 0})
+                      (Stock: {custReturnItem.currentStock})
                     </span>
                   </div>
                   <Button variant="ghost" size="xs" onClick={() => setCustReturnItem(null)}>
@@ -217,7 +227,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                 <ItemSearchTypeahead
                   onSelectItem={(item) => {
                     setCustReturnItem(item);
-                    setCustRefundAmount(item.defaultSalePrice ?? item.default_sale_price ?? 0);
+                    setCustRefundAmount(item.defaultSalePrice);
                   }}
                   placeholder="Search item to return..."
                 />
@@ -231,7 +241,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                 onChange={(v) => {
                   setCustReturnQty(v);
                   if (custReturnItem) {
-                    const price = custReturnItem.defaultSalePrice ?? custReturnItem.default_sale_price ?? 0;
+                    const price = custReturnItem.defaultSalePrice;
                     setCustRefundAmount(v * price);
                   }
                 }}
@@ -240,10 +250,10 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
               <Select
                 label="Item Condition"
                 value={custCondition}
-                onChange={(v) => setCustCondition(v)}
+                onChange={(v) => setCustCondition(v as StockCondition)}
                 options={[
-                  { value: 'RESTOCKABLE', label: 'Restockable (Back to shelf)' },
-                  { value: 'DAMAGED', label: 'Damaged / Write-off to Scrap' },
+                  { value: 'Restockable', label: 'Restockable (Back to shelf)' },
+                  { value: 'DamagedScrap', label: 'Damaged / Write-off to Scrap' },
                 ]}
               />
             </div>
@@ -252,14 +262,14 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
               <Select
                 label="Settlement Resolution"
                 value={custResolution}
-                onChange={(v) => setCustResolution(v)}
+                onChange={(v) => setCustResolution(v as SettlementType)}
                 options={[
-                  { value: 'CASH_REFUND', label: 'Immediate Cash Refund' },
-                  { value: 'REDUCE_DUE', label: 'Reduce Customer Due Balance' },
-                  { value: 'REPLACEMENT', label: 'Direct Item Swap (Zero Cash)' },
+                  { value: 'CashRefund', label: 'Immediate Cash Refund' },
+                  { value: 'ReduceDue', label: 'Reduce Customer Due Balance' },
+                  { value: 'DefectiveReplacement', label: 'Direct Item Swap (Zero Cash)' },
                 ]}
               />
-              {custResolution === 'CASH_REFUND' ? (
+              {custResolution === 'CashRefund' ? (
                 <NumericInput
                   label="Refund Cash (₹)"
                   value={custRefundAmount}
@@ -310,7 +320,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                       {vendReturnItem.name}
                     </span>
                     <span className="text-xs text-slate-500 ml-2">
-                      (Stock: {vendReturnItem.currentStock ?? vendReturnItem.current_stock ?? 0})
+                      (Stock: {vendReturnItem.currentStock})
                     </span>
                   </div>
                   <Button variant="ghost" size="xs" onClick={() => setVendReturnItem(null)}>
@@ -321,7 +331,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                 <ItemSearchTypeahead
                   onSelectItem={(item) => {
                     setVendReturnItem(item);
-                    setVendRefundAmount(item.costPrice ?? item.cost_price ?? item.defaultSalePrice ?? 0);
+                    setVendRefundAmount(item.defaultSalePrice);
                   }}
                   placeholder="Search item to return to vendor..."
                 />
@@ -335,8 +345,7 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                 onChange={(v) => {
                   setVendReturnQty(v);
                   if (vendReturnItem) {
-                    const cost = vendReturnItem.costPrice ?? vendReturnItem.cost_price ?? 0;
-                    setVendRefundAmount(v * cost);
+                    setVendRefundAmount(v * vendReturnItem.defaultSalePrice);
                   }
                 }}
                 min={1}
@@ -344,10 +353,10 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
               <Select
                 label="Vendor Resolution"
                 value={vendResolution}
-                onChange={(v) => setVendResolution(v)}
+                onChange={(v) => setVendResolution(v as SettlementType)}
                 options={[
-                  { value: 'REDUCE_PAYABLE', label: 'Credit Note / Reduce Vendor Due' },
-                  { value: 'CASH_REFUND', label: 'Cash Refund Received from Vendor' },
+                  { value: 'ReduceDue', label: 'Credit Note / Reduce Vendor Due' },
+                  { value: 'CashRefund', label: 'Cash Refund Received from Vendor' },
                 ]}
               />
             </div>
@@ -395,16 +404,16 @@ export const ReturnsAdjustmentsPage: React.FC = () => {
                   </TableRow>
                 ) : (
                   adjustments.map((adj, idx) => {
-                    const delta = adj.quantityDelta ?? adj.quantity_delta ?? 0;
+                    const delta = adj.quantity;
                     return (
-                      <TableRow key={adj.id || idx}>
+                      <TableRow key={adj.id}>
                         <TableCell mono className="text-xs text-slate-400">{idx + 1}</TableCell>
-                        <TableCell className="font-medium">{adj.itemName || adj.item_name || `Item #${adj.itemId || idx + 1}`}</TableCell>
+                        <TableCell className="font-medium">{`Item #${adj.itemId}`}</TableCell>
                         <TableCell align="right" mono className={`font-semibold ${delta > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                           {delta > 0 ? `+${delta}` : delta}
                         </TableCell>
-                        <TableCell className="capitalize text-xs font-semibold">{adj.reason || 'Correction'}</TableCell>
-                        <TableCell className="text-xs text-slate-500">{adj.date || 'Today'}</TableCell>
+                        <TableCell className="capitalize text-xs font-semibold">{adj.reason}</TableCell>
+                        <TableCell className="text-xs text-slate-500">{adj.adjustmentDate}</TableCell>
                         <TableCell className="text-xs text-slate-500">{adj.notes || '—'}</TableCell>
                       </TableRow>
                     );

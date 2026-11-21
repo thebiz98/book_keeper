@@ -4,7 +4,7 @@ import { api } from '@/api';
 import { useCartStore } from '@/store/useCartStore';
 import { useAppStore } from '@/store/useAppStore';
 import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
-import type { ItemInput } from '@/types/store';
+import type { CreateSalePayload, ItemSearchResult } from '@/types';
 import { CartTable } from '@/components/domain/CartTable';
 import { SaleSummaryModal } from '@/components/domain/SaleSummaryModal';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
@@ -59,7 +59,7 @@ export const NewSalePage: React.FC = () => {
 
   // Update default cash tendered when subtotal changes
   useEffect(() => {
-    if (paymentStatus === 'PAID') {
+    if (paymentStatus === 'Paid') {
       setPaidAmount(subtotal);
       setCashTendered(subtotal);
     }
@@ -84,8 +84,8 @@ export const NewSalePage: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [items.length, isSummaryOpen, isBundleModalOpen]);
 
-  const handleSelectItem = (item: ItemInput) => {
-    const ok = addItem(item, 1);
+  const handleSelectItem = (item: ItemSearchResult) => {
+    const ok = addItem({ ...item, id: item.itemId }, 1);
     if (!ok) {
       setError(`Cannot add "${item.name}": out of stock or insufficient quantity`);
     } else {
@@ -102,18 +102,18 @@ export const NewSalePage: React.FC = () => {
     setIsSubmitting(true);
     setError(null);
 
-    const payload = {
-      saleCode: invoiceCode,
-      date: invoiceDate,
-      customerId: customerId ?? null,
-      paidAmount: paymentStatus === 'UNPAID' ? 0 : paidAmount,
-      paymentStatus,
+    const payload: CreateSalePayload = {
+      transactionCode: invoiceCode,
+      transactionDate: invoiceDate,
+      partyId: customerId,
+      paidAmount: paymentStatus === 'Unpaid' ? 0 : paidAmount,
+      paymentMode: 'CASH',
+      notes: null,
       items: items.map((it) => ({
         itemId: it.itemId,
         bundleId: it.bundleId ?? null,
-        quantity: it.quantity,
-        rate: it.rate,
-        unitsPerBundle: it.unitsPerBundle,
+        bundleQuantity: it.bundleId ? it.quantity : it.baseQuantity,
+        unitPrice: it.bundleId ? it.rate : it.rate / it.unitsPerBundle,
       })),
     };
 
@@ -121,7 +121,7 @@ export const NewSalePage: React.FC = () => {
       await api.createSale(payload);
 
       // Record cash inflow into cash register
-      const actualPaid = paymentStatus === 'UNPAID' ? 0 : paidAmount;
+      const actualPaid = paymentStatus === 'Unpaid' ? 0 : paidAmount;
       if (actualPaid > 0) {
         recordCashFlow({ salesCash: actualPaid });
       }
@@ -168,7 +168,7 @@ export const NewSalePage: React.FC = () => {
         {/* Customer Selector */}
         <div className="w-72">
           <PartySelector
-            partyType="CUSTOMER"
+            partyType="Customer"
             selectedPartyId={customerId}
             onSelectParty={(party) => {
               if (party) {
@@ -221,7 +221,7 @@ export const NewSalePage: React.FC = () => {
         {/* Middle: Payment Status Toggle */}
         <div className="flex items-center gap-3">
           <div className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs">
-            {(['PAID', 'PARTIAL', 'UNPAID'] as const).map((status) => (
+            {(['Paid', 'Partial', 'Unpaid'] as const).map((status) => (
               <button
                 key={status}
                 type="button"
@@ -237,7 +237,7 @@ export const NewSalePage: React.FC = () => {
             ))}
           </div>
 
-          {paymentStatus === 'PARTIAL' && (
+          {paymentStatus === 'Partial' && (
             <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs">
               <span className="text-slate-400">Paid: ₹</span>
               <input

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import type { ItemSearchResult } from '@/types';
 import { AppShell } from '@/components/layout/AppShell';
 import { Modal } from '@/components/ui/Modal';
 import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
@@ -46,8 +47,8 @@ const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   isOpen,
   onClose,
 }) => {
-  const [item, setItem] = useState<any>(null);
-  const stock = item ? (item.currentStock ?? item.current_stock ?? 0) : 0;
+  const [item, setItem] = useState<ItemSearchResult | null>(null);
+  const stock = item?.currentStock ?? 0;
   return (
     <Modal
       isOpen={isOpen}
@@ -63,10 +64,10 @@ const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
         {item && (
           <div className="rounded-md border border-slate-200 dark:border-slate-800 p-3 text-sm flex flex-col gap-1">
             <span className="font-semibold">{item.name}</span>
-            <StockStatusBadge currentStock={stock} baseUnit={item.baseUnit ?? item.base_unit ?? 'PCS'} />
+            <StockStatusBadge currentStock={stock} baseUnit={item.baseUnit} />
             <span>
               Rate:{' '}
-              <CurrencyDisplay amount={item.defaultSalePrice ?? item.default_sale_price ?? 0} />
+              <CurrencyDisplay amount={item.defaultSalePrice} />
             </span>
           </div>
         )}

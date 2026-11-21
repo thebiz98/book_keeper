@@ -4,7 +4,13 @@ import { cn } from '@/lib/utils';
 import { Button } from '../ui/Button';
 
 export interface RapidBillingRowProps {
-  onAddItem?: (item: any) => void;
+  onAddItem?: (entry: {
+    name: string;
+    quantity: number;
+    bundle: string;
+    rate: number;
+    total: number;
+  }) => void;
   onOpenBundleModal?: () => void;
   autoFocus?: boolean;
   className?: string;

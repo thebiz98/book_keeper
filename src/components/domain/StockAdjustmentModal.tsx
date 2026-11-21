@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '@/api';
+import type { AdjustmentReason } from '@/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
@@ -26,7 +27,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
 }) => {
   const [adjustmentType, setAdjustmentType] = useState<'DECREASE' | 'INCREASE'>('DECREASE');
   const [quantity, setQuantity] = useState<number>(1);
-  const [reason, setReason] = useState<string>('DAMAGED');
+  const [reason, setReason] = useState<AdjustmentReason>('Damaged');
   const [notes, setNotes] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
     if (isOpen) {
       setAdjustmentType('DECREASE');
       setQuantity(1);
-      setReason('DAMAGED');
+      setReason('Damaged');
       setNotes('');
       setError(null);
     }
@@ -64,10 +65,10 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
     try {
       await api.createStockAdjustment({
         itemId,
-        adjustmentQuantity: delta,
+        adjustmentDate: new Date().toISOString().split('T')[0],
+        quantity: delta,
         reason,
-        notes: notes.trim() || undefined,
-        date: new Date().toISOString().split('T')[0],
+        notes: notes.trim() || null,
       });
       onAdjusted?.();
       onClose();
@@ -150,14 +151,14 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
         <Select
           label="Reason Code *"
           value={reason}
-          onChange={(val) => setReason(String(val))}
+          onChange={(val) => setReason(val as AdjustmentReason)}
           options={[
-            { value: 'DAMAGED', label: 'Damaged / Defective in Store' },
-            { value: 'EXPIRED', label: 'Expired / Dried Ink' },
-            { value: 'SCRAP', label: 'Written off to Scrap' },
-            { value: 'COUNT_CORRECTION', label: 'Cycle Count Audit Correction' },
-            { value: 'THEFT', label: 'Shrinkage / Pilferage' },
-            { value: 'PROMOTIONAL', label: 'Store Sample / Demo' },
+            { value: 'Damaged', label: 'Damaged / Defective in Store' },
+            { value: 'Expired', label: 'Expired / Dried Ink' },
+            { value: 'DamageWriteOff', label: 'Written off to Scrap' },
+            { value: 'AuditCorrection', label: 'Cycle Count Audit Correction' },
+            { value: 'Theft', label: 'Shrinkage / Pilferage' },
+            { value: 'FoundStock', label: 'Found Stock / Surplus' },
           ]}
         />
 

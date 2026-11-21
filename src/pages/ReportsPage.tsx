@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, Download } from 'lucide-react';
 import { api } from '@/api';
+import type { CashFlowReport, PnlReport, StockValuationReport } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
@@ -10,9 +11,9 @@ export const ReportsPage: React.FC = () => {
   const [datePreset, setDatePreset] = useState<'today' | 'week' | 'month' | 'year'>('month');
 
   // Reports data
-  const [pnl, setPnl] = useState<any>(null);
-  const [valuation, setValuation] = useState<any>(null);
-  const [cashFlow, setCashFlow] = useState<any>(null);
+  const [pnl, setPnl] = useState<PnlReport | null>(null);
+  const [valuation, setValuation] = useState<StockValuationReport | null>(null);
+  const [cashFlow, setCashFlow] = useState<CashFlowReport | null>(null);
 
   const fetchReports = () => {
     const today = new Date().toISOString().split('T')[0];
@@ -20,9 +21,9 @@ export const ReportsPage: React.FC = () => {
     const toDate = today;
 
     Promise.all([
-      api.getPnLReport ? api.getPnLReport(fromDate, toDate) : Promise.resolve(null),
-      api.getStockValuationReport ? api.getStockValuationReport() : Promise.resolve(null),
-      api.getCashFlowReport ? api.getCashFlowReport(fromDate, toDate) : Promise.resolve(null),
+      api.getPnLReport(fromDate, toDate),
+      api.getStockValuationReport(),
+      api.getCashFlowReport(fromDate, toDate),
     ])
       .then(([pnlData, valData, cfData]) => {
         setPnl(pnlData);
@@ -96,7 +97,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Gross Sales Revenue</span>
               <div className="text-2xl font-bold mt-1 text-slate-900 dark:text-slate-100">
-                <CurrencyDisplay amount={pnl?.grossSales ?? pnl?.gross_sales ?? 0} />
+                <CurrencyDisplay amount={pnl?.grossSales ?? 0} />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Total customer billings</span>
             </div>
@@ -104,7 +105,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Cost of Goods Sold (COGS)</span>
               <div className="text-2xl font-bold mt-1 text-amber-600 dark:text-amber-400">
-                <CurrencyDisplay amount={pnl?.cogs ?? pnl?.cost_of_goods_sold ?? 0} />
+                <CurrencyDisplay amount={pnl?.cogs ?? 0} />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">FIFO batch cost depletion</span>
             </div>
@@ -112,7 +113,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Net Operating Profit</span>
               <div className="text-2xl font-bold mt-1">
-                <CurrencyDisplay amount={pnl?.netProfit ?? pnl?.net_profit ?? 0} colored size="hero" />
+                <CurrencyDisplay amount={pnl?.netProfit ?? 0} colored size="hero" />
               </div>
               <span className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 block">
                 {pnl?.grossSales ? `Margin: ${Math.round(((pnl.netProfit ?? 0) / pnl.grossSales) * 100)}%` : 'Active'}
@@ -176,7 +177,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Total Stock Asset Valuation</span>
               <div className="text-2xl font-bold mt-1 text-blue-600 dark:text-blue-400">
-                <CurrencyDisplay amount={valuation?.totalValuation ?? valuation?.total_valuation ?? 0} size="hero" />
+                <CurrencyDisplay amount={valuation?.totalValuation ?? 0} size="hero" />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Sum of FIFO cost × remaining lots</span>
             </div>
@@ -184,7 +185,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Active Catalog Items</span>
               <div className="text-2xl font-bold mt-1 text-slate-900 dark:text-slate-100">
-                {valuation?.totalItemsCount ?? valuation?.total_items_count ?? 0}
+                {valuation?.totalItemsCount ?? 0}
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Stationery master products</span>
             </div>
@@ -192,7 +193,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Inward Batches Tracked</span>
               <div className="text-2xl font-bold mt-1 text-slate-900 dark:text-slate-100">
-                {valuation?.activeLotsCount ?? valuation?.active_lots_count ?? 0}
+                {valuation?.activeLotsCount ?? 0}
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Distinct purchase lot layers</span>
             </div>
@@ -218,7 +219,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Cash Inflows</span>
               <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">
-                <CurrencyDisplay amount={cashFlow?.totalInflow ?? cashFlow?.total_inflow ?? 0} />
+                <CurrencyDisplay amount={cashFlow?.totalInflow ?? 0} />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Counter cash + customer dues</span>
             </div>
@@ -226,7 +227,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Cash Outflows</span>
               <div className="text-2xl font-bold mt-1 text-rose-600 dark:text-rose-400">
-                <CurrencyDisplay amount={cashFlow?.totalOutflow ?? cashFlow?.total_outflow ?? 0} />
+                <CurrencyDisplay amount={cashFlow?.totalOutflow ?? 0} />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Inward purchases + vendor dues</span>
             </div>
@@ -234,7 +235,7 @@ export const ReportsPage: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
               <span className="text-xs font-medium text-slate-500">Net Drawer Cash Flow</span>
               <div className="text-2xl font-bold mt-1">
-                <CurrencyDisplay amount={cashFlow?.netCashFlow ?? cashFlow?.net_cash_flow ?? 0} colored size="hero" />
+                <CurrencyDisplay amount={cashFlow?.netCashFlow ?? 0} colored size="hero" />
               </div>
               <span className="text-xs text-slate-400 mt-1 block">Live net liquidity</span>
             </div>

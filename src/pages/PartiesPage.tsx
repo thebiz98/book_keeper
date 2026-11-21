@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Users, Plus, Search, Pencil, Archive, User, Truck } from 'lucide-react';
 import { api } from '@/api';
+import type { Party, PartyType } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -10,41 +11,44 @@ import { TextInput } from '@/components/ui/TextInput';
 import { Select } from '@/components/ui/Select';
 import { Tabs } from '@/components/ui/Tabs';
 
-type PartyKind = 'CUSTOMER' | 'VENDOR';
-
 interface PartyForm {
   id: number | null;
   name: string;
   phone: string;
-  address: string;
-  partyType: PartyKind;
+  notes: string;
+  partyType: PartyType;
 }
 
-const emptyForm = (partyType: PartyKind): PartyForm => ({
+const emptyForm = (partyType: PartyType): PartyForm => ({
   id: null,
   name: '',
   phone: '',
-  address: '',
+  notes: '',
   partyType,
 });
 
 export const PartiesPage: React.FC = () => {
-  const [tab, setTab] = useState<PartyKind>('CUSTOMER');
+  const [tab, setTab] = useState<PartyType>('Customer');
   const [query, setQuery] = useState('');
-  const [parties, setParties] = useState<any[]>([]);
+  const [parties, setParties] = useState<Party[]>([]);
+  const [dues, setDues] = useState<Record<number, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState<PartyForm | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [archiveTarget, setArchiveTarget] = useState<any>(null);
+  const [archiveTarget, setArchiveTarget] = useState<Party | null>(null);
 
   const load = useCallback(() => {
     setIsLoading(true);
     const trimmed = query.trim();
     const req = trimmed ? api.searchParties(trimmed, tab) : api.listParties(tab, true);
+    api
+      .getPartyDuesSummary(tab)
+      .then((rows) => setDues(Object.fromEntries(rows.map((r) => [r.partyId, r.totalDue]))))
+      .catch(() => setDues({}));
     req
-      .then((data) => setParties(Array.isArray(data) ? data : []))
+      .then((data) => setParties(data))
       .catch((err: any) => {
         setParties([]);
         setError(err?.message || 'Failed to load parties');
@@ -68,7 +72,7 @@ export const PartiesPage: React.FC = () => {
     const payload = {
       name: form.name.trim(),
       phone: form.phone.trim() || null,
-      address: form.address.trim() || null,
+      notes: form.notes.trim() || null,
       partyType: form.partyType,
     };
     try {
@@ -98,13 +102,13 @@ export const PartiesPage: React.FC = () => {
     }
   };
 
-  const editParty = (p: any) =>
+  const editParty = (p: Party) =>
     setForm({
       id: p.id,
-      name: p.name ?? p.partyName ?? p.party_name ?? '',
+      name: p.name,
       phone: p.phone ?? '',
-      address: p.address ?? '',
-      partyType: String(p.partyType ?? p.party_type ?? tab).toUpperCase() === 'VENDOR' ? 'VENDOR' : 'CUSTOMER',
+      notes: p.notes ?? '',
+      partyType: p.partyType,
     });
 
   return (
@@ -127,11 +131,11 @@ export const PartiesPage: React.FC = () => {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <Tabs
           tabs={[
-            { id: 'CUSTOMER', label: 'Customers', icon: <User className="h-3.5 w-3.5" /> },
-            { id: 'VENDOR', label: 'Vendors', icon: <Truck className="h-3.5 w-3.5" /> },
+            { id: 'Customer', label: 'Customers', icon: <User className="h-3.5 w-3.5" /> },
+            { id: 'Vendor', label: 'Vendors', icon: <Truck className="h-3.5 w-3.5" /> },
           ]}
           activeTab={tab}
-          onChange={(id) => setTab(id === 'VENDOR' ? 'VENDOR' : 'CUSTOMER')}
+          onChange={(id) => setTab(id === 'Vendor' ? 'Vendor' : 'Customer')}
         />
         <div className="w-64">
           <TextInput
@@ -155,7 +159,7 @@ export const PartiesPage: React.FC = () => {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
-              <TableHead>Address</TableHead>
+              <TableHead>Notes</TableHead>
               <TableHead align="right">Balance Due</TableHead>
               <TableHead className="w-24 text-center">Actions</TableHead>
             </TableRow>
@@ -170,12 +174,12 @@ export const PartiesPage: React.FC = () => {
             ) : (
               parties.map((p) => (
                 <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.name ?? p.partyName}</TableCell>
+                  <TableCell className="font-medium">{p.name}</TableCell>
                   <TableCell className="font-mono">{p.phone || '-'}</TableCell>
-                  <TableCell>{p.address || '-'}</TableCell>
+                  <TableCell>{p.notes || '-'}</TableCell>
                   <TableCell align="right">
                     <CurrencyDisplay
-                      amount={p.balanceDue ?? p.balance_due ?? p.totalDue ?? p.total_due ?? 0}
+                      amount={dues[p.id] ?? 0}
                       colored
                       size="sm"
                     />
@@ -227,17 +231,17 @@ export const PartiesPage: React.FC = () => {
               onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />
             <TextInput
-              label="Address"
-              value={form.address}
-              onChange={(e) => setForm({ ...form, address: e.target.value })}
+              label="Notes"
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
             />
             <Select
               label="Type"
               value={form.partyType}
               onChange={(v) => setForm({ ...form, partyType: v })}
               options={[
-                { value: 'CUSTOMER', label: 'Customer' },
-                { value: 'VENDOR', label: 'Vendor' },
+                { value: 'Customer', label: 'Customer' },
+                { value: 'Vendor', label: 'Vendor' },
               ]}
             />
           </div>
