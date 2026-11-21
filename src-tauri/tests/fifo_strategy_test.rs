@@ -6,7 +6,7 @@
 mod common;
 
 use common::fixtures::*;
-use common::{FifoStrategyImpl, InventoryServiceImpl, MockUnitOfWork, PaymentServiceImpl, ReturnServiceImpl};
+use common::{FifoStrategyImpl, InventoryServiceImpl, TestDb, PaymentServiceImpl, ReturnServiceImpl};
 use book_keeper::core::dtos::{CustomerReturnItemPayload, CustomerReturnPayload};
 use book_keeper::core::error::AppError;
 use book_keeper::core::value_objects::*;
@@ -16,7 +16,7 @@ use book_keeper::services::contracts::return_service::ReturnService;
 
 #[test]
 fn test_tc_fifo_001_single_lot_full_depletion() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin transaction");
 
     // 1. Setup item and single purchase lot
@@ -30,6 +30,7 @@ fn test_tc_fifo_001_single_lot_full_depletion() {
     tx.purchases().create_purchase_item(&lot1).expect("create lot 1");
 
     // 2. Action: deplete 10.0 base units for sale
+    seed_sale_line(&mut *tx, 1, 1);
     let strategy = FifoStrategyImpl;
     let result = strategy
         .deplete_lots_for_sale(&mut *tx, 1, 1, 10.0)
@@ -49,7 +50,7 @@ fn test_tc_fifo_001_single_lot_full_depletion() {
 
 #[test]
 fn test_tc_fifo_002_multi_lot_split_depletion_with_differing_costs() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin transaction");
 
     // Setup: Lot #1 (5 @ 4.0), Lot #2 (10 @ 6.0)
@@ -65,6 +66,7 @@ fn test_tc_fifo_002_multi_lot_split_depletion_with_differing_costs() {
     tx.purchases().create_purchase_item(&lot2).expect("create lot 2");
 
     // Action: Deplete 8 units
+    seed_sale_line(&mut *tx, 1, 1);
     let strategy = FifoStrategyImpl;
     let result = strategy
         .deplete_lots_for_sale(&mut *tx, 1, 1, 8.0)
@@ -93,7 +95,7 @@ fn test_tc_fifo_002_multi_lot_split_depletion_with_differing_costs() {
 
 #[test]
 fn test_tc_fifo_003_insufficient_stock_rejection() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin transaction");
 
     // Setup: Lot #1 has remaining_quantity = 4.0
@@ -134,7 +136,7 @@ fn test_tc_fifo_003_insufficient_stock_rejection() {
 
 #[test]
 fn test_tc_fifo_004_restockable_return_lot_restoration_reverse_order() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin transaction");
 
     // Item ID 42 (non-1 ID verifies dynamic resolution)
@@ -150,6 +152,7 @@ fn test_tc_fifo_004_restockable_return_lot_restoration_reverse_order() {
     tx.purchases().create_purchase_item(&lot1).expect("create lot 10");
     tx.purchases().create_purchase_item(&lot2).expect("create lot 20");
 
+    seed_sale_line(&mut *tx, 100, 42);
     let alloc1 = create_test_allocation(1, 100, 10, 2.0, 10.0);
     let alloc2 = create_test_allocation(2, 100, 20, 3.0, 12.0);
     tx.allocations().create(&alloc1).expect("create alloc 1");
@@ -172,7 +175,7 @@ fn test_tc_fifo_004_restockable_return_lot_restoration_reverse_order() {
 
 #[test]
 fn test_tc_fifo_005_scrap_return_zero_lot_restoration() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
     let payment_service = PaymentServiceImpl;
     let return_service = ReturnServiceImpl::new(inventory_service, payment_service, uow.clone());
@@ -187,6 +190,7 @@ fn test_tc_fifo_005_scrap_return_zero_lot_restoration() {
     let lot = create_test_purchase_lot(70, 7, 7, None, 5.0, 5.0, 300.0, 0.0);
     tx.purchases().create_purchase_item(&lot).expect("create lot");
 
+    seed_sale_line(&mut *tx, 15, 7);
     let alloc = create_test_allocation(1, 15, 70, 5.0, 300.0);
     tx.allocations().create(&alloc).expect("create alloc");
     tx.commit().expect("commit");
@@ -223,7 +227,7 @@ fn test_tc_fifo_005_scrap_return_zero_lot_restoration() {
 
 #[test]
 fn test_tc_fifo_006_negative_stock_adjustment_fifo_depletion() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin transaction");
 
     // Setup: Lot #1 has qty = 10, unit_cost = 12.0
@@ -238,6 +242,7 @@ fn test_tc_fifo_006_negative_stock_adjustment_fifo_depletion() {
 
     // Action: Deplete 3.0 units for negative stock adjustment (damaged write-off)
     let strategy = FifoStrategyImpl;
+    seed_adjustment(&mut *tx, 1, 1);
     let adj_result = strategy
         .deplete_lots_for_adjustment(&mut *tx, 1, 1, 3.0)
         .expect("adjustment depletion must succeed");

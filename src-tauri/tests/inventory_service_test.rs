@@ -6,7 +6,7 @@
 mod common;
 
 use common::fixtures::*;
-use common::{FifoStrategyImpl, MockUnitOfWork};
+use common::{FifoStrategyImpl, TestDb};
 use book_keeper::core::dtos::*;
 use book_keeper::core::entities::*;
 use book_keeper::core::error::AppError;
@@ -20,11 +20,11 @@ use book_keeper::services::contracts::inventory_service::InventoryService;
 /// Test implementation of InventoryService matching LLD Section 6.3
 pub struct InventoryServiceImpl<S: InventoryAllocationStrategy> {
     pub strategy: S,
-    pub uow: MockUnitOfWork,
+    pub uow: TestDb,
 }
 
 impl<S: InventoryAllocationStrategy> InventoryServiceImpl<S> {
-    pub fn new(strategy: S, uow: MockUnitOfWork) -> Self {
+    pub fn new(strategy: S, uow: TestDb) -> Self {
         Self { strategy, uow }
     }
 }
@@ -201,7 +201,7 @@ impl<S: InventoryAllocationStrategy> InventoryService for InventoryServiceImpl<S
 
 #[test]
 fn test_tc_inv_001_deplete_stock_updates_cache_atomically() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
 
     let mut tx = uow.begin_transaction().expect("begin tx");
@@ -216,6 +216,7 @@ fn test_tc_inv_001_deplete_stock_updates_cache_atomically() {
     tx.purchases().create_purchase_item(&lot).expect("create lot");
 
     // Action: Deplete 10.0 units
+    seed_sale_line(&mut *tx, 10, 1);
     let res = inventory_service.deplete_stock_for_sale(&mut *tx, 10, 1, 10.0).expect("deplete stock");
     assert_eq!(res.total_cogs, 1000.0);
 
@@ -227,7 +228,7 @@ fn test_tc_inv_001_deplete_stock_updates_cache_atomically() {
 
 #[test]
 fn test_tc_inv_002_add_stock_increments_cache() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
 
     let mut tx = uow.begin_transaction().expect("begin tx");
@@ -251,7 +252,7 @@ fn test_tc_inv_002_add_stock_increments_cache() {
 
 #[test]
 fn test_tc_inv_003_restore_stock_for_return_increments_cache() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
 
     let mut tx = uow.begin_transaction().expect("begin tx");
@@ -265,6 +266,7 @@ fn test_tc_inv_003_restore_stock_for_return_increments_cache() {
     let lot = create_test_purchase_lot(55, 3, 3, None, 25.0, 25.0, 50.0, 20.0);
     tx.purchases().create_purchase_item(&lot).expect("create lot");
 
+    seed_sale_line(&mut *tx, 10, 3);
     let alloc = create_test_allocation(1, 10, 55, 5.0, 50.0);
     tx.allocations().create(&alloc).expect("create alloc");
 
@@ -282,7 +284,7 @@ fn test_tc_inv_003_restore_stock_for_return_increments_cache() {
 
 #[test]
 fn test_tc_inv_004_negative_adjustment_creates_audit_trail() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
 
     let mut tx = uow.begin_transaction().expect("begin tx");
@@ -321,7 +323,7 @@ fn test_tc_inv_004_negative_adjustment_creates_audit_trail() {
 
 #[test]
 fn test_tc_inv_005_positive_adjustment_creates_synthetic_lot() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
 
     let mut tx = uow.begin_transaction().expect("begin tx");
@@ -360,7 +362,7 @@ fn test_tc_inv_005_positive_adjustment_creates_synthetic_lot() {
 
 #[test]
 fn test_tc_inv_006_low_stock_flag_transition() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
 
     let mut tx = uow.begin_transaction().expect("begin tx");
@@ -375,6 +377,7 @@ fn test_tc_inv_006_low_stock_flag_transition() {
     tx.purchases().create_purchase_item(&lot).expect("create lot");
 
     // Action: Deplete 2.0 units
+    seed_sale_line(&mut *tx, 1, 6);
     inventory_service.deplete_stock_for_sale(&mut *tx, 1, 6, 2.0).expect("deplete stock");
 
     // Assert: stock transitions 6.0 -> 4.0; is_low_stock transitions false -> true (< 5.0)

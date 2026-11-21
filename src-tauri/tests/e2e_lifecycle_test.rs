@@ -17,13 +17,13 @@ use book_keeper::services::contracts::sale_service::SaleService;
 #[test]
 fn test_e2e_5_step_lifecycle_scenario() {
     println!("=== STARTING 5-STEP BACKEND E2E LIFECYCLE TEST ===");
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
     let payment_service = PaymentServiceImpl;
     let purchase_service = PurchaseServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
-    let report_service = ReportServiceImpl::new(uow.clone());
+    let report_service = ReportServiceImpl::with_fixed_today(uow.clone(), "2026-11-20");
 
     // Initial Setup: Register the item "Pencil"
     {

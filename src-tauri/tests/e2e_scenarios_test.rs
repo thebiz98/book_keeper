@@ -22,12 +22,12 @@ use book_keeper::services::contracts::sale_service::SaleService;
 #[test]
 fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
     println!("=== EXECUTING SCENARIO S1: MORNING INWARD TO EVENING DRAWER AUDIT ===");
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
     let payment_service = PaymentServiceImpl;
     let purchase_service = PurchaseServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
-    let report_service = ReportServiceImpl::new(uow.clone());
+    let report_service = ReportServiceImpl::with_fixed_today(uow.clone(), "2026-11-20");
 
     // 1. Setup item "Nataraj Pencil" (initial stock = 0, is_low_stock = true)
     {
@@ -120,7 +120,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
 #[test]
 fn test_scenario_s2_customer_credit_and_khata_cycle() {
     println!("=== EXECUTING SCENARIO S2: CUSTOMER CREDIT & KHATA CYCLE ===");
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
@@ -189,7 +189,7 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
 #[test]
 fn test_scenario_s3_restockable_return_and_defective_replacement() {
     println!("=== EXECUTING SCENARIO S3: RESTOCKABLE RETURN & DEFECTIVE REPLACEMENT ===");
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
@@ -287,20 +287,20 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
 #[test]
 fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
     println!("=== EXECUTING SCENARIO S4: BULK CATALOG & INSTANT BARCODE BILLING ===");
-    let uow = MockUnitOfWork::new();
-    let sqlite_conn = std::sync::Arc::new(std::sync::Mutex::new(common::setup_in_memory_db().unwrap()));
-    let indexer = SqliteSearchIndexer::new(sqlite_conn, uow.clone());
+    let uow = TestDb::new();
+    let indexer = uow.indexer();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service, payment_service, uow.clone());
 
+    let mut catalog = Vec::new();
     {
         let mut tx = uow.begin_transaction().unwrap();
         for i in 1..=100 {
             let barcode = format!("89010300{:05}", i);
             let item = create_test_item(i, &format!("Stationery Product {}", i), Some("Office"), Some(&barcode), 50.0, 25.0);
             tx.items().create(&item).unwrap();
-            indexer.index_item(&item).unwrap();
+            catalog.push(item);
 
             let pur = create_test_purchase_tx(i, &format!("PUR-{}", i), None, 500.0, 500.0, "2026-11-20");
             tx.purchases().create_transaction(&pur).unwrap();
@@ -308,6 +308,10 @@ fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
             tx.purchases().create_purchase_item(&lot).unwrap();
         }
         tx.commit().unwrap();
+    }
+    // Index only after commit: the indexer writes through its own connection.
+    for item in &catalog {
+        indexer.index_item(item).unwrap();
     }
 
     let scan_query = "8901030000042";
@@ -389,7 +393,7 @@ fn create_scenario_vb_archive(archive_path: &str, company_name: &str, item_count
 #[test]
 fn test_scenario_s5_legacy_vedbill_cutover_and_reconciliation() {
     println!("=== EXECUTING SCENARIO S5: VEDBILL CUTOVER & RECONCILIATION ===");
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let migration_service = MigrationServiceImpl::new(uow.clone());
 
     let archive_path = std::env::temp_dir().join(format!("vedbill_cutover_test_{}.vb", uuid::Uuid::new_v4()));

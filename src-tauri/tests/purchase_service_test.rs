@@ -12,8 +12,8 @@ use book_keeper::core::value_objects::*;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::purchase_service::PurchaseService;
 
-fn setup_purchase_service() -> (PurchaseServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>, MockUnitOfWork) {
-    let uow = MockUnitOfWork::new();
+fn setup_purchase_service() -> (PurchaseServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>, TestDb) {
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
     let payment_service = PaymentServiceImpl;
     let purchase_service = PurchaseServiceImpl::new(inventory_service, payment_service, uow.clone());

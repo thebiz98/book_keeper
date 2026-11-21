@@ -8,15 +8,14 @@ mod common;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use common::fixtures::*;
-use common::{MockUnitOfWork, SqliteSearchIndexer};
+use common::TestDb;
 use book_keeper::data::contracts::search_indexer::ItemSearchIndexer;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 
 #[test]
 fn test_tc_srch_001_sub_millisecond_prefix_search() {
-    let sqlite_conn = Arc::new(Mutex::new(common::setup_in_memory_db().expect("init in-memory sqlite")));
-    let uow = MockUnitOfWork::new();
-    let indexer = SqliteSearchIndexer::new(sqlite_conn, uow.clone());
+    let uow = TestDb::new();
+    let indexer = uow.indexer();
 
     let mut tx = uow.begin_transaction().expect("begin tx");
     let item = create_test_item(1, "Apsara Platinum Pencil", Some("Stationery"), Some("8901030381000"), 50.0, 10.0);
@@ -45,9 +44,8 @@ fn test_tc_srch_001_sub_millisecond_prefix_search() {
 
 #[test]
 fn test_tc_srch_002_barcode_exact_and_prefix_scanner_lookup() {
-    let sqlite_conn = Arc::new(Mutex::new(common::setup_in_memory_db().expect("init in-memory sqlite")));
-    let uow = MockUnitOfWork::new();
-    let indexer = SqliteSearchIndexer::new(sqlite_conn, uow.clone());
+    let uow = TestDb::new();
+    let indexer = uow.indexer();
 
     let mut tx = uow.begin_transaction().expect("begin tx");
     let item1 = create_test_item(1, "Doms Colour Pencils", None, Some("8901030381023"), 20.0, 60.0);
@@ -70,9 +68,8 @@ fn test_tc_srch_002_barcode_exact_and_prefix_scanner_lookup() {
 
 #[test]
 fn test_tc_srch_003_soft_deleted_archived_item_exclusion() {
-    let sqlite_conn = Arc::new(Mutex::new(common::setup_in_memory_db().expect("init in-memory sqlite")));
-    let uow = MockUnitOfWork::new();
-    let indexer = SqliteSearchIndexer::new(sqlite_conn, uow.clone());
+    let uow = TestDb::new();
+    let indexer = uow.indexer();
 
     let mut tx = uow.begin_transaction().expect("begin tx");
     let mut archived_item = create_test_item(3, "Old Discontinued Ink", None, None, 0.0, 20.0);
@@ -91,7 +88,7 @@ fn test_tc_srch_003_soft_deleted_archived_item_exclusion() {
 
 #[test]
 fn test_tc_srch_004_dynamic_bundle_suggestion_aggregation() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin tx");
 
     // Setup: 10 items have "Box" (10 units), 2 items have "Dozen" (12 units)

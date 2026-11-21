@@ -6,7 +6,7 @@
 mod common;
 
 use common::fixtures::*;
-use common::MockUnitOfWork;
+use common::TestDb;
 use book_keeper::core::dtos::*;
 use book_keeper::core::entities::*;
 use book_keeper::core::error::AppError;
@@ -114,7 +114,7 @@ impl PaymentService for PaymentServiceImpl {
 
 #[test]
 fn test_tc_pay_001_record_full_payment_clears_balance() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin tx");
 
     // Setup: Sale with balance_due = 250.0, Partial
@@ -149,7 +149,7 @@ fn test_tc_pay_001_record_full_payment_clears_balance() {
 
 #[test]
 fn test_tc_pay_002_record_partial_payment_updates_status() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin tx");
 
     // Setup: Bill with balance_due = 500.0
@@ -178,7 +178,7 @@ fn test_tc_pay_002_record_partial_payment_updates_status() {
 
 #[test]
 fn test_tc_pay_003_overpayment_rejected() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin tx");
 
     // Setup: Bill with balance_due = 500.0
@@ -215,7 +215,7 @@ fn test_tc_pay_003_overpayment_rejected() {
 
 #[test]
 fn test_tc_pay_004_record_refund_creates_outflow_settlement() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let mut tx = uow.begin_transaction().expect("begin tx");
 
     // Action: Record 50.0 cash refund

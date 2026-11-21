@@ -26,7 +26,7 @@ use book_keeper::services::contracts::return_service::ReturnService;
 use book_keeper::services::contracts::sale_service::SaleService;
 
 struct ComboTestHarness {
-    uow: MockUnitOfWork,
+    uow: TestDb,
     inventory_service: InventoryServiceImpl<FifoStrategyImpl>,
     purchase_service: PurchaseServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>,
     sale_service: SaleServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>,
@@ -34,11 +34,11 @@ struct ComboTestHarness {
     accounting_service: AccountingServiceImpl<PaymentServiceImpl>,
     report_service: ReportServiceImpl,
     migration_service: MigrationServiceImpl,
-    indexer: SqliteSearchIndexer,
+    indexer: book_keeper::data::sqlite::fts_indexer::SqliteFts5SearchIndexer,
 }
 
 fn create_combo_harness() -> ComboTestHarness {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let fifo = FifoStrategy;
     let inventory_service = InventoryServiceImpl::new(fifo, uow.clone());
     let payment_service = PaymentServiceImpl;
@@ -46,10 +46,9 @@ fn create_combo_harness() -> ComboTestHarness {
     let sale_service = SaleServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let return_service = ReturnServiceImpl::new(inventory_service.clone(), payment_service, uow.clone());
     let accounting_service = AccountingServiceImpl::new(payment_service, uow.clone());
-    let report_service = ReportServiceImpl::new(uow.clone());
+    let report_service = ReportServiceImpl::with_fixed_today(uow.clone(), "2026-11-20");
     let migration_service = MigrationServiceImpl::new(uow.clone());
-    let sqlite_conn = Arc::new(Mutex::new(common::setup_in_memory_db().expect("init sqlite")));
-    let indexer = SqliteSearchIndexer::new(sqlite_conn, uow.clone());
+    let indexer = uow.indexer();
 
     ComboTestHarness {
         uow,
@@ -318,12 +317,13 @@ fn test_tc_t3_cmb_004_legacy_migration_reindex_checkout_cash_flow() {
 
     // 2. FTS5 Indexing of imported catalog
     {
-        let mut tx = harness.uow.begin_transaction().unwrap();
-        let items = tx.items().list_catalog(None, false, 0, 10).unwrap();
+        let items = {
+            let mut tx = harness.uow.begin_transaction().unwrap();
+            tx.items().list_catalog(None, false, 0, 10).unwrap()
+        }; // read tx released before the indexer writes
         for itm in &items {
             harness.indexer.index_item(itm).expect("index");
         }
-        tx.commit().unwrap();
     }
 
     // 3. Search and Checkout

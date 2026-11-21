@@ -7,7 +7,7 @@ mod common;
 
 use std::fs::File;
 use std::io::{Read, Write};
-use common::{MigrationServiceImpl, MockUnitOfWork};
+use common::{MigrationServiceImpl, TestDb};
 use book_keeper::core::error::AppError;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::migration_service::MigrationService;
@@ -62,7 +62,7 @@ fn create_test_vb_archive(archive_path: &str, company_name: &str, item_count: us
 
 #[test]
 fn test_tc_mig_001_vedbill_zip_container_discovery_and_validation() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let migration_service = MigrationServiceImpl::new(uow);
 
     let archive_path = std::env::temp_dir().join(format!("test_company_valid_{}.vb", uuid::Uuid::new_v4()));
@@ -83,7 +83,7 @@ fn test_tc_mig_001_vedbill_zip_container_discovery_and_validation() {
 
 #[test]
 fn test_tc_mig_002_atomic_database_migration() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let migration_service = MigrationServiceImpl::new(uow.clone());
 
     let archive_path = std::env::temp_dir().join(format!("test_migration_exec_{}.vb", uuid::Uuid::new_v4()));
@@ -107,7 +107,7 @@ fn test_tc_mig_002_atomic_database_migration() {
 
 #[test]
 fn test_tc_mig_003_corrupt_non_zip_file_rejection() {
-    let uow = MockUnitOfWork::new();
+    let uow = TestDb::new();
     let migration_service = MigrationServiceImpl::new(uow.clone());
 
     let corrupt_path = std::env::temp_dir().join(format!("corrupt_file_{}.vb", uuid::Uuid::new_v4()));

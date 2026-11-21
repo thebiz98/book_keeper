@@ -13,8 +13,8 @@ use book_keeper::core::value_objects::*;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::sale_service::SaleService;
 
-fn setup_sale_service() -> (SaleServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>, MockUnitOfWork) {
-    let uow = MockUnitOfWork::new();
+fn setup_sale_service() -> (SaleServiceImpl<InventoryServiceImpl<FifoStrategyImpl>, PaymentServiceImpl>, TestDb) {
+    let uow = TestDb::new();
     let inventory_service = InventoryServiceImpl::new(FifoStrategyImpl, uow.clone());
     let payment_service = PaymentServiceImpl;
     let sale_service = SaleServiceImpl::new(inventory_service, payment_service, uow.clone());

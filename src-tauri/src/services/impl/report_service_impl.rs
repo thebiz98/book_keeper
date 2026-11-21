@@ -10,11 +10,24 @@ use crate::services::contracts::report_service::ReportService;
 #[derive(Clone)]
 pub struct ReportServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>> {
     pub uow: U,
+    /// Fixed business date ("YYYY-MM-DD") for deterministic tests; `None` = local clock.
+    fixed_today: Option<String>,
 }
 
 impl<U: UnitOfWork> ReportServiceImpl<U> {
     pub fn new(uow: U) -> Self {
-        Self { uow }
+        Self { uow, fixed_today: None }
+    }
+
+    /// Pins "today" for dashboard metrics (tests, back-dated reports).
+    pub fn with_fixed_today(uow: U, today: &str) -> Self {
+        Self { uow, fixed_today: Some(today.to_string()) }
+    }
+
+    fn today(&self) -> String {
+        self.fixed_today
+            .clone()
+            .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string())
     }
 }
 
@@ -26,10 +39,32 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
         let lots = tx.purchases().list_all_lots()?;
         let allocations = tx.allocations().list_all()?;
         let settlements = tx.settlements().list_all()?;
+        let settlements: Vec<_> = settlements
+            .into_iter()
+            .filter(|s| s.settlement_date.starts_with(self.today().as_str()))
+            .collect();
 
-        let today_sales: f64 = sales.iter().map(|s| s.total_amount).sum();
-        let today_purchases: f64 = purchases.iter().map(|p| p.total_amount).sum();
-        let total_cogs: f64 = allocations.iter().map(|a| a.quantity_depleted * a.unit_cost).sum();
+        // Flow metrics cover today's business date only; balances below stay all-time.
+        let today = self.today();
+        let is_today = |date: &str| date.starts_with(today.as_str());
+        let today_sale_list: Vec<_> = sales.iter().filter(|s| is_today(&s.transaction_date)).collect();
+        let today_purchase_list: Vec<_> = purchases.iter().filter(|p| is_today(&p.transaction_date)).collect();
+
+        let today_sales: f64 = today_sale_list.iter().map(|s| s.total_amount).sum();
+        let today_purchases: f64 = today_purchase_list.iter().map(|p| p.total_amount).sum();
+
+        // COGS of today's sales: allocations whose sale line belongs to a sale dated today.
+        let mut today_sale_item_ids = std::collections::HashSet::new();
+        for sale in &today_sale_list {
+            for line in tx.sales().list_items_by_transaction_id(sale.id)? {
+                today_sale_item_ids.insert(line.id);
+            }
+        }
+        let total_cogs: f64 = allocations
+            .iter()
+            .filter(|a| today_sale_item_ids.contains(&a.sale_item_id))
+            .map(|a| a.quantity_depleted * a.unit_cost)
+            .sum();
         let today_net_profit = today_sales - total_cogs;
 
         let total_stock_valuation: f64 = lots
@@ -40,12 +75,12 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
         let customer_receivables: f64 = sales.iter().map(|s| s.balance_due).sum();
         let vendor_payables: f64 = purchases.iter().map(|p| p.balance_due).sum();
 
-        let sales_cash: f64 = sales
+        let sales_cash: f64 = today_sale_list
             .iter()
             .filter(|s| s.payment_mode.as_deref() == Some("CASH"))
             .map(|s| s.paid_amount)
             .sum();
-        let pur_cash: f64 = purchases
+        let pur_cash: f64 = today_purchase_list
             .iter()
             .filter(|p| p.payment_mode.as_deref() == Some("CASH"))
             .map(|p| p.paid_amount)
@@ -75,9 +110,9 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
             today_sales,
             today_purchases,
             today_sales_amount: today_sales,
-            today_sales_count: sales.len(),
+            today_sales_count: today_sale_list.len(),
             today_purchase_amount: today_purchases,
-            today_purchase_count: purchases.len(),
+            today_purchase_count: today_purchase_list.len(),
             today_net_profit,
             total_stock_valuation,
             customer_receivables,
@@ -167,6 +202,10 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let settlements = tx.settlements().list_all()?;
+        let settlements: Vec<_> = settlements
+            .into_iter()
+            .filter(|s| s.settlement_date.starts_with(self.today().as_str()))
+            .collect();
         let mut total_inflow = 0.0;
         let mut total_outflow = 0.0;
         for s in settlements {

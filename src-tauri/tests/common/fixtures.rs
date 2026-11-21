@@ -240,3 +240,57 @@ pub fn create_test_adjustment(
         created_at: format!("{}T14:00:00Z", date),
     }
 }
+
+// -------------------------------------------------------------------------
+// Referential seeding helpers.
+// The SQLite schema enforces foreign keys, so low-level strategy/repository
+// tests must create the parent rows the in-memory doubles never required.
+// Seeded parents use high ids / "SEED-" codes so they never collide with ids
+// or "SAL-"/"PUR-" code sequences the tests assert on.
+// -------------------------------------------------------------------------
+
+use book_keeper::data::contracts::unit_of_work::TransactionContext;
+
+const SEED_ID_BASE: i64 = 900_000;
+
+/// Creates a placeholder item with `item_id` if it does not exist yet.
+pub fn ensure_item(tx: &mut dyn TransactionContext, item_id: i64) {
+    if tx.items().find_by_id(item_id).expect("find item").is_none() {
+        let item = create_test_item(item_id, &format!("Seed Item {item_id}"), None, None, 0.0, 1.0);
+        tx.items().create(&item).expect("seed item");
+    }
+}
+
+/// Creates a placeholder purchase header with `purchase_id` if missing.
+pub fn ensure_purchase(tx: &mut dyn TransactionContext, purchase_id: i64) {
+    if tx.purchases().find_by_id(purchase_id).expect("find purchase").is_none() {
+        let pur = create_test_purchase_tx(purchase_id, &format!("SEED-PUR-{purchase_id}"), None, 0.0, 0.0, "2026-01-01");
+        tx.purchases().create_transaction(&pur).expect("seed purchase");
+    }
+}
+
+/// Creates a sale header + sale line with id `sale_item_id` for `item_id`.
+pub fn seed_sale_line(tx: &mut dyn TransactionContext, sale_item_id: i64, item_id: i64) {
+    ensure_item(tx, item_id);
+    let sale_id = SEED_ID_BASE + sale_item_id;
+    let sale = create_test_sale_tx(sale_id, &format!("SEED-SAL-{sale_item_id}"), None, 0.0, 0.0, "2026-01-01");
+    tx.sales().create_transaction(&sale).expect("seed sale");
+    let line = create_test_sale_item(sale_item_id, sale_id, item_id, None, 0.0, 0.0, 0.0);
+    tx.sales().create_sale_item(&line).expect("seed sale line");
+}
+
+/// Creates a stock adjustment header with `adjustment_id` for `item_id`.
+pub fn seed_adjustment(tx: &mut dyn TransactionContext, adjustment_id: i64, item_id: i64) {
+    ensure_item(tx, item_id);
+    let adj = create_test_adjustment(adjustment_id, item_id, 0.0, AdjustmentReason::DamageWriteOff, "2026-01-01");
+    tx.adjustments().create(&adj).expect("seed adjustment");
+}
+
+/// Creates an empty (zero-quantity) purchase lot with `lot_id` if missing.
+pub fn ensure_lot(tx: &mut dyn TransactionContext, lot_id: i64, item_id: i64) {
+    ensure_item(tx, item_id);
+    let pur_id = SEED_ID_BASE + lot_id;
+    ensure_purchase(tx, pur_id);
+    let lot = create_test_purchase_lot(lot_id, pur_id, item_id, None, 0.0, 0.0, 0.0, 0.0);
+    tx.purchases().create_purchase_item(&lot).expect("seed lot");
+}
