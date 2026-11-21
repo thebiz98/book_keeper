@@ -2,8 +2,8 @@
 **System:** Offline-First Retail Accounting & Inventory Management Desktop Application  
 **Target Environment:** Windows Laptop (Single-Node, Embedded Database)  
 **Currency:** Indian Rupees (₹)  
-**Status:** Approved Requirements & Entity Design Baseline  
-**UI/UX Companion Document:** [UI/UX Specification](file:///c:/custom_apps/book_keeper/docs/book_keeper_UI_UX_Specification.md)  
+**Status:** Approved Requirements & Entity Design Baseline (rev. 2026-11-21 — aligned per [Design Decisions](DESIGN_DECISIONS.md))  
+**UI/UX Companion Document:** [UI/UX Specification](book_keeper_UI_UX_Specification.md)  
 
 ---
 
@@ -21,49 +21,57 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **FR-01: Inward Stock & Purchase Management**
   * The user can record purchases of items into stock with item name, quantity, unit cost (₹), purchase date, and optional vendor details.
   * The user can specify the payment status: **Cash** (`PAID`), **Credit** (`UNPAID`), or **Partial** (`PARTIAL`) with an upfront `paid_amount` and remaining `balance_due`.
+  * The stated status must agree with `paid_amount` (`PAID` ⇒ paid = total; `PARTIAL` ⇒ 0 < paid < total; `UNPAID` ⇒ paid = 0); paying more than the total is rejected. A vendor is required unless `PAID`.
 * **FR-02: Outward Sales Management**
   * The user can record sales of items with quantity, selling price (₹), sale date, and optional customer details.
   * The user can record multi-item sales under a single transaction (cart-style billing).
   * The user can specify the payment status: **Cash** (`PAID`), **Credit** (`UNPAID`), or **Partial** (`PARTIAL`) with an upfront `paid_amount` and remaining `balance_due`.
+  * The stated status must agree with `paid_amount` (`PAID` ⇒ paid ≥ total, excess is change and is not stored; `PARTIAL` ⇒ 0 < paid < total; `UNPAID` ⇒ paid = 0). A customer is required unless `PAID`.
 * **FR-03: Strict FIFO Stock Depletion**
-  * When an item is sold, the system automatically depletes inventory from the **oldest available purchase batch** (First-In, First-Out).
+  * When an item is sold, the system automatically depletes inventory from the **oldest available stock lot** (First-In, First-Out). "Oldest" is entry order (lowest lot id); back-dated entries are treated as newest and never re-cost past sales.
   * When inventory for an item spans multiple batches with different purchase costs, the system splits depletion across batches and calculates the exact Cost of Goods Sold (COGS).
 * **FR-04: Negative Stock Prevention**
   * The system strictly validates available stock across all active batches before committing a sale. Sales that exceed total available stock are blocked.
+  * Validation sums the required base quantity per item across all cart lines (the same item on several lines is checked in aggregate). The same guard applies to negative adjustments, vendor returns, and replacement issues.
 * **FR-05: Real-Time Low Stock Monitoring**
   * The system flags any item as "Low Stock" when its total aggregated stock across all batches drops below **5 units** (`current_stock < 5`).
   * Low stock items are surfaced on the Home / Dashboard screen.
 * **FR-06: Symmetrical Credit & Dues Management**
   * **Customer Receivables**: The user can view total outstanding dues owed by customers (sum of `balance_due` on unpaid and partial sales).
   * **Vendor Payables**: The user can view total outstanding dues owed by the shop to suppliers (sum of `balance_due` on unpaid and partial purchases).
-  * **Due Settlement**: The user can record subsequent payments against specific bills. Each settlement decreases `balance_due` and logs the exact settlement date for daily cash register balancing.
+  * **Due Settlement**: The user can record subsequent payments against a specific bill (from Sales/Purchase History) or against a party's oldest open bills first (FIFO, from Credit & Dues). Each settlement decreases `balance_due`, can never exceed the outstanding amount, and logs the exact settlement date for daily cash register balancing.
+  * **Single payment ledger**: every money event (upfront payment, settlement, return credit, cash refund in/out) is one `PAYMENT_SETTLEMENT` row; bill `paid_amount` / `balance_due` / `payment_status` are cached values derived from it (see Assumption 8).
 * **FR-07: Returns & Replacements**
-  * **Customer Sales Return**: Returning sold items for cash refunds or credit due reduction. When items are marked **Restockable**, the system automatically restores `remaining_quantity` on the original inward `PURCHASE_ITEM` lots (traced via `SALE_STOCK_ALLOCATION`), re-entering inventory at their original inward cost.
-  * **Defective Item Replacement**: Swapping a defective sold item with a fresh one without disrupting monetary ledgers.
-  * **Vendor Purchase Return**: Returning damaged/unsold stock to suppliers, reducing vendor payables or logging cash refunds.
+  * **Customer Sales Return**: Returning sold items. When items are marked **Restockable**, the system restores `remaining_quantity` on the original lots (traced via `SALE_STOCK_ALLOCATION`, latest-depleted first), re-entering inventory at their original cost. `DAMAGED_SCRAP` items are not restocked.
+    * **Linked return** (against a sale line): returned qty ≤ sold − already returned; same item; refund rate ≤ the line's effective rate (defaults to it). Repeated partial returns never over-restore lots.
+    * **Unlinked return** (no receipt): allowed; a Restockable unit re-enters stock as a new `RETURN`-source lot at the item's latest lot cost (user enters cost if the item never had a lot).
+  * **Refund settlement (both directions)**: return value first reduces the linked bill's `balance_due` (capped at that balance); any remainder is paid out (customer) / received (vendor) as cash. With no linked bill but a known party, the value is applied to that party's oldest open bills first, remainder in cash; walk-in returns are pure cash refunds.
+  * **Defective Item Replacement**: The defective unit is returned (Scrap or Restockable) and a fresh unit of the same item (qty ≤ returned) is issued via FIFO. No money moves and revenue is not reversed; the fresh unit's cost is booked as an inventory loss on the return date. The original sale is not altered.
+  * **Vendor Purchase Return**: Returning stock to suppliers from a specific lot (qty ≤ lot remaining) or FIFO across the item's lots; settled per the refund rule above (payables first, then cash received).
 * **FR-08: Standalone Stock Adjustments with FIFO Depletion**
-  * The user can adjust stock quantities directly via item search (name or barcode) without referencing a sale or invoice ID, specifying reasons such as `DAMAGED`, `EXPIRED`, `THEFT_LOST`, or `COUNT_CORRECTION`.
-  * **FIFO Depletion Linkage**: When an adjustment is negative (e.g. -5 damaged units), the system automatically triggers the FIFO allocation engine to deduct `remaining_quantity` from the oldest available purchase lots, preventing phantom inventory lots and logging inventory write-off losses accurately.
+  * The user can adjust stock quantities directly via item search (name or barcode) without referencing a sale or invoice ID, with an adjustment date and a reason: `DAMAGED`, `EXPIRED`, `THEFT_LOST`, or `COUNT_CORRECTION`.
+  * **FIFO Depletion Linkage**: When an adjustment is negative (e.g. -5 damaged units), the system automatically triggers the FIFO allocation engine to deduct `remaining_quantity` from the oldest available lots, preventing phantom inventory lots and logging inventory write-off losses accurately.
+  * **Positive adjustments** (found stock) create a new `ADJUSTMENT`-source lot at the item's most recent lot cost; if the item has never had a lot, the user must enter the unit cost. The selling price is never used as cost.
 * **FR-09: Financial Aggregations & Reports**
-  * Periodic totals (Day, Week, Month, Year) for:
-    * Total Sales (Gross Revenue)
-    * Total Purchases
-    * Cash Flow (Actual cash collected vs. cash paid out)
-    * Total Stock Valuation: Sum of (Remaining Batch Qty × Batch Unit Cost) across all active lots
-    * Net Profit: Period Gross Sales - Period COGS
+  * Periodic totals (Day, Week, Month, Year presets or a custom range) for:
+    * Total Sales (Gross Revenue), Sales Returns, and Net Sales
+    * Total Purchases (net of vendor returns; excludes adjustment/opening/return lots)
+    * Cash Flow (actual cash in vs. cash out, from the payment ledger)
+    * Total Stock Valuation: Sum of (Remaining Lot Qty × Lot Unit Cost) across all active lots
+    * Profit statement: Net Sales − COGS (net of returned units) = Gross Profit; − Inventory Losses (write-offs, scrap returns, replacement units) = Net Profit
 * **FR-10: Lists & Operational Views**
   * Complete, filterable lists of all Sales, all Purchases, Pending Customer Dues (Receivables), and Pending Vendor Dues (Payables).
-* **FR-11: Data Portability & Local Backup**
-  * Export data to CSV / Excel sheets.
-  * Import items and opening records from CSV / Excel sheets.
-  * One-click local database backup to a user-selected folder or external USB drive.
+* **FR-11: Data Portability & Local Backup** *(v1 scope)*
+  * Import items with opening stock from CSV / Excel (`.xlsx`): a dry-run validation report (row-level errors, duplicates) precedes execution with a conflict strategy (`SKIP`, `OVERWRITE`, `ADD_STOCK`); opening stock creates `OPENING`-source lots at the row's purchase cost. All-or-nothing.
+  * One-click local database backup to a user-selected folder or external USB drive, plus a database integrity check.
+  * *Deferred to v2:* all exports, parties import, opening dues, VedBill migration, restore from backup.
 * **FR-12: Future Invoicing Foundation**
   * Transactions are stored with unique sequential transaction codes, customer/vendor relationships, line-item breakdowns, and shop profile headers, allowing instant printable bill generation without schema changes.
 * **FR-13: Item Packaging & Bundles (Multi-UOM)**
   * The system supports pre-defined packaging bundles for an item (e.g., a "Box of 10 Pencils", a "Dozen of 12", a "Carton of 500 Sheets").
   * **Base Unit Integrity**: Inventory stock is always tracked and depleted via FIFO at the smallest base unit level (`base_unit`, e.g., Piece). Selling or purchasing in bundles automatically converts to base units via the bundle's multiplier (`quantity = bundle_quantity * units_per_bundle`).
   * **Dual Entry Points for Bundle Creation**:
-    1. *Dedicated Item Master Screen*: Configured during initial item creation or editing (cold start).
+    1. *Dedicated Item Master Screen*: Configured during initial item creation or editing (cold start). Bundles can be edited, and deleted only if no transaction line references them. `units_per_bundle` must be > 1.
     2. *Inline on the Fly*: An inline `[+ New Bundle]` option / shortcut (`Alt + B`) in the billing/purchase unit dropdown opens a quick modal dialog to define a new bundle name, multiplier, and default price without leaving the screen.
   * **Dynamic, Self-Learning Presets (Zero UI Hardcoding)**:
     * The system dynamically queries distinct `(bundle_name, units_per_bundle)` combinations from `ITEM_BUNDLE` ordered by usage frequency.
@@ -77,25 +85,26 @@ The system runs locally on a Windows laptop without requiring any standalone dat
     1. Focus in Item Search → Type 2-3 characters or scan barcode.
     2. Press `Enter` → Selects top match; item details and price auto-populate; focus jumps to Quantity.
     3. Quantity field defaults to `1` → Press `Enter` to accept or type quantity and press `Enter`.
-    4. Focus jumps to Unit / Bundle selector → Defaults to Base Unit (or last used); Arrow keys switch to Box/Bundle if needed → Press `Enter`.
-    5. Line item commits to the bill → Focus loops back immediately to Item Search for the next item.
-  * **Completing the Sale**: Pressing `Enter` on an empty search field (or pressing `Ctrl + Enter`) completes the sale.
-  * **On-Screen Sale Summary Dialog**: An on-screen modal immediately pops up displaying:
+    4. Focus jumps to Unit / Bundle selector → Defaults to Base Unit (or last used); Arrow keys switch to Box/Bundle if needed; `Alt + B` defines a new bundle → Press `Enter`.
+    5. Focus jumps to Rate (pre-filled with the default base or bundle price, editable) → Press `Enter`.
+    6. Line item commits to the bill → Focus loops back immediately to Item Search for the next item.
+  * **Completing the Sale**: Pressing `Enter` on an empty search field (or pressing `Ctrl + Enter`) opens the **Payment dialog before anything is saved**:
     * Grand Total (₹)
-    * Payment Mode (Cash, Credit, Partial)
-    * Cash Received & Change to Return
-  * Pressing `Enter` on the summary dialog dismisses it and resets the screen to a fresh, blank bill ready for the next customer.
+    * Payment Status (`PAID` default, `PARTIAL`, `UNPAID`; the latter two require a customer)
+    * Cash Received (auto-focused) & live Change to Return
+  * Pressing `Enter` in the Payment dialog commits the sale (`paid_amount` = cash received for PAID/PARTIAL, 0 for UNPAID) and shows the result (bill code, balance due, change). Pressing `Enter` again resets the screen to a fresh, blank bill. `Escape` in the Payment dialog returns to the cart without saving.
   * *Note*: This is strictly an on-screen dialog; physical receipt printing and PDF/image export are deferred to future versions.
 * **FR-16: Optional Maximum Retail Price (MRP)**
   * The system supports recording an optional Maximum Retail Price (MRP in ₹) on items and bundles. This serves as a printed reference price distinct from the shop's actual selling price (`default_sale_price`), allowing price-to-MRP comparisons.
-* **FR-17: Soft-Deletion & Archival Integrity**
-  * Items and Parties cannot be hard-deleted if they are linked to historical transactions. Deletion acts as a soft archive (`is_active = 0`), hiding them from active search and selection lists while maintaining complete referential integrity for past bills, audit trails, and financial reports.
+* **FR-17: Soft-Deletion & Archival Integrity** *(deferred to v2)*
+  * v1: Items and Parties cannot be deleted or archived at all. The `is_active` column is kept (always `1` in v1) and read paths already filter on it, so v2 can add archiving without schema changes.
+  * v2 intent: Deletion acts as a soft archive (`is_active = 0`), hiding records from active search and selection lists while maintaining referential integrity for past bills, audit trails, and financial reports.
 
 ### 2.2. Non-Functional Requirements (NFR)
 
 * **NFR-01: Zero External Server Overhead**
   * Must run on a standard Windows laptop without requiring background database services (e.g., PostgreSQL, MySQL, Docker).
-  * Database engine: Embedded **SQLite** (`shop.db`).
+  * Database engine: Embedded **SQLite** (`shop.db` in the OS app-data directory; overridable via `BOOK_KEEPER_DB_PATH`).
 * **NFR-02: Fast Query & Dashboard Latency**
   * Instant load times (< 100ms) for the Home Screen and Low Stock widget by maintaining cached stock counts (`current_stock`) and a boolean flag (`is_low_stock`) on the item record.
 * **NFR-03: Transaction Immutability & Audit Integrity**
@@ -105,7 +114,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **NFR-05: Modularity & Pluggable Stock Strategy**
   * The inventory allocation engine is decoupled such that the depletion strategy (currently FIFO) can be swapped for LIFO or Weighted Average without database restructuring.
 * **NFR-06: Heads-Down Keyboard Ergonomics**
-  * The entire core retail counter billing workflow operates with zero mouse clicks. Predictable Tab/Enter focus ordering, hotkeys for bundle creation (`Alt + B`), and `Escape` to cancel.
+  * The entire core retail counter billing workflow operates with zero mouse clicks. Predictable Tab/Enter focus ordering and a fixed hotkey map: `F1` Dashboard, `F2` Sale, `F3` Purchase, `F4`/`Ctrl+F` item lookup, `F5` Credit & Dues, `F6` Inventory, `Alt+B` new bundle, `Alt+C` / `Alt+V` new customer / vendor, `Ctrl+B` backup, `Ctrl+Enter` complete bill, `Escape` close/back.
 
 ---
 
@@ -123,11 +132,11 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 9. **Sales (Outward Billing)**: Multi-item sales entry in base units or bundles, auto-depleting oldest purchase lots, preventing negative stock.
 10. **Bill-Level Partial Payments**: Support for Cash, Credit, or Partial payments with upfront `paid_amount` and tracked `balance_due`.
 11. **Due Settlements**: Dedicated `PaymentSettlement` records capturing date-accurate cash inflows and outflows as credit is cleared over time.
-12. **Returns & Swaps**: Customer returns, defective swaps, and vendor returns.
-13. **Physical Stock Adjustments**: Fast item lookup for damaged/expired write-offs.
-14. **Reports & Dashboard**: Low-stock widget (< 5 items), Total Stock Value, Customer Dues, Vendor Dues, Period-based Sales & Purchases (Day/Week/Month/Year), Net Profit calculation.
-15. **Import / Export**: CSV/Excel support for Items and Transactions.
-16. **Local Backup**: Direct database snapshot copy to local or removable drive.
+12. **Returns & Swaps**: Customer returns (linked or unlinked), defective swaps, and vendor returns.
+13. **Physical Stock Adjustments**: Fast item lookup for damaged/expired write-offs and found stock.
+14. **Reports & Dashboard**: Low-stock widget (< 5 items), Total Stock Value, Customer Dues, Vendor Dues, Period-based Sales & Purchases (Day/Week/Month/Year), Profit statement, Cash Flow.
+15. **Import**: CSV/Excel import of Items with opening stock (dry-run + conflict strategy).
+16. **Local Backup**: Direct database snapshot copy to local or removable drive, with integrity check.
 17. **Shop Profile**: 1-row configuration table storing shop details for future invoice printing.
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
@@ -140,6 +149,9 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 7. **Transaction Deletion**: Hard deletion of historical transaction records.
 8. **Multi-Store / Multi-Branch**: Centralized inventory across multiple physical locations.
 9. **Multi-User Role-Based Access Control (RBAC)**: User roles, permissions, and shift-management logins.
+10. **Exports**: CSV/Excel exports of catalog, registers, daybook, P&L.
+11. **Parties import, opening dues, VedBill migration, restore from backup.**
+12. **Archiving / soft-deletion of Items and Parties (FR-17).**
 
 ---
 
@@ -147,17 +159,19 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 
 1. **Currency**: All monetary values are strictly denominated in **Indian Rupees (₹)**.
 2. **Base Unit Inventory & Packaging Multipliers**: All stock tracking, FIFO lot storage, and low-stock alerts operate strictly in the item's smallest **Base Unit** (`base_unit`, e.g., Piece). Bundles are multipliers (e.g., 1 Box = 10 Pieces). When a sale or purchase occurs in a bundle, the system automatically multiplies to base units for inventory depletion.
-3. **Bill-Level Partial Payments**: A transaction has `payment_status` as `PAID` (fully paid), `PARTIAL` (partially paid upfront), or `UNPAID` (full credit). Subsequent settlements reduce `balance_due` until 0. Money is fungible; partial payments apply to the total bill, never to specific individual items.
+3. **Bill-Level Partial Payments**: A transaction has `payment_status` as `PAID` (`balance_due = 0`), `PARTIAL` (something paid or credited, balance remains), or `UNPAID` (nothing paid or credited). Subsequent settlements and return credits reduce `balance_due` until 0. Money is fungible; partial payments apply to the total bill, never to specific individual items. Money is rounded to 2 decimals at line and bill level.
 4. **Manual Delayed Entry**: The shopkeeper may make physical cash/credit sales first and enter records into the system at the end of the day or when convenient.
 5. **Stock Valuation Formula**: Total Stock Value = Sum of (Remaining Quantity × Batch Unit Cost) across all active lots.
 6. **Universal Low Stock Level**: An item is considered running low when its total physical stock across all available batches is strictly less than **5 units** (`current_stock < 5`).
 7. **Optional Parties**: Retail cash customers or petty-cash supplier runs do not require customer/vendor profile creation; `party_id` is nullable.
-8. **Settlement Cash Flow Integrity**: Every payment received or made to clear dues is recorded in `PAYMENT_SETTLEMENT` with the settlement date, guaranteeing that daily cash drawer totals reflect actual cash collected that day.
+8. **Single Payment Ledger**: Every money event is exactly one `PAYMENT_SETTLEMENT` row with a `kind`: `UPFRONT` (paid at billing), `SETTLEMENT` (later due payment), `RETURN_CREDIT` (non-cash due reduction from a return), `REFUND_OUT` (cash paid back to a customer), `REFUND_IN` (cash received back from a vendor). Bill headers are created with `paid_amount = 0, balance_due = total` and then updated only through the ledger: `paid_amount = Σ(UPFRONT + SETTLEMENT)`, `balance_due = total − paid_amount − Σ RETURN_CREDIT`. Cash in = sale UPFRONT/SETTLEMENT + purchase REFUND_IN; cash out = purchase UPFRONT/SETTLEMENT + sale REFUND_OUT. Daily cash drawer totals are ledger sums by `settlement_date`.
 9. **Deferred Payment Mode (Null in v1 UI)**: The UI minimizes counter friction by not asking for payment instruments (UPI, Card, Net Banking). All upfront cash collections and cash settlements flow directly into the daily cash drawer register. The database retains `payment_mode` as `NULLABLE` for future version extensibility.
-10. **Restockable Returns FIFO Lot Restoration**: When a customer returns an item marked as `RESTOCKABLE`, the system traces the sale via `SALE_STOCK_ALLOCATION` and restores `remaining_quantity` directly to the original inward `PURCHASE_ITEM` lots (in reverse order of depletion). This brings the item back into active stock at its exact historical purchase cost.
-11. **Negative Stock Adjustment FIFO Depletion**: When a stock adjustment decreases physical inventory (e.g., write-off for `DAMAGED` or `EXPIRED` goods), the FIFO allocation engine immediately consumes the oldest available `PURCHASE_ITEM` lots. This prevents discarded goods from persisting as phantom inventory lots and records inventory loss accurately.
+10. **Linked Return Reversal**: When a customer returns units from a sale line, the system walks that line's `SALE_STOCK_ALLOCATION` rows in reverse depletion order, using `quantity_depleted − returned_quantity` as each row's capacity, increments `returned_quantity`, and records the reversed FIFO cost on `RETURN_ITEM.cost_amount`. For `RESTOCKABLE` units it also restores `remaining_quantity` on the original `PURCHASE_ITEM` lots, bringing the item back at its exact historical cost. This makes repeated partial returns safe and keeps COGS net of returns.
+11. **Stock Outflow FIFO Depletion**: Negative adjustments, replacement issues, and vendor returns consume the oldest available lots via the allocation engine and log each lot consumed in `STOCK_OUTFLOW_ALLOCATION` (with `source_type` and `source_id`). This prevents phantom inventory lots and records inventory loss accurately.
 12. **Optional MRP Tracking**: `mrp` is stored as an optional reference attribute on `ITEM` and `ITEM_BUNDLE`, representing printed pack pricing distinct from the shop's actual selling price.
-13. **Soft-Delete Archiving**: Inward/outward transactions link foreign keys to items and parties. To preserve relational integrity and immutable financial history, `ITEM` and `PARTY` utilize an `is_active` flag (`1` active, `0` archived) instead of hard SQL `DELETE`.
+13. **Soft-Delete Archiving (v2)**: `ITEM` and `PARTY` carry an `is_active` flag reserved for v2 archiving; v1 never deletes or archives them.
+14. **Lot Sources**: Every stock lot is a `PURCHASE_ITEM` under a `PURCHASE_TRANSACTION` whose `source` is `PURCHASE` (real supplier bill), `ADJUSTMENT` (found stock), `OPENING` (import opening stock) or `RETURN` (unlinked restockable customer return). Non-`PURCHASE` headers carry `total_amount = 0`, no party, status `PAID`, and their own code prefix (`ADJ-`, `OPN-`, `RTL-`). All purchase lists, counts, totals, payables and vendor-return pickers include only `source = PURCHASE`.
+15. **FIFO Order**: Lots are consumed in entry order (ascending `PURCHASE_ITEM.id`).
 
 ---
 
@@ -246,8 +260,12 @@ erDiagram
 
     PURCHASE_ITEM ||--o{ SALE_STOCK_ALLOCATION : "depleted_by"
     SALE_ITEM ||--o{ SALE_STOCK_ALLOCATION : "allocates_from"
+    PURCHASE_ITEM ||--o{ STOCK_OUTFLOW_ALLOCATION : "depleted_by"
 
     RETURN_TRANSACTION ||--|{ RETURN_ITEM : "has_lines"
+    RETURN_TRANSACTION ||--o{ PAYMENT_SETTLEMENT : "settled_by"
+    SALE_ITEM ||--o{ RETURN_ITEM : "returned_via"
+    PURCHASE_ITEM ||--o{ RETURN_ITEM : "vendor_returned_via"
 
     ITEM {
         int id PK
@@ -285,7 +303,9 @@ erDiagram
 
     PURCHASE_TRANSACTION {
         int id PK
-        string transaction_code "e.g. PUR-1001"
+        string transaction_code "PUR-/ADJ-/OPN-/RTL- per source"
+        string source "PURCHASE, ADJUSTMENT, OPENING, RETURN"
+        string supplier_invoice_ref "Optional supplier bill no."
         date transaction_date "Date"
         int party_id FK "Optional Vendor"
         string payment_mode "Optional / NULL in v1"
@@ -339,7 +359,17 @@ erDiagram
         int sale_item_id FK
         int purchase_item_id FK
         decimal quantity_depleted "Deducted qty"
+        decimal returned_quantity "Units since returned (default 0)"
         decimal unit_cost "Purchase cost"
+    }
+
+    STOCK_OUTFLOW_ALLOCATION {
+        int id PK
+        string source_type "ADJUSTMENT, REPLACEMENT, VENDOR_RETURN"
+        int source_id "Adjustment or Return id"
+        int purchase_item_id FK
+        decimal quantity_depleted "Deducted qty"
+        decimal unit_cost "Lot cost"
     }
 
     RETURN_TRANSACTION {
@@ -348,31 +378,37 @@ erDiagram
         date return_date "Date"
         string return_type "CUSTOMER or VENDOR"
         int party_id FK "Optional Party"
-        int original_transaction_id FK "Optional link"
-        string settlement_type "REFUND, DUE, REPLACEMENT"
+        int original_transaction_id FK "Optional sale/purchase link"
+        string settlement_type "REFUND or REPLACEMENT"
         decimal total_amount "Total value"
         string reason "Reason"
         string notes "Remarks"
+        datetime created_at "Creation timestamp"
     }
 
     RETURN_ITEM {
         int id PK
         int return_transaction_id FK
         int item_id FK
-        int sale_item_id FK "Optional link to restore FIFO lot"
-        decimal quantity "Returned Qty"
-        decimal unit_price "Rate"
+        int sale_item_id FK "Customer return link (optional)"
+        int purchase_item_id FK "Vendor return lot (optional)"
+        string line_type "RETURNED or REPLACEMENT_ISSUED"
+        decimal quantity "Base units"
+        decimal unit_price "Rate per base unit"
         decimal total_amount "Amount"
-        string condition "RESTOCKABLE or SCRAP"
+        decimal cost_amount "FIFO cost of reversed/issued units"
+        string condition "RESTOCKABLE or DAMAGED_SCRAP"
     }
 
     PAYMENT_SETTLEMENT {
         int id PK
         date settlement_date "Date"
         int party_id FK "Optional Party"
+        string kind "UPFRONT, SETTLEMENT, RETURN_CREDIT, REFUND_OUT, REFUND_IN"
         string transaction_type "SALE or PURCHASE"
-        int transaction_id FK "Transaction ID"
-        decimal amount_paid "Amount cleared"
+        int transaction_id FK "Optional bill"
+        int return_id FK "Optional return"
+        decimal amount_paid "Always positive"
         string payment_mode "Optional / NULL in v1"
         string notes "Remarks"
         datetime created_at "Creation timestamp"
@@ -383,7 +419,8 @@ erDiagram
         date adjustment_date "Date"
         int item_id FK "Item lookup"
         decimal quantity "Positive or Negative"
-        string reason "DAMAGED, EXPIRED, COUNT"
+        decimal unit_cost "Positive adj lot cost"
+        string reason "DAMAGED, EXPIRED, THEFT_LOST, COUNT_CORRECTION"
         string notes "Remarks"
         datetime created_at "Creation timestamp"
     }
@@ -423,8 +460,8 @@ erDiagram
 
 #### 3. `ITEM_SEARCH_FTS` (Virtual Table)
 *SQLite FTS5 inverted index virtual table for instant typeahead search.*
-* Indexed fields: `name`, `category`, `barcode`.
-* Synced automatically with `ITEM` and `ITEM_BUNDLE` via SQLite insert/update/delete triggers.
+* Indexed fields: `name`, `category`, `barcode` (plus one extra row per bundle barcode, pointing at the parent item).
+* Kept in sync by the application's item service after each committed item/bundle change (no SQLite triggers).
 
 #### 4. `PARTY`
 *Unified directory for customers and suppliers.*
@@ -443,7 +480,8 @@ erDiagram
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Internal transaction ID. |
-| `transaction_code` | TEXT | NOT NULL, UNIQUE | Human-readable code (e.g., "PUR-1001"). |
+| `transaction_code` | TEXT | NOT NULL, UNIQUE | Human-readable code; prefix per source (`PUR-`, `ADJ-`, `OPN-`, `RTL-`), each with its own sequence. |
+| `source` | TEXT | NOT NULL DEFAULT 'PURCHASE', CHECK IN ('PURCHASE','ADJUSTMENT','OPENING','RETURN') | Lot origin. Only `PURCHASE` rows are supplier bills; others have total 0, no party, status PAID. |
 | `transaction_date` | TEXT (ISO) | NOT NULL | Date purchase was recorded. |
 | `party_id` | INTEGER | NULLABLE, FK -> `PARTY(id)` | Supplier/vendor reference (null for walk-in). |
 | `payment_mode` | TEXT | NULLABLE | Upfront payment mode (deferred in v1 UI; defaults to cash drawer). |
@@ -451,7 +489,8 @@ erDiagram
 | `total_amount` | REAL | NOT NULL | Sum of all purchase line items in ₹. |
 | `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount paid upfront in ₹. |
 | `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining payable in ₹ (`total_amount - paid_amount`). |
-| `notes` | TEXT | NULLABLE | Supplier invoice reference or remarks. |
+| `supplier_invoice_ref` | TEXT | NULLABLE | Supplier's own invoice / DC number. |
+| `notes` | TEXT | NULLABLE | Remarks. |
 | `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
 
 #### 6. `PURCHASE_ITEM` (The FIFO Stock Lot)
@@ -505,23 +544,33 @@ erDiagram
 | `sale_item_id` | INTEGER | NOT NULL, FK -> `SALE_ITEM(id)` | Outward sale line. |
 | `purchase_item_id` | INTEGER | NOT NULL, FK -> `PURCHASE_ITEM(id)` | Inward batch depleted. |
 | `quantity_depleted` | REAL | NOT NULL | Base units consumed from this inward batch. |
+| `returned_quantity` | REAL | NOT NULL DEFAULT 0 | Base units of this allocation later reversed by customer returns (restockable or scrap). Invariant: `0 ≤ returned_quantity ≤ quantity_depleted`. |
 | `unit_cost` | REAL | NOT NULL | Purchase cost of this batch per base unit in ₹ (for COGS). |
+
+*COGS for a sale = Σ (`quantity_depleted − returned_quantity`) × `unit_cost`.*
 
 #### 10. `RETURN_TRANSACTION` & `RETURN_ITEM`
 *Handles Customer Returns, Defective Swaps, and Vendor Returns.*
-* `RETURN_TRANSACTION`: Contains `return_code`, `return_date`, `return_type` (`CUSTOMER_RETURN`, `VENDOR_RETURN`), `settlement_type` (`CASH_REFUND`, `REDUCE_DUE`, `REPLACEMENT`), `total_amount`, and optional links to parties or original bills.
-* `RETURN_ITEM`: Item, returned quantity (in base units), unit price, `condition` (`RESTOCKABLE` or `DAMAGED_SCRAP`), and optional `sale_item_id` FK.
-  * **Restocking Logic:** When `condition = 'RESTOCKABLE'` and `sale_item_id` is linked, the system queries `SALE_STOCK_ALLOCATION` for that line and increments `remaining_quantity` directly on the original `PURCHASE_ITEM` lot(s). This restores active inventory at the exact original purchase cost.
+* `RETURN_TRANSACTION`: Contains `return_code` (`RET-`), `return_date`, `return_type` (`CUSTOMER`, `VENDOR`), `settlement_type` (`REFUND`, `REPLACEMENT` — `REPLACEMENT` is customer-only), `total_amount` (value of `RETURNED` lines), and optional links to the party and original bill (`original_transaction_id` → sale for customer, purchase for vendor).
+* `RETURN_ITEM`: `line_type` (`RETURNED` or `REPLACEMENT_ISSUED`), item, quantity (base units), unit price, total, `cost_amount` (FIFO cost of reversed or issued units), `condition` (`RESTOCKABLE` or `DAMAGED_SCRAP`, for `RETURNED` customer lines), optional `sale_item_id` (customer) or `purchase_item_id` (vendor lot).
+  * **Customer reversal:** see Assumption 10. Linked lines are capped at sold − already returned. Unlinked `RESTOCKABLE` lines create a `RETURN`-source lot at the latest lot cost (or a user-entered cost).
+  * **Replacement:** `REPLACEMENT_ISSUED` lines (same item as the returned line, qty ≤ returned) are FIFO-depleted with `STOCK_OUTFLOW_ALLOCATION(source_type = REPLACEMENT)`; their cost is an inventory loss. Revenue is not reversed and no money moves.
+  * **Vendor return:** depletes the named lot (qty ≤ its remaining) or FIFO across the item's lots, logging `STOCK_OUTFLOW_ALLOCATION(source_type = VENDOR_RETURN)`.
+  * **Refund settlement (`REFUND`):** value is applied as `RETURN_CREDIT` to the linked bill (capped at its balance), else to the party's oldest open bills; any remainder becomes `REFUND_OUT` (customer) / `REFUND_IN` (vendor) cash.
 
-#### 11. `PAYMENT_SETTLEMENT`
-*Logs subsequent partial and full settlement payments against bills.*
-* Stores `settlement_date`, `party_id`, `transaction_type` (`SALE_SETTLEMENT` [Cash In] or `PURCHASE_SETTLEMENT` [Cash Out]), `transaction_id`, `amount_paid`, `payment_mode` (nullable), `notes`, and `created_at`.
-* Decrements the `balance_due` on the target transaction. When `balance_due` reaches 0, updates `payment_status` to `'PAID'`.
+#### 11. `PAYMENT_SETTLEMENT` (Payment Ledger)
+*The single ledger of every money event (see Assumption 8).*
+* Stores `settlement_date`, `party_id`, `kind` (`UPFRONT`, `SETTLEMENT`, `RETURN_CREDIT`, `REFUND_OUT`, `REFUND_IN`), `transaction_type` (`SALE`, `PURCHASE`), nullable `transaction_id`, nullable `return_id`, `amount_paid` (> 0), `payment_mode` (nullable), `notes`, and `created_at`.
+* `UPFRONT`, `SETTLEMENT` and `RETURN_CREDIT` rows require a `transaction_id` and must not exceed that bill's `balance_due`; they update the bill's cached `paid_amount` / `balance_due` / `payment_status`. Refund rows never change a bill balance.
 
 #### 12. `STOCK_ADJUSTMENT`
 *Direct physical stock count corrections (in base units).*
-* Stores `adjustment_date`, `item_id` (via direct search/barcode), `quantity` (+/- base units), `reason` (`DAMAGED`, `EXPIRED`, `COUNT_CORRECTION`, `THEFT_LOST`), `notes`, and `created_at`.
-* **FIFO Depletion on Negative Adjustments:** When `quantity < 0`, the engine executes FIFO depletion against the oldest available `PURCHASE_ITEM` lots, decrementing `remaining_quantity` and logging the inventory write-off loss. When `quantity > 0` (found stock), a new adjustment inward lot is created using the item's latest purchase unit cost.
+* Stores `adjustment_date`, `item_id` (via direct search/barcode), `quantity` (+/- base units, non-zero), `unit_cost` (positive adjustments only), `reason` (`DAMAGED`, `EXPIRED`, `COUNT_CORRECTION`, `THEFT_LOST`), `notes`, and `created_at`.
+* **Negative:** FIFO depletion against the oldest lots, logged in `STOCK_OUTFLOW_ALLOCATION(source_type = ADJUSTMENT)`; the consumed cost is an inventory loss.
+* **Positive (found stock):** creates an `ADJUSTMENT`-source lot at the item's most recent lot cost; if the item never had a lot, the user-supplied `unit_cost` is required.
+
+#### 12a. `STOCK_OUTFLOW_ALLOCATION`
+*FIFO audit for non-sale stock outflows.* `source_type` (`ADJUSTMENT`, `REPLACEMENT`, `VENDOR_RETURN`), `source_id`, `purchase_item_id`, `quantity_depleted`, `unit_cost`.
 
 #### 13. `SHOP_SETTING`
 *Single-row shop profile.*
@@ -538,16 +587,18 @@ erDiagram
 | **Bundle to Base Unit Conversion** | `quantity = bundle_quantity * units_per_bundle; unit_price = bundle_total / quantity;` |
 | **Total Stock Valuation** | `SELECT SUM(remaining_quantity * unit_cost) FROM PURCHASE_ITEM WHERE remaining_quantity > 0;` |
 | **Customer Receivables (Dues)** | `SELECT SUM(balance_due) FROM SALE_TRANSACTION WHERE payment_status IN ('UNPAID', 'PARTIAL');` |
-| **Vendor Payables (Dues)** | `SELECT SUM(balance_due) FROM PURCHASE_TRANSACTION WHERE payment_status IN ('UNPAID', 'PARTIAL');` |
+| **Vendor Payables (Dues)** | `SELECT SUM(balance_due) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND payment_status IN ('UNPAID', 'PARTIAL');` |
 | **Period Sales (Gross Revenue)** | `SELECT SUM(total_amount) FROM SALE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
-| **Period Purchases** | `SELECT SUM(total_amount) FROM PURCHASE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
-| **Period COGS** | `SELECT SUM(a.quantity_depleted * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` |
-| **Period Net Profit** | Period Gross Sales - Period COGS |
+| **Period Sales Returns** | `SELECT SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'CUSTOMER' AND settlement_type = 'REFUND' AND return_date BETWEEN ? AND ?;` |
+| **Period Purchases (net)** | `SUM(total_amount) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND transaction_date BETWEEN ? AND ?` − `SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'VENDOR' AND return_date BETWEEN ? AND ?` |
+| **Period COGS** | `SELECT SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` |
+| **Period Inventory Losses** | `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type IN ('ADJUSTMENT','REPLACEMENT')` dated by the adjustment/return date, + `SUM(ri.cost_amount)` for customer `REFUND` returns' `RETURNED` lines with `condition = 'DAMAGED_SCRAP'` |
+| **Period Profit** | Net Sales (Gross − Returns) − COGS = Gross Profit; Gross Profit − Inventory Losses = Net Profit |
 | **FIFO Depletion Query** | `SELECT id, remaining_quantity, unit_cost FROM PURCHASE_ITEM WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC;` |
-| **Restockable Return Lot Restoration** | `UPDATE PURCHASE_ITEM SET remaining_quantity = remaining_quantity + ? WHERE id = ?;` (using allocation lots in reverse order) |
-| **Negative Stock Adjustment Depletion**| Runs FIFO depletion loop deducting from oldest `PURCHASE_ITEM.remaining_quantity` and logging loss value |
+| **Linked Return Reversal** | `SELECT * FROM SALE_STOCK_ALLOCATION WHERE sale_item_id = ? AND quantity_depleted > returned_quantity ORDER BY id DESC;` then per row `UPDATE ... SET returned_quantity = returned_quantity + ?` and, if restockable, `UPDATE PURCHASE_ITEM SET remaining_quantity = remaining_quantity + ? WHERE id = ?;` |
+| **Stock Outflow Depletion** (neg. adjustment, replacement, vendor return) | FIFO depletion loop deducting from oldest `PURCHASE_ITEM.remaining_quantity`, inserting `STOCK_OUTFLOW_ALLOCATION` rows |
 | **Dynamic Bundle Presets & Sizes** | `SELECT bundle_name, units_per_bundle, COUNT(*) as usage_count FROM ITEM_BUNDLE GROUP BY bundle_name, units_per_bundle ORDER BY usage_count DESC;` |
-| **Daily Cash Flow (Drawer Total)**| `(Upfront Cash from Sales Today + Customer Settlements Today) - (Upfront Cash for Purchases Today + Vendor Settlements Today + Cash Refunds Today)` |
+| **Cash Flow / Drawer (period)** | From `PAYMENT_SETTLEMENT` where `settlement_date BETWEEN ? AND ?`: cash in = Σ(SALE·UPFRONT + SALE·SETTLEMENT + PURCHASE·REFUND_IN); cash out = Σ(PURCHASE·UPFRONT + PURCHASE·SETTLEMENT + SALE·REFUND_OUT); `RETURN_CREDIT` excluded. Live drawer = today's net. |
 
 ---
 
@@ -606,11 +657,25 @@ interface DashboardMetrics {
   today_sales_count: number;
   today_purchase_amount: number;
   today_purchase_count: number;
-  today_net_profit: number;           // Today's Sales - Today's COGS
+  today_net_profit: number;           // Same formula as PnLReport.net_profit for today
   total_stock_valuation: number;      // Sum of (remaining_qty * unit_cost)
   customer_receivables: number;       // Total outstanding customer dues
   vendor_payables: number;            // Total outstanding vendor dues
-  live_cash_in_drawer: number;        // Physical cash balancing formula
+  live_cash_in_drawer: number;        // Today's ledger cash in − cash out
+}
+// today_purchase_* count/sum only source = 'PURCHASE'.
+
+// Command: get_recent_transactions
+// Input: { limit: number }  -> last N sales + PURCHASE-source purchases + returns, newest first
+interface RecentTransaction {
+  kind: "SALE" | "PURCHASE" | "RETURN";
+  id: number;
+  code: string;
+  date: string;
+  created_at: string;
+  party_name: string | null;
+  amount: number;
+  payment_status: "PAID" | "PARTIAL" | "UNPAID" | null; // null for returns
 }
 
 // Command: get_low_stock_alerts
@@ -626,7 +691,7 @@ interface LowStockItem {
 }
 
 // Command: get_sales_purchase_trend
-// Input: { period: "7d" | "30d" | "1y" }
+// Input: { period: "7d" | "30d" | "1y" }   (UI toggle: 7D / 30D / 1Y)
 interface TrendDataPoint {
   date: string;                       // "YYYY-MM-DD"
   sales_amount: number;
@@ -641,13 +706,14 @@ interface TrendDataPoint {
 
 // Command: create_sale
 // Input: { payload: CreateSalePayload }
-// Atomic transaction: Validates stock across lots -> Inserts SALE_TRANSACTION -> 
-// Inserts SALE_ITEM lines -> Executes FIFO depletion -> Inserts SALE_STOCK_ALLOCATION -> Updates ITEM cached stock
+// Atomic transaction: Validates status/paid cross-check -> Validates stock per item (summed across lines) ->
+// Inserts SALE_TRANSACTION (paid 0, balance = total) -> Inserts SALE_ITEM lines -> Executes FIFO depletion ->
+// Inserts SALE_STOCK_ALLOCATION -> Updates ITEM cached stock -> Records UPFRONT ledger row (if paid > 0)
 interface CreateSalePayload {
   transaction_date: string;           // "YYYY-MM-DD"
-  party_id: number | null;            // null for walk-in
+  party_id: number | null;            // null for walk-in; required unless PAID
   payment_status: "PAID" | "PARTIAL" | "UNPAID";
-  paid_amount: number;
+  paid_amount: number;                // cash received; PAID => >= total (excess = change, not stored)
   notes: string | null;
   items: Array<{
     item_id: number;
@@ -662,26 +728,34 @@ interface SaleSummaryResponse {
   sale_id: number;
   transaction_code: string;
   total_amount: number;
-  paid_amount: number;
+  paid_amount: number;                // stored upfront (capped at total)
   balance_due: number;
+  change_amount: number;              // max(0, cash received - total)
   payment_status: "PAID" | "PARTIAL" | "UNPAID";
 }
 
 // Command: get_sales_history
-// Input: { filter: SalesHistoryFilter }
+// Input: { filter: SalesHistoryFilter }  -> Paginated<SaleHistoryRow>
 interface SalesHistoryFilter {
   start_date?: string;
   end_date?: string;
   payment_status?: "PAID" | "PARTIAL" | "UNPAID" | "ALL";
   party_id?: number;
-  search_query?: string;
+  search_query?: string;              // matches transaction code or party name
   page: number;
   limit: number;
+}
+interface SaleHistoryRow {
+  id: number; transaction_code: string; transaction_date: string; created_at: string;
+  party_id: number | null; party_name: string | null; line_count: number;
+  total_amount: number; paid_amount: number; balance_due: number;
+  payment_status: "PAID" | "PARTIAL" | "UNPAID";
 }
 
 // Command: get_sale_details
 // Input: { sale_id: number }
-// Returns sale header, line items with bundle details, and FIFO depletion cost breakdown.
+// Returns sale header, line items with bundle details, per-line returned qty, FIFO depletion cost breakdown,
+// and the bill's ledger rows.
 ```
 
 #### 3. Inward Purchases & FIFO Lots Domain (`purchase_api`)
@@ -691,14 +765,15 @@ interface SalesHistoryFilter {
 
 // Command: create_purchase
 // Input: { payload: CreatePurchasePayload }
-// Atomic transaction: Inserts PURCHASE_TRANSACTION -> Inserts PURCHASE_ITEM lots 
-// (remaining_quantity = normalized base quantity) -> Increments ITEM.current_stock & updates is_low_stock
+// Atomic transaction: Validates status/paid cross-check -> Inserts PURCHASE_TRANSACTION (source PURCHASE,
+// paid 0, balance = total) -> Inserts PURCHASE_ITEM lots (remaining_quantity = normalized base quantity) ->
+// Increments ITEM.current_stock & updates is_low_stock -> Records UPFRONT ledger row (if paid > 0)
 interface CreatePurchasePayload {
   transaction_date: string;           // "YYYY-MM-DD"
-  party_id: number | null;            // supplier reference
+  party_id: number | null;            // supplier reference; required unless PAID
   supplier_invoice_ref: string | null;
   payment_status: "PAID" | "PARTIAL" | "UNPAID";
-  paid_amount: number;
+  paid_amount: number;                // PAID => == total; never > total
   notes: string | null;
   items: Array<{
     item_id: number;
@@ -709,11 +784,12 @@ interface CreatePurchasePayload {
 }
 
 // Command: get_purchases_history
-// Input: { filter: PurchaseHistoryFilter }
+// Input: { filter: PurchaseHistoryFilter }  (same shape as SalesHistoryFilter; only source = PURCHASE)
+// -> Paginated<PurchaseHistoryRow> (SaleHistoryRow fields + supplier_invoice_ref)
 
 // Command: get_purchase_details
 // Input: { purchase_id: number }
-// Returns header, lines, and remaining FIFO units per line.
+// Returns header, lines, remaining FIFO units per line, and the bill's ledger rows.
 ```
 
 #### 4. Inventory, Bundles & Typeahead Domain (`inventory_api`)
@@ -756,10 +832,18 @@ interface CreateItemPayload {
 }
 
 // Command: update_item
-// Input: { item_id: number, payload: UpdateItemPayload }
+// Input: { item_id: number, payload: UpdateItemPayload }   (master fields only; never stock)
 
-// Command: archive_item
-// Input: { item_id: number } (Soft-deletes: sets is_active = 0)
+// (archive_item: deferred to v2 — FR-17)
+
+// Command: get_item_lots
+// Input: { item_id: number }  -> all lots (any source) with remaining > 0 first, newest last
+interface ItemLot {
+  purchase_item_id: number; purchase_transaction_id: number; transaction_code: string;
+  source: "PURCHASE" | "ADJUSTMENT" | "OPENING" | "RETURN";
+  transaction_date: string; vendor_name: string | null;
+  quantity: number; remaining_quantity: number; unit_cost: number;
+}
 
 // Command: get_bundle_suggestions
 // Input: none
@@ -781,6 +865,13 @@ interface CreateBundlePayload {
   default_bundle_price: number | null;
   barcode: string | null;
 }
+
+// Command: update_bundle
+// Input: { bundle_id: number, payload: Omit<CreateBundlePayload, "item_id"> }
+// units_per_bundle change rejected if any transaction line references the bundle.
+
+// Command: delete_bundle
+// Input: { bundle_id: number }  -> rejected if any PURCHASE_ITEM / SALE_ITEM references it
 ```
 
 #### 5. Credit & Dues Management Domain (`dues_api`)
@@ -801,8 +892,9 @@ interface PartyDueSummary {
 
 // Command: settle_bill_payment
 // Input: { payload: SettlePaymentPayload }
-// Records PAYMENT_SETTLEMENT. If transaction_id is provided, settles that specific bill;
-// if transaction_id is null, decrements balance_due on oldest unpaid transactions (FIFO settlement).
+// Records SETTLEMENT ledger row(s). If transaction_id is provided, settles that specific bill
+// (amount <= its balance_due); if null, applies to the party's oldest open bills first
+// (ORDER BY transaction_date, id; amount <= party's total outstanding). Rejects otherwise.
 // Transitions payment_status to 'PAID' when balance_due reaches 0.
 interface SettlePaymentPayload {
   party_id: number;
@@ -812,59 +904,91 @@ interface SettlePaymentPayload {
   amount_paid: number;
   notes: string | null;
 }
+
+// Command: get_party_ledger
+// Input: { party_id: number } -> open/closed bills + ledger rows + returns for the party, chronological
+
+// Party directory commands: create_party, update_party, get_party,
+// list_parties { party_type?, active_only }, search_parties { query, party_type? }
+// List/search rows carry outstanding_balance and transaction_count. (archive_party deferred to v2.)
 ```
 
 #### 6. Returns & Physical Adjustments Domain (`returns_adjustments_api`)
 
 ```typescript
 // Command: create_customer_return
-// Input: { payload: CustomerReturnPayload }
-// Atomic transaction: Inserts RETURN_TRANSACTION & RETURN_ITEM lines.
-// If condition is 'RESTOCKABLE', restores remaining_quantity in original PURCHASE_ITEM lot(s).
-// Applies settlement: CASH_REFUND (drawer outflow) or REDUCE_DUE (credit adjustment).
+// Input: { payload: CustomerReturnPayload }  -> { return_id, return_code, credited_amount, cash_refunded }
+// Atomic transaction (BEGIN IMMEDIATE):
+//  1. Validate: linked lines -> sale_item belongs to original_sale_id, same item,
+//     qty <= sold - already returned, unit_price <= line effective base price.
+//     REPLACEMENT -> original_sale_id required, every RETURNED line linked, replacement_items same item,
+//     qty <= returned qty for that item, stock available.
+//  2. Insert RETURN_TRANSACTION & RETURN_ITEM lines.
+//  3. Linked lines: reverse allocations (returned_quantity), restore lots if RESTOCKABLE, set cost_amount.
+//     Unlinked RESTOCKABLE: create RETURN-source lot (latest cost, else line.unit_cost_override required).
+//  4. REFUND: RETURN_CREDIT to original sale (capped at balance) / else party's oldest open sales;
+//     remainder -> REFUND_OUT. REPLACEMENT: FIFO-issue replacement units (STOCK_OUTFLOW_ALLOCATION,
+//     source REPLACEMENT), no money.
+//  5. Update ITEM cached stock.
 interface CustomerReturnPayload {
   original_sale_id: number | null;
   party_id: number | null;
   return_date: string;
-  settlement_type: "CASH_REFUND" | "REDUCE_DUE" | "DEFECTIVE_REPLACEMENT";
-  notes: string | null;
-  items: Array<{
-    item_id: number;
-    sale_item_id: number | null;      // linked sale item for lot restoration
-    quantity: number;                 // returned base units
-    unit_price: number;
-    condition: "RESTOCKABLE" | "DAMAGED_SCRAP";
-  }>;
-}
-
-// Command: create_vendor_return
-// Input: { payload: VendorReturnPayload }
-// Decrements purchase lot remaining_quantity and active stock, reduces balance_due or logs refund
-interface VendorReturnPayload {
-  original_purchase_id: number | null;
-  party_id: number | null;
-  return_date: string;
-  settlement_type: "CASH_REFUND" | "REDUCE_DUE";
+  settlement_type: "REFUND" | "REPLACEMENT";
   reason: string | null;
   notes: string | null;
   items: Array<{
     item_id: number;
-    purchase_item_id: number | null;  // specific lot being returned (or null for FIFO)
+    sale_item_id: number | null;      // linked sale line (required for REPLACEMENT)
     quantity: number;                 // returned base units
-    unit_cost: number;
+    unit_price: number;               // <= original effective base price when linked
+    condition: "RESTOCKABLE" | "DAMAGED_SCRAP";
+    unit_cost_override: number | null;// only for unlinked RESTOCKABLE when item has no prior lot
+  }>;
+  replacement_items: Array<{ item_id: number; quantity: number }>; // REPLACEMENT only, else []
+}
+
+// Command: create_vendor_return
+// Input: { payload: VendorReturnPayload }  -> { return_id, return_code, credited_amount, cash_refunded }
+// Atomic transaction (BEGIN IMMEDIATE): deplete named lot (qty <= remaining) or FIFO across item lots,
+// log STOCK_OUTFLOW_ALLOCATION (source VENDOR_RETURN), value = Σ qty × lot unit_cost.
+// Settlement: RETURN_CREDIT to original purchase (capped at balance) / else vendor's oldest open
+// purchases; remainder -> REFUND_IN (cash received).
+interface VendorReturnPayload {
+  original_purchase_id: number | null;
+  party_id: number | null;
+  return_date: string;
+  reason: string | null;
+  notes: string | null;
+  items: Array<{
+    item_id: number;
+    purchase_item_id: number | null;  // specific lot (must be PURCHASE-source, same item) or null for FIFO
+    quantity: number;                 // returned base units
   }>;
 }
 
+// Command: list_returns
+// Input: { filter: { return_type?: "CUSTOMER" | "VENDOR"; start_date?: string; end_date?: string; page: number; limit: number } }
+
+// Command: get_return_details
+// Input: { return_id: number } -> header, lines, allocations, ledger rows
+
 // Command: create_stock_adjustment
-// Input: { payload: StockAdjustmentPayload }
-// If quantity < 0: triggers FIFO depletion loop deducting from oldest active PURCHASE_ITEM lots.
-// If quantity > 0: creates an adjustment inward lot. Updates ITEM.current_stock & is_low_stock.
+// Input: { payload: StockAdjustmentPayload }  -> { adjustment_id, loss_value }
+// If quantity < 0: FIFO depletion from oldest lots, STOCK_OUTFLOW_ALLOCATION (source ADJUSTMENT).
+// If quantity > 0: creates an ADJUSTMENT-source lot at latest lot cost (else unit_cost required).
+// Updates ITEM.current_stock & is_low_stock.
 interface StockAdjustmentPayload {
   item_id: number;
-  quantity: number;                   // positive (+) to add, negative (-) to write off
+  adjustment_date: string;            // "YYYY-MM-DD"
+  quantity: number;                   // non-zero; positive (+) to add, negative (-) to write off
+  unit_cost: number | null;           // positive only; required if item has no prior lot
   reason: "DAMAGED" | "EXPIRED" | "COUNT_CORRECTION" | "THEFT_LOST";
   notes: string | null;
 }
+
+// Command: list_stock_adjustments
+// Input: { item_id?: number, page: number, limit: number }
 ```
 
 #### 7. Financial Reports & Backup Domain (`reports_api`, `settings_api`)
@@ -874,8 +998,13 @@ interface StockAdjustmentPayload {
 // Input: { from_date: string, to_date: string }
 interface PnLReport {
   gross_sales: number;
-  cogs: number;                       // Total FIFO Cost of Goods Sold
-  net_profit: number;                 // gross_sales - cogs
+  sales_returns: number;              // customer REFUND returns in period
+  net_sales: number;                  // gross_sales - sales_returns
+  cogs: number;                       // FIFO COGS net of returned units
+  gross_profit: number;               // net_sales - cogs
+  inventory_losses: number;           // write-offs + replacement issues + scrap returns
+  net_profit: number;                 // gross_profit - inventory_losses
+  total_purchases: number;            // PURCHASE-source purchases - vendor returns
 }
 
 // Command: get_stock_valuation_report
@@ -892,20 +1021,36 @@ interface StockValuationReport {
 
 // Command: get_cash_flow_report
 // Input: { from_date: string, to_date: string }
-interface CashFlowReport {
-  sales_cash_inflow: number;
-  customer_settlements_inflow: number;
-  purchase_cash_outflow: number;
-  vendor_settlements_outflow: number;
-  refunds_cash_outflow: number;
-  net_cash_balance: number;
+interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by settlement_date
+  sales_cash_inflow: number;            // SALE·UPFRONT
+  customer_settlements_inflow: number;  // SALE·SETTLEMENT
+  vendor_refunds_inflow: number;        // PURCHASE·REFUND_IN
+  purchase_cash_outflow: number;        // PURCHASE·UPFRONT
+  vendor_settlements_outflow: number;   // PURCHASE·SETTLEMENT
+  refunds_cash_outflow: number;         // SALE·REFUND_OUT
+  net_cash_balance: number;             // inflows - outflows
 }
 
 // Command: backup_database
-// Input: { destination_path: string }
+// Input: { destination_path: string }  -> absolute path of book_keeper_backup_YYYYMMDD_HHMM.db
 // Creates a clean SQLite online snapshot copy of shop.db to destination folder or USB.
+
+// Command: verify_database_integrity -> boolean (PRAGMA integrity_check)
+
+// Command: get_shop_settings / update_shop_settings (single row id = 1)
+
+// Command: validate_items_import
+// Input: { file_path: string }  (.csv or .xlsx, Template A columns)
+// Dry run, no writes -> { valid_count, rows_with_errors: [{ row, field, message }], duplicates: [{ row, name, existing_item_id }] }
+
+// Command: execute_items_import
+// Input: { file_path: string, conflict_strategy: "SKIP" | "OVERWRITE" | "ADD_STOCK" }
+// One BEGIN IMMEDIATE transaction; any invalid row aborts everything. New items + optional bundle;
+// opening stock -> one OPN- header with a lot per item at Purchase Cost. Reindexes FTS after commit.
+// -> { created, updated, skipped, stock_lots_created }
 ```
 
 ### 9.4. Atomic Transaction & Concurrency Controls
-* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_stock_adjustment`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
+* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
+* No operation updates or deletes a committed transaction row except through the cached-value updates defined above (`paid_amount`, `balance_due`, `payment_status`, `remaining_quantity`, `returned_quantity`, `current_stock`, `is_low_stock`).
 * This guarantees that FIFO lot allocation and inventory decrement operate in complete isolation, preventing double-depletion or race conditions even under rapid scanning.

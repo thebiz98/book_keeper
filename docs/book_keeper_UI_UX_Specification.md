@@ -1,14 +1,14 @@
 # UI/UX Specification Document: Book Keeper
 **System:** Offline-First Retail Accounting & Inventory Management Desktop Application  
 **Target Environment:** Windows Desktop (Tauri v2 + React + Tailwind CSS)  
-**Parent Document:** [High-Level Design (HLD)](file:///c:/custom_apps/book_keeper/docs/book_keeper_HLD.md)  
-**Status:** Approved Page-Wise UI/UX Baseline  
+**Parent Document:** [High-Level Design (HLD)](book_keeper_HLD.md) | [Design Decisions](DESIGN_DECISIONS.md)  
+**Status:** Approved Page-Wise UI/UX Baseline (rev. 2026-11-21 alignment)  
 
 ---
 
 ## 1. Design Philosophy & Ergonomics
 
-1. **Heads-Down Keyboard-First Billing:** The retail counter workflow is designed to operate completely without a mouse. Predictable `Enter`/`Tab` key sequences jump from Item Search to Quantity to Bundle Selection to Table, looping back instantly for the next scan/type.
+1. **Heads-Down Keyboard-First Billing:** The retail counter workflow is designed to operate completely without a mouse. Predictable `Enter`/`Tab` key sequences jump from Item Search to Quantity to Unit/Bundle to Rate to Cart, looping back instantly for the next scan/type.
 2. **High-Density, Clutter-Free Layout:** All business-critical numbers (current stock, line totals, balance dues, cash drawer position) are prominently visible without navigating through nested menus.
 3. **Semantic Status Colors:**
    - **Emerald / Green:** Paid status, stock healthy, positive cash inflow, change due.
@@ -40,15 +40,16 @@ The application maintains a persistent desktop shell across all views.
 | Reports           |                                                                                  |
 | Settings          |                                                                                  |
 +-------------------+----------------------------------------------------------------------------------+
-| Hotkeys: F2: Sale | F3: Purchase | F4: Search Item | Ctrl+B: Backup | Alt+S: Settings | Help (?)       |
+| Hotkeys: F1 Home | F2 Sale | F3 Purchase | F4/Ctrl+F Item | F5 Dues | F6 Inventory | Ctrl+B Backup    |
 +------------------------------------------------------------------------------------------------------+
 ```
 
 ### 2.1. Top Header Bar
 - **Shop Title Pill:** Displays active shop name from `SHOP_SETTING`.
 - **System Date & Time:** Live system date.
-- **Cash Drawer Live Pill:** Real-time physical cash in drawer:
-  $$\text{Cash Drawer} = (\text{Upfront Cash Sales} + \text{Customer Cash Settlements}) - (\text{Upfront Cash Purchases} + \text{Vendor Cash Settlements} + \text{Cash Refunds})$$
+- **Cash Drawer Live Pill:** Today's net cash from the payment ledger:
+  $$\text{Cash Drawer} = (\text{Sale Upfront} + \text{Customer Settlements} + \text{Vendor Refunds In}) - (\text{Purchase Upfront} + \text{Vendor Settlements} + \text{Customer Refunds Out})$$
+  Return credits against dues are not cash and are excluded. Refreshes after every money-moving action.
 - **Global Item Search Popover (`F4` or `Ctrl + F`):** Quick item stock and price lookup accessible anywhere without navigating away.
 - **Local DB State:** Indicator displaying local SQLite health (`shop.db Connected`).
 
@@ -75,7 +76,7 @@ The application maintains a persistent desktop shell across all views.
 * **Top KPI Ribbon:**
   - **Today's Gross Sales (₹)** + Count of completed bills.
   - **Today's Purchases (₹)** + Count of inward batches.
-  - **Today's Net Profit (₹):** Real-time calculation: $\text{Gross Sales Today} - \text{COGS of Sold Lots Today}$.
+  - **Today's Net Profit (₹):** Same formula as the P&L report for today (Net Sales − COGS net of returns − Inventory Losses).
   - **Total Inventory Valuation (₹):** Real-time sum: $\sum (\text{Remaining Lot Qty} \times \text{Unit Cost})$.
   - **Total Customer Receivables (₹):** Sum of outstanding customer credit dues.
   - **Total Vendor Payables (₹):** Sum of outstanding supplier bills.
@@ -85,8 +86,8 @@ The application maintains a persistent desktop shell across all views.
   - `[Settle Due (F5)]`
   - `[Stock Adjustment]`
 * **Main Left/Center Pane:**
-  - **Sales vs Purchases Visual Trend:** Interactive graph toggleable by *Today / 7 Days / Month / Year*.
-  - **Recent Transactions Feed:** Real-time table of last 10 transactions (Time, Code, Party, Amount, Status: `PAID`/`PARTIAL`/`UNPAID`, Quick Action).
+  - **Sales vs Purchases Visual Trend:** Interactive graph toggleable by *7D / 30D / 1Y*.
+  - **Recent Transactions Feed:** Table of last 10 sales, purchases and returns (`get_recent_transactions`): Time, Code, Party, Amount, Status (`PAID`/`PARTIAL`/`UNPAID`; none for returns), Quick Action (open details).
 * **Right Contextual Pane — Low Stock Monitor (`current_stock < 5`):**
   - Instant list of items where aggregated stock is strictly under 5 base units.
   - Row columns: Item Name, Category, Stock Level.
@@ -101,38 +102,35 @@ The application maintains a persistent desktop shell across all views.
   - Date Picker (defaults to current date, editable for delayed entries).
   - Customer Selector: Typeahead matching Name/Phone or defaults to "Walk-in Customer". Displays previous outstanding balance if customer selected.
 * **Rapid Item Entry Row (Sequential Focus Cycle):**
-  1. **Item Search Input (FTS5):** Type 2-3 characters or scan barcode. Press `Enter` to select top item and auto-populate base price and optional MRP.
-  2. **Available Stock & Price Indicator:** Real-time stock and pricing display (e.g., `Available: 28 PCS | Rate: ₹15.00 | MRP: ₹20.00`). Displays bold error if stock is 0.
+  1. **Item Search Input (FTS5):** Type 2-3 characters or scan barcode (item or bundle barcode). Press `Enter` to select top item and auto-populate base price and optional MRP. Pressing `Enter` with the field **empty** completes the bill (opens the Payment dialog).
+  2. **Available Stock & Price Indicator:** Real-time stock and pricing display (e.g., `Available: 28 PCS | Rate: ₹15.00 | MRP: ₹20.00`), net of quantity of this item already in the cart. Displays bold error if stock is 0.
   3. **Quantity Input:** Defaults to `1`. Press `Enter` to accept or type custom quantity.
-  4. **Packaging / Unit Selector:** Select base unit (`PCS`, `SHEET`, `KG`) or bundle (`Box of 10`, `Dozen`).
+  4. **Packaging / Unit Selector:** Defaults to base unit (or the last unit used for this item); arrow keys switch to a bundle (`Box of 10`, `Dozen`). Bundle barcode scans pre-select that bundle.
      - Inline Shortcut: `Alt + B` opens quick modal to add a new bundle definition on the fly.
-  5. **Unit Rate (₹):** Pre-populated with default rate; editable.
-  6. **Add Trigger (`Enter`):** Appends line item to Cart Table and resets cursor to Search Input.
+  5. **Unit Rate (₹):** Pre-populated with default base or bundle price; editable.
+  6. **Add Trigger (`Enter`):** Appends line item to Cart Table (blocked with the inline Negative Stock Alert if cart total for the item would exceed stock) and resets cursor to Search Input.
 * **Cart Line Items Table:**
   - Columns: `#`, `Item Name`, `Packaging / Unit`, `Quantity (Base Units)`, `MRP (₹)`, `Rate (₹)`, `Line Total (₹)`, `Remove [Del]`.
-* **Checkout & Payment Footer:**
+* **Checkout Footer:**
   - Totals: Total line items, total base units, Subtotal (₹).
-  - Payment Status Selector: `PAID` (default), `PARTIAL`, `UNPAID`.
-  - Payment Inputs:
-    - If `PARTIAL`: Focuses `Paid Amount (₹)`, auto-computes `Balance Due = Subtotal - Paid Amount`. Requires customer assignment.
-    - If `UNPAID`: Paid Amount = ₹0, Balance Due = Subtotal.
   - Remarks / Notes field.
-  - Primary Action: `[Complete Sale (Ctrl + Enter)]` — commits FIFO depletion and opens On-Screen Sale Summary Dialog.
-  - Discard Action: `[Cancel Bill (Esc)]`.
+  - Primary Action: `[Complete Sale (Enter on empty search / Ctrl + Enter)]` — opens the Payment dialog (Page 3). Nothing is saved until the dialog is confirmed.
+  - Discard Action: `[Cancel Bill (Esc)]` with confirmation when the cart is not empty.
 
 ---
 
-### Page 3: On-Screen Sale Summary Dialog (Modal Overlay)
-* **Purpose:** High-visibility on-screen dialog displayed immediately upon checkout completion (FR-15).
-* **Display Elements:**
-  - Invoice Code & Customer Name.
+### Page 3: Payment & Sale Summary Dialog (Modal Overlay)
+* **Purpose:** Collect payment before committing, then confirm the result (FR-15).
+* **Step A — Payment (before commit):**
+  - Invoice Code (provisional) & Customer Name (or Walk-in).
   - **Grand Total (₹):** Extra-large bold text.
-  - Payment Status (`PAID`, `PARTIAL`, `UNPAID`).
-  - **Tendered Change Calculator:**
-    - Input: `Cash Received (₹)` (auto-focused on open).
-    - Output: `Change to Return (₹)` (prominent green text).
-* **Keyboard Action:**
-  - Pressing `Enter` or `Space` dismisses dialog, resets billing counter to blank state, and focuses Item Search for next customer.
+  - Payment Status: `PAID` (default) / `PARTIAL` / `UNPAID`. `PARTIAL` and `UNPAID` require a customer (`Alt + C` creates one inline).
+  - `Cash Received (₹)` (auto-focused; prefilled with total for PAID; hidden for UNPAID).
+  - Live output: `Change to Return (₹)` for PAID (green), `Balance Due (₹)` for PARTIAL (amber). Invalid combinations shown in red and block confirm.
+  - `Enter` → commits the sale (FIFO depletion, ledger). On error (e.g. stock changed), message shown, stays on Step A. `Esc` → back to cart, nothing saved.
+* **Step B — Result (after commit):**
+  - Final bill code, total, paid, balance due, change to return.
+  - `Enter` or `Space` dismisses, resets billing counter to blank state, and focuses Item Search for next customer.
 
 ---
 
@@ -141,8 +139,8 @@ The application maintains a persistent desktop shell across all views.
 * **Header Controls:**
   - Auto-generated Purchase Code (`PUR-XXXX`).
   - Inward Date.
-  - Supplier / Vendor Selector (Search or `+ Add Vendor`).
-  - Supplier Invoice Reference / DC Number.
+  - Supplier / Vendor Selector (Search or `+ Add Vendor` / `Alt + V`).
+  - Supplier Invoice Reference / DC Number (stored on the purchase).
 * **Inward Line Item Entry Row:**
   - Item Search / Selection.
   - Packaging / Unit Selector (`Base Unit` or `Bundle`).
@@ -153,9 +151,9 @@ The application maintains a persistent desktop shell across all views.
   - Columns: `#`, `Item Name`, `Packaging`, `Inward Qty`, `Base Units`, `Unit Cost (₹)`, `Line Total (₹)`, `Actions`.
 * **Footer & Settlement:**
   - Total Purchase Value (₹).
-  - Payment Status: `PAID`, `PARTIAL`, `UNPAID`.
+  - Payment Status: `PAID` (paid = total), `PARTIAL` (0 < paid < total), `UNPAID` (paid = 0). `PARTIAL`/`UNPAID` require a vendor. Paid can never exceed total.
   - `Paid Amount (₹)` and `Balance Due (₹)` (Vendor Payable).
-  - Action: `[Record Inward Stock (Ctrl + Enter)]` — creates `PURCHASE_ITEM` FIFO lots with `remaining_quantity = quantity`, updates cached item stock, and refreshes low-stock flag.
+  - Action: `[Record Inward Stock (Ctrl + Enter)]` — creates `PURCHASE_ITEM` FIFO lots with `remaining_quantity = quantity`, records the upfront payment in the ledger, updates cached item stock, and refreshes low-stock flag.
 
 ---
 
@@ -165,16 +163,18 @@ The application maintains a persistent desktop shell across all views.
   - FTS5 search (Name, Barcode, Category).
   - Category Filter Dropdown.
   - Quick Toggle: `[x] Show Only Low Stock (< 5 units)`.
-  - Action Buttons: `[+ Add Item]`, `[Import Items (CSV)]`, `[Export Catalog (Excel)]`.
+  - Action Buttons: `[+ Add Item]`, `[Import Items (CSV / Excel)]` — opens the import dialog: file pick → dry-run report (valid rows, row errors, duplicates) → conflict strategy (`Skip` / `Overwrite details` / `Add stock`) → Confirm → summary. *(Export: deferred to v2.)*
 * **Items Table:**
   - Columns: `Barcode`, `Item Name`, `Category`, `Base Unit`, `Current Stock`, `Stock Status Badge`, `MRP (₹)`, `Default Sale Price (₹)`, `Bundles Configured`, `Actions`.
 * **Item Details / Edit Drawer:**
   - General Info: Name, Category, Barcode, Base Unit, MRP (₹, optional), Default Selling Price.
   - **Packaging Bundles Sub-table:**
     - List of bundles (e.g. "Dozen" = 12 PCS, "Box" = 50 PCS).
-    - `[+ Add Bundle]` button with standard presets (`Box`, `Dozen`, `Carton`, `Pack of 5`, `Pack of 10`) + custom names, Multiplier, Bundle MRP, Bundle Sale Price, Outer Barcode.
+    - `[+ Add Bundle]` opens the bundle modal with **dynamic suggestions from existing bundles** (no hard-coded presets) + custom names, Multiplier (> 1), Bundle MRP, Bundle Sale Price, Outer Barcode.
+    - Edit / Delete per bundle; delete and multiplier changes are refused if any bill uses the bundle.
+  - Stock is read-only here (changed only via purchases, sales, returns, adjustments). No archive/delete of items in v1.
 * **Batch Lot Inspector (Row Expand):**
-  - Inspects active inward FIFO lots for the item: Lot Date, Purchase Code, Vendor, Original Inward Qty, Remaining Qty, Unit Cost.
+  - Lists the item's lots (`get_item_lots`): Lot Date, Code, Source (`Purchase` / `Adjustment` / `Opening` / `Return`), Vendor, Original Qty, Remaining Qty, Unit Cost; active lots first.
 
 ---
 
@@ -186,56 +186,59 @@ The application maintains a persistent desktop shell across all views.
 * **Dues Table:**
   - Columns: `Party Name`, `Phone`, `Unsettled Bills Count`, `Earliest Bill Date`, `Total Invoiced (₹)`, `Total Paid (₹)`, `Net Due Balance (₹)`, `Actions`.
 * **Settlement Action Modal (`Settle Payment`):**
-  - Displays list of unpaid/partial bills for the selected party.
+  - Displays list of unpaid/partial bills for the selected party, oldest first, with a live preview of how the amount will be split.
   - Form Fields:
     - `Settlement Date` (defaults to today).
-    - `Settlement Amount (₹)`.
+    - `Settlement Amount (₹)` (> 0, ≤ party's total outstanding).
     - `Notes / Receipt Reference`.
   - Behavior: Allocates settlement amount against oldest unpaid bills (FIFO bill settlement). Decrements `balance_due` and updates status to `PAID` when fully settled.
-  - Cash Register Impact: Immediately logs cash inflow or outflow in `PAYMENT_SETTLEMENT` to balance the day's cash drawer.
+  - Cash Register Impact: Immediately logs cash inflow (customer) or outflow (vendor) in the payment ledger to balance the day's cash drawer.
+  - The same modal opened from Sales/Purchase History settles **that bill only** (amount ≤ its balance).
+* **Row action `[View Ledger]`:** party's bills, payments, credits and refunds in date order (`get_party_ledger`).
 
 ---
 
 ### Page 7: Sales History Ledger
 * **Purpose:** Audit log of all past customer invoices.
-* **Filters:** Date Range, Payment Status (`All`, `PAID`, `PARTIAL`, `UNPAID`), Customer Search.
-* **Table Columns:** `Invoice Code`, `Date & Time`, `Customer`, `Items Summary`, `Total Amount (₹)`, `Paid (₹)`, `Balance Due (₹)`, `Status Badge`, `Actions`.
+* **Filters:** Date Range, Payment Status (`All`, `PAID`, `PARTIAL`, `UNPAID`), Search (invoice code or customer name). Server-side pagination.
+* **Table Columns:** `Invoice Code`, `Date & Time`, `Customer`, `Items` (line count), `Total Amount (₹)`, `Paid (₹)`, `Balance Due (₹)`, `Status Badge`, `Actions`.
 * **Actions:**
-  - `[View Invoice / Line Items]`
-  - `[Record Settlement]` (active if balance due > 0)
-  - `[Initiate Return / Replacement]`
+  - `[View Invoice / Line Items]` — lines with returned qty, FIFO cost breakdown, ledger rows.
+  - `[Record Settlement]` (active if balance due > 0; single-bill mode)
+  - `[Initiate Return / Replacement]` (opens Page 9 Customer tab pre-linked to this bill)
+* Bills are never edited or deleted (NFR-03).
 
 ---
 
 ### Page 8: Purchase History Ledger
 * **Purpose:** Audit log of all inward supplier shipments and lot tracking.
-* **Filters:** Date Range, Payment Status, Vendor Search.
+* **Filters:** Date Range, Payment Status, Search (purchase code or vendor name). Shows supplier purchases only (no ADJ/OPN/RTL lots).
 * **Table Columns:** `Purchase Code`, `Date`, `Vendor`, `Supplier Bill Ref`, `Total (₹)`, `Paid (₹)`, `Balance Due (₹)`, `Status Badge`, `Actions`.
 * **Actions:**
   - `[View Batch Lines & Remaining FIFO Quantities]`
-  - `[Record Vendor Payment]` (active if balance due > 0)
-  - `[Initiate Vendor Return]`
+  - `[Record Vendor Payment]` (active if balance due > 0; single-bill mode)
+  - `[Initiate Vendor Return]` (opens Page 9 Vendor tab pre-linked to this bill)
 
 ---
 
 ### Page 9: Returns, Replacements & Physical Adjustments
 * **Purpose:** Formal handling of returns, swaps, and inventory count corrections without breaking transaction immutability.
 * **Tab 1: Customer Sales Return & Swap:**
-  - Invoice search / item selection.
-  - Returned Quantity & Condition:
-    - `RESTOCKABLE` — Item re-enters active inventory.
-    - `DAMAGED / SCRAP` — Item is written off to scrap.
-  - Settlement Resolution:
-    - `CASH REFUND` (logs outflow from today's cash drawer).
-    - `REDUCE CREDIT DUE` (credits customer's outstanding balance).
-    - `DEFECTIVE REPLACEMENT` (swaps defective unit for a fresh unit of equal value; zero net monetary movement).
+  - Mode: **With bill** (invoice search → bill's lines with sold / already returned / returnable / rate) or **No receipt** (item search, rate, optional customer).
+  - Returned Quantity (≤ returnable) & Condition:
+    - `RESTOCKABLE` — Item re-enters active inventory (original lot when linked; a new return lot at latest cost when unlinked — cost asked if the item never had stock).
+    - `DAMAGED_SCRAP` — Item is written off to scrap.
+  - Settlement:
+    - `REFUND` — value first reduces the bill's balance due (or, with no bill, the customer's oldest dues); any remainder is cash handed back. Preview shows "₹X credited · ₹Y cash".
+    - `REPLACEMENT` (with bill only) — issues fresh units of the same item (qty ≤ returned) from stock; no money moves.
 * **Tab 2: Vendor Purchase Return:**
-  - Inward lot selection and return quantity.
-  - Reduces vendor payable or logs cash refund from supplier.
+  - Bill / vendor selection, then lot selection (supplier lots only, remaining qty shown) or FIFO; return quantity ≤ remaining.
+  - Value = lot cost × qty. Reduces the bill's (or vendor's oldest) payable first; any remainder is cash received from the supplier.
 * **Tab 3: Standalone Stock Adjustments:**
   - Direct item search (Name/Barcode) without requiring invoice reference.
-  - Fields: `Adjustment Date`, `Quantity` (+ or - base units), `Reason` (`DAMAGED`, `EXPIRED`, `COUNT_CORRECTION`), `Notes`.
-  - Recalculates cached stock and low-stock flag immediately.
+  - Fields: `Adjustment Date`, `Quantity` (+ or − base units, non-zero), `Reason` (`DAMAGED`, `EXPIRED`, `THEFT_LOST`, `COUNT_CORRECTION`), `Unit Cost` (positive only; prefilled from latest lot, required if none), `Notes`.
+  - Recalculates cached stock and low-stock flag immediately; shows write-off value for negative adjustments.
+* **History sub-lists:** recent returns (`list_returns`) and adjustments (`list_stock_adjustments`).
 
 ---
 
@@ -244,19 +247,19 @@ The application maintains a persistent desktop shell across all views.
 * **Filter Bar:** Quick buttons (`Today`, `This Week`, `This Month`, `This Year`, `Custom Range`).
 * **Report Modules:**
   1. **Profit & Loss Report:**
-     - Gross Sales Revenue (₹)
-     - Minus FIFO Cost of Goods Sold (COGS) (₹)
-     - **= Net Operating Profit (₹)**
+     - Gross Sales (₹)
+     - Less Sales Returns (₹) → **Net Sales**
+     - Less FIFO COGS, net of returned units (₹) → **Gross Profit**
+     - Less Inventory Losses (write-offs, scrap returns, replacement units) (₹)
+     - **= Net Profit (₹)**
+     - Also shown: Total Purchases (net of vendor returns).
   2. **FIFO Inventory Valuation Report:**
-     - Active lots count, total units by category, and **Total Stock Valuation (₹)** based on actual inward purchase costs.
-  3. **Daily Cash Flow Register:**
-     - Upfront Cash Inflows (Cash Sales).
-     - Customer Settlement Inflows (Credit collected).
-     - Upfront Cash Outflows (Cash Purchases).
-     - Vendor Settlement Outflows (Supplier dues cleared).
-     - Customer Cash Refund Outflows.
-     - **Net Cash Drawer Balance.**
-* **Export Controls:** `[Export to Excel (.xlsx)]`, `[Export to CSV]`.
+     - Active lots count, items and valuation by category, and **Total Stock Valuation (₹)** based on actual lot costs (all lot sources).
+  3. **Cash Flow Register:**
+     - Inflows: Sale upfront cash, Customer settlements, Vendor refunds received.
+     - Outflows: Purchase upfront cash, Vendor settlements, Customer refunds paid.
+     - **Net Cash Balance.**
+* *Export controls: deferred to v2.*
 
 ---
 
@@ -264,7 +267,7 @@ The application maintains a persistent desktop shell across all views.
 * **Purpose:** Unified directory for customer credit records and supplier contact details.
 * **Tabs:** `Customers` and `Suppliers`.
 * **Table Columns:** `Party Name`, `Phone`, `Address / Notes`, `Total Transactions`, `Current Outstanding Balance (₹)`, `Actions`.
-* **Actions:** `[+ Add Party]`, `[Edit Details]`, `[View Transaction History]`.
+* **Actions:** `[+ Add Party]`, `[Edit Details]`, `[View Transaction History]` (party ledger). No archive/delete in v1.
 
 ---
 
@@ -274,12 +277,12 @@ The application maintains a persistent desktop shell across all views.
   - Shop Name, Phone, Address, Tax ID / GSTIN / PAN (optional).
   - Persisted in `SHOP_SETTING` for headers and future invoice printing.
 * **Local Database Backup & Snapshot:**
-  - Status display: Current SQLite file location (`%APPDATA%/book_keeper/shop.db`).
-  - Last backup timestamp.
-  - **`[One-Click Backup to USB / Folder]` Button:** Windows file picker to save a timestamped copy (e.g. `shop_backup_YYYYMMDD_HHMM.db`).
+  - Status display: Current SQLite file location (`<app data>/shop.db`, or `BOOK_KEEPER_DB_PATH`).
+  - Last backup timestamp (this session).
+  - **`[One-Click Backup to USB / Folder]` Button (`Ctrl + B`):** folder picker; saves a timestamped copy `book_keeper_backup_YYYYMMDD_HHMM.db` (never overwrites).
   - Database Integrity Check utility.
-* **Data Migration:** Bulk Import/Export templates for Items and Parties.
-* **Keyboard Hotkeys Cheatsheet:** Reference table of all desktop keyboard shortcuts.
+* *Data migration (VedBill), parties import, exports and restore: deferred to v2.*
+* **Keyboard Hotkeys Cheatsheet:** Reference table of all desktop keyboard shortcuts (rendered from the single hotkey registry).
 
 ---
 
@@ -295,7 +298,7 @@ The application maintains a persistent desktop shell across all views.
 2. **Inline Party Creation Modal (`Alt + C` / `Alt + V`):**
    - Quick creation of Customer or Vendor on the fly without abandoning cart.
 3. **Negative Stock Alert:**
-   - Inline blocking alert if entered sale quantity exceeds available base units.
+   - Inline blocking alert if the cart's total base units for an item would exceed available stock.
 
 ---
 
@@ -313,8 +316,11 @@ The application maintains a persistent desktop shell across all views.
 | **FR-08** | Standalone Stock Adjustments | **Page 9** (Adjustment Tab) & **Page 1** (Quick action) |
 | **FR-09** | Financial Aggregations & Reports | **Page 10** (Reports) & **Page 1** (KPI Cards) |
 | **FR-10** | Lists & Operational Views | **Page 5, 6, 7, 8, 11** |
-| **FR-11** | Data Portability & Local Backup | **Page 12** (Settings & Local Backup) |
+| **FR-11** | Items Import & Local Backup | **Page 5** (Import dialog) & **Page 12** (Backup, Integrity) |
 | **FR-12** | Invoicing Foundation | **Page 7** (Sales History) & **Page 12** (Shop Profile) |
 | **FR-13** | Multi-UOM Bundles & Inline Creation | **Page 2 & 4** (`Alt + B`), **Page 5** (Item Master) |
 | **FR-14** | High-Speed FTS5 Typeahead | **Page 2 & 4** (Search row), Global Bar (`F4`) |
-| **FR-15** | Keyboard Checkout & Summary Modal | **Page 2** (Enter flow) & **Page 3** (Summary Dialog) |
+| **FR-15** | Keyboard Checkout & Payment Dialog | **Page 2** (Enter flow) & **Page 3** (Payment / Summary Dialog) |
+| **FR-16** | Optional MRP | **Page 2** (indicator & cart), **Page 5** (item & bundle fields) |
+| **FR-17** | Soft-Deletion | *Deferred to v2 — no UI in v1* |
+| **NFR-06** | Keyboard Ergonomics | Global shell hotkey registry, **Page 2/3/4** |

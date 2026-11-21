@@ -1,8 +1,8 @@
 # UI Low-Level Design (LLD): Book Keeper
 **System:** Offline-First Retail Accounting & Inventory Management Desktop Application  
 **Target Environment:** Windows Desktop (Tauri v2 + React 19 + TypeScript + Tailwind CSS)  
-**Parent Documents:** [High-Level Design (HLD)](file:///c:/custom_apps/book_keeper/docs/book_keeper_HLD.md) | [UI/UX Specification](file:///c:/custom_apps/book_keeper/docs/book_keeper_UI_UX_Specification.md) | [Backend LLD](file:///c:/custom_apps/book_keeper/docs/book_keeper_LLD.md)  
-**Status:** Approved Low-Level Design Baseline  
+**Parent Documents:** [High-Level Design (HLD)](book_keeper_HLD.md) | [UI/UX Specification](book_keeper_UI_UX_Specification.md) | [Backend LLD](book_keeper_LLD.md) | [Design Decisions](DESIGN_DECISIONS.md)  
+**Status:** Approved Low-Level Design Baseline (rev. 2026-11-21 alignment)  
 
 ---
 
@@ -13,7 +13,8 @@ This document details the Low-Level Design (LLD) for the Book Keeper user interf
 2. **Custom Lightweight Components:** Zero reliance on heavy third-party UI component libraries; all primitives are custom-built with React, TypeScript, Tailwind CSS, and Lucide Icons for high rendering velocity and tight keyboard ergonomics.
 3. **Dual Theme Architecture (Light & Dark Modes from Day 1):** Built on Tailwind's `class` dark mode strategy with high-contrast slate/zinc neutrals, maintaining crisp legibility in both bright shop environments and low-light evening counters.
 4. **Mock Data Abstraction Layer:** Complete decoupling of the UI from Tauri IPC via a typed `ApiClient` interface, enabling immediate in-browser development (`npm run dev`) and UI testing against seeded retail stationery datasets.
-5. **Strict Keyboard Ergonomics:** Global hotkey management (`F1`–`F6`, `Alt+B`, `Ctrl+Enter`, `Esc`) and automated sequential focus looping for rapid counter billing.
+5. **Strict Keyboard Ergonomics:** Global hotkey management (`F1`–`F6`, `Ctrl+F`, `Alt+B`, `Alt+C`, `Alt+V`, `Ctrl+B`, `Ctrl+Enter`, `Esc`) and automated sequential focus looping for rapid counter billing.
+6. **Single IPC Boundary:** Frontend types are camelCase; `src/api/ipc.ts` (`invokeCmd`) is the only place that converts to/from the backend's snake_case. The mock client implements the same business rules as the backend (status cross-check, aggregate stock check, ledger, return guards) so UI behaviour is identical in both modes.
 
 ---
 
@@ -77,7 +78,7 @@ src/
 │   ├── domain/                      # Tier 3: Complex Organisms & Engines
 │   │   ├── RapidBillingRow.tsx      # Sequential focus counter billing row
 │   │   ├── CartTable.tsx            # Bill line-items table with delete shortcut
-│   │   ├── SaleSummaryModal.tsx     # Large total, cash tendered, change return
+│   │   ├── SaleSummaryModal.tsx     # Pre-commit payment dialog + post-commit result view
 │   │   ├── BundleCreationModal.tsx  # Dynamic packaging suggestions & multiplier
 │   │   ├── ItemSearchTypeahead.tsx  # FTS5 instant search dropdown
 │   │   ├── PartySelector.tsx        # Customer/Vendor select with balance pill
@@ -102,8 +103,8 @@ src/
     ├── ReturnsAdjustmentsPage.tsx   # Customer/Vendor Returns & Corrections
     ├── ReportsPage.tsx              # P&L, Inventory Valuation, Cash Flow
     ├── PartiesPage.tsx              # Customer & Supplier Directory
-    ├── SettingsPage.tsx             # Shop Profile, Backup to USB, Integrity
-    └── DataMigrationPage.tsx        # VedBill .vb Backup Importer & Report
+    └── SettingsPage.tsx             # Shop Profile, Backup to USB, Integrity
+    # (Items import dialog lives on InventoryPage; MigrationPage / VedBill deferred to v2 and removed)
 ```
 
 ---
@@ -140,11 +141,15 @@ src/
   - `F1`: Navigate to Dashboard
   - `F2`: Navigate to New Sale (auto-focuses Item Search)
   - `F3`: Navigate to New Purchase
-  - `F4`: Open Global Item Stock & Rate Lookup popover
+  - `F4` / `Ctrl + F`: Open Global Item Stock & Rate Lookup popover
   - `F5`: Navigate to Credit & Dues (Khata Ledger & Settle Modal)
   - `F6`: Navigate to Inventory Master
   - `Ctrl + B`: Open Backup utility in Settings
-  - `Esc`: Close any active modal dialog or dismiss popovers
+  - `Alt + B`: New bundle (billing/purchase unit selector context)
+  - `Alt + C` / `Alt + V`: Inline new Customer / Vendor (sale / purchase screens)
+  - `Ctrl + Enter`: Complete bill (opens payment dialog on sale; records purchase on purchase screen)
+  - `Esc`: Close any active modal dialog or dismiss popovers; on the payment dialog, back to the cart without saving
+* No other global shortcuts exist; `HotkeyBar` and `Sidebar` badges render from this single registry.
 
 ### 4.2 Counter Billing Sequential Focus Engine (`useSequentialFocus`)
 The rapid counter billing workflow operates via an explicit ref cycle:
@@ -168,12 +173,15 @@ sequenceDiagram
     User->>Bundle: Selects Unit or Bundle + presses [Enter]
     Bundle->>Rate: Automated focus transition
     User->>Rate: Reviews/edits rate + presses [Enter]
-    Rate->>Cart: Line commits to Cart Table
+    Rate->>Cart: Line commits to Cart Table (same item+unit+rate merges qty)
     Cart->>Search: Cursor resets to Search Input for next item
+    User->>Search: [Enter] on empty search (or Ctrl+Enter)
+    Search->>Cart: Opens Payment dialog (nothing saved yet)
 ```
 
-* **Inline Packaging Shortcut (`Alt + B`):** While focused on the Bundle selector, pressing `Alt + B` immediately opens `BundleCreationModal` without abandoning the current transaction.
-* **Complete Bill Shortcut (`Ctrl + Enter`):** Pressing `Ctrl + Enter` anywhere in the billing view commits the sale and opens the `SaleSummaryModal`.
+* **Inline Packaging Shortcut (`Alt + B`):** While focused on the Bundle selector, pressing `Alt + B` immediately opens `BundleCreationModal` without abandoning the current transaction; the new bundle is auto-selected and its price pre-fills Rate.
+* **Complete Bill (`Enter` on empty search or `Ctrl + Enter`):** opens `SaleSummaryModal` in **payment** mode. Only on `Enter` inside that dialog is `createSale` invoked. Disabled when the cart is empty.
+* **Unit default:** base unit, or the unit last used for that item in the current session.
 
 ---
 
@@ -319,22 +327,40 @@ interface PaymentStatusBadgeProps {
   4. `Select` for Unit/Bundle (input ref #3, `Alt+B` listener)
   5. `NumericInput` for Rate (input ref #4)
   6. `Button` for Add Item (`Enter` trigger)
-* Validates negative stock immediately before appending to cart.
+* Validates stock before appending: `existing cart base qty for this item + new base qty <= available` (aggregate across lines, base units, EPS 1e-9). Shows the inline Negative Stock Alert and keeps focus on Qty when it fails. Purchase screen skips this check.
+* Rejects qty ≤ 0 and rate < 0.
 
-#### 2. `SaleSummaryModal`
-* High-visibility dialog triggered on `Ctrl + Enter` checkout:
+#### 2. `SaleSummaryModal` (Payment dialog → Result view)
+* **Payment mode** (opened before anything is saved):
   - Prominent **Grand Total (₹)** in hero typography (`text-3xl font-bold font-mono`).
-  - Auto-focused **Cash Received (₹)** numeric input.
-  - Live calculation: $\text{Change to Return} = \text{Cash Received} - \text{Grand Total}$.
-  - Color-coded: Emerald when change $\ge 0$, Rose if cash received is less than total.
-  - `Enter` or `Space` dismisses dialog, resets bill state, and returns cursor to Item Search for the next customer.
+  - Status selector `PAID` (default) / `PARTIAL` / `UNPAID`; `PARTIAL`/`UNPAID` require a selected customer (inline `Alt + C` to create one).
+  - Auto-focused **Cash Received (₹)** numeric input (prefilled with total for PAID; disabled and 0 for UNPAID).
+  - Live calculation: $\text{Change} = \max(0, \text{Cash} - \text{Total})$ for PAID; $\text{Balance Due} = \text{Total} - \text{Cash}$ for PARTIAL.
+  - Validation mirrors the backend cross-check (PAID ⇒ cash ≥ total; PARTIAL ⇒ 0 < cash < total). Color-coded: Emerald when valid, Rose otherwise.
+  - `Enter` invokes `createSale({ paymentStatus, paidAmount: cash, … })`; errors (e.g. stock changed) are shown inline and the dialog stays in payment mode. `Esc` returns to the cart with nothing saved.
+* **Result mode** (after success): bill code, customer, total, paid, balance due, change (from `SaleSummaryResponse`). `Enter` or `Space` closes, resets the bill, refreshes the next sale code, and focuses Item Search.
 
 #### 3. `BundleCreationModal`
 * Triggered from billing unit selector via `Alt + B` or from Item Master.
 * Features **dynamic self-learning packaging suggestions** querying historical `(bundle_name, units_per_bundle)` pairs:
   - As the user types `B...`, suggestions appear: `Box (10 units)`, `Box (20 units)`, `Box (50 units)`.
   - Selecting an option auto-fills both name and multiplier.
+  - Validates name non-empty, multiplier > 1, prices ≥ 0.
   - Commits to SQLite `ITEM_BUNDLE` via API and auto-selects in the calling line item.
+  - In Item Master the same modal edits an existing bundle (`updateBundle`); delete calls `deleteBundle` and shows the backend's rejection if the bundle is referenced by any bill.
+
+#### 4. `SettlementModal`
+* Two entry modes: **party FIFO** (from Credit & Dues; lists the party's open bills oldest first and previews how the amount will be split) and **single bill** (from Sales/Purchase History `[Record Settlement]`; `transactionId` set).
+* Amount must be > 0 and ≤ outstanding (party total or bill balance); date defaults to today.
+
+#### 5. `StockAdjustmentModal`
+* Fields: item search, Adjustment Date (default today), Quantity (± base units, non-zero), Reason (`DAMAGED`, `EXPIRED`, `THEFT_LOST`, `COUNT_CORRECTION`), Unit Cost (shown only for positive quantity; required when the item has no lot history — detected via `getItemLots`), Notes.
+* Negative quantity validated against current stock before submit.
+
+#### 6. Returns forms (`ReturnsAdjustmentsPage`)
+* **Customer tab:** pick a bill (search by code / customer) or choose "No receipt". Linked mode lists the bill's lines with `sold`, `already returned`, `returnable` and pre-filled rate (editable down only). Per line: qty, condition. Settlement: `REFUND` (shows the preview "₹X credited to dues, ₹Y cash to hand back") or `REPLACEMENT` (linked only; pick replacement qty per returned item, ≤ returned, stock-checked). Unlinked mode: item search, qty, rate, condition, unit cost when the item has no lot history; party optional.
+* **Vendor tab:** pick a purchase bill or vendor; lines show `PURCHASE`-source lots (`getItemLots`) with remaining qty; per line qty ≤ remaining, or "FIFO" when no lot chosen. Preview of credit vs cash received.
+* Result toast shows `returnCode`, `creditedAmount`, `cashRefunded`.
 
 ---
 
@@ -349,42 +375,52 @@ export interface ApiClient {
   getDashboardMetrics(): Promise<DashboardMetrics>;
   getLowStockAlerts(): Promise<LowStockItem[]>;
   getSalesPurchaseTrend(period: '7d' | '30d' | '1y'): Promise<TrendDataPoint[]>;
+  getRecentTransactions(limit: number): Promise<RecentTransaction[]>;
 
   // Sales
   getNextSaleCode(): Promise<string>;
   createSale(payload: CreateSalePayload): Promise<SaleSummaryResponse>;
-  getSalesHistory(filter: SalesHistoryFilter): Promise<PaginatedResponse<SaleSummaryResponse>>;
+  getSalesHistory(filter: SalesHistoryFilter): Promise<PaginatedResponse<SaleHistoryRow>>;
   getSaleDetails(saleId: number): Promise<SaleDetailResponse>;
 
   // Purchases
   getNextPurchaseCode(): Promise<string>;
-  createPurchase(payload: CreatePurchasePayload): Promise<{ purchase_id: number }>;
-  getPurchasesHistory(filter: PurchaseHistoryFilter): Promise<PaginatedResponse<PurchaseTransaction>>;
+  createPurchase(payload: CreatePurchasePayload): Promise<{ purchaseId: number; transactionCode: string }>;
+  getPurchasesHistory(filter: PurchaseHistoryFilter): Promise<PaginatedResponse<PurchaseHistoryRow>>;
+  getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailResponse>;
 
   // Inventory & Typeahead
   searchItemsFts(query: string, limit?: number): Promise<ItemSearchResult[]>;
   getItemsCatalog(filter: ItemCatalogFilter): Promise<PaginatedResponse<ItemSearchResult>>;
-  createItem(payload: CreateItemPayload): Promise<ItemSearchResult>;
-  updateItem(itemId: number, payload: Partial<CreateItemPayload>): Promise<ItemSearchResult>;
-  archiveItem(itemId: number): Promise<boolean>;
+  createItem(payload: CreateItemPayload): Promise<number>;            // item id
+  updateItem(itemId: number, payload: UpdateItemPayload): Promise<void>;
+  getItemLots(itemId: number): Promise<ItemLot[]>;
   getBundleSuggestions(): Promise<BundleSuggestion[]>;
-  createBundle(payload: CreateBundlePayload): Promise<ItemBundle>;
+  createBundle(payload: CreateBundlePayload): Promise<number>;        // bundle id
+  updateBundle(bundleId: number, payload: UpdateBundlePayload): Promise<void>;
+  deleteBundle(bundleId: number): Promise<void>;
+  validateItemsImport(filePath: string): Promise<ImportValidationReport>;
+  executeItemsImport(filePath: string, strategy: 'SKIP' | 'OVERWRITE' | 'ADD_STOCK'): Promise<ImportSummary>;
 
   // Credit & Dues
   getPartyDuesSummary(partyType: 'CUSTOMER' | 'VENDOR'): Promise<PartyDueSummary[]>;
-  settleBillPayment(payload: SettlePaymentPayload): Promise<boolean>;
+  settleBillPayment(payload: SettlePaymentPayload): Promise<SettlementResult>;
+  getPartyLedger(partyId: number): Promise<PartyLedgerView>;
 
   // Parties & Directory
-  createParty(payload: CreatePartyPayload): Promise<{ party_id: number }>;
-  updateParty(partyId: number, payload: Partial<CreatePartyPayload>): Promise<boolean>;
-  archiveParty(partyId: number): Promise<boolean>;
-  listParties(partyType?: 'CUSTOMER' | 'VENDOR', activeOnly?: boolean): Promise<Party[]>;
-  searchParties(query: string, partyType?: 'CUSTOMER' | 'VENDOR'): Promise<Party[]>;
+  createParty(payload: CreatePartyPayload): Promise<number>;          // party id
+  updateParty(partyId: number, payload: UpdatePartyPayload): Promise<void>;
+  getParty(partyId: number): Promise<Party>;
+  listParties(partyType?: 'CUSTOMER' | 'VENDOR', activeOnly?: boolean): Promise<PartyListRow[]>;
+  searchParties(query: string, partyType?: 'CUSTOMER' | 'VENDOR'): Promise<PartyListRow[]>;
 
   // Returns & Adjustments
-  createCustomerReturn(payload: CustomerReturnPayload): Promise<{ return_code: string }>;
-  createVendorReturn(payload: VendorReturnPayload): Promise<{ return_code: string }>;
-  createStockAdjustment(payload: StockAdjustmentPayload): Promise<{ adjustment_id: number }>;
+  getNextReturnCode(): Promise<string>;
+  createCustomerReturn(payload: CustomerReturnPayload): Promise<ReturnResult>;
+  createVendorReturn(payload: VendorReturnPayload): Promise<ReturnResult>;
+  listReturns(filter: ReturnsFilter): Promise<PaginatedResponse<ReturnTransaction>>;
+  getReturnDetails(returnId: number): Promise<ReturnDetailResponse>;
+  createStockAdjustment(payload: StockAdjustmentPayload): Promise<{ adjustmentId: number; lossValue: number }>;
   listStockAdjustments(itemId?: number, page?: number, limit?: number): Promise<PaginatedResponse<StockAdjustment>>;
 
   // Reports & Settings
@@ -392,10 +428,13 @@ export interface ApiClient {
   getStockValuationReport(): Promise<StockValuationReport>;
   getCashFlowReport(fromDate: string, toDate: string): Promise<CashFlowReport>;
   backupDatabase(destinationPath: string): Promise<string>;
+  verifyDatabaseIntegrity(): Promise<boolean>;
   getShopSettings(): Promise<ShopSettings>;
-  updateShopSettings(settings: ShopSettings): Promise<boolean>;
+  updateShopSettings(settings: ShopSettings): Promise<void>;
 }
 ```
+* Method names map 1:1 to the HLD §9.3 command catalog (camelCase ↔ snake_case). Shapes follow the HLD/LLD DTOs with camelCase keys. No method exists for deferred features (archive, exports, VedBill, parties import, restore).
+* Errors: `invokeCmd` rejects with a typed `AppError` (`{ type, details }` per LLD §10.1); pages show `details.message` inline (validation) or as a toast.
 
 ### 6.2 Seed Dataset Profile
 The `MockApiClient` provides realistic stationery shop data matching forensic findings from actual retail databases:
@@ -472,5 +511,5 @@ gantt
   6. `SalesHistoryPage` & `PurchaseHistoryPage`
   7. `ReturnsAdjustmentsPage`
   8. `ReportsPage` & `PartiesPage`
-  9. `SettingsPage` & `DataMigrationPage`
+  9. `SettingsPage` (+ items import dialog on `InventoryPage`)
 * **Step 8:** Connect Tauri v2 `invoke()` commands and verify production builds.
