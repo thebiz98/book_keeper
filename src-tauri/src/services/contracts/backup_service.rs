@@ -7,3 +7,13 @@ pub trait BackupService: Send + Sync {
     /// Runs `PRAGMA integrity_check` and returns true if the database is healthy.
     fn verify_database_integrity(&self) -> Result<bool, AppError>;
 }
+
+impl<T: BackupService + ?Sized> BackupService for std::sync::Arc<T> {
+    fn backup_database(&self, destination_path: &str) -> Result<String, AppError> {
+        (**self).backup_database(destination_path)
+    }
+
+    fn verify_database_integrity(&self) -> Result<bool, AppError> {
+        (**self).verify_database_integrity()
+    }
+}

@@ -60,6 +60,9 @@ pub trait PurchaseRepository {
     fn get_latest_purchase_item_for_item(&self, _item_id: i64) -> Result<Option<PurchaseItem>, AppError> {
         Ok(None)
     }
+    fn list_all_lots(&self) -> Result<Vec<PurchaseItem>, AppError> {
+        Ok(Vec::new())
+    }
     fn list_transactions(&self, filter: &PurchaseFilter) -> Result<PaginatedList<PurchaseTransaction>, AppError> {
         let items = self.list_purchases(
             filter.start_date.as_deref(),

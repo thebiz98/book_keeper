@@ -16,6 +16,12 @@ pub trait UnitOfWork: Send + Sync {
     fn begin_transaction(&self) -> Result<Box<dyn TransactionContext>, AppError>;
 }
 
+impl<T: UnitOfWork + ?Sized> UnitOfWork for std::sync::Arc<T> {
+    fn begin_transaction(&self) -> Result<Box<dyn TransactionContext>, AppError> {
+        (**self).begin_transaction()
+    }
+}
+
 pub trait TransactionContext {
     /// Commits all staged mutations atomically.
     fn commit(self: Box<Self>) -> Result<(), AppError>;

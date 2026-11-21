@@ -13,3 +13,24 @@ pub trait ReportService: Send + Sync {
     fn get_stock_valuation_report(&self) -> Result<StockValuationReport, AppError>;
     fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError>;
 }
+
+impl<T: ReportService + ?Sized> ReportService for std::sync::Arc<T> {
+    fn get_dashboard_metrics(&self) -> Result<DashboardMetrics, AppError> {
+        (**self).get_dashboard_metrics()
+    }
+    fn get_low_stock_alerts(&self) -> Result<Vec<LowStockItem>, AppError> {
+        (**self).get_low_stock_alerts()
+    }
+    fn get_sales_purchase_trend(&self, period: &str) -> Result<Vec<TrendDataPoint>, AppError> {
+        (**self).get_sales_purchase_trend(period)
+    }
+    fn get_pnl_report(&self, from_date: &str, to_date: &str) -> Result<PnLReport, AppError> {
+        (**self).get_pnl_report(from_date, to_date)
+    }
+    fn get_stock_valuation_report(&self) -> Result<StockValuationReport, AppError> {
+        (**self).get_stock_valuation_report()
+    }
+    fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError> {
+        (**self).get_cash_flow_report(from_date, to_date)
+    }
+}

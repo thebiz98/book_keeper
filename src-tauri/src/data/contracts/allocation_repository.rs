@@ -14,4 +14,7 @@ pub trait AllocationRepository {
     fn list_by_sale_item_id(&self, sale_item_id: i64) -> Result<Vec<SaleStockAllocation>, AppError> {
         self.find_by_sale_item_id(sale_item_id)
     }
+    fn list_all(&self) -> Result<Vec<SaleStockAllocation>, AppError> {
+        Ok(Vec::new())
+    }
 }

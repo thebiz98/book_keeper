@@ -20,4 +20,7 @@ pub trait SettlementRepository {
     fn get_daily_settlement_total(&self, _date: &str, _tx_type: &str) -> Result<f64, AppError> {
         Ok(0.0)
     }
+    fn list_all(&self) -> Result<Vec<PaymentSettlement>, AppError> {
+        Ok(Vec::new())
+    }
 }

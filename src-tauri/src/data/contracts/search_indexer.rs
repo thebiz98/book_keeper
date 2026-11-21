@@ -33,3 +33,33 @@ pub trait ItemSearchIndexer: Send + Sync {
         self.rebuild_index()
     }
 }
+
+impl<T: ItemSearchIndexer + ?Sized> ItemSearchIndexer for std::sync::Arc<T> {
+    fn search(&self, query: &str) -> Result<Vec<ItemSearchResult>, AppError> {
+        (**self).search(query)
+    }
+
+    fn search_with_limit(&self, query: &str, limit: usize) -> Result<Vec<ItemSearchResult>, AppError> {
+        (**self).search_with_limit(query, limit)
+    }
+
+    fn index_item(&self, item: &Item) -> Result<(), AppError> {
+        (**self).index_item(item)
+    }
+
+    fn index_item_with_bundles(&self, item: &Item, bundles: &[ItemBundle]) -> Result<(), AppError> {
+        (**self).index_item_with_bundles(item, bundles)
+    }
+
+    fn remove_item(&self, item_id: i64) -> Result<(), AppError> {
+        (**self).remove_item(item_id)
+    }
+
+    fn rebuild_index(&self) -> Result<(), AppError> {
+        (**self).rebuild_index()
+    }
+
+    fn rebuild_index_with_bundles(&self, items_with_bundles: &[(Item, Vec<ItemBundle>)]) -> Result<(), AppError> {
+        (**self).rebuild_index_with_bundles(items_with_bundles)
+    }
+}

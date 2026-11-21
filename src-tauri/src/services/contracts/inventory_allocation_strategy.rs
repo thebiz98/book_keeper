@@ -50,3 +50,43 @@ pub trait InventoryAllocationStrategy: Send + Sync {
         write_off_qty: f64,
     ) -> Result<AdjustmentDepletionResult, AppError>;
 }
+
+impl<T: InventoryAllocationStrategy + ?Sized> InventoryAllocationStrategy for std::sync::Arc<T> {
+    fn validate_stock_availability(
+        &self,
+        uow: &mut dyn TransactionContext,
+        item_id: i64,
+        required_base_qty: f64,
+    ) -> Result<(), AppError> {
+        (**self).validate_stock_availability(uow, item_id, required_base_qty)
+    }
+
+    fn deplete_lots_for_sale(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        item_id: i64,
+        required_base_qty: f64,
+    ) -> Result<DepletionResult, AppError> {
+        (**self).deplete_lots_for_sale(uow, sale_item_id, item_id, required_base_qty)
+    }
+
+    fn restore_lots_for_return(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        quantity_to_restore: f64,
+    ) -> Result<(), AppError> {
+        (**self).restore_lots_for_return(uow, sale_item_id, quantity_to_restore)
+    }
+
+    fn deplete_lots_for_adjustment(
+        &self,
+        uow: &mut dyn TransactionContext,
+        stock_adjustment_id: i64,
+        item_id: i64,
+        write_off_qty: f64,
+    ) -> Result<AdjustmentDepletionResult, AppError> {
+        (**self).deplete_lots_for_adjustment(uow, stock_adjustment_id, item_id, write_off_qty)
+    }
+}

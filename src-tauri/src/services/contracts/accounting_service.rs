@@ -21,3 +21,26 @@ pub trait AccountingService: Send + Sync {
         party_id: i64,
     ) -> Result<PartyLedgerView, AppError>;
 }
+
+impl<T: AccountingService + ?Sized> AccountingService for std::sync::Arc<T> {
+    fn get_party_dues_summary(
+        &self,
+        party_type: PartyType,
+    ) -> Result<Vec<PartyDueSummary>, AppError> {
+        (**self).get_party_dues_summary(party_type)
+    }
+
+    fn settle_bill_payment(
+        &self,
+        payload: SettlePaymentPayload,
+    ) -> Result<(), AppError> {
+        (**self).settle_bill_payment(payload)
+    }
+
+    fn get_party_ledger(
+        &self,
+        party_id: i64,
+    ) -> Result<PartyLedgerView, AppError> {
+        (**self).get_party_ledger(party_id)
+    }
+}

@@ -168,7 +168,7 @@ fn test_tc_sale_004_bundle_unit_sale_multiplier_conversion() {
             item_id: 4,
             bundle_id: Some(1),
             bundle_quantity: 2.0,
-            unit_price: Some(9.0),
+            unit_price: Some(90.0), // rate per Box (LLD TC-SALE-004)
         }],
     };
     let summary = sale_service.create_sale(payload).expect("bundle sale");
