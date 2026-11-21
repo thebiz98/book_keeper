@@ -1,2 +1,10 @@
-// API Controllers module
-// Controllers will be registered in Phase 5
+pub mod adjustment_controller;
+pub mod dues_controller;
+pub mod item_controller;
+pub mod migration_controller;
+pub mod party_controller;
+pub mod purchase_controller;
+pub mod report_controller;
+pub mod return_controller;
+pub mod sale_controller;
+pub mod settings_controller;
