@@ -73,7 +73,7 @@ Each theme lists what it closes, the main files and the LLD tests to implement. 
 - Risk: do not delete `ImportExportServiceImpl` until `ItemImportService` exists.
 
 ### T1 — Schema rewrite, migration runner, enums, DB path (RC-1; DD-01/05/06/07/11/12/20/23/25/28)
-- **Recommended strategy** (NFR-01_04 §6): no real user DB exists, so rewrite `SCHEMA_V1` in place to the aligned design. Add a `schema_version` table and a numbered runner: each step in its own transaction, FKs off during table rebuilds, a backup taken first, and a refusal to open a newer version. Detect a legacy dev DB and fail with a clear message. Add a frozen-fixture upgrade test.
+- **Decided (DD-29):** no real user DB exists, so rewrite `SCHEMA_V1` in place to the aligned design. Add a `schema_version` table and a numbered runner: each step in its own transaction, FKs off during table rebuilds, a backup taken first, and a refusal to open a newer version. Detect a legacy dev DB and fail with a clear message. Add a frozen-fixture upgrade test.
 - Schema contents:
   - `payment_settlements`: `kind`, `return_id`, nullable `transaction_id`, `CHECK amount > 0`.
   - `purchase_transactions`: `source`, `supplier_invoice_ref`.
@@ -81,6 +81,7 @@ Each theme lists what it closes, the main files and the LLD tests to implement. 
   - `return_items`: `line_type`, `cost_amount`, `purchase_item_id`.
   - New `stock_outflow_allocations` table, replacing the adjustment allocations table.
   - `stock_adjustments.unit_cost`.
+  - Name snapshots (DD-30): `party_name` on sale/purchase/return headers, `item_name` on all bill lines.
   - Bill lines: `pack_label`/`pack_quantity` with **no** `bundle_id`.
   - All CHECKs and indexes from LLD §5.3, including the four missing indexes and a NOCASE index on item name.
   - UNIQUE item name. Barcode uniqueness across items and bundles is enforced in the service.
@@ -201,8 +202,8 @@ Each theme lists what it closes, the main files and the LLD tests to implement. 
   - shop settings loaded on start, with no fake defaults.
 - **Lists:** adopt the paginated contract, with a pager on every page.
 
-### T12 — Mock client
-- Either reach full parity (DD-27) or reduce the mock to fixture data. **Open decision Q2 in §4.**
+### T12 — Mock client (DD-27 thin fixtures)
+- Strip business logic from `mockClient.ts`; keep seed data and contract-shaped responses (camelCase, typed `AppError` where simulated). Delete mock-behaviour tests (`mockApiClient.test.ts` rule assertions); keep a contract-shape test.
 
 ### T13 — Test suite overhaul (RC-12)
 - One AppState-based harness on real SQLite for all backend tests. Delete the local-copy inventory tests and the hand-wired strategy. Add a strategy contract test.
@@ -210,7 +211,7 @@ Each theme lists what it closes, the main files and the LLD tests to implement. 
 - Replace the TC-SSM/TC-RBR tests that lock in old behaviour. Add frontend tests for the checkout keyboard flow, payment dialog, hotkeys, modal focus, typeahead race, settlement modal and returns form.
 - Perf tests at realistic volume against the stated targets (NFR-02:F-N12).
 
-## 4. Open decisions (needed before the fix phase)
+## 4. Decisions (resolved 2026-11-21: Q1 → DD-29 rewrite in place, Q2 → DD-27 thin fixture mock, Q3 → DD-30 name snapshots)
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|

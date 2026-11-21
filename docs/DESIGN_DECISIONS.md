@@ -183,7 +183,23 @@ The footer payment-status inputs are removed. Notes stay in the footer.
 
 **DD-26 — Error contract.** `invokeCmd` rejects with the typed `AppError` `{ type, details }` defined in LLD §10.1. The UI shows `details.message`.
 
-**DD-27 — Mock parity.** The mock API client enforces the same business rules as the backend. The UI must behave identically against either one.
+**DD-27 — Mock is a thin fixture client (revised 2026-11-21).** The browser-mode mock serves seed data so UI layout and flows can be worked on without Rust. It does **not** re-implement business rules: no FIFO, ledger, guards or validation. All behaviour is verified against the real Rust backend. The mock must still match the typed IPC contract (method names, camelCase shapes, `AppError` shape for errors it chooses to simulate).
+
+**DD-29 — Schema strategy: rewrite v1 in place (2026-11-21).**
+- No user database exists yet, so `SCHEMA_V1` is replaced by the aligned schema (HLD §6, LLD §5.3).
+- A `schema_version` table and a numbered, forward-only migration runner are introduced:
+  - each step runs in its own transaction;
+  - foreign keys are turned off during table rebuilds;
+  - a backup is taken before migrating;
+  - the app refuses to open a database newer than it understands.
+- A legacy development database (pre-alignment v1) is detected and rejected with a clear message.
+- Every schema change after this one is a real v2+ migration, covered by a frozen-fixture upgrade test.
+
+**DD-30 — Name snapshots on bills (2026-11-21).** Names are stored at write time, the same way as `pack_label`, so later edits to the directory or catalog never change historical bills:
+- `party_name` on the sale, purchase and return headers (null for walk-ins);
+- `item_name` on `SALE_ITEM`, `PURCHASE_ITEM` and `RETURN_ITEM`.
+
+Bill views read the snapshot. Directory and catalog screens read the live record.
 
 **DD-28 — Bills are decoupled from bundles (2026-11-21).** A bundle is only a data-entry convenience.
 - `SALE_ITEM` and `PURCHASE_ITEM` store:

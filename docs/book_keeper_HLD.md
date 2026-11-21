@@ -306,6 +306,7 @@ erDiagram
         string supplier_invoice_ref "Optional supplier bill no."
         date transaction_date "Date"
         int party_id FK "Optional Vendor"
+        string party_name "Snapshot at write time (DD-30)"
         string payment_mode "Optional / NULL in v1"
         string payment_status "PAID, PARTIAL, UNPAID"
         decimal total_amount "Total amount"
@@ -319,6 +320,7 @@ erDiagram
         int id PK
         int purchase_transaction_id FK
         int item_id FK
+        string item_name "Snapshot at write time (DD-30)"
         string pack_label "Snapshot e.g. Box of 10 (NULL if base unit)"
         decimal pack_quantity "Snapshot qty in that pack"
         decimal quantity "Base units for FIFO"
@@ -332,6 +334,7 @@ erDiagram
         string transaction_code "e.g. SAL-1001"
         date transaction_date "Date"
         int party_id FK "Optional Customer"
+        string party_name "Snapshot at write time (DD-30)"
         string payment_mode "Optional / NULL in v1"
         string payment_status "PAID, PARTIAL, UNPAID"
         decimal total_amount "Total amount"
@@ -345,6 +348,7 @@ erDiagram
         int id PK
         int sale_transaction_id FK
         int item_id FK
+        string item_name "Snapshot at write time (DD-30)"
         string pack_label "Snapshot e.g. Box of 10 (NULL if base unit)"
         decimal pack_quantity "Snapshot qty in that pack"
         decimal quantity "Base units depleted via FIFO"
@@ -482,6 +486,7 @@ erDiagram
 | `source` | TEXT | NOT NULL DEFAULT 'PURCHASE', CHECK IN ('PURCHASE','ADJUSTMENT','OPENING','RETURN') | Lot origin. Only `PURCHASE` rows are supplier bills; others have total 0, no party, status PAID. |
 | `transaction_date` | TEXT (ISO) | NOT NULL | Date purchase was recorded. |
 | `party_id` | INTEGER | NULLABLE, FK -> `PARTY(id)` | Supplier/vendor reference (null for walk-in). |
+| `party_name` | TEXT | NULLABLE | Party name snapshot at write time (DD-30); bills display this, not the live name. |
 | `payment_mode` | TEXT | NULLABLE | Upfront payment mode (deferred in v1 UI; defaults to cash drawer). |
 | `payment_status` | TEXT | CHECK IN ('PAID', 'PARTIAL', 'UNPAID') | Settlement status. |
 | `total_amount` | REAL | NOT NULL | Sum of all purchase line items in ₹. |
@@ -498,6 +503,7 @@ erDiagram
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Inward stock lot identifier. |
 | `purchase_transaction_id` | INTEGER | NOT NULL, FK -> `PURCHASE_TRANSACTION(id)` | Parent transaction. |
 | `item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)` | Product purchased. |
+| `item_name` | TEXT | NOT NULL | Item name snapshot at write time (DD-30). |
 | `pack_label` | TEXT | NULLABLE | Display snapshot of the pack used at entry (e.g. "Box of 10"); NULL if entered in base units. No FK to `ITEM_BUNDLE`. |
 | `pack_quantity` | REAL | NOT NULL | Display snapshot: quantity in that pack (equals `quantity` when base units). |
 | `quantity` | REAL | NOT NULL | Base units (pack quantity × multiplier at entry time) for FIFO. |
@@ -513,6 +519,7 @@ erDiagram
 | `transaction_code` | TEXT | NOT NULL, UNIQUE | Bill/Invoice number (e.g., "SAL-1001"). |
 | `transaction_date` | TEXT (ISO) | NOT NULL | Date sale was recorded. |
 | `party_id` | INTEGER | NULLABLE, FK -> `PARTY(id)` | Customer reference (null for cash walk-in). |
+| `party_name` | TEXT | NULLABLE | Party name snapshot at write time (DD-30). |
 | `payment_mode` | TEXT | NULLABLE | Upfront payment mode (deferred in v1 UI; defaults to cash drawer). |
 | `payment_status` | TEXT | CHECK IN ('PAID', 'PARTIAL', 'UNPAID') | Paid, Partial, or Due later. |
 | `total_amount` | REAL | NOT NULL | Total bill value in ₹. |
@@ -528,6 +535,7 @@ erDiagram
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Sale line identifier. |
 | `sale_transaction_id` | INTEGER | NOT NULL, FK -> `SALE_TRANSACTION(id)` | Parent transaction. |
 | `item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)` | Product sold. |
+| `item_name` | TEXT | NOT NULL | Item name snapshot at write time (DD-30). |
 | `pack_label` | TEXT | NULLABLE | Display snapshot of the pack used at entry (e.g. "Box of 10"); NULL if sold in base units. No FK to `ITEM_BUNDLE`. |
 | `pack_quantity` | REAL | NOT NULL | Display snapshot: quantity in that pack (equals `quantity` when base units). |
 | `quantity` | REAL | NOT NULL | Base units (pack quantity × multiplier at entry time) depleted via FIFO. |
@@ -549,6 +557,7 @@ erDiagram
 
 #### 10. `RETURN_TRANSACTION` & `RETURN_ITEM`
 *Handles Customer Returns, Defective Swaps, and Vendor Returns.*
+* Both carry name snapshots (DD-30): `RETURN_TRANSACTION.party_name`, `RETURN_ITEM.item_name`.
 * `RETURN_TRANSACTION`: Contains `return_code` (`RET-`), `return_date`, `return_type` (`CUSTOMER`, `VENDOR`), `settlement_type` (`REFUND`, `REPLACEMENT` — `REPLACEMENT` is customer-only), `total_amount` (value of `RETURNED` lines), and optional links to the party and original bill (`original_transaction_id` → sale for customer, purchase for vendor).
 * `RETURN_ITEM`: `line_type` (`RETURNED` or `REPLACEMENT_ISSUED`), item, quantity (base units), unit price, total, `cost_amount` (FIFO cost of reversed or issued units), `condition` (`RESTOCKABLE` or `DAMAGED_SCRAP`, for `RETURNED` customer lines), optional `sale_item_id` (customer) or `purchase_item_id` (vendor lot).
   * **Customer reversal:** see Assumption 10. Linked lines are capped at sold − already returned. Unlinked `RESTOCKABLE` lines create a `RETURN`-source lot at the latest lot cost (or a user-entered cost).

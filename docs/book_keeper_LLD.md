@@ -325,6 +325,7 @@ pub struct PurchaseTransaction {
     pub source: LotSource,        // Non-Purchase: total 0, party None, status Paid
     pub transaction_date: String, // "YYYY-MM-DD"
     pub party_id: Option<i64>,    // Supplier
+    pub party_name: Option<String>, // Snapshot at write time (DD-30)
     pub payment_mode: Option<String>,
     pub payment_status: PaymentStatus,
     pub total_amount: f64,
@@ -339,6 +340,7 @@ pub struct PurchaseItem {
     pub id: i64,
     pub purchase_transaction_id: i64,
     pub item_id: i64,
+    pub item_name: String,          // Name snapshot at write time (DD-30)
     pub pack_label: Option<String>, // Display snapshot ("Box of 10"); None = base units. No bundle FK (DD-28)
     pub pack_quantity: f64,         // Display snapshot: qty in that pack
     pub quantity: f64,              // Base units (pack_quantity × multiplier at entry)
@@ -354,6 +356,7 @@ pub struct SaleTransaction {
     pub transaction_code: String, // e.g. "SAL-1001"
     pub transaction_date: String, // "YYYY-MM-DD"
     pub party_id: Option<i64>,    // Customer
+    pub party_name: Option<String>, // Snapshot at write time (DD-30)
     pub payment_mode: Option<String>,
     pub payment_status: PaymentStatus,
     pub total_amount: f64,
@@ -368,6 +371,7 @@ pub struct SaleItem {
     pub id: i64,
     pub sale_transaction_id: i64,
     pub item_id: i64,
+    pub item_name: String,          // Name snapshot at write time (DD-30)
     pub pack_label: Option<String>, // Display snapshot ("Box of 10"); None = base units. No bundle FK (DD-28)
     pub pack_quantity: f64,         // Display snapshot: qty in that pack
     pub quantity: f64,              // Base units
@@ -760,6 +764,8 @@ pub trait ReportRepository: Send + Sync {
 * `ITEM_BUNDLE`: `CHECK (units_per_bundle > 1)`.
 * `STOCK_ADJUSTMENT`: `CHECK (quantity <> 0)`.
 * Indexes: `purchase_item(item_id, remaining_quantity)`, `sale_stock_allocation(sale_item_id)`, `stock_outflow_allocation(source_type, source_id)`, `payment_settlement(settlement_date)`, `payment_settlement(transaction_type, transaction_id)`, `sale_transaction(transaction_date)`, `purchase_transaction(source, transaction_date)`, `item(barcode)`, `item_bundle(barcode)`, `return_item(sale_item_id)`, `return_item(purchase_item_id)`.
+* Name snapshots (DD-30): `party_name` on sale/purchase/return headers, `item_name` on sale/purchase/return lines, written by the creating service; history/detail queries read snapshots.
+* Schema strategy (DD-29): v1 is the aligned schema itself (pre-release rewrite); a legacy pre-alignment DB is detected and rejected.
 * Migrations are numbered, forward-only, recorded in a `schema_version` table, each applied in one transaction; `ALTER TABLE ADD COLUMN` / new tables only (NFR-04). No JSON blob columns.
 
 ---
@@ -1913,6 +1919,7 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 ### 11.1 Testing Strategy & Harness Architecture
 1. **Unit Testing (`core/` & `services/impl/`)**:
    * Uses mock repositories (via `mockall` or in-memory structs implementing repository traits) to test domain calculations, validation rules, and error paths in complete isolation.
+1a. **Mock client (DD-27)**: the frontend mock is a thin fixture provider; no business-rule tests run against it.
 2. **Integration Testing (`data/sqlite/`)**:
    * Uses fast, in-process SQLite databases (`:memory:`) to verify SQL schema migrations, trigger execution, FTS5 virtual tables, and foreign key constraints (`PRAGMA foreign_keys = ON`).
 3. **End-to-End Domain Scenario Testing**:

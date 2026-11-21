@@ -12,9 +12,9 @@ This document details the Low-Level Design (LLD) for the Book Keeper user interf
 1. **Component-First Methodology:** All reusable base primitives (atoms), retail molecules, and domain organisms are engineered and styled prior to page assembly.
 2. **Custom Lightweight Components:** Zero reliance on heavy third-party UI component libraries; all primitives are custom-built with React, TypeScript, Tailwind CSS, and Lucide Icons for high rendering velocity and tight keyboard ergonomics.
 3. **Dual Theme Architecture (Light & Dark Modes from Day 1):** Built on Tailwind's `class` dark mode strategy with high-contrast slate/zinc neutrals, maintaining crisp legibility in both bright shop environments and low-light evening counters.
-4. **Mock Data Abstraction Layer:** Complete decoupling of the UI from Tauri IPC via a typed `ApiClient` interface, enabling immediate in-browser development (`npm run dev`) and UI testing against seeded retail stationery datasets.
+4. **Mock Data Abstraction Layer (thin fixtures, DD-27):** Complete decoupling of the UI from Tauri IPC via a typed `ApiClient` interface, enabling immediate in-browser development (`npm run dev`) and UI testing against seeded retail stationery datasets.
 5. **Strict Keyboard Ergonomics:** Global hotkey management (`F1`–`F6`, `Ctrl+F`, `Alt+B`, `Alt+C`, `Alt+V`, `Ctrl+B`, `Ctrl+Enter`, `Esc`) and automated sequential focus looping for rapid counter billing.
-6. **Single IPC Boundary:** Frontend types are camelCase; `src/api/ipc.ts` (`invokeCmd`) is the only place that converts to/from the backend's snake_case. The mock client implements the same business rules as the backend (status cross-check, aggregate stock check, ledger, return guards) so UI behaviour is identical in both modes.
+6. **Single IPC Boundary:** Frontend types are camelCase; `src/api/ipc.ts` (`invokeCmd`) is the only place that converts to/from the backend's snake_case. The mock client is a thin fixture provider for UI work (DD-27): it serves seed data and matches the IPC contract shapes, but does not re-implement business rules; behaviour is verified against the Rust backend.
 
 ---
 
