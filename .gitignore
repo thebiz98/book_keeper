@@ -1,3 +1,41 @@
-node_modules
-target
-dist
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+target/
+src-tauri/target/
+*.tsbuildinfo
+.vite/
+
+# Tauri-generated (rebuilt on every `tauri build/dev`)
+src-tauri/gen/schemas/
+
+# Local SQLite databases and backups (app data, test runs)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.vb
+
+# Test / coverage artifacts
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
