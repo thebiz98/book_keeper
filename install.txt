@@ -4,6 +4,7 @@ BOOK KEEPER - ENVIRONMENT SETUP & INSTALLATION GUIDE
 System Architecture: Offline-First Desktop Accounting & Inventory Management
 Platforms Supported: Windows (ARM64 & x86_64), Linux / WSL2 (Ubuntu/Debian)
 Core Tech Stack: Tauri v2 + React 19 + TypeScript + Rust + Embedded SQLite
+Last verified: 2026-11-22 on Windows 11 ARM64 (Node 22.11, Rust 1.100, MSVC 14.44)
 ================================================================================
 
 TABLE OF CONTENTS:
@@ -12,7 +13,12 @@ TABLE OF CONTENTS:
 3. Option 2: WSL2 Setup (For Windows with Smart App Control Kept ON)
 4. Option 3: Pure Native Linux Setup (Ubuntu/Debian/Fedora)
 5. Verifying Your Installation
-6. Project Initialization & Running the App
+6. Project Initialization & Running the App (Development, no .exe)
+7. UI Only (Mock Backend) vs. UI + Real Backend
+8. Building the .exe and Installers, Installing, Running
+9. Running the Test Gate on Windows
+10. Platform Notes (What Is and Isn't Windows-Specific)
+11. Troubleshooting
 
 ================================================================================
 1. WINDOWS SMART APP CONTROL VS. WINDOWS DEFENDER ANTIVIRUS
@@ -25,17 +31,20 @@ TABLE OF CONTENTS:
   cloud history, SAC blocks them with "os error 4551".
 
 * Does turning off Smart App Control create a security risk?
-  NO. Windows Defender Antivirus remains 100% active, running, and scanning.
-  Real-time scanning, cloud-delivered malware protection, ransomware guards,
-  behavior monitoring, and network firewalls remain fully armed.
-  Turning off SAC simply stops Windows from blocking unsigned developer tools
-  (Cargo, Rust, newly compiled local binaries). Millions of software developers
-  have SAC turned off by default.
+  Windows Defender Antivirus stays fully active: real-time scanning,
+  cloud-delivered protection, ransomware guards, behavior monitoring and the
+  firewall keep running. Turning off SAC only stops Windows from blocking
+  unsigned developer tools (Cargo, Rust, newly compiled local binaries).
+  Note: once SAC is turned off, Windows does not let you turn it back on
+  without resetting/reinstalling Windows.
 
 ================================================================================
 2. OPTION 1: NATIVE WINDOWS SETUP (ARM64 & x86_64)
 ================================================================================
 Prerequisites: Open PowerShell as Administrator.
+
+First, check your CPU architecture (it decides the C++ component in Step 2):
+  $env:PROCESSOR_ARCHITECTURE      # ARM64  or  AMD64 (= x86_64)
 
 --- STEP 1: Turn Off Smart App Control (Developer Requirement) ---
 1. Open Windows Start Menu -> Search "Smart App Control".
@@ -43,12 +52,29 @@ Prerequisites: Open PowerShell as Administrator.
 3. Toggle to "Off".
 
 --- STEP 2: Install Microsoft Visual Studio 2022 C++ Build Tools (MSVC) ---
-Run in Administrator PowerShell:
+Run in Administrator PowerShell.
+
+x86_64 (AMD64) machines:
 winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" --accept-package-agreements --accept-source-agreements
+
+ARM64 machines -- the ARM64 compiler component is REQUIRED and is NOT part of
+the default VCTools workload. Without it, every Rust build fails with
+"error: linker `link.exe` not found":
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended" --accept-package-agreements --accept-source-agreements
+
+Build Tools already installed without ARM64? Add just the component:
+& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools" --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --passive --norestart
+
+(GUI alternative: Visual Studio Installer -> Build Tools 2022 -> Modify ->
+ Individual components -> "MSVC v143 - VS 2022 C++ ARM64/ARM64EC build tools".)
+
+Check that the ARM64 linker exists (should print True):
+Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\*\bin\Hostarm64\arm64\link.exe"
 
 (Alternative via Browser):
 Download from https://visualstudio.microsoft.com/visual-cpp-build-tools/
-Run the installer and check: "Desktop development with C++".
+Run the installer and check: "Desktop development with C++"
+(on ARM64 also tick the ARM64 build tools component above).
 
 --- STEP 3: Install Node.js (LTS) ---
 Method A: Portable Clean Install (Bypasses all MSI installer permission issues):
@@ -71,6 +97,10 @@ winget install Rustlang.Rustup
 For ARM64: curl.exe -o "$env:TEMP\rustup-init.exe" "https://win.rustup.rs/aarch64"
 For x86_64: curl.exe -o "$env:TEMP\rustup-init.exe" "https://win.rustup.rs/x86_64"
 Start-Process -Wait "$env:TEMP\rustup-init.exe" -ArgumentList "-y"
+
+Check the toolchain matches your CPU:
+rustup show active-toolchain   # ARM64: stable-aarch64-pc-windows-msvc
+                               # x64:   stable-x86_64-pc-windows-msvc
 
 --- STEP 5: Microsoft Edge WebView2 Runtime ---
 Pre-installed on Windows 10/11 by default.
@@ -101,9 +131,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 
 --- STEP 5: Database Path Configuration ---
-By default, SQLite creates the database in Linux: ~/.local/share/book_keeper/shop.db
+By default, SQLite creates the database in Linux: ~/.local/share/com.bookkeeper.app/shop.db
 If you want the database stored on your Windows C: drive accessible via File Explorer, set:
-export BOOK_KEEPER_DB_PATH="/mnt/c/Users/<YourWindowsUsername>/AppData/Roaming/book_keeper/shop.db"
+export BOOK_KEEPER_DB_PATH="/mnt/c/Users/<YourWindowsUsername>/AppData/Roaming/com.bookkeeper.app/shop.db"
+(SQLite over /mnt/c is slower and its file locking is less reliable; prefer the
+ Linux default for day-to-day use.)
 
 ================================================================================
 4. OPTION 3: PURE NATIVE LINUX SETUP (Ubuntu / Debian / Arch / Fedora)
@@ -130,26 +162,205 @@ rustup default stable
 ================================================================================
 Open a FRESH terminal window and run:
 
-node -v        # Should output v20.x or v22.x
-npm -v         # Should output 10.x+
-cargo --version # Should output cargo 1.8x.x+
-rustc --version # Should output rustc 1.8x.x+
+node -v         # v20.x or v22.x
+npm -v          # 10.x+
+cargo --version # recent stable (verified with 1.100)
+rustc --version # recent stable (verified with 1.100)
 
 If all four commands return version numbers without error, you are ready!
 
 ================================================================================
-6. PROJECT INITIALIZATION & RUNNING THE APP
+6. PROJECT INITIALIZATION & RUNNING THE APP (DEVELOPMENT, NO .EXE)
 ================================================================================
+Development mode runs the app straight from source. Nothing is installed and
+no release build is made. Use it while iterating.
+
 Navigate to the project root directory:
-cd /path/to/book_keeper
+cd C:\custom_apps\book_keeper          (or /path/to/book_keeper)
 
 --- First Time Initialization ---
-# 1. Install frontend dependencies
-npm install
+npm install          # installs frontend deps + the Tauri CLI (@tauri-apps/cli)
 
-# 2. Run in Development Mode (Live Hot Module Reloading)
-npm run tauri dev
+--- Run in Development Mode ---
+npm run tauri dev    # same as: npx tauri dev
 
-# 3. Compile Production Installer (.exe on Windows, .deb/.AppImage on Linux)
+What it does: starts the Vite dev server on http://localhost:1420, compiles the
+Rust backend (debug), and opens the "Book Keeper" window. The first compile
+takes a few minutes; later launches take about 10 s.
+  * Saving a .ts/.tsx/.css file -> the window hot-reloads instantly.
+  * Saving a .rs file           -> Rust recompiles and the app restarts.
+  * Closing the window or pressing Ctrl+C in the terminal stops everything.
+
+--- Windows: Desktop Shortcut (no install, no .exe build) ---
+The repo ships scripts\dev-launch.cmd, which runs `npx tauri dev` from the
+project folder (and runs `npm install` first if node_modules is missing).
+Create a desktop shortcut to it once, from PowerShell in the project root:
+
+$proj = (Get-Location).Path
+$desk = [Environment]::GetFolderPath('Desktop')
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$desk\Book Keeper (dev).lnk")
+$lnk.TargetPath = "$proj\scripts\dev-launch.cmd"
+$lnk.WorkingDirectory = $proj
+$lnk.IconLocation = "$proj\src-tauri\icons\icon.ico"
+$lnk.WindowStyle = 7          # start the console minimized
+$lnk.Save()
+
+Double-click "Book Keeper (dev)" on the desktop. A minimized console holds the
+dev server and logs; closing it also closes the app. If startup fails, the
+console stays open with the error.
+
+--- Where the data lives ---
+The real backend stores everything in one SQLite file:
+  Windows : %APPDATA%\com.bookkeeper.app\shop.db
+  Linux   : ~/.local/share/com.bookkeeper.app/shop.db
+  macOS   : ~/Library/Application Support/com.bookkeeper.app/shop.db
+Override it with the BOOK_KEEPER_DB_PATH environment variable, e.g. a
+throw-away database for experiments (PowerShell):
+  $env:BOOK_KEEPER_DB_PATH = "C:\temp\bk-scratch.db"; npm run tauri dev
+Dev mode, the .exe and the installed app all share the same default database.
+
+================================================================================
+7. UI ONLY (MOCK BACKEND) VS. UI + REAL BACKEND
+================================================================================
+No flag or config switch is needed. src/api/index.ts picks the client at
+runtime: inside a Tauri window it uses TauriClient (real Rust backend + SQLite
+over IPC); in a plain browser it falls back to MockApiClient (in-memory fake
+data, src/api/mock/).
+
+--- UI with the MOCK backend (no Rust needed, fastest UI iteration) ---
+npm run dev
+Then open http://localhost:1420 in Edge/Chrome. Mock data is in memory only
+and resets on every page reload. Good for layout/styling/flow work; it does
+NOT exercise real validation, FIFO costing, or database behaviour.
+
+--- UI with the REAL backend ---
+npm run tauri dev        (or the desktop shortcut from section 6)
+The Tauri window talks to the Rust backend, which reads and writes shop.db.
+
+Tip: while `npm run tauri dev` is running, http://localhost:1420 in a normal
+browser still shows the MOCK version (the browser has no Tauri IPC), so you
+can compare the two side by side.
+
+================================================================================
+8. BUILDING THE .EXE AND INSTALLERS, INSTALLING, RUNNING
+================================================================================
+--- Build ---
+From the project root (PowerShell or cmd, see section 9 about Git Bash):
 npm run tauri build
+
+This runs `npm run build` (tsc + Vite production bundle), compiles Rust in
+release mode, embeds the UI inside the exe, and produces (ARM64 example; on
+x64 the names say x64):
+
+  target\release\book-keeper.exe                                   (~12 MB, portable)
+  target\release\bundle\msi\Book Keeper_0.1.0_arm64_en-US.msi       (~4.6 MB, MSI installer)
+  target\release\bundle\nsis\Book Keeper_0.1.0_arm64-setup.exe      (~3 MB, setup wizard)
+
+Build time: about 2 minutes on a warm cache. The first build downloads the WiX
+and NSIS installer tools automatically (internet needed once). To build only
+one installer type:  npm run tauri build -- --bundles nsis   (or msi)
+
+--- Option A: Run the portable exe (no install) ---
+Double-click target\release\book-keeper.exe, or put a shortcut to it on the
+desktop. The UI is embedded, so no dev server is needed. It needs only the
+WebView2 runtime, which ships with Windows 10/11. Copy the exe anywhere;
+it uses the same %APPDATA% database as dev mode.
+
+--- Option B: Install ---
+Double-click Book Keeper_0.1.0_arm64-setup.exe (NSIS, installs per user, no
+admin) or the .msi (Windows Installer, per machine). It adds Start Menu
+(and optional desktop) shortcuts and an entry in Settings -> Apps.
+Because the build is unsigned, Windows SmartScreen may show "Windows protected
+your PC": click "More info" -> "Run anyway". With Smart App Control ON,
+unsigned installers are blocked outright.
+
+--- Uninstall ---
+Settings -> Apps -> Installed apps -> Book Keeper -> Uninstall.
+The database in %APPDATA%\com.bookkeeper.app is NOT removed. Delete it by hand
+if you want a clean slate (back it up first; it holds all shop records).
+
+--- ARM64 vs x64 builds ---
+The build targets the machine's own architecture. An ARM64 build runs only on
+ARM64 Windows. To produce an x64 build from an ARM64 machine:
+  rustup target add x86_64-pc-windows-msvc
+  npm run tauri build -- --target x86_64-pc-windows-msvc
+(needs the default x64 MSVC tools, which the VCTools workload installs).
+
+================================================================================
+9. RUNNING THE TEST GATE ON WINDOWS
+================================================================================
+run_e2e_tests.sh runs: cargo test, cargo clippy -D warnings, tsc, vitest, vite
+build. On Windows, run the steps from PowerShell or cmd:
+
+cd src-tauri; cargo test; cargo clippy -- -D warnings; cd ..
+npx tsc --noEmit
+npx vitest run
+npx vite build
+
+Do NOT run cargo from Git Bash: Git's /usr/bin/link.exe (a GNU file-linking
+utility) comes before the MSVC linker on PATH, and every build fails with
+"link: extra operand ...". This also applies to `bash run_e2e_tests.sh`.
+
+================================================================================
+10. PLATFORM NOTES (WHAT IS AND ISN'T WINDOWS-SPECIFIC)
+================================================================================
+Getting the app running on Windows needed NO Windows-specific code changes.
+The changes made on 2026-11-22 were all platform-neutral:
+  * package.json: added @tauri-apps/cli (needed to run Tauri at all) and
+    happy-dom (Vitest environment; it was in vite.config.ts but missing from
+    package.json).
+  * src-tauri/build.rs: rewrote icon files on every build, which made
+    `tauri dev` rebuild forever on any OS. It now writes only missing icons.
+  * Four small clippy fixes required by the newer Rust 1.100 lints (same
+    behaviour, including rejecting NaN bundle multipliers).
+
+Backend (Rust): cross-platform. There is no cfg(windows)/cfg(unix) code.
+SQLite is bundled (rusqlite "bundled"), so no system SQLite is needed. File
+paths come from Tauri's app_data_dir() plus PathBuf.
+
+UI (React): cross-platform. The same bundle runs in every OS webview.
+
+Webview (this part does differ per OS; Tauri chooses it, not our code):
+  Windows : Microsoft Edge WebView2 (Chromium), pre-installed on Win 10/11
+  Linux   : WebKitGTK 4.1 (libwebkit2gtk-4.1)
+  macOS   : WKWebView (Safari engine)
+Keep CSS/JS within what both Chromium and Safari/WebKit support; Vite targets
+chrome105 on Windows and safari13 elsewhere (vite.config.ts). Only Windows has
+been exercised in a real window so far.
+
+Windows-only bits that are harmless elsewhere:
+  * #![windows_subsystem = "windows"] in main.rs hides the console in release
+    builds; other OSes ignore it.
+  * scripts\dev-launch.cmd is a Windows convenience; on Linux/macOS just run
+    `npm run tauri dev`.
+
+Known cross-platform follow-up: the bundle identifier "com.bookkeeper.app"
+ends in ".app", which Tauri warns conflicts with the macOS app bundle
+extension. Changing it moves the default data folder on every OS (existing
+shop.db would need to be moved), so it is left as is until macOS is targeted.
+
+================================================================================
+11. TROUBLESHOOTING
+================================================================================
+"error: linker `link.exe` not found"
+  -> ARM64 machine without the ARM64 MSVC component. See section 2, Step 2.
+
+"link: extra operand '...rcgu.o'"
+  -> cargo was run from Git Bash. Use PowerShell or cmd (section 9).
+
+"os error 4551" / build scripts blocked
+  -> Smart App Control is on. See section 1, or use WSL2 (section 3).
+
+`tauri dev` keeps printing "File src-tauri\icons\... changed. Rebuilding"
+  -> An old build.rs. Pull the fixed version (writes icons only if missing).
+
+"Cannot find package 'happy-dom'" when running vitest
+  -> Run `npm install` (happy-dom is now a devDependency).
+
+"Port 1420 is already in use"
+  -> Another dev server is still running. Close its console, or:
+     Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object CommandLine -match vite | ForEach-Object { Stop-Process -Id $_.ProcessId }
+
+Blank window
+  -> WebView2 is missing: winget install Microsoft.EdgeWebView2Runtime
 ================================================================================

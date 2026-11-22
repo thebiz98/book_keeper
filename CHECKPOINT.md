@@ -23,6 +23,8 @@ All milestones M1–M6 are done. Gate (`bash run_e2e_tests.sh`): 54 backend test
 ## Environment
 Termux (aarch64): cargo and node need the sandbox disabled. In the sandbox `find`/`grep` fail; use `rg`. A full `tauri build` (window bundle) can't run on Termux because the webview libs are missing; build the desktop bundle on a desktop OS.
 
+Windows 11 ARM64 (verified 2026-11-22): requires VS Build Tools 2022 with the **ARM64** component (`Microsoft.VisualStudio.Component.VC.Tools.ARM64`); x64-only tools fail with `linker link.exe not found`. Run cargo from PowerShell/cmd, not Git Bash, because Git's `/usr/bin/link` shadows MSVC `link.exe`. Dev run without installing: `scripts\dev-launch.cmd` (`npx tauri dev`); DB lives at `%APPDATA%\com.bookkeeper.app\shop.db`.
+
 ## Next (not started)
 - Package and run with `tauri build` on a desktop machine, then do a manual UI pass in Tauri mode (so far only the mock client and IPC contracts have been checked).
 - Optional: tighten the remaining `as any` tab-ID casts in ReportsPage and ReturnsAdjustmentsPage.
