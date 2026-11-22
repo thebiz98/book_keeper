@@ -23,6 +23,7 @@ export const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps
       precision = 2,
       autoSelectOnFocus = true,
       className,
+      onBlur,
       ...props
     },
     ref
@@ -31,9 +32,15 @@ export const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps
       value !== undefined && value !== null ? String(value) : ''
     );
 
+    // Re-sync from the prop only when it differs from what the user typed, so
+    // "1.50" is not rewritten to "1.5" mid-typing.
     React.useEffect(() => {
-      setDisplayVal(value !== undefined && value !== null ? String(value) : '');
-    }, [value]);
+      setDisplayVal((prev) => {
+        const typed = allowDecimals ? parseFloat(prev) : parseInt(prev, 10);
+        if (value === typed || (prev === '' && !value)) return prev;
+        return value !== undefined && value !== null ? String(value) : '';
+      });
+    }, [value, allowDecimals]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const raw = e.target.value;
@@ -73,7 +80,7 @@ export const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps
         setDisplayVal(String(parsed));
       }
       onChange(parsed);
-      props.onBlur?.(e);
+      onBlur?.(e);
     };
 
     return (

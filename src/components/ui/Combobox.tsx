@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, ChevronDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useEscapeLayer } from '@/hooks/useHotkeys';
 
 export interface ComboboxOption<T = string | number> {
   value: T;
@@ -38,6 +39,10 @@ export function Combobox<T extends string | number = string>({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listId = React.useId();
+
+  // Esc closes the dropdown first (top-most layer), never the surrounding modal.
+  useEscapeLayer(() => setIsOpen(false), isOpen);
 
   const selectedOption = options.find((opt) => opt.value === value);
 
@@ -92,9 +97,6 @@ export function Combobox<T extends string | number = string>({
           setSearch('');
         }
       }
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setIsOpen(false);
     }
   };
 
@@ -116,11 +118,17 @@ export function Combobox<T extends string | number = string>({
         onClick={() => {
           if (!disabled) {
             setIsOpen((prev) => !prev);
-            setTimeout(() => inputRef.current?.focus(), 50);
+            setTimeout(() => inputRef.current?.focus(), 0);
           }
         }}
         onKeyDown={handleKeyDown}
         tabIndex={disabled ? -1 : 0}
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? listId : undefined}
+        aria-invalid={error ? true : undefined}
+        aria-disabled={disabled || undefined}
       >
         <div className="flex items-center gap-2 overflow-hidden truncate">
           {selectedOption ? (
@@ -134,7 +142,7 @@ export function Combobox<T extends string | number = string>({
       </div>
 
       {isOpen && (
-        <div className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg py-1">
+        <div id={listId} role="listbox" className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-lg py-1">
           <div className="px-2 py-1 sticky top-0 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
             <div className="relative flex items-center">
               <Search className="h-3.5 w-3.5 absolute left-2 text-slate-400" />
@@ -145,7 +153,8 @@ export function Combobox<T extends string | number = string>({
                   setSearch(e.target.value);
                   onSearchChange?.(e.target.value);
                 }}
-                onKeyDown={handleKeyDown}
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Search options"
                 placeholder="Search..."
                 className="w-full text-xs pl-7 pr-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
@@ -164,6 +173,9 @@ export function Combobox<T extends string | number = string>({
                 return (
                   <div
                     key={String(opt.value)}
+                    role="option"
+                    aria-selected={isSelected}
+                    aria-disabled={opt.disabled || undefined}
                     onClick={() => handleSelect(opt)}
                     onMouseEnter={() => setHighlightedIndex(idx)}
                     className={cn(

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sun, Moon, Database, Clock, Search } from 'lucide-react';
+import { hotkeyBadge } from '@/hooks/useHotkeys';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/useAppStore';
 import { useThemeStore } from '@/store/useThemeStore';
@@ -29,14 +30,25 @@ const ROUTE_TITLES: Record<string, string> = {
 export const Header: React.FC = () => {
   const activeRoute = useAppStore((s) => s.activeRoute);
   const shopProfile = useAppStore((s) => s.shopProfile);
+  const dbLabel = useAppStore((s) => s.dbLabel);
+  const loadShopSettings = useAppStore((s) => s.loadShopSettings);
+  const refreshMetrics = useAppStore((s) => s.refreshMetrics);
+  const openLookup = useAppStore((s) => s.openLookup);
   const liveCashInDrawer = useAppStore((s) => s.liveCashInDrawer);
   const isDbConnected = useAppStore((s) => s.isDbConnected);
-  const setActiveRoute = useAppStore((s) => s.setActiveRoute);
 
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggleTheme);
 
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
+
+  // Shop name comes from persisted settings; the cash pill follows the backend ledger.
+  useEffect(() => {
+    void loadShopSettings();
+  }, [loadShopSettings]);
+  useEffect(() => {
+    void refreshMetrics();
+  }, [activeRoute, refreshMetrics]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -79,13 +91,14 @@ export const Header: React.FC = () => {
       <div className="hidden md:flex items-center gap-4">
         <button
           type="button"
-          onClick={() => setActiveRoute('inventory')}
+          onClick={openLookup}
+          aria-label="Open item lookup (F4)"
           className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs text-slate-600 dark:text-slate-300 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
         >
           <Search className="h-3.5 w-3.5 text-slate-400" />
           <span>Search Items & Barcodes...</span>
           <kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 text-[10px] font-mono font-semibold border border-slate-300 dark:border-slate-700">
-            F4
+            {hotkeyBadge('lookup')}
           </kbd>
         </button>
 
@@ -108,7 +121,7 @@ export const Header: React.FC = () => {
 
         {/* Database Health Pill */}
         <div
-          title={isDbConnected ? 'SQLite WAL Database OK' : 'Database Disconnected'}
+          title={isDbConnected ? `SQLite database OK (${dbLabel ?? 'custom path'})` : 'Database Disconnected'}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
         >
           <Database className="h-3 w-3 text-slate-400" />
@@ -119,7 +132,7 @@ export const Header: React.FC = () => {
             )}
           />
           <span className="hidden sm:inline text-slate-600 dark:text-slate-300">
-            {isDbConnected ? 'shop.db' : 'Offline'}
+            {isDbConnected ? dbLabel ?? 'custom path' : 'Offline'}
           </span>
         </div>
 

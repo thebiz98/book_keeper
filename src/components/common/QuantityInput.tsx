@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface QuantityInputProps {
@@ -11,6 +11,8 @@ export interface QuantityInputProps {
   className?: string;
   disabled?: boolean;
   min?: number;
+  /** Fractional quantities (e.g. 2.5 KG). Default true. */
+  allowDecimals?: boolean;
 }
 
 export const QuantityInput: React.FC<QuantityInputProps> = ({
@@ -23,19 +25,25 @@ export const QuantityInput: React.FC<QuantityInputProps> = ({
   className,
   disabled = false,
   min = 1,
+  allowDecimals = true,
 }) => {
   const isBundle = unitsPerBundle > 1 && bundleName;
-  const totalBaseUnits = quantity * unitsPerBundle;
+  const totalBaseUnits = Math.round(quantity * unitsPerBundle * 1e6) / 1e6;
+  const [text, setText] = useState(String(quantity));
+  useEffect(() => {
+    setText((prev) => (parseFloat(prev) === quantity ? prev : String(quantity)));
+  }, [quantity]);
   const isExceedingStock = maxStock !== undefined && totalBaseUnits > maxStock;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseInt(e.target.value, 10);
+    const raw = e.target.value;
+    setText(raw);
+    const val = allowDecimals ? parseFloat(raw) : parseInt(raw, 10);
     if (isNaN(val)) {
       onChange(min);
       return;
     }
-    const clamped = Math.max(min, val);
-    onChange(clamped);
+    onChange(Math.max(min, val));
   };
 
   return (
@@ -44,7 +52,8 @@ export const QuantityInput: React.FC<QuantityInputProps> = ({
         <input
           type="number"
           min={min}
-          value={quantity}
+          step={allowDecimals ? 'any' : 1}
+          value={text}
           onChange={handleChange}
           disabled={disabled}
           className={cn(

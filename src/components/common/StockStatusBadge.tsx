@@ -3,10 +3,14 @@ import { cn } from '@/lib/utils';
 
 export interface StockStatusBadgeProps {
   currentStock: number;
+  /** Server-computed low-stock flag (is_low_stock). The only source of the Low Stock state. */
   isLowStock?: boolean;
   baseUnit?: string;
   className?: string;
 }
+
+/** Stock at or below this is treated as zero (fractional base units). */
+export const STOCK_EPS = 1e-9;
 
 export const StockStatusBadge: React.FC<StockStatusBadgeProps> = ({
   currentStock,
@@ -14,8 +18,8 @@ export const StockStatusBadge: React.FC<StockStatusBadgeProps> = ({
   baseUnit = 'PCS',
   className,
 }) => {
-  const isOutOfStock = currentStock === 0;
-  const isWarning = !isOutOfStock && (currentStock < 5 || isLowStock);
+  const isOutOfStock = currentStock <= STOCK_EPS;
+  const isWarning = !isOutOfStock && isLowStock;
 
   let label: string;
   let colorStyles: string;

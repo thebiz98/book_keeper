@@ -1,6 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useId, useRef } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useModalLayer } from '@/hooks/useHotkeys';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 export interface DrawerProps {
   isOpen: boolean;
@@ -25,18 +27,13 @@ export const Drawer: React.FC<DrawerProps> = ({
   width = 'md',
   className,
 }) => {
-  useEffect(() => {
-    if (isOpen) {
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          onClose();
-        }
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [isOpen, onClose]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useModalLayer(() => onCloseRef.current(), isOpen);
+  useFocusTrap(dialogRef, isOpen);
 
   if (!isOpen) return null;
 
@@ -60,8 +57,11 @@ export const Drawer: React.FC<DrawerProps> = ({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={cn(
           'fixed z-50 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col overflow-hidden max-w-[95vw]',
           positions[position],
@@ -71,7 +71,7 @@ export const Drawer: React.FC<DrawerProps> = ({
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <div>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
+            <h2 id={titleId} className="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
             {description && (
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{description}</p>
             )}
@@ -79,13 +79,15 @@ export const Drawer: React.FC<DrawerProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close"
+            data-modal-close="true"
             className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="p-5 overflow-y-auto flex-1">{children}</div>
+        <div data-modal-body className="p-5 overflow-y-auto flex-1">{children}</div>
 
         {footer && (
           <div className="px-5 py-3 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-800 shrink-0 flex items-center justify-end gap-2">

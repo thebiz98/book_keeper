@@ -58,6 +58,8 @@ export const TextInput = React.forwardRef<HTMLInputElement, TextInputProps>(
             ref={ref}
             id={inputId}
             value={value}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${inputId}-error` : undefined}
             onFocus={handleFocus}
             className={cn(
               'w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm px-3 py-1.5 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 transition-colors',
@@ -82,7 +84,7 @@ export const TextInput = React.forwardRef<HTMLInputElement, TextInputProps>(
           )}
         </div>
         {error && (
-          <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 mt-0.5">
+          <p id={`${inputId}-error`} role="alert" className="text-xs text-rose-600 dark:text-rose-400 mt-0.5">
             {error}
           </p>
         )}

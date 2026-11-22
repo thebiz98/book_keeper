@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { round2 } from '@/lib/money';
 
 export interface CurrencyDisplayProps {
   amount: number;
@@ -18,11 +19,13 @@ export const CurrencyDisplay: React.FC<CurrencyDisplayProps> = ({
   showSign = false,
   className,
 }) => {
-  const isPositive = amount > 0;
-  const isNegative = amount < 0;
+  // Round first so sub-paisa noise never renders as "-₹0.00".
+  const rounded = round2(Number.isFinite(amount) ? amount : 0);
+  const isPositive = rounded > 0;
+  const isNegative = rounded < 0;
 
   // Format absolute value with Indian number formatting (en-IN)
-  const absAmount = Math.abs(amount);
+  const absAmount = Math.abs(rounded);
   const formattedNumber = new Intl.NumberFormat('en-IN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,

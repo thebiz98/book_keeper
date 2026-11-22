@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import type { ItemSearchResult } from '@/types';
 import { AppShell } from '@/components/layout/AppShell';
 import { Modal } from '@/components/ui/Modal';
@@ -6,7 +6,7 @@ import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
 import { useAppStore } from '@/store/useAppStore';
-import { useGlobalHotkeys } from '@/hooks/useGlobalHotkeys';
+import { useAppHotkeys } from '@/hooks/useAppHotkeys';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { NewSalePage } from '@/pages/NewSalePage';
 import { NewPurchasePage } from '@/pages/NewPurchasePage';
@@ -40,12 +40,11 @@ const ROUTES: Record<string, React.FC> = {
   settings: SettingsPage,
 };
 
-const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
+export const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   isOpen,
   onClose,
 }) => {
   const [item, setItem] = useState<ItemSearchResult | null>(null);
-  const stock = item?.currentStock ?? 0;
   return (
     <Modal
       isOpen={isOpen}
@@ -57,14 +56,22 @@ const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
       size="md"
     >
       <div className="flex flex-col gap-4">
-        <ItemSearchTypeahead onSelectItem={setItem} autoFocus />
+        <ItemSearchTypeahead onSelectItem={setItem} autoFocus clearOnSelect={false} />
         {item && (
-          <div className="rounded-md border border-slate-200 dark:border-slate-800 p-3 text-sm flex flex-col gap-1">
+          <div
+            data-testid="lookup-result"
+            className="rounded-md border border-slate-200 dark:border-slate-800 p-3 text-sm flex flex-col gap-1"
+          >
             <span className="font-semibold">{item.name}</span>
-            <StockStatusBadge currentStock={stock} baseUnit={item.baseUnit} />
+            <StockStatusBadge currentStock={item.currentStock} baseUnit={item.baseUnit} />
             <span>
-              Rate:{' '}
-              <CurrencyDisplay amount={item.defaultSalePrice} />
+              Rate: <CurrencyDisplay amount={item.defaultSalePrice} />
+              {item.mrp != null && (
+                <>
+                  {' '}
+                  | MRP: <CurrencyDisplay amount={item.mrp} />
+                </>
+              )}
             </span>
           </div>
         )}
@@ -75,29 +82,17 @@ const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
 
 const App: React.FC = () => {
   const activeRoute = useAppStore((s) => s.activeRoute);
-  const setActiveRoute = useAppStore((s) => s.setActiveRoute);
-  const [lookupOpen, setLookupOpen] = useState(false);
+  const lookupOpen = useAppStore((s) => s.lookupOpen);
+  const closeLookup = useAppStore((s) => s.closeLookup);
 
-  const handlers = useMemo(
-    () => ({
-      F1: () => setActiveRoute('dashboard'),
-      F2: () => setActiveRoute('sale'),
-      F3: () => setActiveRoute('purchase'),
-      F4: () => setLookupOpen(true),
-      F5: () => setActiveRoute('dues'),
-      F6: () => setActiveRoute('inventory'),
-      'Ctrl+B': () => setActiveRoute('settings'),
-    }),
-    [setActiveRoute]
-  );
-  useGlobalHotkeys(handlers);
+  useAppHotkeys();
 
   const Page = ROUTES[activeRoute] ?? DashboardPage;
 
   return (
     <AppShell>
       <Page />
-      <ItemLookupModal isOpen={lookupOpen} onClose={() => setLookupOpen(false)} />
+      <ItemLookupModal isOpen={lookupOpen} onClose={closeLookup} />
     </AppShell>
   );
 };

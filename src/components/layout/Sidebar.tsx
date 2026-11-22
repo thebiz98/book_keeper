@@ -14,13 +14,14 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/useAppStore';
+import { hotkeyBadge, type HotkeyAction } from '@/hooks/useHotkeys';
 
 interface NavItem {
   id: string;
   aliases: string[];
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  hotkey?: string;
+  hotkey?: HotkeyAction;
   isPrimary?: boolean;
 }
 
@@ -30,14 +31,14 @@ const MAIN_ITEMS: NavItem[] = [
     aliases: ['dashboard'],
     label: 'Dashboard',
     icon: LayoutDashboard,
-    hotkey: 'F1',
+    hotkey: 'dashboard',
   },
   {
     id: 'sale',
     aliases: ['sale', 'billing', 'new-sale'],
     label: 'New Sale',
     icon: ShoppingCart,
-    hotkey: 'F2',
+    hotkey: 'sale',
     isPrimary: true,
   },
   {
@@ -45,21 +46,21 @@ const MAIN_ITEMS: NavItem[] = [
     aliases: ['purchase', 'purchases', 'new-purchase'],
     label: 'New Purchase',
     icon: Truck,
-    hotkey: 'F3',
+    hotkey: 'purchase',
   },
   {
     id: 'dues',
     aliases: ['dues', 'credit-dues'],
     label: 'Khata Dues',
     icon: BookOpen,
-    hotkey: 'F5',
+    hotkey: 'dues',
   },
   {
     id: 'inventory',
     aliases: ['inventory', 'items'],
     label: 'Inventory Master',
     icon: Package,
-    hotkey: 'F6',
+    hotkey: 'inventory',
   },
 ];
 
@@ -102,7 +103,7 @@ const SYSTEM_ITEMS: NavItem[] = [
     aliases: ['settings'],
     label: 'Settings & Backup',
     icon: Settings,
-    hotkey: 'Ctrl+B',
+    hotkey: 'backup',
   },
 ];
 
@@ -127,6 +128,7 @@ export const Sidebar: React.FC = () => {
           <button
             key={item.id}
             type="button"
+            aria-current={active ? 'page' : undefined}
             onClick={() => setActiveRoute(item.id)}
             className={cn(
               'flex items-center justify-between px-3 py-2 rounded-md text-xs font-medium transition-colors select-none cursor-pointer',
@@ -151,7 +153,7 @@ export const Sidebar: React.FC = () => {
                     : 'bg-black/5 dark:bg-white/10 text-slate-500 dark:text-slate-400'
                 )}
               >
-                {item.hotkey}
+                {hotkeyBadge(item.hotkey)}
               </kbd>
             )}
           </button>

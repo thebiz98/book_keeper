@@ -7,7 +7,7 @@ import StockStatusBadge from '@/components/common/StockStatusBadge';
 // Spec: docs/book_keeper_UI_LLD.md §5.2 (Item 3), PROJECT.md F16, F43
 // Status Rules:
 //   - currentStock === 0 -> Danger "Out of Stock" (bg-rose-*)
-//   - currentStock < 5   -> Warning "Low Stock: {currentStock} {unit}" (bg-amber-*)
+//   - isLowStock (server flag, never the number alone) -> Warning "Low Stock: {currentStock} {unit}" (bg-amber-*)
 //   - currentStock >= 5  -> Success "{currentStock} {unit}" (bg-emerald-*)
 // ============================================================================
 
@@ -31,7 +31,7 @@ describe('StockStatusBadge - Three-Tier Retail Stock Health Indicator', () => {
 
   describe('2. Low Stock (< 5 base units, Warning)', () => {
     it('TC-SSB-003: renders "Low Stock: 3 PCS" with Warning styling when currentStock is 3', () => {
-      const { container } = render(<StockStatusBadge currentStock={3} baseUnit="PCS" />);
+      const { container } = render(<StockStatusBadge currentStock={3} isLowStock baseUnit="PCS" />);
 
       expect(container.textContent).toMatch(/Low Stock:\s*3\s*PCS/i);
 
@@ -41,20 +41,42 @@ describe('StockStatusBadge - Three-Tier Retail Stock Health Indicator', () => {
     });
 
     it('TC-SSB-004: renders warning for stock of 1', () => {
-      const { container } = render(<StockStatusBadge currentStock={1} baseUnit="PCS" />);
+      const { container } = render(<StockStatusBadge currentStock={1} isLowStock baseUnit="PCS" />);
       expect(container.textContent).toMatch(/Low Stock:\s*1\s*PCS/i);
     });
 
     it('TC-SSB-005: handles fractional decimal stock under 5 (e.g. 4.5 KG)', () => {
-      const { container } = render(<StockStatusBadge currentStock={4.5} baseUnit="KG" />);
+      const { container } = render(<StockStatusBadge currentStock={4.5} isLowStock baseUnit="KG" />);
       expect(container.textContent).toMatch(/Low Stock:\s*4\.5\s*KG/i);
     });
 
     it('TC-SSB-006: boundary test at 4.99 triggers Warning', () => {
-      const { container } = render(<StockStatusBadge currentStock={4.99} baseUnit="PCS" />);
+      const { container } = render(<StockStatusBadge currentStock={4.99} isLowStock baseUnit="PCS" />);
       expect(container.textContent).toMatch(/Low Stock/i);
       const badge = container.firstChild as HTMLElement;
       expect(badge.className).toMatch(/amber|yellow|warning/i);
+    });
+  });
+
+  describe('2b. Flag-only low stock and EPS boundaries (F6-b)', () => {
+    it('does not warn for small stock when the server flag is false', () => {
+      const { container } = render(<StockStatusBadge currentStock={3} baseUnit="PCS" isLowStock={false} />);
+      expect(container.textContent).not.toContain('Low Stock');
+      expect((container.firstChild as HTMLElement).className).toMatch(/emerald/);
+    });
+    it('warns for a large stock when the server flag is true', () => {
+      const { container } = render(<StockStatusBadge currentStock={50} baseUnit="PCS" isLowStock />);
+      expect(container.textContent).toContain('Low Stock: 50 PCS');
+    });
+    it('treats stock at or below EPS as out of stock, even with the low flag', () => {
+      const a = render(<StockStatusBadge currentStock={1e-12} isLowStock />);
+      expect(a.container.textContent).toContain('Out of Stock');
+      const b = render(<StockStatusBadge currentStock={-0.5} />);
+      expect(b.container.textContent).toContain('Out of Stock');
+    });
+    it('treats a just-above-EPS stock as in stock', () => {
+      const { container } = render(<StockStatusBadge currentStock={0.001} baseUnit="KG" />);
+      expect(container.textContent).toContain('0.001 KG');
     });
   });
 
