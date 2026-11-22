@@ -1,212 +1,259 @@
-import React, { useState, useEffect } from 'react';
-import { User, Truck, Search } from 'lucide-react';
-import { api } from '@/api';
+import React, { useCallback, useEffect, useState } from 'react';
+import { User, Truck, Search, ChevronDown, ChevronRight } from 'lucide-react';
+import { api, errorMessage } from '@/api';
 import type { PartyDueSummary, PartyType } from '@/types';
-import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
+import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
 import { SettlementModal } from '@/components/domain/SettlementModal';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
+import { PartyLedgerDrawer } from '@/components/domain/PartyLedgerDrawer';
+import { DataTable, type DataTableColumn } from '@/components/domain/DataTable';
+import { fetchOpenBills, transactionTypeFor, type OpenBill } from '@/components/domain/openBills';
+import { refreshAppMetrics } from '@/components/domain/navParams';
 import { Button } from '@/components/ui/Button';
+import { Tabs } from '@/components/ui/Tabs';
+
+interface SettleTarget {
+  party: PartyDueSummary;
+  /** null = lump sum on account. */
+  bill: OpenBill | null;
+}
+
+const OpenBillsPanel: React.FC<{
+  party: PartyDueSummary;
+  reloadKey: number;
+  onSettle: (bill: OpenBill) => void;
+}> = ({ party, reloadKey, onSettle }) => {
+  const [bills, setBills] = useState<OpenBill[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const type = transactionTypeFor(party.partyType);
+
+  useEffect(() => {
+    let live = true;
+    setBills(null);
+    setError(null);
+    fetchOpenBills(type, party.partyId)
+      .then((b) => live && setBills(b))
+      .catch((e) => live && setError(errorMessage(e)));
+    return () => {
+      live = false;
+    };
+  }, [type, party.partyId, reloadKey]);
+
+  if (error) {
+    return (
+      <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">
+        Could not load open bills: {error}
+      </p>
+    );
+  }
+  if (!bills) return <p className="text-xs text-slate-500">Loading open bills...</p>;
+  if (bills.length === 0) return <p className="text-xs text-slate-500">No open bills.</p>;
+  return (
+    <table className="w-full text-xs" data-testid="open-bills">
+      <thead>
+        <tr className="text-left text-slate-400">
+          <th>Code</th>
+          <th>Date</th>
+          <th className="text-right">Total</th>
+          <th className="text-right">Paid</th>
+          <th className="text-right">Balance</th>
+          <th className="text-center">Status</th>
+          <th />
+        </tr>
+      </thead>
+      <tbody>
+        {bills.map((b) => (
+          <tr key={b.id} className="border-t border-slate-100 dark:border-slate-800">
+            <td className="py-1 font-mono font-semibold">{b.transactionCode}</td>
+            <td className="font-mono">{b.transactionDate}</td>
+            <td className="text-right">
+              <CurrencyDisplay amount={b.totalAmount} size="sm" />
+            </td>
+            <td className="text-right">
+              <CurrencyDisplay amount={b.paidAmount} size="sm" />
+            </td>
+            <td className="text-right">
+              <CurrencyDisplay amount={b.balanceDue} size="sm" colored />
+            </td>
+            <td className="text-center">
+              <PaymentStatusBadge status={b.paymentStatus} />
+            </td>
+            <td className="text-right">
+              <Button variant="secondary" size="xs" onClick={() => onSettle(b)}>
+                Settle
+              </Button>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+};
 
 export const CreditDuesPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<PartyType>('CUSTOMER');
   const [duesList, setDuesList] = useState<PartyDueSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [target, setTarget] = useState<SettleTarget | null>(null);
+  const [ledgerPartyId, setLedgerPartyId] = useState<number | null>(null);
 
-  // Settlement modal state
-  const [selectedParty, setSelectedParty] = useState<{ id: number; name: string; totalDue: number } | null>(null);
-  const [isSettlementOpen, setIsSettlementOpen] = useState(false);
+  const isCustomer = activeTab === 'CUSTOMER';
+  const type = transactionTypeFor(activeTab);
 
-  const recordCashFlow = useAppStore((s) => s.recordCashFlow);
-
-  const fetchDues = () => {
+  const fetchDues = useCallback(() => {
+    let live = true;
     setIsLoading(true);
+    setError(null);
     api
       .getPartyDuesSummary(activeTab)
-      .then((data) => setDuesList(data))
-      .catch(() => setDuesList([]))
-      .finally(() => setIsLoading(false));
-  };
-
-  useEffect(() => {
-    fetchDues();
+      .then((data) => live && setDuesList(data))
+      .catch((e) => {
+        if (live) {
+          setDuesList([]);
+          setError(errorMessage(e));
+        }
+      })
+      .finally(() => live && setIsLoading(false));
+    return () => {
+      live = false;
+    };
   }, [activeTab]);
 
-  const filteredDues = duesList.filter((d) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    const name = d.partyName.toLowerCase();
-    const phone = (d.phone || '').toLowerCase();
-    return name.includes(q) || phone.includes(q);
-  });
+  useEffect(() => {
+    setExpanded(null);
+    return fetchDues();
+  }, [fetchDues]);
 
-  const totalOutstanding = filteredDues.reduce((acc, d) => {
-    return acc + d.balanceDue;
-  }, 0);
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = duesList.filter(
+    (d) => !q || d.partyName.toLowerCase().includes(q) || (d.phone ?? '').toLowerCase().includes(q)
+  );
+  const totalOutstanding = filtered.reduce((acc, d) => acc + d.balanceDue, 0);
 
-  const handleSettled = (settledAmount: number) => {
-    if (activeTab === 'CUSTOMER') {
-      recordCashFlow({ customerDuesSettled: settledAmount });
-    } else {
-      recordCashFlow({ vendorDuesSettled: settledAmount });
-    }
-    fetchDues();
-  };
+  const columns: DataTableColumn<PartyDueSummary>[] = [
+    {
+      key: 'name',
+      header: isCustomer ? 'Customer' : 'Vendor',
+      render: (d) => (
+        <button
+          type="button"
+          className="flex items-center gap-1 font-semibold cursor-pointer"
+          aria-label={`Toggle open bills for ${d.partyName}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded(expanded === d.partyId ? null : d.partyId);
+          }}
+        >
+          {expanded === d.partyId ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          {d.partyName}
+        </button>
+      ),
+    },
+    { key: 'phone', header: 'Phone', mono: true, render: (d) => d.phone ?? '-' },
+    { key: 'count', header: 'Unsettled Bills', align: 'center', render: (d) => d.unsettledBillsCount },
+    { key: 'earliest', header: 'Earliest Bill', mono: true, render: (d) => d.earliestBillDate },
+    { key: 'inv', header: 'Total Invoiced', align: 'right', render: (d) => <CurrencyDisplay amount={d.totalInvoiced} /> },
+    { key: 'paid', header: 'Total Paid', align: 'right', render: (d) => <CurrencyDisplay amount={d.totalPaid} /> },
+    {
+      key: 'bal',
+      header: 'Net Due Balance',
+      align: 'right',
+      render: (d) => <CurrencyDisplay amount={d.balanceDue} colored className="font-bold" />,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      render: (d) => (
+        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <Button variant="primary" size="xs" onClick={() => setTarget({ party: d, bill: null })}>
+            {isCustomer ? 'Receive on account' : 'Pay on account'}
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => setLedgerPartyId(d.partyId)}>
+            View Ledger
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Top Header & Tab Ribbon */}
       <div className="p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs">
-            <button
-              type="button"
-              onClick={() => setActiveTab('CUSTOMER')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                activeTab === 'CUSTOMER'
-                  ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-              }`}
-            >
-              <User className="h-3.5 w-3.5" />
-              <span>Customer Receivables</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('VENDOR')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                activeTab === 'VENDOR'
-                  ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-              }`}
-            >
-              <Truck className="h-3.5 w-3.5" />
-              <span>Supplier Payables</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Total Dues Callout */}
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col text-right">
-            <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              {activeTab === 'CUSTOMER' ? 'Total Receivables Owed' : 'Total Payables Due'}
-            </span>
-            <div className="text-xl font-bold font-mono text-rose-600 dark:text-rose-400">
-              <CurrencyDisplay amount={totalOutstanding} size="xl" colored />
-            </div>
-          </div>
+        <Tabs
+          activeTab={activeTab}
+          onChange={(id) => setActiveTab(id === 'VENDOR' ? 'VENDOR' : 'CUSTOMER')}
+          tabs={[
+            { id: 'CUSTOMER', label: 'Customer Receivables', icon: <User className="h-3.5 w-3.5" /> },
+            { id: 'VENDOR', label: 'Vendor Payables', icon: <Truck className="h-3.5 w-3.5" /> },
+          ]}
+        />
+        <div className="flex flex-col text-right">
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+            {isCustomer ? 'Total Receivables Owed' : 'Total Payables Due'}
+          </span>
+          {error ? <span className="text-xl text-slate-400">-</span> : <CurrencyDisplay amount={totalOutstanding} size="xl" colored />}
         </div>
       </div>
 
-      {/* Filter Bar */}
       <div className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Search party by name or mobile phone..."
+            aria-label="Search party"
+            placeholder={`Search ${isCustomer ? 'customer' : 'vendor'} by name or phone...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full text-xs pl-8 pr-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-
-        <span className="text-xs text-slate-500 font-mono">
-          {filteredDues.length} Unsettled Accounts
-        </span>
+        <span className="text-xs text-slate-500 font-mono">{filtered.length} accounts with open bills</span>
       </div>
 
-      {/* Dues Ledger Table */}
-      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs flex-1">
-        <Table dense>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-12 text-center">#</TableHead>
-              <TableHead>Party Name</TableHead>
-              <TableHead>Phone / Contact</TableHead>
-              <TableHead className="text-center">Unsettled Bills</TableHead>
-              <TableHead align="right">Outstanding Balance (₹)</TableHead>
-              <TableHead className="w-28 text-center">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-12 text-center text-slate-400 text-xs">
-                  Loading khata ledger...
-                </TableCell>
-              </TableRow>
-            ) : filteredDues.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-12 text-center text-slate-400 text-xs">
-                  All accounts settled! Zero outstanding dues.
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredDues.map((due, idx) => {
-                const name = due.partyName;
-                const phone = due.phone || '—';
-                const count = due.unsettledBillsCount;
-                const balance = due.balanceDue;
+      <DataTable
+        columns={columns}
+        items={filtered}
+        rowKey={(d) => d.partyId}
+        isLoading={isLoading}
+        error={error}
+        onRetry={fetchDues}
+        emptyMessage="No outstanding dues. All accounts are settled."
+        isExpanded={(d) => expanded === d.partyId}
+        renderExpanded={(d) => (
+          <OpenBillsPanel
+            party={d}
+            reloadKey={reloadKey}
+            onSettle={(bill) => setTarget({ party: d, bill })}
+          />
+        )}
+        onRowClick={(d) => setExpanded(expanded === d.partyId ? null : d.partyId)}
+      />
 
-                return (
-                  <TableRow key={due.partyId}>
-                    <TableCell className="text-center text-slate-400 select-none">
-                      {idx + 1}
-                    </TableCell>
-                    <TableCell className="font-semibold text-slate-900 dark:text-slate-100">
-                      {name}
-                    </TableCell>
-                    <TableCell mono className="text-xs text-slate-500">
-                      {phone}
-                    </TableCell>
-                    <TableCell className="text-center font-mono text-xs">
-                      <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-semibold">
-                        {count} Bills
-                      </span>
-                    </TableCell>
-                    <TableCell align="right" mono className="font-bold text-rose-600 dark:text-rose-400 text-sm">
-                      <CurrencyDisplay amount={balance} size="md" colored />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Button
-                        variant="primary"
-                        size="xs"
-                        onClick={() => {
-                          setSelectedParty({
-                            id: due.partyId,
-                            name,
-                            totalDue: balance,
-                          });
-                          setIsSettlementOpen(true);
-                        }}
-                      >
-                        Settle
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* FIFO Settlement Modal */}
-      {selectedParty && (
+      {target && (
         <SettlementModal
-          isOpen={isSettlementOpen}
-          onClose={() => setIsSettlementOpen(false)}
-          partyId={selectedParty.id}
-          partyName={selectedParty.name}
-          totalDue={selectedParty.totalDue}
-          transactionType={activeTab === 'CUSTOMER' ? 'SALE' : 'PURCHASE'}
-          onSettled={handleSettled}
+          isOpen
+          onClose={() => setTarget(null)}
+          partyId={target.party.partyId}
+          partyName={target.party.partyName}
+          totalDue={target.bill ? target.bill.balanceDue : target.party.balanceDue}
+          transactionType={type}
+          transactionId={target.bill ? target.bill.id : null}
+          billCode={target.bill?.transactionCode}
+          onSettled={() => {
+            setTarget(null);
+            setReloadKey((k) => k + 1);
+            refreshAppMetrics();
+            fetchDues();
+          }}
         />
       )}
+
+      <PartyLedgerDrawer partyId={ledgerPartyId} onClose={() => setLedgerPartyId(null)} />
     </div>
   );
 };

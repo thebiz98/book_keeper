@@ -1,68 +1,108 @@
 import React, { useState } from 'react';
 import { Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { addDays, startOfMonth, startOfWeek, startOfYear, todayLocal, toLocalDateString } from '@/lib/dates';
+
+export type DatePresetId = 'all' | 'today' | '7d' | '30d' | 'week' | 'month' | 'year' | 'custom';
+
+export interface DateRange {
+  startDate: string;
+  endDate: string;
+}
 
 export interface DateRangePickerProps {
   startDate?: string;
   endDate?: string;
-  onChange: (range: { startDate: string; endDate: string }) => void;
+  onChange: (range: DateRange) => void;
+  /** Presets shown, in order. Default: today, week, month, year, custom. */
+  presets?: DatePresetId[];
   className?: string;
 }
 
+export const DEFAULT_PRESETS: DatePresetId[] = ['today', 'week', 'month', 'year', 'custom'];
+
+const LABELS: Record<DatePresetId, string> = {
+  all: 'All',
+  today: 'Today',
+  '7d': 'Last 7 Days',
+  '30d': 'Last 30 Days',
+  week: 'This Week',
+  month: 'This Month',
+  year: 'This Year',
+  custom: 'Custom',
+};
+
+/** Inclusive local-date range for a preset ('all' = both empty). */
+export function presetRange(preset: Exclude<DatePresetId, 'custom'>, now: Date = new Date()): DateRange {
+  const end = toLocalDateString(now);
+  switch (preset) {
+    case 'all':
+      return { startDate: '', endDate: '' };
+    case 'today':
+      return { startDate: end, endDate: end };
+    case '7d':
+      return { startDate: addDays(now, -6), endDate: end };
+    case '30d':
+      return { startDate: addDays(now, -29), endDate: end };
+    case 'week':
+      return { startDate: startOfWeek(now), endDate: end };
+    case 'month':
+      return { startDate: startOfMonth(now), endDate: end };
+    case 'year':
+      return { startDate: startOfYear(now), endDate: end };
+  }
+}
+
+/** Which preset (if any) the range corresponds to. */
+export function detectPreset(startDate: string, endDate: string, presets: DatePresetId[]): DatePresetId {
+  for (const p of presets) {
+    if (p === 'custom') continue;
+    const r = presetRange(p);
+    if (r.startDate === startDate && r.endDate === endDate) return p;
+  }
+  return 'custom';
+}
+
 export const DateRangePicker: React.FC<DateRangePickerProps> = ({
-  startDate = new Date().toISOString().split('T')[0],
-  endDate = new Date().toISOString().split('T')[0],
+  startDate,
+  endDate,
   onChange,
+  presets = DEFAULT_PRESETS,
   className,
 }) => {
-  const [activePreset, setActivePreset] = useState<string>('today');
+  const today = todayLocal();
+  const start = startDate ?? today;
+  const end = endDate ?? today;
+  const [forceCustom, setForceCustom] = useState(false);
+  const active: DatePresetId = forceCustom ? 'custom' : detectPreset(start, end, presets);
 
-  const applyPreset = (preset: string) => {
-    setActivePreset(preset);
-    const today = new Date();
-    const end = today.toISOString().split('T')[0];
-    let start = end;
-
-    if (preset === 'today') {
-      start = end;
-    } else if (preset === '7d') {
-      const d = new Date();
-      d.setDate(d.getDate() - 7);
-      start = d.toISOString().split('T')[0];
-    } else if (preset === '30d') {
-      const d = new Date();
-      d.setDate(d.getDate() - 30);
-      start = d.toISOString().split('T')[0];
-    } else if (preset === 'year') {
-      const d = new Date();
-      d.setFullYear(d.getFullYear() - 1);
-      start = d.toISOString().split('T')[0];
+  const choose = (p: DatePresetId) => {
+    if (p === 'custom') {
+      setForceCustom(true);
+      return;
     }
-
-    onChange({ startDate: start, endDate: end });
+    setForceCustom(false);
+    onChange(presetRange(p));
   };
 
   return (
     <div className={cn('flex flex-wrap items-center gap-2 text-xs', className)}>
       <div className="flex rounded-md border border-slate-300 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800">
-        {[
-          { id: 'today', label: 'Today' },
-          { id: '7d', label: '7 Days' },
-          { id: '30d', label: '30 Days' },
-          { id: 'year', label: '1 Year' },
-        ].map((p) => (
+        {presets.map((p) => (
           <button
-            key={p.id}
+            key={p}
             type="button"
-            onClick={() => applyPreset(p.id)}
+            data-preset={p}
+            aria-pressed={active === p}
+            onClick={() => choose(p)}
             className={cn(
               'px-2 py-1 rounded text-xs font-medium transition-colors cursor-pointer',
-              activePreset === p.id
+              active === p
                 ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs font-semibold'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             )}
           >
-            {p.label}
+            {LABELS[p]}
           </button>
         ))}
       </div>
@@ -71,20 +111,28 @@ export const DateRangePicker: React.FC<DateRangePickerProps> = ({
         <Calendar className="h-3.5 w-3.5 text-slate-400" />
         <input
           type="date"
-          value={startDate}
+          aria-label="Start date"
+          value={start}
+          max={end || undefined}
           onChange={(e) => {
-            setActivePreset('custom');
-            onChange({ startDate: e.target.value, endDate });
+            const v = e.target.value;
+            if (!v) return;
+            setForceCustom(true);
+            onChange({ startDate: v, endDate: end && end >= v ? end : v });
           }}
           className="bg-transparent text-xs text-slate-800 dark:text-slate-200 focus:outline-none tabular-nums font-mono"
         />
         <span className="text-slate-400">to</span>
         <input
           type="date"
-          value={endDate}
+          aria-label="End date"
+          value={end}
+          min={start || undefined}
           onChange={(e) => {
-            setActivePreset('custom');
-            onChange({ startDate, endDate: e.target.value });
+            const v = e.target.value;
+            if (!v) return;
+            setForceCustom(true);
+            onChange({ startDate: start && start <= v ? start : v, endDate: v });
           }}
           className="bg-transparent text-xs text-slate-800 dark:text-slate-200 focus:outline-none tabular-nums font-mono"
         />

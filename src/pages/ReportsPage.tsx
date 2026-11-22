@@ -1,238 +1,173 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
-import { api } from '@/api';
+import { api, errorMessage } from '@/api';
+import { round2 } from '@/lib/money';
+import { startOfMonth, todayLocal } from '@/lib/dates';
 import type { CashFlowReport, PnLReport, StockValuationReport } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
-import { Tabs } from '@/components/ui/Tabs';
+import { DateRangePicker } from '@/components/common/DateRangePicker';
 
-// TODO(F6-c): show the full P&L/cash-flow breakdown, local-date presets (lib/dates), error states.
-export const ReportsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'pnl' | 'valuation' | 'cashflow'>('pnl');
-  const [datePreset, setDatePreset] = useState<'today' | 'week' | 'month' | 'year'>('month');
+interface Section<T> {
+  data: T | null;
+  error: string | null;
+  loading: boolean;
+}
+const empty = <T,>(): Section<T> => ({ data: null, error: null, loading: true });
 
-  // Reports data
-  const [pnl, setPnl] = useState<PnLReport | null>(null);
-  const [valuation, setValuation] = useState<StockValuationReport | null>(null);
-  const [cashFlow, setCashFlow] = useState<CashFlowReport | null>(null);
-
-  const fetchReports = () => {
-    const today = new Date().toISOString().split('T')[0];
-    const fromDate = '2026-11-01';
-    const toDate = today;
-
-    Promise.all([
-      api.getPnLReport(fromDate, toDate),
-      api.getStockValuationReport(),
-      api.getCashFlowReport(fromDate, toDate),
-    ])
-      .then(([pnlData, valData, cfData]) => {
-        setPnl(pnlData);
-        setValuation(valData);
-        setCashFlow(cfData);
-      })
-      .catch(() => {})
-  };
-
+function useReport<T>(fetcher: () => Promise<T>, deps: unknown[]): [Section<T>, () => void] {
+  const [state, setState] = useState<Section<T>>(empty<T>());
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    fetchReports();
-  }, [datePreset]);
+    let live = true;
+    setState({ data: null, error: null, loading: true });
+    fetcher()
+      .then((data) => live && setState({ data, error: null, loading: false }))
+      .catch((e) => live && setState({ data: null, error: errorMessage(e), loading: false }));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, tick]);
+  return [state, () => setTick((t) => t + 1)];
+}
+
+const Line: React.FC<{ label: string; amount: number; strong?: boolean; testId?: string; negative?: boolean }> = ({
+  label,
+  amount,
+  strong,
+  testId,
+  negative,
+}) => (
+  <div
+    data-testid={testId}
+    className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold border-t border-slate-200 dark:border-slate-700' : ''}`}
+  >
+    <span className={strong ? '' : 'text-slate-600 dark:text-slate-300'}>{label}</span>
+    <span className="font-mono">
+      {negative ? '- ' : ''}
+      <CurrencyDisplay amount={amount} colored={strong} />
+    </span>
+  </div>
+);
+
+const Panel: React.FC<{ title: string; state: Section<unknown>; onRetry: () => void; children: React.ReactNode }> = ({
+  title,
+  state,
+  onRetry,
+  children,
+}) => (
+  <section className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+    <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">{title}</h2>
+    {state.loading ? (
+      <p className="text-xs text-slate-400 py-4">Loading...</p>
+    ) : state.error ? (
+      <div role="alert" className="text-xs text-rose-600 dark:text-rose-400 py-2">
+        {state.error}{' '}
+        <button type="button" onClick={onRetry} className="underline cursor-pointer">
+          Retry
+        </button>
+      </div>
+    ) : (
+      children
+    )}
+  </section>
+);
+
+export const ReportsPage: React.FC = () => {
+  const [range, setRange] = useState({ startDate: startOfMonth(), endDate: todayLocal() });
+  const [pnl, retryPnl] = useReport<PnLReport>(() => api.getPnLReport(range.startDate, range.endDate), [range.startDate, range.endDate]);
+  const [cash, retryCash] = useReport<CashFlowReport>(() => api.getCashFlowReport(range.startDate, range.endDate), [range.startDate, range.endDate]);
+  const [val, retryVal] = useReport<StockValuationReport>(() => api.getStockValuationReport(), []);
+  const onRange = useCallback((r: { startDate: string; endDate: string }) => setRange(r), []);
+
+  const p = pnl.data;
+  const c = cash.data;
+  const inflow = c ? round2(c.salesCashInflow + c.customerSettlementsInflow + c.vendorRefundsInflow) : 0;
+  const outflow = c ? round2(c.purchaseCashOutflow + c.vendorSettlementsOutflow + c.refundsCashOutflow) : 0;
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            <BarChart3 className="text-blue-600 dark:text-blue-400" size={24} />
-            Financial & Inventory Accounting Reports
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            Real-time P&L with strict FIFO cost of goods sold (COGS), inventory asset valuation, and cash flow.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Preset buttons */}
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-md text-xs font-medium">
-            {(['today', 'week', 'month', 'year'] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => setDatePreset(p)}
-                className={`px-2.5 py-1 rounded transition-colors capitalize ${
-                  datePreset === p
-                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 font-semibold shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                {p === 'year' ? 'This FY' : `This ${p}`}
-              </button>
-            ))}
-          </div>
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
+        <h1 className="text-xl font-bold flex items-center gap-2">
+          <BarChart3 className="text-blue-600 dark:text-blue-400" size={24} />
+          Financial Reports
+        </h1>
+        <DateRangePicker startDate={range.startDate} endDate={range.endDate} onChange={onRange} />
       </div>
 
-      {/* Tabs */}
-      <Tabs
-        tabs={[
-          { id: 'pnl', label: 'Profit & Loss (FIFO COGS)' },
-          { id: 'valuation', label: 'Stock Valuation (FIFO Lots)' },
-          { id: 'cashflow', label: 'Cash Flow Statement' },
-        ]}
-        activeTab={activeTab}
-        onChange={(id) => setActiveTab(id as any)}
-      />
-
-      {/* Tab 1: P&L Statement */}
-      {activeTab === 'pnl' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Gross Sales Revenue</span>
-              <div className="text-2xl font-bold mt-1 text-slate-900 dark:text-slate-100">
-                <CurrencyDisplay amount={pnl?.grossSales ?? 0} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel title="Profit & Loss" state={pnl} onRetry={retryPnl}>
+          {p && (
+            <div data-testid="pnl">
+              <Line testId="pnl-gross-sales" label="Gross Sales" amount={p.grossSales} />
+              <Line testId="pnl-sales-returns" label="Less: Sales Returns" amount={p.salesReturns} negative />
+              <Line testId="pnl-net-sales" label="Net Sales" amount={p.netSales} strong />
+              <Line testId="pnl-cogs" label="Less: FIFO COGS (net of returns)" amount={p.cogs} negative />
+              <Line testId="pnl-gross-profit" label="Gross Profit" amount={p.grossProfit} strong />
+              <Line testId="pnl-losses" label="Less: Inventory Losses" amount={p.inventoryLosses} negative />
+              <Line testId="pnl-net-profit" label="Net Profit" amount={p.netProfit} strong />
+              <div className="mt-2 pt-2 border-t border-dashed border-slate-200 dark:border-slate-700">
+                <Line testId="pnl-purchases" label="Total Purchases (net of vendor returns)" amount={p.totalPurchases} />
               </div>
-              <span className="text-xs text-slate-400 mt-1 block">Total customer billings</span>
             </div>
+          )}
+        </Panel>
 
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Cost of Goods Sold (COGS)</span>
-              <div className="text-2xl font-bold mt-1 text-amber-600 dark:text-amber-400">
-                <CurrencyDisplay amount={pnl?.cogs ?? 0} />
-              </div>
-              <span className="text-xs text-slate-400 mt-1 block">FIFO batch cost depletion</span>
+        <Panel title="Cash Flow Register" state={cash} onRetry={retryCash}>
+          {c && (
+            <div data-testid="cashflow">
+              <p className="text-[11px] font-semibold uppercase text-slate-400">Inflows</p>
+              <Line testId="cf-sales" label="Sale upfront cash" amount={c.salesCashInflow} />
+              <Line testId="cf-cust" label="Customer settlements" amount={c.customerSettlementsInflow} />
+              <Line testId="cf-vref" label="Vendor refunds received" amount={c.vendorRefundsInflow} />
+              <Line label="Total inflow" amount={inflow} strong />
+              <p className="text-[11px] font-semibold uppercase text-slate-400 mt-2">Outflows</p>
+              <Line testId="cf-purch" label="Purchase upfront cash" amount={c.purchaseCashOutflow} />
+              <Line testId="cf-vset" label="Vendor settlements" amount={c.vendorSettlementsOutflow} />
+              <Line testId="cf-refunds" label="Customer refunds paid" amount={c.refundsCashOutflow} />
+              <Line label="Total outflow" amount={outflow} strong />
+              <Line testId="cf-net" label="Net Cash Balance" amount={c.netCashBalance} strong />
             </div>
+          )}
+        </Panel>
+      </div>
 
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Net Operating Profit</span>
-              <div className="text-2xl font-bold mt-1">
-                <CurrencyDisplay amount={pnl?.netProfit ?? 0} colored size="hero" />
-              </div>
-              <span className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 block">
-                {pnl?.grossSales ? `Margin: ${Math.round(((pnl.netProfit ?? 0) / pnl.grossSales) * 100)}%` : 'Active'}
+      <Panel title="FIFO Inventory Valuation (current)" state={val} onRetry={retryVal}>
+        {val.data && (
+          <div data-testid="valuation">
+            <div className="flex gap-6 text-sm mb-3">
+              <span>
+                Total Stock Valuation: <CurrencyDisplay amount={val.data.totalValuation} colored />
               </span>
+              <span>Active lots: {val.data.activeLotsCount}</span>
             </div>
+            {val.data.categoriesBreakdown.length === 0 ? (
+              <p className="text-xs text-slate-500">No stock on hand.</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-slate-400">
+                    <th className="py-1">Category</th>
+                    <th className="text-right">Items</th>
+                    <th className="text-right">Valuation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {val.data.categoriesBreakdown.map((cat) => (
+                    <tr key={cat.category} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="py-1">{cat.category}</td>
+                      <td className="text-right font-mono">{cat.itemsCount}</td>
+                      <td className="text-right">
+                        <CurrencyDisplay amount={cat.valuation} size="sm" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-
-          {/* Detailed Statement Breakdown */}
-          <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 p-6 shadow-xs max-w-2xl">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-4 border-b pb-2 dark:border-slate-800">
-              P&L Ledger Breakdown
-            </h3>
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between items-center py-1">
-                <span className="text-slate-600 dark:text-slate-300">1. Gross Revenue (Counter Sales)</span>
-                <span className="font-mono font-semibold">
-                  <CurrencyDisplay amount={pnl?.grossSales ?? 0} />
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1 text-slate-500">
-                <span>Less: Sales Returns</span>
-                <span className="font-mono text-rose-500">
-                  -<CurrencyDisplay amount={pnl?.salesReturns ?? 0} />
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1 text-slate-500">
-                <span>Less: Inventory Losses</span>
-                <span className="font-mono text-rose-500">
-                  -<CurrencyDisplay amount={pnl?.inventoryLosses ?? 0} />
-                </span>
-              </div>
-              <div className="border-t border-slate-200 dark:border-slate-800 pt-2 flex justify-between items-center font-medium">
-                <span>Net Sales Revenue</span>
-                <span className="font-mono font-semibold">
-                  <CurrencyDisplay
-                    amount={pnl?.netSales ?? 0}
-                  />
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1 text-slate-500">
-                <span>Less: Cost of Goods Sold (COGS FIFO)</span>
-                <span className="font-mono text-rose-500">
-                  -<CurrencyDisplay amount={pnl?.cogs ?? 0} />
-                </span>
-              </div>
-              <div className="border-t-2 border-slate-900 dark:border-slate-100 pt-3 flex justify-between items-center font-bold text-base">
-                <span>Net Operating Profit</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                  <CurrencyDisplay amount={pnl?.netProfit ?? 0} colored />
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 2: Stock Valuation */}
-      {activeTab === 'valuation' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Total Stock Asset Valuation</span>
-              <div className="text-2xl font-bold mt-1 text-blue-600 dark:text-blue-400">
-                <CurrencyDisplay amount={valuation?.totalValuation ?? 0} size="hero" />
-              </div>
-              <span className="text-xs text-slate-400 mt-1 block">Sum of FIFO cost × remaining lots</span>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Active Catalog Items</span>
-              <div className="text-2xl font-bold mt-1 text-slate-900 dark:text-slate-100">
-                {valuation?.categoriesBreakdown.reduce((n, c) => n + c.itemsCount, 0) ?? 0}
-              </div>
-              <span className="text-xs text-slate-400 mt-1 block">Stationery master products</span>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Inward Batches Tracked</span>
-              <div className="text-2xl font-bold mt-1 text-slate-900 dark:text-slate-100">
-                {valuation?.activeLotsCount ?? 0}
-              </div>
-              <span className="text-xs text-slate-400 mt-1 block">Distinct purchase lot layers</span>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-900 p-6 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-            <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-2">
-              Valuation Methodology
-            </h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Book Keeper calculates inventory valuation using strict First-In, First-Out (FIFO) lot depletion.
-              Each purchase batch creates a discrete cost layer in SQLite. When items are billed, units are depleted
-              from the oldest remaining batch, ensuring 100% tax and audit compliance without weighted average distortion.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 3: Cash Flow */}
-      {activeTab === 'cashflow' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Cash Inflows</span>
-              <div className="text-2xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">
-                <CurrencyDisplay amount={(cashFlow ? cashFlow.salesCashInflow + cashFlow.customerSettlementsInflow + cashFlow.vendorRefundsInflow : 0)} />
-              </div>
-              <span className="text-xs text-slate-400 mt-1 block">Counter cash + customer dues</span>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Cash Outflows</span>
-              <div className="text-2xl font-bold mt-1 text-rose-600 dark:text-rose-400">
-                <CurrencyDisplay amount={(cashFlow ? cashFlow.purchaseCashOutflow + cashFlow.vendorSettlementsOutflow + cashFlow.refundsCashOutflow : 0)} />
-              </div>
-              <span className="text-xs text-slate-400 mt-1 block">Inward purchases + vendor dues</span>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-xs font-medium text-slate-500">Net Drawer Cash Flow</span>
-              <div className="text-2xl font-bold mt-1">
-                <CurrencyDisplay amount={cashFlow?.netCashBalance ?? 0} colored size="hero" />
-              </div>
-              <span className="text-xs text-slate-400 mt-1 block">Live net liquidity</span>
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      </Panel>
     </div>
   );
 };

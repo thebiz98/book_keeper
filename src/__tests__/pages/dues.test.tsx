@@ -1,0 +1,125 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { render } from '../testUtils';
+import { CreditDuesPage } from '@/pages/CreditDuesPage';
+import { allocateFifo } from '@/components/domain/openBills';
+import type { PartyDueSummary, SaleHistoryRow } from '@/types';
+import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText } from './helpers';
+
+const party: PartyDueSummary = {
+  partyId: 7,
+  partyName: 'Sharma Traders',
+  phone: '999',
+  partyType: 'CUSTOMER',
+  unsettledBillsCount: 2,
+  earliestBillDate: '2026-01-01',
+  totalInvoiced: 500,
+  totalPaid: 200,
+  balanceDue: 300,
+};
+const bill = (id: number, date: string, due: number, status: 'UNPAID' | 'PARTIAL'): SaleHistoryRow => ({
+  id,
+  transactionCode: `SAL-${id}`,
+  transactionDate: date,
+  createdAt: `${date}T10:00:00`,
+  partyId: 7,
+  partyName: 'Sharma Traders',
+  lineCount: 1,
+  totalAmount: due + 50,
+  paidAmount: 50,
+  balanceDue: due,
+  paymentStatus: status,
+});
+
+function setup() {
+  return installApi({
+    getPartyDuesSummary: [party],
+    getSalesHistory: async (f: { paymentStatus?: string }) => ({
+      items: f.paymentStatus === 'UNPAID' ? [bill(2, '2026-01-02', 200, 'UNPAID')] : [bill(1, '2026-01-01', 100, 'PARTIAL')],
+      total: 1,
+      page: 1,
+      limit: 200,
+    }),
+    settleBillPayment: { settlementIds: [1], billsTouched: [1] },
+  });
+}
+
+describe('CreditDuesPage', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('settles a single bill with transactionId', async () => {
+    const api = setup();
+    render(<CreditDuesPage />);
+    await waitFor(() => bodyText().includes('Sharma Traders'));
+    click(document.querySelector('[aria-label^="Toggle open bills"]')!);
+    await waitFor(() => !!document.querySelector('[data-testid="open-bills"]'));
+    // oldest first: SAL-1 is the first row
+    const rows = document.querySelectorAll('[data-testid="open-bills"] tbody tr');
+    expect(rows[0].textContent).toContain('SAL-1');
+    click(buttonByText('Settle', rows[0] as HTMLElement));
+    await flush();
+    expect(bodyText()).toContain('SAL-1');
+    click(buttonByText('Record Settlement', document.querySelector('[role="dialog"]')!));
+    await flush();
+    expect(api.settleBillPayment).toHaveBeenCalledTimes(1);
+    const payload = api.settleBillPayment.mock.calls[0][0];
+    expect(payload).toMatchObject({ partyId: 7, transactionType: 'SALE', transactionId: 1, amountPaid: 100 });
+    expect(payload.settlementDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('lump sum sends null transactionId and previews the FIFO split', async () => {
+    const api = setup();
+    render(<CreditDuesPage />);
+    await waitFor(() => bodyText().includes('Sharma Traders'));
+    click(buttonByText('Receive on account'));
+    await waitFor(() => !!document.querySelector('[data-testid="fifo-preview"] li'));
+    const input = document.querySelector('input[aria-label="Settlement amount"]')!;
+    setInput(input, '150.5');
+    await flush();
+    const preview = document.querySelector('[data-testid="fifo-preview"]')!.textContent ?? '';
+    expect(preview).toContain('SAL-1');
+    expect(preview).toContain('SAL-2');
+    expect(preview).toContain('₹100.00 of ₹100.00 - settled');
+    expect(preview).toContain('₹50.50 of ₹200.00');
+    click(buttonByText('Record Settlement', document.querySelector('[role="dialog"]')!));
+    await flush();
+    expect(api.settleBillPayment.mock.calls[0][0]).toMatchObject({ transactionId: null, amountPaid: 150.5 });
+  });
+
+  it('rejects an amount above the outstanding balance', async () => {
+    const api = setup();
+    render(<CreditDuesPage />);
+    await waitFor(() => bodyText().includes('Sharma Traders'));
+    click(buttonByText('Receive on account'));
+    await flush();
+    setInput(document.querySelector('input[aria-label="Settlement amount"]')!, '301');
+    click(buttonByText('Record Settlement', document.querySelector('[role="dialog"]')!));
+    await flush();
+    expect(api.settleBillPayment).not.toHaveBeenCalled();
+    expect(bodyText()).toContain('cannot exceed');
+  });
+
+  it('shows the error instead of "all settled" when loading fails', async () => {
+    installApi({
+      getPartyDuesSummary: async () => {
+        throw { type: 'DatabaseError', details: 'db is locked' };
+      },
+    });
+    render(<CreditDuesPage />);
+    await waitFor(() => bodyText().includes('db is locked'));
+    expect(bodyText()).not.toContain('No outstanding dues');
+    expect(bodyText()).not.toContain('₹0.00');
+  });
+});
+
+describe('allocateFifo', () => {
+  it('applies oldest first and stops when the amount runs out', () => {
+    const bills = [bill(1, '2026-01-01', 100, 'PARTIAL'), bill(2, '2026-01-02', 200, 'UNPAID')];
+    const out = allocateFifo(bills, 120);
+    expect(out.map((r) => [r.bill.id, r.applied, r.remainingAfter])).toEqual([
+      [1, 100, 0],
+      [2, 20, 180],
+    ]);
+  });
+});

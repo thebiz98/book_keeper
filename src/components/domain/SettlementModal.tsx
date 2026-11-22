@@ -1,20 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { CreditCard, CheckCircle2 } from 'lucide-react';
-import { api } from '@/api';
+import { api, errorMessage } from '@/api';
+import { round2 } from '@/lib/money';
+import { todayLocal } from '@/lib/dates';
+import type { TransactionType } from '@/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
+import { allocateFifo, fetchOpenBills, type OpenBill } from './openBills';
 
 export interface SettlementModalProps {
   isOpen: boolean;
   onClose: () => void;
   partyId: number;
   partyName: string;
+  /** Outstanding amount: the party total (lump sum) or the bill balance (single bill). */
   totalDue: number;
-  /** SALE for customers, PURCHASE for vendors. TODO(F6-c): make required and wire from callers. */
-  transactionType?: 'SALE' | 'PURCHASE';
+  /** SALE for customers (receive), PURCHASE for vendors (pay). */
+  transactionType: TransactionType;
+  /** Set => settle that bill only. null/undefined => lump sum across open bills, oldest first. */
+  transactionId?: number | null;
+  /** Display code of the single bill. */
+  billCode?: string;
   onSettled?: (amount: number) => void;
 }
 
@@ -24,64 +33,99 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   partyId,
   partyName,
   totalDue,
-  transactionType = 'SALE',
+  transactionType,
+  transactionId = null,
+  billCode,
   onSettled,
 }) => {
+  const singleBill = transactionId !== null;
+  const isCustomer = transactionType === 'SALE';
   const [amount, setAmount] = useState<number>(totalDue);
+  const [date, setDate] = useState<string>(todayLocal());
   const [paymentMode, setPaymentMode] = useState<string>('CASH');
   const [notes, setNotes] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [bills, setBills] = useState<OpenBill[]>([]);
+  const [billsError, setBillsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setAmount(totalDue);
+      setDate(todayLocal());
       setPaymentMode('CASH');
       setNotes('');
       setError(null);
     }
-  }, [isOpen, totalDue]);
+  }, [isOpen, totalDue, transactionId]);
+
+  useEffect(() => {
+    if (!isOpen || singleBill) return;
+    let live = true;
+    setBillsError(null);
+    fetchOpenBills(transactionType, partyId)
+      .then((b) => live && setBills(b))
+      .catch((e) => {
+        if (live) {
+          setBills([]);
+          setBillsError(errorMessage(e));
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [isOpen, singleBill, transactionType, partyId]);
+
+  const validation = (): string | null => {
+    if (!(amount > 0)) return 'Settlement amount must be greater than 0';
+    if (round2(amount) > round2(totalDue)) {
+      return `Settlement amount cannot exceed the outstanding balance (₹${round2(totalDue).toFixed(2)})`;
+    }
+    if (!date) return 'Settlement date is required';
+    return null;
+  };
 
   const handleSettle = async () => {
-    if (amount <= 0) {
-      setError('Settlement amount must be greater than 0');
+    const v = validation();
+    if (v) {
+      setError(v);
       return;
     }
-    if (amount > totalDue) {
-      setError(`Settlement amount cannot exceed total outstanding due (₹${totalDue})`);
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
-
     try {
       await api.settleBillPayment({
         partyId,
         transactionType,
-        transactionId: null,
-        amountPaid: amount,
+        transactionId,
+        amountPaid: round2(amount),
         paymentMode,
         notes: notes.trim() || null,
-        settlementDate: new Date().toISOString().split('T')[0],
+        settlementDate: date,
       });
       onSettled?.(amount);
       onClose();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to settle debt payment');
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const remainingBalance = Math.max(0, totalDue - amount);
+  const remainingBalance = Math.max(0, round2(totalDue - amount));
+  const split = singleBill ? [] : allocateFifo(bills, amount);
+  const verb = isCustomer ? 'Receive' : 'Pay';
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Settle Credit Khata Balance"
-      description={`FIFO payment allocation for ${partyName}`}
+      title={
+        singleBill
+          ? `${isCustomer ? 'Record Settlement' : 'Record Vendor Payment'}${billCode ? ` - ${billCode}` : ''}`
+          : `${verb} on account`
+      }
+      description={singleBill ? `Settles this bill only - ${partyName}` : `Oldest bills first - ${partyName}`}
       size="md"
       footer={
         <>
@@ -93,7 +137,6 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
             size="sm"
             onClick={handleSettle}
             isLoading={isLoading}
-            hotkey="Ctrl+Enter"
             leftIcon={<CheckCircle2 className="h-4 w-4" />}
           >
             Record Settlement
@@ -102,33 +145,45 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
       }
     >
       <div className="flex flex-col gap-4 py-1">
-        {/* Outstanding Dues Summary Header */}
         <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800">
           <div>
-            <span className="text-xs text-slate-500 dark:text-slate-400">Total Outstanding Due</span>
-            <div className="text-xl font-bold font-mono text-rose-600 dark:text-rose-400">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {singleBill ? 'Bill Balance Due' : 'Total Outstanding'}
+            </span>
+            <div className="text-xl font-bold font-mono">
               <CurrencyDisplay amount={totalDue} size="xl" colored />
             </div>
           </div>
           <div className="text-right">
             <span className="text-xs text-slate-500 dark:text-slate-400">Remaining After Payment</span>
-            <div className="text-xl font-bold font-mono text-slate-900 dark:text-slate-100">
+            <div className="text-xl font-bold font-mono">
               <CurrencyDisplay amount={remainingBalance} size="xl" />
             </div>
           </div>
         </div>
 
-        {/* Inputs */}
         <div className="grid grid-cols-2 gap-3">
           <NumericInput
-            label="Payment Amount (₹) *"
+            label="Settlement Amount (₹) *"
+            aria-label="Settlement amount"
             value={amount}
             onChange={setAmount}
-            min={1}
-            max={totalDue}
+            min={0}
             autoFocus
           />
-
+          <div className="flex flex-col gap-1">
+            <label htmlFor="settle-date" className="text-xs font-medium text-slate-700 dark:text-slate-300">
+              Settlement Date
+            </label>
+            <input
+              id="settle-date"
+              type="date"
+              value={date}
+              max={todayLocal()}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
           <Select
             label="Payment Mode"
             value={paymentMode}
@@ -140,29 +195,50 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
               { value: 'CHEQUE', label: 'Cheque' },
             ]}
           />
+          <div className="flex flex-col gap-1">
+            <label htmlFor="settle-notes" className="text-xs font-medium text-slate-700 dark:text-slate-300">
+              Notes / Reference
+            </label>
+            <input
+              id="settle-notes"
+              type="text"
+              placeholder="e.g. UPI Ref / receipt no."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
-            Notes / Reference
-          </label>
-          <input
-            type="text"
-            placeholder="e.g. UPI Ref / Cash receipt details..."
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        {/* FIFO allocation explanation note */}
-        <div className="flex items-start gap-2 p-2.5 rounded bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40 text-[11px] text-blue-700 dark:text-blue-300">
-          <CreditCard className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>
-            Payment will automatically extinguish earliest unpaid invoices first according to FIFO
-            principles.
-          </span>
-        </div>
+        {!singleBill && (
+          <div data-testid="fifo-preview" className="rounded border border-slate-200 dark:border-slate-800 text-xs">
+            <div className="px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800/60 font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+              <CreditCard className="h-3.5 w-3.5" /> Split preview (oldest bill first)
+            </div>
+            {billsError ? (
+              <p role="alert" className="p-2.5 text-rose-600 dark:text-rose-400">
+                Could not load open bills: {billsError}
+              </p>
+            ) : split.length === 0 ? (
+              <p className="p-2.5 text-slate-500">Enter an amount to see how it is applied.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                {split.map((r) => (
+                  <li key={r.bill.id} className="px-2.5 py-1.5 flex items-center justify-between font-mono">
+                    <span>
+                      {r.bill.transactionCode} <span className="text-slate-400">({r.bill.transactionDate})</span>
+                    </span>
+                    <span>
+                      <CurrencyDisplay amount={r.applied} size="sm" /> of{' '}
+                      <CurrencyDisplay amount={r.bill.balanceDue} size="sm" />
+                      {r.remainingAfter === 0 ? ' - settled' : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {error && (
           <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">

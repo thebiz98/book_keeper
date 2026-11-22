@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Save, DatabaseBackup, ShieldCheck } from 'lucide-react';
-import { api } from '@/api';
+import { api, errorMessage } from '@/api';
 import { useAppStore } from '@/store/useAppStore';
 import { useThemeStore } from '@/store/useThemeStore';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
@@ -43,6 +43,23 @@ export const SettingsPage: React.FC = () => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [dbNotice, setDbNotice] = useState<Notice>(null);
   const [integrityOk, setIntegrityOk] = useState<boolean | null>(null);
+  const [lastBackup, setLastBackup] = useState<{ path: string; at: Date } | null>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
+
+  // TODO(F6-integrate): the shell adds an app-store `requestBackup` flag for Ctrl+B. Typed loosely
+  // until it lands. We cannot pick a folder natively, so we run the backup when a folder is set,
+  // otherwise focus the folder field.
+  const requestBackup = useAppStore((s) => (s as unknown as { requestBackup?: boolean }).requestBackup);
+  const handleBackupRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('bk.backupDir');
+      if (saved) setBackupPath(saved);
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
 
   useEffect(() => {
     api
@@ -55,9 +72,7 @@ export const SettingsPage: React.FC = () => {
         setAddress(s.address ?? '');
         setTaxId(s.taxId ?? '');
       })
-      .catch((err: any) =>
-        setProfileNotice({ kind: 'error', text: err?.message || 'Failed to load settings' })
-      );
+      .catch((err) => setProfileNotice({ kind: 'error', text: `Failed to load settings: ${errorMessage(err)}` }));
   }, []);
 
   const handleSave = async () => {
@@ -82,8 +97,8 @@ export const SettingsPage: React.FC = () => {
         taxId: taxId.trim(),
       });
       setProfileNotice({ kind: 'success', text: 'Shop profile saved' });
-    } catch (err: any) {
-      setProfileNotice({ kind: 'error', text: err?.message || 'Failed to save settings' });
+    } catch (err) {
+      setProfileNotice({ kind: 'error', text: errorMessage(err) });
     } finally {
       setIsSaving(false);
     }
@@ -91,7 +106,8 @@ export const SettingsPage: React.FC = () => {
 
   const handleBackup = async () => {
     if (!backupPath.trim()) {
-      setDbNotice({ kind: 'error', text: 'Enter a destination path for the backup' });
+      setDbNotice({ kind: 'error', text: 'Enter a destination folder for the backup' });
+      backupInput.current?.focus();
       return;
     }
     setIsBackingUp(true);
@@ -99,12 +115,25 @@ export const SettingsPage: React.FC = () => {
     try {
       const written = await api.backupDatabase(backupPath.trim());
       setDbNotice({ kind: 'success', text: `Backup written to ${written}` });
-    } catch (err: any) {
-      setDbNotice({ kind: 'error', text: err?.message || 'Backup failed' });
+      setLastBackup({ path: written, at: new Date() });
+      try {
+        localStorage.setItem('bk.backupDir', backupPath.trim());
+      } catch {
+        /* storage unavailable */
+      }
+    } catch (err) {
+      setDbNotice({ kind: 'error', text: errorMessage(err) });
     } finally {
       setIsBackingUp(false);
     }
   };
+
+  handleBackupRef.current = handleBackup;
+  useEffect(() => {
+    if (!requestBackup) return;
+    useAppStore.setState({ requestBackup: false } as unknown as Partial<ReturnType<typeof useAppStore.getState>>);
+    handleBackupRef.current();
+  }, [requestBackup]);
 
   const handleVerify = async () => {
     setIsVerifying(true);
@@ -118,8 +147,8 @@ export const SettingsPage: React.FC = () => {
           ? { kind: 'success', text: 'Integrity check passed' }
           : { kind: 'error', text: 'Integrity check reported problems' }
       );
-    } catch (err: any) {
-      setDbNotice({ kind: 'error', text: err?.message || 'Integrity check failed' });
+    } catch (err) {
+      setDbNotice({ kind: 'error', text: errorMessage(err) });
     } finally {
       setIsVerifying(false);
     }
@@ -167,12 +196,22 @@ export const SettingsPage: React.FC = () => {
           )}
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
+          <p className="text-xs text-slate-500">
+            Database file: <span className="font-mono">&lt;app data&gt;/shop.db</span> (or the path in{' '}
+            <span className="font-mono">BOOK_KEEPER_DB_PATH</span>).
+          </p>
           <TextInput
-            label="Backup Destination Path"
-            placeholder="/storage/emulated/0/Backups/shop_backup.db"
+            ref={backupInput}
+            label="Backup Destination Folder (must already exist)"
+            placeholder="/storage/emulated/0/Backups"
             value={backupPath}
             onChange={(e) => setBackupPath(e.target.value)}
           />
+          <p className="text-xs text-slate-500" data-testid="last-backup">
+            {lastBackup
+              ? `Last backup this session: ${lastBackup.at.toLocaleString()} (${lastBackup.path})`
+              : 'No backup yet this session.'}
+          </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="primary"

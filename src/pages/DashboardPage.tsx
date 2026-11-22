@@ -1,270 +1,229 @@
-import React, { useState, useEffect } from 'react';
-import {
-  TrendingUp,
-  AlertTriangle,
-  Users,
-  Package,
-  ShoppingCart,
-  Truck,
-  BookOpen,
-  ArrowUpRight,
-} from 'lucide-react';
-import { api } from '@/api';
-import type { DashboardMetrics, LowStockItem, SaleHistoryRow, TrendDataPoint } from '@/types';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ShoppingCart, Truck, BookOpen, SlidersHorizontal, AlertTriangle, ArrowUpRight } from 'lucide-react';
+import { api, errorMessage } from '@/api';
+import type { DashboardMetrics, LowStockItem, RecentTransaction, TrendDataPoint } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { StockAdjustmentModal } from '@/components/domain/StockAdjustmentModal';
+import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
+import { navigateWithParam } from '@/components/domain/navParams';
+
+type Period = '7d' | '30d' | '1y';
+const PERIODS: { id: Period; label: string }[] = [
+  { id: '7d', label: '7D' },
+  { id: '30d', label: '30D' },
+  { id: '1y', label: '1Y' },
+];
+
+interface Section<T> {
+  data: T | null;
+  error: string | null;
+}
+
+interface DashData {
+  metrics: Section<DashboardMetrics>;
+  lowStock: Section<LowStockItem[]>;
+  recent: Section<RecentTransaction[]>;
+  trend: Section<TrendDataPoint[]>;
+}
+
+/** Simple SWR: last successful result per period is shown immediately while a refetch runs. */
+const cache: { base: Omit<DashData, 'trend'> | null; trend: Partial<Record<Period, Section<TrendDataPoint[]>>> } = {
+  base: null,
+  trend: {},
+};
+
+/** Test hook: drop the in-memory cache. */
+export function resetDashboardCache(): void {
+  cache.base = null;
+  cache.trend = {};
+}
+
+async function settle<T>(p: Promise<T>): Promise<Section<T>> {
+  try {
+    return { data: await p, error: null };
+  } catch (e) {
+    return { data: null, error: errorMessage(e) };
+  }
+}
+
+const Err: React.FC<{ msg: string; onRetry: () => void }> = ({ msg, onRetry }) => (
+  <div role="alert" className="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
+    <span>{msg}</span>
+    <button type="button" className="underline cursor-pointer" onClick={onRetry}>
+      Retry
+    </button>
+  </div>
+);
+
+const Kpi: React.FC<{ label: string; value: number | null; sub?: string; colored?: boolean; testId: string }> = ({
+  label,
+  value,
+  sub,
+  colored,
+  testId,
+}) => (
+  <Card>
+    <CardContent className="p-3 flex flex-col justify-between h-full" data-testid={testId}>
+      <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">{label}</span>
+      <div className="text-lg font-bold font-mono my-1">
+        {value === null ? <span className="text-slate-400">-</span> : <CurrencyDisplay amount={value} size="lg" colored={colored} />}
+      </div>
+      {sub && <span className="text-[10px] text-slate-500 font-mono">{sub}</span>}
+    </CardContent>
+  </Card>
+);
 
 export const DashboardPage: React.FC = () => {
   const setActiveRoute = useAppStore((s) => s.setActiveRoute);
-  const liveCashInDrawer = useAppStore((s) => s.liveCashInDrawer);
+  const [period, setPeriod] = useState<Period>('7d');
+  const [base, setBase] = useState(cache.base);
+  const [trend, setTrend] = useState<Section<TrendDataPoint[]> | null>(cache.trend['7d'] ?? null);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [detail, setDetail] = useState<{ kind: 'SALE' | 'PURCHASE'; id: number } | null>(null);
+  const alive = useRef(true);
 
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [lowStockAlerts, setLowStockAlerts] = useState<LowStockItem[]>([]);
-  const [trendData, setTrendData] = useState<TrendDataPoint[]>([]);
-  // TODO(F6-c): use getRecentTransactions (mixed sales/purchases/returns) and drop the parties lookup.
-  const [recentSales, setRecentSales] = useState<SaleHistoryRow[]>([]);
-  const [customerNames, setCustomerNames] = useState<Record<number, string>>({});
-
-  useEffect(() => {
-    let isMounted = true;
-
-    Promise.all([
-      api.getDashboardMetrics().catch(() => null),
-      api.getLowStockAlerts().catch(() => [] as LowStockItem[]),
-      api.getSalesPurchaseTrend('7d').catch(() => [] as TrendDataPoint[]),
-      api.getSalesHistory({ limit: 6 }).catch(() => null),
-      api.listParties('CUSTOMER', false).catch(() => []),
-    ]).then(([metricsRes, alertsRes, trendRes, salesRes, customers]) => {
-      if (!isMounted) return;
-      if (metricsRes) setMetrics(metricsRes);
-      setLowStockAlerts(alertsRes);
-      setTrendData(trendRes);
-      if (salesRes) setRecentSales(salesRes.items);
-      setCustomerNames(Object.fromEntries(customers.map((c) => [c.id, c.name])));
-    });
-
-    return () => {
-      isMounted = false;
-    };
+  const loadBase = useCallback(async () => {
+    const [metrics, lowStock, recent] = await Promise.all([
+      settle(api.getDashboardMetrics()),
+      settle(api.getLowStockAlerts()),
+      settle(api.getRecentTransactions(10)),
+    ]);
+    const next = { metrics, lowStock, recent };
+    cache.base = next;
+    if (alive.current) setBase(next);
   }, []);
 
-  const todayGross = metrics?.todaySalesAmount ?? 0;
-  const receivables = metrics?.customerReceivables ?? 0;
-  const netProfit = metrics?.todayNetProfit ?? 0;
-  const stockValuation = metrics?.totalStockValuation ?? 0;
+  const loadTrend = useCallback(async (p: Period) => {
+    const sec = await settle(api.getSalesPurchaseTrend(p));
+    cache.trend[p] = sec;
+    if (alive.current) setTrend((cur) => (periodRef.current === p ? sec : cur));
+  }, []);
+
+  const periodRef = useRef<Period>(period);
+  periodRef.current = period;
+
+  useEffect(() => {
+    alive.current = true;
+    void loadBase();
+    const onFocus = () => {
+      void loadBase();
+      void loadTrend(periodRef.current);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      alive.current = false;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [loadBase, loadTrend]);
+
+  useEffect(() => {
+    setTrend(cache.trend[period] ?? null);
+    void loadTrend(period);
+  }, [period, loadTrend]);
+
+  const m = base?.metrics.data ?? null;
+  const low = base?.lowStock.data ?? null;
+  const maxAmt = Math.max(1, ...(trend?.data ?? []).map((t) => Math.max(t.salesAmount, t.purchaseAmount)));
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Action Header Ribbon */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
         <div>
-          <h1 className="text-base font-bold text-slate-900 dark:text-slate-100">
-            Retail Counter Cockpit
-          </h1>
-          <p className="text-xs text-slate-500">
-            Real-time daily turnover, cash drawer, and inventory health
-          </p>
+          <h1 className="text-base font-bold text-slate-900 dark:text-slate-100">Retail Counter Cockpit</h1>
+          <p className="text-xs text-slate-500">Daily turnover, cash drawer and inventory health</p>
         </div>
-
         <div className="flex items-center gap-2">
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setActiveRoute('sale')}
-            hotkey="F2"
-            leftIcon={<ShoppingCart className="h-3.5 w-3.5" />}
-          >
+          <Button size="sm" onClick={() => setActiveRoute('sale')} hotkey="F2" leftIcon={<ShoppingCart className="h-3.5 w-3.5" />}>
             New Sale
           </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setActiveRoute('purchase')}
-            hotkey="F3"
-            leftIcon={<Truck className="h-3.5 w-3.5" />}
-          >
+          <Button variant="secondary" size="sm" onClick={() => setActiveRoute('purchase')} hotkey="F3" leftIcon={<Truck className="h-3.5 w-3.5" />}>
             New Purchase
           </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setActiveRoute('dues')}
-            hotkey="F5"
-            leftIcon={<BookOpen className="h-3.5 w-3.5" />}
-          >
+          <Button variant="outline" size="sm" onClick={() => setActiveRoute('dues')} hotkey="F5" leftIcon={<BookOpen className="h-3.5 w-3.5" />}>
             Settle Due
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setAdjustOpen(true)} leftIcon={<SlidersHorizontal className="h-3.5 w-3.5" />}>
+            Stock Adjustment
           </Button>
         </div>
       </div>
 
-      {/* KPI 6-Grid Ribbon */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        {/* 1. Today's Gross Sales */}
-        <Card>
-          <CardContent className="p-3 flex flex-col justify-between h-full">
-            <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              Today&apos;s Gross Sales
-            </span>
-            <div className="text-lg font-bold font-mono text-slate-900 dark:text-slate-100 my-1">
-              <CurrencyDisplay amount={todayGross} size="lg" />
-            </div>
-            <span className="text-[10px] text-emerald-600 font-medium flex items-center gap-0.5">
-              <TrendingUp className="h-3 w-3" /> Retail Counter
-            </span>
-          </CardContent>
-        </Card>
-
-        {/* 2. Cash in Drawer */}
-        <Card>
-          <CardContent className="p-3 flex flex-col justify-between h-full">
-            <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              Cash in Drawer
-            </span>
-            <div className="text-lg font-bold font-mono my-1">
-              <CurrencyDisplay amount={liveCashInDrawer} colored size="lg" />
-            </div>
-            <span className="text-[10px] text-slate-500 font-mono">Live physical cash</span>
-          </CardContent>
-        </Card>
-
-        {/* 3. Low Stock Items */}
-        <Card
-          className="cursor-pointer hover:border-amber-400 transition-colors"
-          onClick={() => setActiveRoute('inventory')}
-        >
-          <CardContent className="p-3 flex flex-col justify-between h-full">
-            <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              Low Stock Alerts
-            </span>
-            <div className="text-lg font-bold font-mono text-amber-600 dark:text-amber-400 my-1">
-              {lowStockAlerts.length} Items
-            </div>
-            <span className="text-[10px] text-amber-600 flex items-center gap-0.5 font-medium">
-              <AlertTriangle className="h-3 w-3" /> &lt; 5 units threshold
-            </span>
-          </CardContent>
-        </Card>
-
-        {/* 4. Customer Receivables */}
-        <Card
-          className="cursor-pointer hover:border-rose-400 transition-colors"
-          onClick={() => setActiveRoute('dues')}
-        >
-          <CardContent className="p-3 flex flex-col justify-between h-full">
-            <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              Khata Receivables
-            </span>
-            <div className="text-lg font-bold font-mono text-rose-600 dark:text-rose-400 my-1">
-              <CurrencyDisplay amount={receivables} size="lg" />
-            </div>
-            <span className="text-[10px] text-slate-500 font-medium flex items-center gap-0.5">
-              <Users className="h-3 w-3" /> Customer credit
-            </span>
-          </CardContent>
-        </Card>
-
-        {/* 5. Today's Net Operating Profit */}
-        <Card>
-          <CardContent className="p-3 flex flex-col justify-between h-full">
-            <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              Today&apos;s Net Profit
-            </span>
-            <div className="text-lg font-bold font-mono text-emerald-600 dark:text-emerald-400 my-1">
-              <CurrencyDisplay amount={netProfit} colored size="lg" />
-            </div>
-            <span className="text-[10px] text-slate-500 font-mono">FIFO Gross - COGS</span>
-          </CardContent>
-        </Card>
-
-        {/* 6. Inventory Valuation */}
-        <Card>
-          <CardContent className="p-3 flex flex-col justify-between h-full">
-            <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-              Stock Valuation
-            </span>
-            <div className="text-lg font-bold font-mono text-slate-900 dark:text-slate-100 my-1">
-              <CurrencyDisplay amount={stockValuation} size="lg" />
-            </div>
-            <span className="text-[10px] text-slate-500 font-mono flex items-center gap-0.5">
-              <Package className="h-3 w-3" /> Active FIFO Lots
-            </span>
-          </CardContent>
-        </Card>
+      {base?.metrics.error && <Err msg={`Could not load metrics: ${base.metrics.error}`} onRetry={loadBase} />}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <Kpi testId="kpi-sales" label="Today's Gross Sales" value={m?.todaySalesAmount ?? null} sub={m ? `${m.todaySalesCount} bills` : undefined} />
+        <Kpi testId="kpi-purchases" label="Today's Purchases" value={m?.todayPurchaseAmount ?? null} sub={m ? `${m.todayPurchaseCount} batches` : undefined} />
+        <Kpi testId="kpi-profit" label="Today's Net Profit" value={m?.todayNetProfit ?? null} colored />
+        <Kpi testId="kpi-valuation" label="Inventory Valuation" value={m?.totalStockValuation ?? null} />
+        <Kpi testId="kpi-receivables" label="Customer Receivables" value={m?.customerReceivables ?? null} />
+        <Kpi testId="kpi-payables" label="Vendor Payables" value={m?.vendorPayables ?? null} />
+        <Kpi testId="kpi-cash" label="Cash in Drawer" value={m?.liveCashInDrawer ?? null} colored sub="Live physical cash" />
       </div>
 
-      {/* Main Split: Left 7-Day Trend + Recent Sales, Right Low Stock Table */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left Pane (2 Columns) */}
         <div className="lg:col-span-2 flex flex-col gap-4">
-          {/* 7-Day Sales vs Purchases Comparative Bar Ribbon */}
           <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Sales vs Purchases 7-Day Activity
+                Sales vs Purchases
               </h2>
-              <span className="text-[10px] text-slate-400 font-mono">Daily volume (₹)</span>
-            </div>
-
-            {trendData.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400">
-                No recent activity recorded
+              <div className="flex rounded-md border border-slate-300 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800 text-xs">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    data-period={p.id}
+                    aria-pressed={period === p.id}
+                    onClick={() => setPeriod(p.id)}
+                    className={`px-2 py-0.5 rounded font-medium cursor-pointer ${
+                      period === p.id ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-2xs' : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
               </div>
+            </div>
+            {trend?.error ? (
+              <Err msg={`Could not load trend: ${trend.error}`} onRetry={() => loadTrend(period)} />
+            ) : !trend?.data ? (
+              <p className="py-6 text-center text-xs text-slate-400">Loading...</p>
             ) : (
-              <div className="flex flex-col gap-2">
-                {trendData.map((dp) => {
-                  const sAmt = dp.salesAmount;
-                  const pAmt = dp.purchaseAmount;
-                  const maxAmt = Math.max(1000, ...trendData.map((t) => Math.max(t.salesAmount, t.purchaseAmount)));
-                  const sPct = Math.min(100, (sAmt / maxAmt) * 100);
-                  const pPct = Math.min(100, (pAmt / maxAmt) * 100);
-
-                  return (
-                    <div key={dp.date} className="flex items-center gap-3 text-xs">
-                      <span className="w-20 font-mono text-slate-500 text-[11px] shrink-0">
-                        {dp.date}
-                      </span>
-                      <div className="flex-1 flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <div
-                            style={{ width: `${Math.max(4, sPct)}%` }}
-                            className="h-2 rounded bg-blue-600 transition-all duration-300"
-                            title={`Sales: ₹${sAmt}`}
-                          />
-                          <span className="font-mono text-[10px] text-slate-600 dark:text-slate-400">
-                            <CurrencyDisplay amount={sAmt} size="sm" />
-                          </span>
-                        </div>
-                        {pAmt > 0 && (
-                          <div className="flex items-center gap-2">
-                            <div
-                              style={{ width: `${Math.max(4, pPct)}%` }}
-                              className="h-2 rounded bg-amber-500 transition-all duration-300"
-                              title={`Purchases: ₹${pAmt}`}
-                            />
-                            <span className="font-mono text-[10px] text-amber-600 dark:text-amber-400">
-                              <CurrencyDisplay amount={pAmt} size="sm" />
-                            </span>
-                          </div>
-                        )}
-                      </div>
+              <div className="flex flex-col gap-1.5" data-testid="trend">
+                {trend.data.map((dp) => (
+                  <div key={dp.date} className="flex items-center gap-3 text-xs">
+                    <span className="w-20 font-mono text-slate-500 text-[11px] shrink-0">
+                      {period === '1y' ? dp.date.slice(0, 7) : dp.date}
+                    </span>
+                    <div className="flex-1 flex flex-col gap-0.5">
+                      <div
+                        style={{ width: `${Math.max(1, (dp.salesAmount / maxAmt) * 100)}%` }}
+                        className="h-1.5 rounded bg-blue-600"
+                        title={`Sales: ₹${dp.salesAmount}`}
+                      />
+                      <div
+                        style={{ width: `${Math.max(1, (dp.purchaseAmount / maxAmt) * 100)}%` }}
+                        className="h-1.5 rounded bg-amber-500"
+                        title={`Purchases: ₹${dp.purchaseAmount}`}
+                      />
                     </div>
-                  );
-                })}
+                    <span className="w-24 text-right font-mono text-[10px]">
+                      <CurrencyDisplay amount={dp.salesAmount} size="sm" />
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
 
-          {/* Recent Invoices Feed */}
           <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Recent Invoices Feed
+                Recent Transactions
               </h2>
               <button
                 type="button"
@@ -275,95 +234,110 @@ export const DashboardPage: React.FC = () => {
                 <ArrowUpRight className="h-3 w-3" />
               </button>
             </div>
-
-            {recentSales.length === 0 ? (
-              <div className="py-6 text-center text-xs text-slate-400">No invoices yet today</div>
+            {base?.recent.error ? (
+              <Err msg={`Could not load recent transactions: ${base.recent.error}`} onRetry={loadBase} />
+            ) : !base?.recent.data ? (
+              <p className="py-4 text-center text-xs text-slate-400">Loading...</p>
+            ) : base.recent.data.length === 0 ? (
+              <p className="py-4 text-center text-xs text-slate-400">No transactions yet.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 select-none">
-                      <th className="py-2">Code</th>
-                      <th className="py-2">Customer</th>
-                      <th className="py-2 text-right">Amount</th>
-                      <th className="py-2 text-center">Status</th>
+              <table className="w-full text-left text-xs" data-testid="recent">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 select-none">
+                    <th className="py-2">Time</th>
+                    <th>Type</th>
+                    <th>Code</th>
+                    <th>Party</th>
+                    <th className="text-right">Amount</th>
+                    <th className="text-center">Status</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {base.recent.data.map((t) => (
+                    <tr key={`${t.kind}-${t.id}`} className="border-b border-slate-50 dark:border-slate-800/60">
+                      <td className="py-1.5 font-mono text-slate-500">
+                        {t.date}
+                        {t.createdAt ? ` ${t.createdAt.slice(11, 16)}` : ''}
+                      </td>
+                      <td>{t.kind}</td>
+                      <td className="font-mono font-semibold">{t.code}</td>
+                      <td>{t.partyName ?? '-'}</td>
+                      <td className="text-right">
+                        <CurrencyDisplay amount={t.amount} size="sm" />
+                      </td>
+                      <td className="text-center">{t.paymentStatus ? <PaymentStatusBadge status={t.paymentStatus} /> : null}</td>
+                      <td className="text-right">
+                        <button
+                          type="button"
+                          className="text-blue-600 hover:underline cursor-pointer"
+                          onClick={() =>
+                            t.kind === 'RETURN' ? setActiveRoute('returns') : setDetail({ kind: t.kind, id: t.id })
+                          }
+                        >
+                          Open
+                        </button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50 dark:divide-slate-800/60 font-mono">
-                    {recentSales.map((s) => (
-                      <tr key={s.id} className="hover:bg-slate-50/50">
-                        <td className="py-2 font-semibold text-slate-800 dark:text-slate-200">
-                          {s.transactionCode}
-                        </td>
-                        <td className="py-2 font-sans text-slate-600 dark:text-slate-400">
-                          {(s.partyId !== null && customerNames[s.partyId]) || 'Walk-in Customer'}
-                        </td>
-                        <td className="py-2 text-right font-bold text-slate-900 dark:text-slate-100">
-                          <CurrencyDisplay amount={s.totalAmount} size="sm" />
-                        </td>
-                        <td className="py-2 text-center">
-                          <PaymentStatusBadge status={s.paymentStatus} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
 
-        {/* Right Contextual Pane: Low Stock Watchlist */}
         <div className="flex flex-col p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-1.5">
               <AlertTriangle className="h-4 w-4 text-amber-500" />
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Low Stock Alerts
+                Low Stock Monitor
               </h2>
             </div>
-            <span className="text-[10px] font-mono text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded font-bold">
-              {lowStockAlerts.length}
-            </span>
+            {low && (
+              <span data-testid="low-count" className="text-[10px] font-mono text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded font-bold">
+                {low.length}
+              </span>
+            )}
           </div>
-
-          {lowStockAlerts.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400">
-              Inventory is healthy. Zero items under low-stock threshold.
-            </div>
+          {base?.lowStock.error ? (
+            <Err msg={`Could not load low-stock items: ${base.lowStock.error}`} onRetry={loadBase} />
+          ) : !low ? (
+            <p className="py-8 text-center text-xs text-slate-400">Loading...</p>
+          ) : low.length === 0 ? (
+            <p className="py-8 text-center text-xs text-slate-400">Inventory is healthy. No items under the threshold.</p>
           ) : (
-            <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 overflow-y-auto max-h-[460px]">
-              {lowStockAlerts.map((item) => {
-                const stock = item.currentStock;
-                const unit = item.baseUnit;
-
-                return (
-                  <div key={item.id} className="py-2.5 flex items-center justify-between gap-2">
-                    <div className="flex flex-col truncate">
-                      <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                        {item.name}
-                      </span>
-                      <span className="text-[10px] text-slate-400">{item.category}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <StockStatusBadge currentStock={stock} isLowStock baseUnit={unit} />
-                      <button
-                        type="button"
-                        onClick={() => setActiveRoute('purchase')}
-                        title="Record Inward Purchase Batch (F3)"
-                        className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 hover:bg-blue-100 transition-colors cursor-pointer"
-                      >
-                        Inward
-                      </button>
-                    </div>
+            <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 overflow-y-auto max-h-[520px]">
+              {low.map((item) => (
+                <div key={item.id} className="py-2.5 flex items-center justify-between gap-2">
+                  <div className="flex flex-col truncate">
+                    <span className="text-xs font-semibold truncate">{item.name}</span>
+                    <span className="text-[10px] text-slate-400">{item.category ?? 'Uncategorized'}</span>
                   </div>
-                );
-              })}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <StockStatusBadge currentStock={item.currentStock} isLowStock baseUnit={item.baseUnit} />
+                    <button
+                      type="button"
+                      onClick={() => navigateWithParam('purchase', 'inwardItem', String(item.id))}
+                      title="Record inward purchase for this item (F3)"
+                      className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 hover:bg-blue-100 cursor-pointer"
+                    >
+                      Inward (F3)
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
       </div>
+
+      <StockAdjustmentModal
+        isOpen={adjustOpen}
+        onClose={() => setAdjustOpen(false)}
+        onAdjusted={() => void loadBase()}
+      />
+      <BillDetailDrawer kind={detail?.kind ?? 'SALE'} billId={detail?.id ?? null} onClose={() => setDetail(null)} />
     </div>
   );
 };

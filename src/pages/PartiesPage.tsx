@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Plus, Search, Pencil, User, Truck } from 'lucide-react';
-import { api } from '@/api';
-import type { Party, PartyType } from '@/types';
+import { Users, Plus, Search, Pencil, User, Truck, BookOpen } from 'lucide-react';
+import { api, errorMessage } from '@/api';
+import type { PartyListRow, PartyType } from '@/types';
+import { PartyLedgerDrawer } from '@/components/domain/PartyLedgerDrawer';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
@@ -29,8 +30,8 @@ const emptyForm = (partyType: PartyType): PartyForm => ({
 export const PartiesPage: React.FC = () => {
   const [tab, setTab] = useState<PartyType>('CUSTOMER');
   const [query, setQuery] = useState('');
-  const [parties, setParties] = useState<Party[]>([]);
-  const [dues, setDues] = useState<Record<number, number>>({});
+  const [parties, setParties] = useState<PartyListRow[]>([]);
+  const [ledgerId, setLedgerId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,17 +40,14 @@ export const PartiesPage: React.FC = () => {
 
   const load = useCallback(() => {
     setIsLoading(true);
+    setError(null);
     const trimmed = query.trim();
     const req = trimmed ? api.searchParties(trimmed, tab) : api.listParties(tab, true);
-    api
-      .getPartyDuesSummary(tab)
-      .then((rows) => setDues(Object.fromEntries(rows.map((r) => [r.partyId, r.balanceDue]))))
-      .catch(() => setDues({}));
     req
       .then((data) => setParties(data))
-      .catch((err: any) => {
+      .catch((err) => {
         setParties([]);
-        setError(err?.message || 'Failed to load parties');
+        setError(`Failed to load parties: ${errorMessage(err)}`);
       })
       .finally(() => setIsLoading(false));
   }, [tab, query]);
@@ -81,14 +79,14 @@ export const PartiesPage: React.FC = () => {
       }
       setForm(null);
       load();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to save party');
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setIsSaving(false);
     }
   };
 
-  const editParty = (p: Party) =>
+  const editParty = (p: PartyListRow) =>
     setForm({
       id: p.id,
       name: p.name,
@@ -145,15 +143,16 @@ export const PartiesPage: React.FC = () => {
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
-              <TableHead>Notes</TableHead>
-              <TableHead align="right">Balance Due</TableHead>
-              <TableHead className="w-24 text-center">Actions</TableHead>
+              <TableHead>Address / Notes</TableHead>
+              <TableHead align="right">Transactions</TableHead>
+              <TableHead align="right">Outstanding Balance</TableHead>
+              <TableHead className="w-32 text-center">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {parties.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-slate-400 py-8">
+                <TableCell colSpan={6} className="text-center text-slate-400 py-8">
                   {isLoading ? 'Loading...' : 'No parties found'}
                 </TableCell>
               </TableRow>
@@ -163,17 +162,19 @@ export const PartiesPage: React.FC = () => {
                   <TableCell className="font-medium">{p.name}</TableCell>
                   <TableCell className="font-mono">{p.phone || '-'}</TableCell>
                   <TableCell>{p.notes || '-'}</TableCell>
+                  <TableCell align="right" mono>
+                    {p.transactionCount}
+                  </TableCell>
                   <TableCell align="right">
-                    <CurrencyDisplay
-                      amount={dues[p.id] ?? 0}
-                      colored
-                      size="sm"
-                    />
+                    <CurrencyDisplay amount={p.outstandingBalance} colored size="sm" />
                   </TableCell>
                   <TableCell className="text-center">
                     <div className="flex justify-center gap-1">
                       <Button variant="ghost" size="xs" title="Edit" onClick={() => editParty(p)}>
                         <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="xs" title="View Transaction History" onClick={() => setLedgerId(p.id)}>
+                        <BookOpen className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   </TableCell>
@@ -183,6 +184,8 @@ export const PartiesPage: React.FC = () => {
           </TableBody>
         </Table>
       </div>
+
+      <PartyLedgerDrawer partyId={ledgerId} onClose={() => setLedgerId(null)} />
 
       <Modal
         isOpen={form !== null}
