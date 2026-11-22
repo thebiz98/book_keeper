@@ -262,8 +262,35 @@ export type ConflictStrategy = 'SKIP' | 'OVERWRITE' | 'ADD_STOCK';
 
 export interface ImportRowError {
   row: number;
+  /** Item name on that row, when it has one. */
+  name?: string | null;
   field: string;
   message: string;
+}
+
+/** The import will do something differently from the source; the row still imports. Row 0 = whole file. */
+export interface ImportRowWarning {
+  row: number;
+  name: string;
+  message: string;
+}
+
+export type HeaderIssueKind = 'UNKNOWN' | 'MISSING' | 'DUPLICATE';
+
+export interface HeaderIssue {
+  kind: HeaderIssueKind;
+  column: string;
+  position: number | null;
+  columnLetter: string | null;
+  message: string;
+  suggestion: string | null;
+}
+
+export interface ExpectedColumn {
+  name: string;
+  required: boolean;
+  rule: string;
+  example: string;
 }
 
 export interface ImportDuplicate {
@@ -276,7 +303,14 @@ export interface ImportValidationReport {
   validCount: number;
   rowsWithErrors: ImportRowError[];
   duplicates: ImportDuplicate[];
+  /** Non-empty: fix the header row first (rows were not checked). */
+  headerIssues: HeaderIssue[];
+  warnings: ImportRowWarning[];
+  lotsToCreate: number;
+  expectedColumns: ExpectedColumn[];
 }
+
+export type TemplateFormat = 'CSV' | 'XLSX';
 
 export interface ImportSummary {
   created: number;
@@ -366,4 +400,8 @@ export interface ApiClient {
     filePath: string,
     conflictStrategy: ConflictStrategy
   ): Promise<ImportSummary>;
+  validateVedbillImport(filePath: string): Promise<ImportValidationReport>;
+  executeVedbillImport(filePath: string, conflictStrategy: ConflictStrategy): Promise<ImportSummary>;
+  /** Saves the items-import template; resolves to the final path. */
+  writeItemsImportTemplate(destPath: string, format: TemplateFormat): Promise<string>;
 }

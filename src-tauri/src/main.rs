@@ -7,6 +7,8 @@ use tauri::Manager;
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let env_override = std::env::var(book_keeper::app_state::DB_PATH_ENV).ok();
@@ -74,6 +76,9 @@ fn main() {
             report_controller::get_stock_valuation_report,
             import_controller::validate_items_import,
             import_controller::execute_items_import,
+            import_controller::validate_vedbill_import,
+            import_controller::execute_vedbill_import,
+            import_controller::write_items_import_template,
             party_controller::list_parties,
             adjustment_controller::list_stock_adjustments,
             item_controller::search_items_fts,

@@ -681,10 +681,35 @@ export class MockApiClient implements ApiClient {
 
   // --- Import ---
   async validateItemsImport() {
-    return { validCount: 10, rowsWithErrors: [], duplicates: [] };
+    return {
+      validCount: 10,
+      rowsWithErrors: [],
+      duplicates: [],
+      headerIssues: [],
+      warnings: [],
+      lotsToCreate: 10,
+      expectedColumns: [],
+    };
   }
   async executeItemsImport() {
     return { created: 10, updated: 0, skipped: 0, stockLotsCreated: 10 };
+  }
+  async validateVedbillImport() {
+    return {
+      validCount: 3,
+      rowsWithErrors: [],
+      duplicates: [],
+      headerIssues: [],
+      warnings: [{ row: 1, name: 'WHITE GLUE 20', message: 'VedBill shows stock 29 but its lots add up to 32.' }],
+      lotsToCreate: 4,
+      expectedColumns: [],
+    };
+  }
+  async executeVedbillImport() {
+    return { created: 3, updated: 0, skipped: 0, stockLotsCreated: 4 };
+  }
+  async writeItemsImportTemplate(destPath: string) {
+    return destPath;
   }
 }
 

@@ -8,6 +8,7 @@
 pub mod fixtures;
 pub mod ledger;
 pub mod stock;
+pub mod vedbill_fixture;
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -108,6 +109,8 @@ pub type ReturnServiceImpl<I, P, A> = book_keeper::services::ReturnServiceImpl<I
 pub type AccountingServiceImpl<P> = book_keeper::services::AccountingServiceImpl<P, TestDb>;
 pub type ReportServiceImpl = book_keeper::services::ReportServiceImpl<TestDb>;
 pub type ItemImportServiceImpl<I> = book_keeper::services::ItemImportServiceImpl<TestDb, I>;
+pub type VedbillImportServiceImpl<I> =
+    book_keeper::services::VedbillImportServiceImpl<TestDb, I, book_keeper::data::vedbill::ZipVedbillReader>;
 pub type ItemServiceImpl<I> = book_keeper::services::ItemServiceImpl<TestDb, I>;
 pub type PartyServiceImpl = book_keeper::services::PartyServiceImpl<TestDb>;
 pub type ShopSettingServiceImpl = book_keeper::services::ShopSettingServiceImpl<TestDb>;

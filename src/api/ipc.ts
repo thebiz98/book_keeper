@@ -149,4 +149,10 @@ export class TauriClient implements ApiClient {
     invokeCmd('validate_items_import', { filePath });
   executeItemsImport: ApiClient['executeItemsImport'] = (filePath, conflictStrategy) =>
     invokeCmd('execute_items_import', { filePath, conflictStrategy });
+  validateVedbillImport: ApiClient['validateVedbillImport'] = (filePath) =>
+    invokeCmd('validate_vedbill_import', { filePath });
+  executeVedbillImport: ApiClient['executeVedbillImport'] = (filePath, conflictStrategy) =>
+    invokeCmd('execute_vedbill_import', { filePath, conflictStrategy });
+  writeItemsImportTemplate: ApiClient['writeItemsImportTemplate'] = (destPath, format) =>
+    invokeCmd('write_items_import_template', { destPath, format });
 }

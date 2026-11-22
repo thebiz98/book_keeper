@@ -6,7 +6,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
-use crate::core::value_objects::LotSource;
+use crate::core::value_objects::{clean_name, clean_optional, LotSource};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::InventoryService;
@@ -47,7 +47,7 @@ pub enum BarcodeOwner {
 /// Pure field validation for an item (create, update, import). `name` is checked trimmed.
 /// `mrp` must be null or > 0 (0 is rejected: the UI sends null for "no MRP").
 pub fn validate_item_fields(name: &str, default_sale_price: f64, mrp: Option<f64>) -> Result<(), AppError> {
-    if name.trim().is_empty() {
+    if clean_name(name).is_empty() {
         return Err(invalid("name", "Item name cannot be empty"));
     }
     if !default_sale_price.is_finite() || default_sale_price < 0.0 {
@@ -117,7 +117,7 @@ pub fn ensure_item_name_unique(
     name: &str,
     exclude_item_id: Option<i64>,
 ) -> Result<(), AppError> {
-    if let Some(it) = tx.items().find_by_name(name.trim())? {
+    if let Some(it) = tx.items().find_by_name(&clean_name(name))? {
         if Some(it.id) != exclude_item_id {
             return Err(invalid("name", format!("An item named '{}' already exists", it.name)));
         }
@@ -168,7 +168,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemServiceImpl<U, I> {
         p: &UpdateBundlePayload,
     ) -> Result<ItemBundle, AppError> {
         validate_bundle_fields(&p.bundle_name, p.units_per_bundle, p.mrp, p.default_bundle_price)?;
-        ensure_bundle_name_unique(tx, item_id, &p.bundle_name, bundle_id)?;
+        ensure_bundle_name_unique(tx, item_id, &clean_name(&p.bundle_name), bundle_id)?;
         let barcode = clean(p.barcode.clone());
         if let Some(bc) = barcode.as_deref() {
             ensure_barcode_unique(tx, bc, bundle_id.map(|id| (BarcodeOwner::Bundle, id)))?;
@@ -176,7 +176,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemServiceImpl<U, I> {
         Ok(ItemBundle {
             id: bundle_id.unwrap_or(0),
             item_id,
-            bundle_name: p.bundle_name.trim().to_string(),
+            bundle_name: clean_name(&p.bundle_name),
             units_per_bundle: p.units_per_bundle,
             mrp: p.mrp,
             default_bundle_price: p.default_bundle_price,
@@ -269,8 +269,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let now = chrono::Utc::now().to_rfc3339();
         let item = Item {
             id: 0,
-            name: payload.name.trim().to_string(),
-            category: clean(payload.category),
+            name: clean_name(&payload.name),
+            category: clean_optional(payload.category.as_deref()),
             barcode,
             base_unit: payload.base_unit.trim().to_string(),
             mrp: payload.mrp,
@@ -329,8 +329,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         }
 
         // Master fields only: the repository update never touches stock.
-        existing.name = payload.name.trim().to_string();
-        existing.category = clean(payload.category);
+        existing.name = clean_name(&payload.name);
+        existing.category = clean_optional(payload.category.as_deref());
         existing.barcode = barcode;
         existing.base_unit = payload.base_unit.trim().to_string();
         existing.mrp = payload.mrp; // None clears the MRP

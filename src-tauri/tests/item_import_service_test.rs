@@ -152,18 +152,95 @@ fn tc_imp_004_all_or_nothing() {
 #[test]
 fn header_rules() {
     let (_db, svc) = setup();
+    // Header problems come back in the report (all at once, with suggestions), not as an Err.
     let unknown = raw_csv("Item Name,Base Unit,Sale Price,Purchase Cost,Colour\nA,PCS,1,1,red\n");
-    let e = svc.validate_items_import(s(&unknown)).unwrap_err();
-    assert!(e.to_string().contains("Colour"), "{e}");
-    let missing = raw_csv("Item Name,Base Unit,Sale Price\nA,PCS,1\n");
-    let e = svc.validate_items_import(s(&missing)).unwrap_err();
-    assert!(e.to_string().contains("Purchase Cost"), "{e}");
+    let rep = svc.validate_items_import(s(&unknown)).unwrap();
+    assert_eq!(rep.valid_count, 0);
+    assert!(rep.header_issues.iter().any(|i| i.kind == HeaderIssueKind::Unknown && i.column == "Colour"), "{rep:?}");
+    let missing = raw_csv("Item Name,Base Unit,Sale Rate\nA,PCS,1\n");
+    let rep = svc.validate_items_import(s(&missing)).unwrap();
+    assert!(rep.header_issues.iter().any(|i| i.kind == HeaderIssueKind::Missing && i.column == "Purchase Cost"));
+    let rate = rep.header_issues.iter().find(|i| i.column == "Sale Rate").unwrap();
+    assert_eq!(rate.suggestion.as_deref(), Some("Sale Price"));
+    assert_eq!(rep.expected_columns.len(), 10);
+    // execute refuses, quoting every header message
+    let e = svc.execute_items_import(s(&missing), ConflictStrategy::Skip).unwrap_err();
+    assert!(e.to_string().contains("Purchase Cost") && e.to_string().contains("Sale Price"), "{e}");
     // case-insensitive + trimmed + BOM accepted
     let ok = raw_csv("\u{feff} ITEM NAME , base unit,SALE PRICE,purchase cost\nA,PCS,1,1\n");
     assert_eq!(svc.validate_items_import(s(&ok)).unwrap().valid_count, 1);
     let bad_ext = std::env::temp_dir().join("x.txt");
     std::fs::write(&bad_ext, "a").unwrap();
     assert!(svc.validate_items_import(s(&bad_ext)).is_err());
+}
+
+#[test]
+fn names_are_cleaned_and_duplicates_detected_after_cleaning() {
+    let (db, svc) = setup();
+    let f = csv_file("  Pen   Blue ,,,PCS,,10,5,3,,\nNote\u{00A0}book,,,PCS,,10,5,,,\npen blue,,,PCS,,10,5,,,\n");
+    let rep = svc.validate_items_import(s(&f)).unwrap();
+    assert_eq!(rep.valid_count, 2, "{rep:?}");
+    assert!(rep.rows_with_errors.iter().any(|e| e.row == 4 && e.field == "Item Name" && e.message.contains("row 2")));
+    let ok = csv_file("  Pen   Blue ,,,PCS,,10,5,3,,\nNote\u{00A0}book,,,PCS,,10,5,,,\n");
+    svc.execute_items_import(s(&ok), ConflictStrategy::Skip).unwrap();
+    assert_eq!(item(&db, "Pen Blue").current_stock, 3.0);
+    assert_eq!(item(&db, "Note book").name, "Note book");
+}
+
+#[test]
+fn windows_1252_csv_is_read() {
+    let (db, svc) = setup();
+    let mut bytes = HEADER.as_bytes().to_vec();
+    bytes.extend_from_slice(b"\nCaf\xe9 Mug,,,PCS,,10,5,,,\n");
+    let p = std::env::temp_dir().join(format!("bk_import_{}.csv", uuid::Uuid::new_v4()));
+    std::fs::write(&p, bytes).unwrap();
+    svc.execute_items_import(s(&p), ConflictStrategy::Skip).unwrap();
+    assert_eq!(item(&db, "Café Mug").name, "Café Mug");
+}
+
+#[test]
+fn number_errors_say_how_to_fix() {
+    let (_db, svc) = setup();
+    let rep = svc.validate_items_import(s(&csv_file("Pen,,,PCS,,\"12,5\",₹5,,,\n"))).unwrap();
+    let price = rep.rows_with_errors.iter().find(|e| e.field == "Sale Price").unwrap();
+    assert!(price.message.contains("dot for decimals"), "{}", price.message);
+    assert_eq!(price.name.as_deref(), Some("Pen"));
+    let cost = rep.rows_with_errors.iter().find(|e| e.field == "Purchase Cost").unwrap();
+    assert!(cost.message.contains("currency"), "{}", cost.message);
+}
+
+#[test]
+fn template_round_trip_csv_and_xlsx() {
+    use book_keeper::services::r#impl::import_template_writer::write_template;
+    let (db, svc) = setup();
+    let dir = std::env::temp_dir().join(format!("bk_tpl_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    for (fmt, ext) in [(TemplateFormat::Csv, "csv"), (TemplateFormat::Xlsx, "xlsx")] {
+        // A wrong extension is corrected to the chosen format.
+        let saved = write_template(dir.join("template.txt").to_str().unwrap(), fmt).unwrap();
+        assert!(saved.ends_with(ext), "{saved}");
+        let rep = svc.validate_items_import(&saved).unwrap();
+        assert!(rep.header_issues.is_empty(), "{fmt:?}: {:?}", rep.header_issues);
+        assert_eq!((rep.valid_count, rep.rows_with_errors.len()), (0, 0));
+    }
+
+    // Fill the CSV template with one row and import it.
+    let csv = dir.join("template.csv");
+    let mut content = std::fs::read(&csv).unwrap();
+    content.extend_from_slice("Pen Blue,Stationery,,PCS,12,10,6,100,Box,10\r\n".as_bytes());
+    std::fs::write(&csv, content).unwrap();
+    let sum = svc.execute_items_import(csv.to_str().unwrap(), ConflictStrategy::Skip).unwrap();
+    assert_eq!((sum.created, sum.stock_lots_created), (1, 1));
+    assert_eq!(item(&db, "Pen Blue").current_stock, 100.0);
+
+    // XLSX header row is exactly the template columns, in order, on the first sheet.
+    use calamine::{open_workbook_auto, Reader};
+    let mut wb = open_workbook_auto(dir.join("template.xlsx")).unwrap();
+    assert_eq!(wb.sheet_names(), vec!["Items".to_string(), "Instructions".to_string()]);
+    let range = wb.worksheet_range_at(0).unwrap().unwrap();
+    let header: Vec<String> = range.rows().next().unwrap().iter().map(|c| c.to_string()).collect();
+    assert_eq!(header.join(","), HEADER);
 }
 
 #[test]

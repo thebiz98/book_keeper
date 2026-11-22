@@ -18,7 +18,10 @@ pub use item_dto::{
     BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult, ItemLot,
     ItemSearchResult, UpdateBundlePayload, UpdateItemPayload,
 };
-pub use import_dto::{ConflictStrategy, ImportDuplicate, ImportRowError, ImportSummary, ImportValidationReport};
+pub use import_dto::{
+    ConflictStrategy, ExpectedColumn, HeaderIssue, HeaderIssueKind, ImportDuplicate, ImportRowError, ImportRowWarning,
+    ImportSummary, ImportValidationReport, TemplateFormat,
+};
 pub use pagination::{
     clean_text, validate_date_range, PageRequest, Paginated, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT,
 };

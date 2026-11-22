@@ -9,6 +9,7 @@ pub mod return_line_type;
 pub mod return_type;
 pub mod settlement_type;
 pub mod stock_condition;
+pub mod text;
 pub mod transaction_code;
 pub mod transaction_type;
 
@@ -23,5 +24,6 @@ pub use return_line_type::ReturnLineType;
 pub use return_type::ReturnType;
 pub use settlement_type::SettlementType;
 pub use stock_condition::StockCondition;
+pub use text::{clean_name, clean_optional};
 pub use transaction_code::TransactionCode;
 pub use transaction_type::TransactionType;

@@ -1515,16 +1515,33 @@ pub trait ItemImportService: Send + Sync {
 pub enum ConflictStrategy { Skip, Overwrite, AddStock }
 ```
 
-* **Columns** (Template A, header match case-insensitive, trimmed): `Item Name`*, `Category`, `Barcode`, `Base Unit`*, `MRP`, `Sale Price`*, `Purchase Cost`*, `Opening Stock` (default 0), `Packaging Bundle`, `Units Per Bundle`.
-* **Row validation**: required fields present; numbers parse and are `>= 0` (`Units Per Bundle > 1` when a bundle name is given, and both or neither given); duplicate names *within the file* are errors; barcode uniqueness against DB and file.
+* **Columns** (Template A): `Item Name`*, `Category`, `Barcode`, `Base Unit`*, `MRP`, `Sale Price`*, `Purchase Cost`*, `Opening Stock` (default 0), `Packaging Bundle`, `Units Per Bundle`. The single source of truth is `COLUMNS` in `item_import_service_impl.rs`; the downloadable templates are generated from it.
+* **Files**: `.csv` (UTF-8 with or without BOM; non-UTF-8 falls back to Windows-1252), `.xlsx` / `.xls` (first sheet only). Blank rows are ignored; row numbers match the sheet (header = row 1).
+* **Header validation** (match ignores case and extra/odd whitespace): unknown, missing-required and duplicate columns are **all** reported together as `header_issues` in the report (not an `Err`). Each has an actionable message, the column letter, and a `suggestion` (closest template name by edit distance, else a meaning hint: qty/stock -> Opening Stock, rate/price -> Sale Price, cost/purchase -> Purchase Cost, unit/uom -> Base Unit, ...). Aliases are never mapped silently. `execute_*` refuses while any header issue exists.
+* **Name hygiene** (`core::value_objects::clean_name`, also used by `ItemService` create/update and bundle names): trim, collapse inner whitespace, NBSP -> space, drop zero-width chars/BOM, keep case. Names that collide after cleaning are row errors.
+* **Row validation**: required fields present; numbers parse and are `>= 0` (`MRP > 0` when given; `Units Per Bundle > 1`, both bundle fields or neither); duplicate names / barcodes *within the file* are errors; barcode uniqueness against DB. Every `ImportRowError` carries the item `name` and a message that says how to fix it (e.g. comma decimals, currency signs).
 * **Duplicates vs DB** (matched by case-insensitive name) are reported, not errors; the strategy decides:
   * `Skip`: leave the existing item untouched.
   * `Overwrite`: update category/barcode/MRP/sale price (never stock, never base unit).
-  * `AddStock`: leave the master data and add `Opening Stock` as a new lot.
-* **Execution**: new items are created through `ItemService` logic (same validation). All opening stock goes into **one** `OPENING`-source header (`OPN-XXXX`, dated today) with one lot per item at `Purchase Cost`, created via `InventoryService.create_source_lot`. Any error rolls back the entire import. The FTS index is rebuilt for touched items after commit.
-* `ImportSummary { created, updated, skipped, stock_lots_created }`.
+  * `AddStock`: leave the master data and add the row's stock as new lot(s).
+* **Execution**: rows carry `lots: Vec<OpeningLot { date, qty, cost }>` (spreadsheet: one lot dated today when Opening Stock > 0). Lots are grouped by date and created with `InventoryService.create_source_lots(Opening, date, ...)` **once per date, oldest first** (one `OPN-XXXX` header per date), so FIFO order (`purchase_items.id`) follows the source dates. Everything is one transaction; any error rolls back the whole import. FTS is reindexed for touched items after commit.
+* `ImportValidationReport { valid_count, rows_with_errors, duplicates, header_issues, warnings, lots_to_create, expected_columns }`; `ImportSummary { created, updated, skipped, stock_lots_created }`.
+* **Template download**: `write_items_import_template(dest_path, format: CSV | XLSX) -> saved path`. CSV = UTF-8 BOM + header row. XLSX = sheet "Items" (headers only; required columns shaded; header notes; number validation; text-formatted name/barcode/unit columns; frozen header) + sheet "Instructions" (ignored on import). Written to a temp file then renamed into place.
 
-> *Deferred to v2 (removed from v1 code):* VedBill `.vb` migration, parties import / opening dues, all exports, restore from backup.
+### 6.14a VedBill inventory migration (`VedbillImportService`)
+
+* Commands: `validate_vedbill_import(file_path)`, `execute_vedbill_import(file_path, conflict_strategy)`; same report/summary types and strategies as 6.14.
+* **Reader** (`data::contracts::VedbillBackupReader`, impl `data::vedbill::ZipVedbillReader`): `.vb` is a ZIP. Only the `company.db` entry is extracted (exact name, size-capped) to a private temp folder that is deleted afterwards, then opened `SQLITE_OPEN_READ_ONLY`. Needed columns are probed with `PRAGMA table_info`; missing ones give a "format not supported" error. `company_manifest.json` `schemaVersion != 8` gives a file-level warning (row 0).
+* **Mapping** (`vedbill_import_service_impl::map_snapshot`):
+  * every `items` row becomes an item; `SERVICE` items too, with no stock;
+  * name -> `clean_name`; unit = primary unit short name (else `PCS`); sale price = `salePrice`; MRP = `mrp` when > 0; category and barcode empty (VedBill categories are expense categories; `itemCode` is not a barcode);
+  * **stock = the VedBill lots, one to one**: each `stock_lots` row with `remainingPrimaryQty > 0` becomes an OPENING lot with the same quantity, `purchasePrice` and local `lotDate`, oldest first; lots <= 0 (oversold) are dropped;
+  * no positive lots but `primaryQuantity > 0`: one lot of that quantity at `purchasePrice` (or 0), dated `openingStockDate` or today;
+  * negative `primaryQuantity` with no positive lots: stock 0.
+  * Each deviation (name cleaned, screen stock != lot sum, lots dropped, fallback lot, zero cost, service, missing unit) is a `warning`.
+* Re-running with `Skip` is idempotent (everything is a duplicate by name).
+
+> *Deferred to v2:* VedBill parties / documents / payments history, parties import / opening dues, all exports, restore from backup.
 
 ---
 

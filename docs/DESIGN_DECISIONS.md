@@ -114,7 +114,8 @@ This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagre
 - **In v1:**
   - Items import (CSV and XLSX): a dry-run validation report, then execution with a `SKIP`, `OVERWRITE` or `ADD_STOCK` strategy. Opening stock creates `OPENING`-source lots at the row's Purchase Cost.
   - One-click backup plus an integrity check.
-- **Deferred to v2:** every export, parties import, opening dues, VedBill migration, and restore from backup.
+  - **Amended 2026-11-22:** an *inventory-only* VedBill migration (item master + open stock lots from a `.vb` backup) is pulled into v1, sharing the items-import dry-run, strategy and summary. Rules are in LLD §6.14a.
+- **Deferred to v2:** every export, parties import, opening dues, VedBill sales/purchases/parties history, and restore from backup.
 - In the fix phase, the existing code for the deferred features is **removed**: IPC commands, services, UI buttons and tests.
 
 **DD-17 — FR-17 archiving is deferred to v2 (D-22).** In v1 there is no archive and no delete for items or parties. The `is_active` columns stay (default 1) and read queries still filter on them. `archive_item` and `archive_party` are removed in the fix phase.

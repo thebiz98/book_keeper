@@ -1,6 +1,6 @@
 # BookKeeper - Data Import, Export & VedBill Migration Study
 **Document Version:** 1.1.0  
-**Status:** Reference study. **v1 scope (2026-11-21, [DD-16](DESIGN_DECISIONS.md)):** only §4 *Template A items import* (dry-run + Skip/Overwrite/Add-stock, CSV + XLSX, opening stock as `OPENING`-source lots) is in v1, implemented per Backend LLD §6.14 (`validate_items_import`, `execute_items_import`). Everything else here — VedBill migration (§2–3), parties import / opening dues (Template B), all exports (§5), restore, and the §7 IPC names — is **deferred to v2**. Where this document and the LLD differ, the LLD wins.  
+**Status:** Reference study. **v1 scope (2026-11-21, [DD-16](DESIGN_DECISIONS.md)):** only §4 *Template A items import* (dry-run + Skip/Overwrite/Add-stock, CSV + XLSX, opening stock as `OPENING`-source lots) is in v1, implemented per Backend LLD §6.14 (`validate_items_import`, `execute_items_import`). **Amended 2026-11-22:** the *inventory-only* VedBill migration (items + open stock lots; LLD §6.14a) is also in v1. Everything else here — the rest of VedBill migration (§2–3: parties, documents, payments), parties import / opening dues (Template B), all exports (§5), restore, and the §7 IPC names — is **deferred to v2**. Where this document and the LLD differ, the LLD wins.  
 **Target Architecture:** Desktop (Windows 10/11 x64) | Tauri v2 + Rust (rusqlite) + React 19 / TypeScript  
 
 ---

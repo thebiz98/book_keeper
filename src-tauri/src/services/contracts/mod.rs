@@ -12,6 +12,7 @@ pub mod report_service;
 pub mod return_service;
 pub mod sale_service;
 pub mod shop_setting_service;
+pub mod vedbill_import_service;
 
 pub use accounting_service::AccountingService;
 pub use backup_service::BackupService;
@@ -29,3 +30,4 @@ pub use report_service::ReportService;
 pub use return_service::ReturnService;
 pub use sale_service::SaleService;
 pub use shop_setting_service::ShopSettingService;
+pub use vedbill_import_service::VedbillImportService;

@@ -15,6 +15,7 @@ use crate::services::contracts::report_service::ReportService;
 use crate::services::contracts::return_service::ReturnService;
 use crate::services::contracts::sale_service::SaleService;
 use crate::services::contracts::shop_setting_service::ShopSettingService;
+use crate::services::contracts::vedbill_import_service::VedbillImportService;
 
 pub struct AppState {
     pub unit_of_work: Arc<dyn UnitOfWork>,
@@ -30,6 +31,7 @@ pub struct AppState {
     pub report_service: Arc<dyn ReportService>,
     pub party_service: Arc<dyn PartyService>,
     pub item_import_service: Arc<dyn ItemImportService>,
+    pub vedbill_import_service: Arc<dyn VedbillImportService>,
     pub backup_service: Arc<dyn BackupService>,
     pub shop_setting_service: Arc<dyn ShopSettingService>,
     pub data_reset_service: Arc<dyn DataResetService>,
@@ -166,6 +168,12 @@ fn build_sqlite_app_state_full(
     let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone()));
     let item_import_service: Arc<dyn ItemImportService> =
         Arc::new(ItemImportServiceImpl::new(uow.clone(), inventory_service.clone()).with_indexer(search_indexer.clone()));
+    let vedbill_reader: Arc<dyn crate::data::contracts::vedbill_reader::VedbillBackupReader> =
+        Arc::new(crate::data::vedbill::ZipVedbillReader);
+    let vedbill_import_service: Arc<dyn VedbillImportService> = Arc::new(
+        crate::services::VedbillImportServiceImpl::new(uow.clone(), inventory_service.clone(), vedbill_reader)
+            .with_indexer(search_indexer.clone()),
+    );
     let backup_service: Arc<dyn BackupService> = Arc::new(BackupServiceImpl::new(db_path));
     let shop_setting_service: Arc<dyn ShopSettingService> =
         Arc::new(ShopSettingServiceImpl::new(uow.clone()));
@@ -210,6 +218,7 @@ fn build_sqlite_app_state_full(
         report_service,
         party_service,
         item_import_service,
+        vedbill_import_service,
         backup_service,
         shop_setting_service,
         data_reset_service,

@@ -13,6 +13,7 @@ pub mod search_indexer;
 pub mod setting_repository;
 pub mod settlement_repository;
 pub mod unit_of_work;
+pub mod vedbill_reader;
 
 pub use adjustment_repository::AdjustmentRepository;
 pub use allocation_repository::AllocationRepository;
@@ -29,3 +30,4 @@ pub use search_indexer::ItemSearchIndexer;
 pub use setting_repository::SettingRepository;
 pub use settlement_repository::SettlementRepository;
 pub use unit_of_work::{TransactionContext, UnitOfWork};
+pub use vedbill_reader::{VedbillBackupReader, VedbillItem, VedbillLot, VedbillManifest, VedbillSnapshot};
