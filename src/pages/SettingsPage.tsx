@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Save, DatabaseBackup, ShieldCheck } from 'lucide-react';
+import { Settings, Save, DatabaseBackup, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import { pickFolder } from '@/api/pickFolder';
-import type { AppConfigView } from '@/types';
+import type { AppConfigView, ResetScope } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { useThemeStore } from '@/store/useThemeStore';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { TextInput } from '@/components/ui/TextInput';
 import { Badge } from '@/components/ui/Badge';
+import { Modal } from '@/components/ui/Modal';
+import { useCartStore } from '@/store/useCartStore';
 
 type Notice = { kind: 'success' | 'error'; text: string } | null;
 
@@ -25,6 +27,8 @@ const NoticeLine: React.FC<{ notice: Notice }> = ({ notice }) =>
       {notice.text}
     </p>
   ) : null;
+
+const RESET_PHRASE: Record<ResetScope, string> = { Transactions: 'RESET', All: 'DELETE ALL' };
 
 export const SettingsPage: React.FC = () => {
   const setShopProfile = useAppStore((s) => s.setShopProfile);
@@ -45,6 +49,11 @@ export const SettingsPage: React.FC = () => {
   const [isVerifying, setIsVerifying] = useState(false);
   const [dbNotice, setDbNotice] = useState<Notice>(null);
   const [integrityOk, setIntegrityOk] = useState<boolean | null>(null);
+  const [resetScope, setResetScope] = useState<ResetScope | null>(null);
+  const [resetText, setResetText] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetNotice, setResetNotice] = useState<Notice>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
   const [lastBackup, setLastBackup] = useState<{ path: string; at: Date } | null>(null);
 
   // The shell sets the app-store `requestBackup` flag for Ctrl+B; it runs a backup into the current folder.
@@ -131,6 +140,37 @@ export const SettingsPage: React.FC = () => {
       if (picked) await applyDirectory(picked);
     } catch (err) {
       setDbNotice({ kind: 'error', text: errorMessage(err) });
+    }
+  };
+
+  const openReset = (scope: ResetScope) => {
+    setResetText('');
+    setResetError(null);
+    setResetScope(scope);
+  };
+  const closeReset = () => {
+    if (!isResetting) setResetScope(null);
+  };
+  const handleReset = async () => {
+    if (!resetScope || resetText !== RESET_PHRASE[resetScope]) return;
+    setIsResetting(true);
+    setResetError(null);
+    try {
+      const summary = await api.resetData(resetScope);
+      const total = summary.deleted.reduce((n, d) => n + d.rows, 0);
+      setResetScope(null);
+      setResetNotice({
+        kind: 'success',
+        text: `Reset complete: ${total} rows deleted. Backup written to ${summary.backupPath}`,
+      });
+      // Other pages load their data on mount; refresh what is cached app-wide.
+      useCartStore.getState().clearCart();
+      void useAppStore.getState().refreshMetrics();
+      api.getAppConfig().then(setConfig).catch(() => {});
+    } catch (err) {
+      setResetError(errorMessage(err));
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -256,6 +296,77 @@ export const SettingsPage: React.FC = () => {
           <NoticeLine notice={dbNotice} />
         </CardContent>
       </Card>
+
+      {config?.testingMode === true && (
+        <Card className="border-rose-300 dark:border-rose-900">
+          <CardHeader>
+            <CardTitle>Testing tools</CardTitle>
+            <Badge variant="danger">Testing mode</Badge>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+              <TriangleAlert className="h-4 w-4 shrink-0" />
+              For testing only. A backup is written to the backup folder first, but the data is removed.
+            </p>
+            <div className="flex flex-col gap-1">
+              <div>
+                <Button variant="danger" onClick={() => openReset('Transactions')}>
+                  Clear transactions
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">Keeps items, bundles, parties; stock returns to opening stock.</p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <div>
+                <Button variant="danger" onClick={() => openReset('All')}>
+                  Clear all data
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">Deletes everything except the shop profile.</p>
+            </div>
+            <NoticeLine notice={resetNotice} />
+          </CardContent>
+        </Card>
+      )}
+
+      <Modal
+        isOpen={resetScope !== null}
+        onClose={closeReset}
+        title={resetScope === 'All' ? 'Clear all data' : 'Clear transactions'}
+        description="A backup is written first. This cannot be undone from the app."
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" onClick={closeReset} disabled={isResetting}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={isResetting}
+              disabled={!resetScope || resetText !== RESET_PHRASE[resetScope]}
+              onClick={handleReset}
+            >
+              Confirm
+            </Button>
+          </>
+        }
+      >
+        {resetScope && (
+          <div className="flex flex-col gap-3">
+            <TextInput
+              label={`Type ${RESET_PHRASE[resetScope]} to confirm`}
+              value={resetText}
+              onChange={(e) => setResetText(e.target.value)}
+              autoComplete="off"
+            />
+            {resetError && (
+              <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                {resetError}
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
 
       <Card>
         <CardHeader>

@@ -25,6 +25,8 @@ import type {
   SaleHistoryRow,
   ShopSettings,
   AppConfigView,
+  ResetScope,
+  ResetSummary,
   StockAdjustment,
 } from '@/types';
 import type { AppError } from '../errors';
@@ -638,7 +640,7 @@ export class MockApiClient implements ApiClient {
   private backupDir: string | null = null;
   private mockConfigView(): AppConfigView {
     return {
-      testingMode: true,
+      testingMode: this.testingMode,
       backupDirectory: this.backupDir ?? MOCK_DEFAULT_BACKUP_DIR,
       isDefaultDirectory: this.backupDir === null,
       lastAutoBackupAt: null,
@@ -650,6 +652,28 @@ export class MockApiClient implements ApiClient {
   async setBackupDirectory(path: string | null) {
     this.backupDir = path && path.trim() ? path.trim() : null;
     return this.mockConfigView();
+  }
+  private testingMode = true;
+  async resetData(scope: ResetScope): Promise<ResetSummary> {
+    if (!this.testingMode) {
+      throw { type: 'OperationNotAllowed', details: 'Data reset is only available in testing mode' };
+    }
+    const deleted = [
+      { table: 'sales', rows: this.sales.length },
+      { table: 'purchases', rows: this.purchases.length },
+      { table: 'returns', rows: this.returns.length },
+      { table: 'stock_adjustments', rows: this.adjustments.length },
+    ];
+    this.sales = [];
+    this.purchases = [];
+    this.returns = [];
+    this.adjustments = [];
+    if (scope === 'All') {
+      deleted.push({ table: 'items', rows: this.items.length }, { table: 'parties', rows: this.parties.length });
+      this.items = [];
+      this.parties = [];
+    }
+    return { scope, deleted, backupPath: `${this.backupDir ?? MOCK_DEFAULT_BACKUP_DIR}/book_keeper_prereset_mock.db` };
   }
   async verifyDatabaseIntegrity() {
     return true;

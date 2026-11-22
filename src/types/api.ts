@@ -29,6 +29,8 @@ import type {
   SettlementType,
   ShopSettings,
   AppConfigView,
+  ResetScope,
+  ResetSummary,
   StockAdjustment,
   StockCondition,
   StockValuationReport,
@@ -354,6 +356,8 @@ export interface ApiClient {
   getAppConfig(): Promise<AppConfigView>;
   /** `null` resets to the default backup folder. */
   setBackupDirectory(path: string | null): Promise<AppConfigView>;
+  /** Testing only: the backend refuses unless testing mode is on. Writes a pre-reset backup first. */
+  resetData(scope: ResetScope): Promise<ResetSummary>;
   verifyDatabaseIntegrity(): Promise<boolean>;
 
   // Items import

@@ -404,6 +404,14 @@ export interface AppConfigView {
   lastAutoBackupAt: string | null;
 }
 
+export type ResetScope = 'Transactions' | 'All';
+
+export interface ResetSummary {
+  scope: ResetScope;
+  deleted: { table: string; rows: number }[];
+  backupPath: string;
+}
+
 export interface ShopSettings {
   id: number;
   shopName: string;
