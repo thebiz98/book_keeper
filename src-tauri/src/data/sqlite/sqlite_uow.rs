@@ -48,6 +48,7 @@ impl SqliteUnitOfWork {
             settings: SqliteSettingRepository::new(conn.clone()),
             parties: SqlitePartyRepository::new(conn.clone()),
             reports: SqliteReportRepository::new(conn.clone()),
+            maintenance: SqliteMaintenanceRepository::new(conn.clone()),
             conn,
             finished: false,
             read_only,
@@ -81,6 +82,7 @@ pub struct SqliteTransactionContext {
     settings: SqliteSettingRepository,
     parties: SqlitePartyRepository,
     reports: SqliteReportRepository,
+    maintenance: SqliteMaintenanceRepository,
 }
 
 impl SqliteTransactionContext {
@@ -141,4 +143,5 @@ impl TransactionContext for SqliteTransactionContext {
     fn settings(&mut self) -> &mut dyn SettingRepository { &mut self.settings }
     fn parties(&mut self) -> &mut dyn PartyRepository { &mut self.parties }
     fn reports(&mut self) -> &mut dyn ReportRepository { &mut self.reports }
+    fn maintenance(&mut self) -> &mut dyn MaintenanceRepository { &mut self.maintenance }
 }

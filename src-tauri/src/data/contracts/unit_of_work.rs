@@ -3,6 +3,7 @@ use super::adjustment_repository::AdjustmentRepository;
 use super::allocation_repository::AllocationRepository;
 use super::bundle_repository::BundleRepository;
 use super::item_repository::ItemRepository;
+use super::maintenance_repository::MaintenanceRepository;
 use super::outflow_allocation_repository::OutflowAllocationRepository;
 use super::party_repository::PartyRepository;
 use super::purchase_repository::PurchaseRepository;
@@ -58,4 +59,6 @@ pub trait TransactionContext {
     fn settings(&mut self) -> &mut dyn SettingRepository;
     fn parties(&mut self) -> &mut dyn PartyRepository;
     fn reports(&mut self) -> &mut dyn ReportRepository;
+    /// Bulk deletes for the testing-only data reset.
+    fn maintenance(&mut self) -> &mut dyn MaintenanceRepository;
 }

@@ -1,6 +1,7 @@
 pub mod adjustment_controller;
 pub mod dues_controller;
 pub mod item_controller;
+pub mod maintenance_controller;
 pub mod import_controller;
 pub mod party_controller;
 pub mod purchase_controller;

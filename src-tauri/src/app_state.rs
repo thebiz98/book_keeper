@@ -3,6 +3,7 @@ use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::backup_service::BackupService;
+use crate::services::contracts::data_reset_service::DataResetService;
 use crate::services::contracts::item_import_service::ItemImportService;
 use crate::services::contracts::inventory_allocation_strategy::InventoryAllocationStrategy;
 use crate::services::contracts::inventory_service::InventoryService;
@@ -31,6 +32,7 @@ pub struct AppState {
     pub item_import_service: Arc<dyn ItemImportService>,
     pub backup_service: Arc<dyn BackupService>,
     pub shop_setting_service: Arc<dyn ShopSettingService>,
+    pub data_reset_service: Arc<dyn DataResetService>,
     /// Compiled-in config (`app.config.json`).
     pub config: crate::config::AppConfig,
     /// Absolute path of the live database file.
@@ -168,6 +170,10 @@ fn build_sqlite_app_state_full(
     let shop_setting_service: Arc<dyn ShopSettingService> =
         Arc::new(ShopSettingServiceImpl::new(uow.clone()));
 
+    let data_reset_service: Arc<dyn DataResetService> = Arc::new(DataResetServiceImpl::new(
+        config.testing_mode, uow.clone(), inventory_service.clone(), search_indexer.clone(), backup_service.clone(),
+    ));
+
     // Startup invariant (NFR-02 cache audit): current_stock == Σ lot remainders. A mismatch is
     // repaired from the lots (the source of truth) and logged, never silently ignored.
     {
@@ -206,6 +212,7 @@ fn build_sqlite_app_state_full(
         item_import_service,
         backup_service,
         shop_setting_service,
+        data_reset_service,
         config,
         db_path: db_path.to_path_buf(),
         backup_dir: std::sync::RwLock::new(initial_backup_dir),

@@ -36,6 +36,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             settings_controller::backup_database,
             settings_controller::get_app_config,
+            maintenance_controller::reset_data,
             settings_controller::set_backup_directory,
             item_controller::create_bundle,
             item_controller::update_bundle,

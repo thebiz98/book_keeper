@@ -1,6 +1,7 @@
 pub mod accounting_service_impl;
 pub mod backup_scheduler;
 pub mod backup_service_impl;
+pub mod data_reset_service_impl;
 pub mod fifo_strategy;
 pub mod inventory_service_impl;
 pub mod item_import_service_impl;
@@ -15,6 +16,7 @@ pub mod shop_setting_service_impl;
 
 pub use accounting_service_impl::AccountingServiceImpl;
 pub use backup_service_impl::BackupServiceImpl;
+pub use data_reset_service_impl::DataResetServiceImpl;
 pub use fifo_strategy::FifoStrategy;
 pub use inventory_service_impl::InventoryServiceImpl;
 pub use item_import_service_impl::ItemImportServiceImpl;
