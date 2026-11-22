@@ -44,11 +44,11 @@ impl PageRequest {
         if page < 1 {
             return Err(invalid("page", "page must be 1 or more"));
         }
-        if limit < 1 || limit > MAX_PAGE_LIMIT {
+        if !(1..=MAX_PAGE_LIMIT).contains(&limit) {
             return Err(invalid("limit", format!("limit must be between 1 and {MAX_PAGE_LIMIT}")));
         }
         // Bounds the offset so `(page - 1) * limit` cannot overflow.
-        if (page - 1).checked_mul(limit).map_or(true, |o| o > i64::MAX as usize) {
+        if (page - 1).checked_mul(limit).is_none_or(|o| o > i64::MAX as usize) {
             return Err(invalid("page", "page is out of range"));
         }
         Ok(Self { page, limit })

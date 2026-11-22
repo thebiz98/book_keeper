@@ -140,12 +140,20 @@ fn ensure_icons() {
     let png256 = make_png(256, 256);
     let png512 = make_png(512, 512);
 
-    let _ = fs::write(icons_dir.join("32x32.png"), &png32);
-    let _ = fs::write(icons_dir.join("128x128.png"), &png128);
-    let _ = fs::write(icons_dir.join("128x128@2x.png"), &png256);
-    let _ = fs::write(icons_dir.join("icon.png"), &png512);
-    let _ = fs::write(icons_dir.join("icon.ico"), make_ico(&png32));
-    let _ = fs::write(icons_dir.join("icon.icns"), make_icns(&png128));
+    // Write only missing files: rewriting existing icons on every build makes the
+    // `tauri dev` watcher see a change and rebuild in an endless loop.
+    let write_if_missing = |name: &str, bytes: &[u8]| {
+        let path = icons_dir.join(name);
+        if !path.exists() {
+            let _ = fs::write(path, bytes);
+        }
+    };
+    write_if_missing("32x32.png", &png32);
+    write_if_missing("128x128.png", &png128);
+    write_if_missing("128x128@2x.png", &png256);
+    write_if_missing("icon.png", &png512);
+    write_if_missing("icon.ico", &make_ico(&png32));
+    write_if_missing("icon.icns", &make_icns(&png128));
 }
 
 fn main() {

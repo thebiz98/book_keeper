@@ -110,7 +110,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                             format!("Bundle {bundle_id} does not belong to item {}", item.id),
                         ));
                     }
-                    if !(bundle.units_per_bundle > 0.0) {
+                    if bundle.units_per_bundle <= 0.0 || bundle.units_per_bundle.is_nan() {
                         return Err(validation("bundle_id", "Bundle multiplier must be positive"));
                     }
                     (bundle.units_per_bundle, Some(bundle.bundle_name))

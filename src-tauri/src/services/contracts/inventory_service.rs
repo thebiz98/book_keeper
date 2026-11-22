@@ -48,6 +48,7 @@ pub trait InventoryService: Send + Sync {
     /// header (own code sequence, party None, PAID, no ledger row) and increments the cache.
     /// Cost: explicit, else the item's latest lot cost, else `ValidationError(unit_cost)`.
     /// Never derived from a sale price. Returns the lot id.
+    #[allow(clippy::too_many_arguments)]
     fn create_source_lot(
         &self,
         uow: &mut dyn TransactionContext,
