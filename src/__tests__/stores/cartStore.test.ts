@@ -1,397 +1,156 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useCartStore } from '@/store/useCartStore';
+import type { ItemInput, BundleInput } from '@/store/useCartStore';
 
-// ============================================================================
-// Test Suite: useCartStore
-// Spec: docs/book_keeper_UI_LLD.md §5, TEST_INFRA.md §4.1, PROJECT.md F33, F41
-// ============================================================================
+const pencil: ItemInput = {
+  id: 1,
+  name: 'Pencil',
+  baseUnit: 'PCS',
+  defaultSalePrice: 10,
+  mrp: 12,
+  currentStock: 50,
+};
+const box10: BundleInput = { id: 5, bundleName: 'Box of 10', unitsPerBundle: 10, salePrice: 90 };
+const box12: BundleInput = { id: 6, bundleName: 'Box of 12', unitsPerBundle: 12, salePrice: 100 };
 
-describe('useCartStore - Retail Billing Cart State Management', () => {
-  beforeEach(() => {
-    // Reset cart state before every test
-    useCartStore.getState().clearCart();
-  });
+const s = () => useCartStore.getState();
 
-  describe('1. addItem', () => {
-    it('TC-CART-001: adds loose item to cart with default quantity 1 and default price', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 1,
-        name: 'Apsara Platinum Pencil',
-        barcode: '8901030381023',
-        baseUnit: 'PCS',
-        defaultSalePrice: 10.0,
-        currentStock: 50.0,
-      };
+describe('useCartStore (F6 rules)', () => {
+  beforeEach(() => s().clearCart());
 
-      const success = store.addItem(mockItem);
-      expect(success).toBe(true);
-
-      const state = useCartStore.getState();
-      expect(state.items).toHaveLength(1);
-      expect(state.items[0]).toMatchObject({
-        itemId: 1,
-        name: 'Apsara Platinum Pencil',
-        quantity: 1,
-        baseQuantity: 1,
-        rate: 10.0,
-        lineTotal: 10.0,
-        unitsPerBundle: 1,
-      });
-      expect(state.subtotal).toBe(10.0);
-      expect(state.totalBaseUnits).toBe(1);
-      expect(state.totalItems).toBe(1);
+  describe('addItem', () => {
+    it('adds a loose line with a line id, quantity 1 and base price', () => {
+      expect(s().addItem(pencil)).toBe(true);
+      expect(s().items[0]).toMatchObject({ itemId: 1, quantity: 1, baseQuantity: 1, rate: 10, lineTotal: 10 });
+      expect(s().items[0].lineId).toBeTruthy();
+      expect(s().subtotal).toBe(10);
     });
 
-    it('TC-CART-002: adds item with custom quantity and recalculates line total', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 2,
-        name: 'Classmate Spiral Notebook',
-        baseUnit: 'PCS',
-        defaultSalePrice: 65.0,
-        currentStock: 20.0,
-      };
-
-      const success = store.addItem(mockItem, 4);
-      expect(success).toBe(true);
-
-      const state = useCartStore.getState();
-      expect(state.items[0].quantity).toBe(4);
-      expect(state.items[0].baseQuantity).toBe(4);
-      expect(state.items[0].lineTotal).toBe(260.0); // 4 * 65.0
-      expect(state.subtotal).toBe(260.0);
-      expect(state.totalBaseUnits).toBe(4);
+    it('supports decimal quantity and explicit rate override', () => {
+      expect(s().addItem(pencil, 2.5, null, 8)).toBe(true);
+      expect(s().items[0]).toMatchObject({ quantity: 2.5, rate: 8, lineTotal: 20 });
     });
 
-    it('TC-CART-003: merges line item if same item is added again up to available stock', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 3,
-        name: 'Cello Gripper Pen',
-        baseUnit: 'PCS',
-        defaultSalePrice: 10.0,
-        currentStock: 15.0,
-      };
+    it('merges only when item, unit and rate are all the same', () => {
+      s().addItem(pencil, 2);
+      s().addItem(pencil, 3);
+      expect(s().items).toHaveLength(1);
+      expect(s().items[0].quantity).toBe(5);
 
-      store.addItem(mockItem, 3);
-      store.addItem(mockItem, 2);
+      s().addItem(pencil, 1, null, 9); // different rate
+      expect(s().items).toHaveLength(2);
 
-      const state = useCartStore.getState();
-      expect(state.items).toHaveLength(1);
-      expect(state.items[0].quantity).toBe(5);
-      expect(state.items[0].baseQuantity).toBe(5);
-      expect(state.items[0].lineTotal).toBe(50.0);
-      expect(state.subtotal).toBe(50.0);
+      s().addItem(pencil, 1, box10); // different unit
+      expect(s().items).toHaveLength(3);
+
+      s().addItem(pencil, 1, box10); // same bundle + same rate merges
+      expect(s().items).toHaveLength(3);
+      expect(s().items[2]).toMatchObject({ quantity: 2, baseQuantity: 20, bundleId: 5 });
+    });
+
+    it('keeps quantity * unitsPerBundle === baseQuantity after merging', () => {
+      s().addItem(pencil, 1, box12);
+      s().addItem(pencil, 2, box12);
+      const line = s().items[0];
+      expect(line.quantity).toBe(3);
+      expect(line.baseQuantity).toBe(36);
+    });
+
+    it('checks stock aggregated across lines of the same item', () => {
+      s().addItem(pencil, 1, box10); // 10
+      s().addItem(pencil, 3, box10, 85); // +30 => 40, separate line (rate differs)
+      expect(s().addItem(pencil, 11, null)).toBe(false); // 40 + 11 > 50
+      expect(s().addItem(pencil, 10, null)).toBe(true); // exactly 50
+      expect(s().addItem(pencil, 1e-12, null)).toBe(true); // within 1e-9 epsilon
+    });
+
+    it('rejects zero, negative and NaN quantity and out-of-stock items', () => {
+      expect(s().addItem(pencil, 0)).toBe(false);
+      expect(s().addItem(pencil, -1)).toBe(false);
+      expect(s().addItem(pencil, NaN)).toBe(false);
+      expect(s().addItem({ ...pencil, currentStock: 0 })).toBe(false);
+      expect(s().items).toHaveLength(0);
+    });
+
+    it('uses bundle price, falling back to base price times units', () => {
+      s().addItem(pencil, 2, box10);
+      expect(s().items[0]).toMatchObject({ rate: 90, lineTotal: 180 });
+      s().addItem(pencil, 1, { id: 9, bundleName: 'Pack of 5', unitsPerBundle: 5 });
+      expect(s().items[1].rate).toBe(50);
     });
   });
 
-  describe('2. Bundle Multiplier Conversion', () => {
-    it('TC-CART-004: converts bundle multiplier to base quantity (Box of 10 -> 2 Boxes = 20 base units)', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 10,
-        name: 'Camlin Exam Marker',
-        baseUnit: 'PCS',
-        defaultSalePrice: 25.0,
-        currentStock: 100.0,
-      };
-      const bundle = {
-        bundleName: 'Box of 10',
-        unitsPerBundle: 10,
-        salePrice: 240.0, // Discounted bundle rate (24 ₹/pc)
-      };
-
-      store.addItem(mockItem, 2, bundle);
-
-      const state = useCartStore.getState();
-      expect(state.items[0].quantity).toBe(2);
-      expect(state.items[0].unitsPerBundle).toBe(10);
-      expect(state.items[0].baseQuantity).toBe(20); // 2 * 10 = 20 base units
-      expect(state.items[0].bundleName).toBe('Box of 10');
-      expect(state.items[0].lineTotal).toBe(480.0); // 2 * 240.0
-      expect(state.totalBaseUnits).toBe(20);
-      expect(state.subtotal).toBe(480.0);
+  describe('updateQuantity', () => {
+    it('rejects <= 0 and NaN, keeps the line', () => {
+      s().addItem(pencil, 2);
+      const id = s().items[0].lineId;
+      expect(s().updateQuantity(id, 0)).toBe(false);
+      expect(s().updateQuantity(id, -3)).toBe(false);
+      expect(s().updateQuantity(id, NaN)).toBe(false);
+      expect(s().items[0].quantity).toBe(2);
     });
 
-    it('TC-CART-005: setBundle updates existing line item multiplier and line total', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 11,
-        name: 'Reynolds Ballpoint Pen',
-        baseUnit: 'PCS',
-        defaultSalePrice: 5.0,
-        currentStock: 200.0,
-      };
-
-      // Add 2 loose pens
-      store.addItem(mockItem, 2);
-      expect(useCartStore.getState().items[0].baseQuantity).toBe(2);
-      expect(useCartStore.getState().items[0].lineTotal).toBe(10.0);
-
-      // Change packaging to Dozen (12 units, ₹55/dozen)
-      store.setBundle(11, {
-        bundleName: 'Dozen',
-        unitsPerBundle: 12,
-        salePrice: 55.0,
-      });
-
-      const updated = useCartStore.getState();
-      expect(updated.items[0].unitsPerBundle).toBe(12);
-      expect(updated.items[0].baseQuantity).toBe(24); // 2 * 12 = 24 PCS
-      expect(updated.items[0].lineTotal).toBe(110.0); // 2 * 55.0
-      expect(updated.subtotal).toBe(110.0);
-      expect(updated.totalBaseUnits).toBe(24);
-    });
-
-    it('TC-CART-006: resetting bundle to null returns to loose base unit rate', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 12,
-        name: 'Sticky Notes Pad',
-        baseUnit: 'PCS',
-        defaultSalePrice: 40.0,
-        currentStock: 50.0,
-      };
-
-      store.addItem(mockItem, 3, {
-        bundleName: 'Pack of 5',
-        unitsPerBundle: 5,
-        salePrice: 180.0,
-      });
-      expect(useCartStore.getState().items[0].baseQuantity).toBe(15);
-
-      // Revert to loose base unit
-      store.setBundle(12, null);
-
-      const state = useCartStore.getState();
-      expect(state.items[0].unitsPerBundle).toBe(1);
-      expect(state.items[0].baseQuantity).toBe(3); // 3 loose PCS
-      expect(state.items[0].rate).toBe(40.0);
-      expect(state.items[0].lineTotal).toBe(120.0); // 3 * 40.0
-      expect(state.totalBaseUnits).toBe(3);
+    it('rechecks aggregated stock including other lines', () => {
+      s().addItem(pencil, 40);
+      s().addItem(pencil, 1, null, 9);
+      const second = s().items[1].lineId;
+      expect(s().updateQuantity(second, 10)).toBe(true);
+      expect(s().updateQuantity(second, 11)).toBe(false);
+      expect(s().items[1].quantity).toBe(10);
     });
   });
 
-  describe('3. Negative Stock Protection (Cannot Exceed Available Stock)', () => {
-    it('TC-CART-007: blocks adding item when requested quantity exceeds available stock', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 20,
-        name: 'Casio Scientific Calculator FX-991CW',
-        baseUnit: 'PCS',
-        defaultSalePrice: 1250.0,
-        currentStock: 3.0, // Only 3 available
-      };
-
-      // Attempt to add 4 calculators (exceeds stock of 3)
-      const success = store.addItem(mockItem, 4);
-      expect(success).toBe(false);
-
-      const state = useCartStore.getState();
-      expect(state.items).toHaveLength(0);
-      expect(state.subtotal).toBe(0);
+  describe('setBundle', () => {
+    it('sets bundleId, multiplier and rate', () => {
+      s().addItem(pencil, 2);
+      const id = s().items[0].lineId;
+      expect(s().setBundle(id, box10)).toBe(true);
+      expect(s().items[0]).toMatchObject({ bundleId: 5, unitsPerBundle: 10, baseQuantity: 20, rate: 90, lineTotal: 180 });
+      expect(s().setBundle(id, null)).toBe(true);
+      expect(s().items[0]).toMatchObject({ bundleId: undefined, unitsPerBundle: 1, baseQuantity: 2, rate: 10 });
     });
 
-    it('TC-CART-008: blocks adding item with zero stock (Out of Stock)', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 21,
-        name: 'Fevicol MR 100g',
-        baseUnit: 'BOTTLE',
-        defaultSalePrice: 45.0,
-        currentStock: 0.0,
-      };
-
-      const success = store.addItem(mockItem, 1);
-      expect(success).toBe(false);
-      expect(useCartStore.getState().items).toHaveLength(0);
-    });
-
-    it('TC-CART-009: blocks bundle selection if base units exceed available stock', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 22,
-        name: 'Pilot V5 Liquid Ink Pen',
-        baseUnit: 'PCS',
-        defaultSalePrice: 50.0,
-        currentStock: 15.0, // Only 15 available
-      };
-
-      // Adding 2 Boxes of 10 requires 20 PCS, but only 15 available
-      const bundle = {
-        bundleName: 'Box of 10',
-        unitsPerBundle: 10,
-        salePrice: 480.0,
-      };
-
-      const success = store.addItem(mockItem, 2, bundle);
-      expect(success).toBe(false);
-      expect(useCartStore.getState().items).toHaveLength(0);
-    });
-
-    it('TC-CART-010: updateQuantity blocks increment exceeding available stock', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 23,
-        name: 'Kangaro Stapler No. 10',
-        baseUnit: 'PCS',
-        defaultSalePrice: 75.0,
-        currentStock: 5.0,
-      };
-
-      store.addItem(mockItem, 3);
-      expect(useCartStore.getState().items[0].quantity).toBe(3);
-
-      // Attempt to update quantity to 6 (stock is 5)
-      const success = store.updateQuantity(23, 6);
-      expect(success).toBe(false);
-
-      // Quantity remains unchanged at 3
-      expect(useCartStore.getState().items[0].quantity).toBe(3);
-    });
-
-    it('TC-CART-011: allows purchasing exact stock boundary (quantity == availableStock)', () => {
-      const store = useCartStore.getState();
-      const mockItem = {
-        id: 24,
-        name: 'A4 Copier Paper Ream',
-        baseUnit: 'REAM',
-        defaultSalePrice: 320.0,
-        currentStock: 5.0,
-      };
-
-      const success = store.addItem(mockItem, 5);
-      expect(success).toBe(true);
-      expect(useCartStore.getState().items[0].quantity).toBe(5);
-      expect(useCartStore.getState().subtotal).toBe(1600.0);
+    it('refuses and keeps the previous unit when stock would be exceeded', () => {
+      s().addItem({ ...pencil, currentStock: 15 }, 10);
+      const id = s().items[0].lineId;
+      expect(s().setBundle(id, box12)).toBe(false);
+      expect(s().items[0]).toMatchObject({ bundleId: undefined, baseQuantity: 10 });
     });
   });
 
-  describe('4. updateQuantity and updateRate', () => {
-    it('TC-CART-012: updateQuantity updates base units and subtotal', () => {
-      const store = useCartStore.getState();
-      store.addItem({
-        id: 30,
-        name: 'Highlighter Pen',
-        baseUnit: 'PCS',
-        defaultSalePrice: 20.0,
-        currentStock: 25.0,
-      }, 2);
-
-      expect(useCartStore.getState().subtotal).toBe(40.0);
-
-      store.updateQuantity(30, 4);
-      const state = useCartStore.getState();
-      expect(state.items[0].quantity).toBe(4);
-      expect(state.items[0].baseQuantity).toBe(4);
-      expect(state.items[0].lineTotal).toBe(80.0);
-      expect(state.subtotal).toBe(80.0);
+  describe('rate, remove, rounding', () => {
+    it('updateRate rejects negative/NaN and rounds line totals with round2', () => {
+      s().addItem(pencil, 3);
+      const id = s().items[0].lineId;
+      expect(s().updateRate(id, -1)).toBe(false);
+      expect(s().updateRate(id, NaN)).toBe(false);
+      expect(s().updateRate(id, 3.33)).toBe(true);
+      expect(s().items[0].lineTotal).toBe(9.99);
+      expect(s().subtotal).toBe(9.99);
     });
 
-    it('TC-CART-013: updateRate recalculates line total and cart subtotal', () => {
-      const store = useCartStore.getState();
-      store.addItem({
-        id: 31,
-        name: 'Binder Clip 32mm',
-        baseUnit: 'PCS',
-        defaultSalePrice: 15.0,
-        currentStock: 100.0,
-      }, 5);
-
-      expect(useCartStore.getState().subtotal).toBe(75.0);
-
-      // Apply discounted rate of ₹12.0
-      store.updateRate(31, 12.0);
-      const state = useCartStore.getState();
-      expect(state.items[0].rate).toBe(12.0);
-      expect(state.items[0].lineTotal).toBe(60.0); // 5 * 12.0
-      expect(state.subtotal).toBe(60.0);
-    });
-  });
-
-  describe('5. removeItem and clearCart', () => {
-    it('TC-CART-014: removeItem removes line item and decrements subtotal', () => {
-      const store = useCartStore.getState();
-      store.addItem({
-        id: 40,
-        name: 'Item A',
-        baseUnit: 'PCS',
-        defaultSalePrice: 100.0,
-        currentStock: 10.0,
-      }, 1);
-      store.addItem({
-        id: 41,
-        name: 'Item B',
-        baseUnit: 'PCS',
-        defaultSalePrice: 50.0,
-        currentStock: 10.0,
-      }, 2);
-
-      expect(useCartStore.getState().subtotal).toBe(200.0);
-      expect(useCartStore.getState().items).toHaveLength(2);
-
-      store.removeItem(40);
-
-      const state = useCartStore.getState();
-      expect(state.items).toHaveLength(1);
-      expect(state.items[0].itemId).toBe(41);
-      expect(state.subtotal).toBe(100.0); // 2 * 50.0
-      expect(state.totalBaseUnits).toBe(2);
+    it('subtotal is rounded across lines', () => {
+      s().addItem(pencil, 1, null, 0.1);
+      s().addItem({ ...pencil, id: 2 }, 1, null, 0.2);
+      expect(s().subtotal).toBe(0.3);
     });
 
-    it('TC-CART-015: clearCart resets all items, subtotal, and balances to clean initial state', () => {
-      const store = useCartStore.getState();
-      store.addItem({
-        id: 50,
-        name: 'Item C',
-        baseUnit: 'PCS',
-        defaultSalePrice: 30.0,
-        currentStock: 50.0,
-      }, 3);
-      store.setCustomer({ id: 9, name: 'Sharmaji' });
-      store.setPaymentStatus('PARTIAL', 50.0);
-
-      expect(useCartStore.getState().items).toHaveLength(1);
-      expect(useCartStore.getState().selectedCustomer).not.toBeNull();
-
-      store.clearCart();
-
-      const cleared = useCartStore.getState();
-      expect(cleared.items).toHaveLength(0);
-      expect(cleared.subtotal).toBe(0);
-      expect(cleared.totalBaseUnits).toBe(0);
-      expect(cleared.totalItems).toBe(0);
-      expect(cleared.selectedCustomer).toBeNull();
-      expect(cleared.paymentStatus).toBe('PAID');
-      expect(cleared.paidAmount).toBe(0);
-      expect(cleared.balanceDue).toBe(0);
+    it('removes by line id, leaving other lines of the same item', () => {
+      s().addItem(pencil, 1);
+      s().addItem(pencil, 1, box10);
+      s().removeItem(s().items[0].lineId);
+      expect(s().items).toHaveLength(1);
+      expect(s().items[0].bundleId).toBe(5);
+      expect(s().totalItems).toBe(1);
     });
-  });
 
-  describe('6. Customer Selection & Payment Balance Due', () => {
-    it('TC-CART-016: calculates balance due accurately for PARTIAL and UNPAID sales', () => {
-      const store = useCartStore.getState();
-      store.addItem({
-        id: 60,
-        name: 'Desk Organiser',
-        baseUnit: 'PCS',
-        defaultSalePrice: 500.0,
-        currentStock: 10.0,
-      }, 2); // Subtotal = 1000
-
-      // Case A: Default PAID -> balance due is 0
-      expect(useCartStore.getState().balanceDue).toBe(0);
-
-      // Case B: PARTIAL payment of ₹400 -> balance due = 600
-      store.setPaymentStatus('PARTIAL', 400.0);
-      expect(useCartStore.getState().paidAmount).toBe(400.0);
-      expect(useCartStore.getState().balanceDue).toBe(600.0);
-
-      // Case C: Full UNPAID credit sale -> balance due = 1000
-      store.setPaymentStatus('UNPAID');
-      expect(useCartStore.getState().paidAmount).toBe(0.0);
-      expect(useCartStore.getState().balanceDue).toBe(1000.0);
+    it('clearCart resets customer and totals', () => {
+      s().addItem(pencil, 1);
+      s().setCustomer({ id: 3, name: 'A' });
+      s().clearCart();
+      expect(s().items).toEqual([]);
+      expect(s().selectedCustomer).toBeNull();
+      expect(s().subtotal).toBe(0);
     });
   });
 });

@@ -1,229 +1,202 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CheckCircle2, ArrowRight, Banknote } from 'lucide-react';
+import { errorMessage } from '@/api';
+import { round2 } from '@/lib/money';
+import type { PaymentStatus, SaleSummaryResponse } from '@/types';
+import type { CustomerInput } from '@/types/store';
+import { useBusyLock } from '@/hooks/useHotkeys';
+import { cn } from '@/lib/utils';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { Button } from '../ui/Button';
+import { Modal } from '../ui/Modal';
+import { PartySelector } from './PartySelector';
+
+export interface SalePaymentValues {
+  paymentStatus: PaymentStatus;
+  /** Cash received from the customer (0 for UNPAID). */
+  cashReceived: number;
+}
 
 export interface SaleSummaryModalProps {
   isOpen: boolean;
+  /** Payment mode: Esc / Back returns to the cart without saving. */
   onClose: () => void;
-  onConfirm?: () => void;
   grandTotal: number;
+  customer: CustomerInput | null;
+  /** Lets the dialog pick / create a customer when PARTIAL or UNPAID needs one. */
+  onCustomerChange?: (customer: CustomerInput | null) => void;
+  /** Performs the sale. Rejections are shown inside the dialog. */
+  onSubmit: (values: SalePaymentValues) => Promise<SaleSummaryResponse>;
+  /** Result mode: Enter / Space starts the next bill. */
+  onDone: (result: SaleSummaryResponse) => void;
+  /** Display-only code preview shown while paying. */
   invoiceCode?: string;
-  customerName?: string;
-  defaultCashReceived?: number;
+}
+
+const STATUSES: PaymentStatus[] = ['PAID', 'PARTIAL', 'UNPAID'];
+
+export function validatePayment(
+  status: PaymentStatus,
+  total: number,
+  cash: number,
+  hasCustomer: boolean
+): string | null {
+  const t = round2(total);
+  if (status !== 'PAID' && !hasCustomer) {
+    return `Select a customer for a ${status} sale (Alt+C to create one)`;
+  }
+  if (status === 'UNPAID') return null;
+  if (!Number.isFinite(cash) || cash < 0) return 'Enter the cash received';
+  const c = round2(cash);
+  if (status === 'PAID' && c < t) return 'Cash received must cover the total for a PAID sale';
+  if (status === 'PARTIAL') {
+    if (c <= 0) return 'Enter the amount received for a PARTIAL sale';
+    if (c >= t) return 'PARTIAL requires cash less than the total; use PAID instead';
+  }
+  return null;
 }
 
 export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   isOpen,
   onClose,
-  onConfirm,
-  grandTotal = 0,
+  grandTotal,
+  customer,
+  onCustomerChange,
+  onSubmit,
+  onDone,
   invoiceCode,
-  customerName,
-  defaultCashReceived,
 }) => {
-  const [cashReceived, setCashReceived] = useState<number>(
-    defaultCashReceived !== undefined ? defaultCashReceived : grandTotal
-  );
+  const [status, setStatus] = useState<PaymentStatus>('PAID');
+  const [cashStr, setCashStr] = useState(String(grandTotal));
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SaleSummaryResponse | null>(null);
 
-  const cashInputRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const confirmBtnRef = useRef<HTMLButtonElement>(null);
+  const cashRef = useRef<HTMLInputElement>(null);
+  const doneBtnRef = useRef<HTMLButtonElement>(null);
+  const submittingRef = useRef(false);
+  const totalRef = useRef(grandTotal);
+  totalRef.current = grandTotal;
 
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  const onConfirmRef = useRef(onConfirm);
-  onConfirmRef.current = onConfirm;
+  useBusyLock(submitting);
+
+  // Reset only when the dialog opens: never while the cashier is typing.
+  useEffect(() => {
+    if (!isOpen) return;
+    setStatus('PAID');
+    setCashStr(String(totalRef.current));
+    setError(null);
+    setResult(null);
+    setSubmitting(false);
+    submittingRef.current = false;
+    cashRef.current?.focus();
+    cashRef.current?.select();
+  }, [isOpen]);
 
   useEffect(() => {
-    if (isOpen) {
-      const initialCash =
-        defaultCashReceived !== undefined ? defaultCashReceived : grandTotal;
-      setCashReceived(initialCash);
+    if (result) doneBtnRef.current?.focus();
+  }, [result]);
 
-      // Autofocus cash input immediately
-      setTimeout(() => {
-        if (cashInputRef.current) {
-          cashInputRef.current.focus();
-          cashInputRef.current.select();
-        }
-      }, 50);
+  const cash = cashStr.trim() === '' ? NaN : parseFloat(cashStr);
+  const validation = validatePayment(status, grandTotal, cash, customer != null);
+  const mode = result ? 'result' : 'payment';
+
+  const pickStatus = (next: PaymentStatus) => {
+    setStatus(next);
+    setError(null);
+    if (next === 'PAID') setCashStr(String(totalRef.current));
+    else if (next === 'UNPAID') setCashStr('0');
+    else setCashStr('');
+    if (next !== 'UNPAID') setTimeout(() => cashRef.current?.focus(), 0);
+  };
+
+  const submit = async () => {
+    if (mode !== 'payment' || submittingRef.current) return;
+    if (validation) {
+      setError(validation);
+      return;
     }
-  }, [isOpen, defaultCashReceived, grandTotal]);
-
-  const handleDismiss = () => {
-    if (onConfirmRef.current) {
-      onConfirmRef.current();
-    } else {
-      onCloseRef.current();
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await onSubmit({
+        paymentStatus: status,
+        cashReceived: status === 'UNPAID' ? 0 : round2(cash),
+      });
+      setResult(res);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   };
 
-  const handleDismissRef = useRef(handleDismiss);
-  handleDismissRef.current = handleDismiss;
+  const finish = () => {
+    if (result) onDone(result);
+  };
 
-  // Native DOM keyboard listeners for Escape, Enter, Space
-  useEffect(() => {
-    if (!isOpen) return;
+  const changeAmount = round2(cash - grandTotal);
+  const balance = status === 'UNPAID' ? round2(grandTotal) : round2(Math.max(grandTotal - (Number.isFinite(cash) ? cash : 0), 0));
+  const message = error ?? validation;
 
-    const dialogEl = dialogRef.current;
-    const confirmBtnEl = confirmBtnRef.current;
+  const onStatusKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const i = STATUSES.indexOf(status);
+    const n = e.key === 'ArrowRight' ? (i + 1) % 3 : (i + 2) % 3;
+    pickStatus(STATUSES[n]);
+    // keep focus on the radio group
+    setTimeout(() => {
+      document.querySelector<HTMLElement>(`[data-status="${STATUSES[n]}"]`)?.focus();
+    }, 0);
+  };
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+  const onBodyKeyDown = (e: React.KeyboardEvent) => {
+    if (mode === 'result' && (e.key === ' ' || e.key === 'Enter')) {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag !== 'BUTTON') {
         e.preventDefault();
-        onCloseRef.current();
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        handleDismissRef.current();
-      } else if (e.key === ' ' || e.code === 'Space') {
-        const target = e.target as HTMLElement;
-        if (!target || (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA')) {
-          e.preventDefault();
-          handleDismissRef.current();
-        }
+        if (!e.repeat) finish();
       }
-    };
-
-    const handleBtnKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.code === 'Space' || e.key === 'Enter') {
-        e.preventDefault();
-        handleDismissRef.current();
-      }
-    };
-
-    dialogEl?.addEventListener('keydown', handleKeyDown);
-    confirmBtnEl?.addEventListener('keydown', handleBtnKeyDown);
-
-    return () => {
-      dialogEl?.removeEventListener('keydown', handleKeyDown);
-      confirmBtnEl?.removeEventListener('keydown', handleBtnKeyDown);
-    };
-  }, [isOpen]);
-
-  if (!isOpen) return null;
-
-  const changeAmount = cashReceived - grandTotal;
-  const isOverOrExact = changeAmount >= 0;
+    }
+  };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col focus:outline-none"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              Sale Complete
-            </h2>
-          </div>
-          <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
-            {invoiceCode && (
-              <span className="bg-slate-200 dark:bg-slate-800 px-2 py-0.5 rounded font-semibold text-slate-700 dark:text-slate-300">
-                {invoiceCode}
-              </span>
-            )}
-            {customerName && (
-              <span className="font-sans text-slate-600 dark:text-slate-400">
-                {customerName}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Content Body */}
-        <div className="p-6 flex flex-col gap-5">
-          {/* Hero Grand Total */}
-          <div className="flex flex-col items-center justify-center py-2 text-center bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-100 dark:border-slate-800">
-            <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-              Grand Total
-            </span>
-            <div data-testid="grand-total" className="text-4xl font-bold font-mono text-slate-900 dark:text-slate-50">
-              <CurrencyDisplay amount={grandTotal} size="hero" />
-            </div>
-          </div>
-
-          {/* Cash Tendered Input */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Banknote className="h-4 w-4 text-slate-400" />
-                Cash Tendered / Received
-              </span>
-              <span className="text-[10px] text-slate-400 uppercase font-mono">F2 auto-focused</span>
-            </label>
-            <input
-              ref={cashInputRef}
-              data-testid="cash-received-input"
-              type="number"
-              name="cash"
-              autoFocus
-              value={cashReceived === 0 ? '' : cashReceived}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                setCashReceived(isNaN(val) ? 0 : val);
-              }}
-              onInput={(e) => {
-                const val = parseFloat((e.target as HTMLInputElement).value);
-                setCashReceived(isNaN(val) ? 0 : val);
-              }}
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xl font-bold font-mono px-4 py-2.5 text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          {/* Live Change Calculation Breakdown */}
-          <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
-            <div className="flex flex-col">
-              <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                {isOverOrExact ? 'Change to Return' : 'Shortage / Due Balance'}
-              </span>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                {isOverOrExact ? 'Return to customer' : 'Customer balance short'}
-              </span>
-            </div>
-
-            {isOverOrExact ? (
-              <div
-                data-testid="change-badge"
-                className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-3 py-1 rounded-md text-base font-bold font-mono tabular-nums flex items-center gap-1"
-              >
-                <span>₹</span>
-                <span>{Math.abs(changeAmount).toFixed(2)}</span>
-              </div>
-            ) : (
-              <div
-                data-testid="shortage-badge"
-                className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 px-3 py-1 rounded-md text-base font-bold font-mono tabular-nums flex items-center gap-1"
-              >
-                <span>Short: ₹</span>
-                <span>{Math.abs(changeAmount).toFixed(2)}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <Button variant="outline" size="sm" onClick={onClose} hotkey="Esc">
-            Close
-          </Button>
-
+    <Modal
+      isOpen={isOpen}
+      onClose={mode === 'payment' ? () => { if (!submittingRef.current) onClose(); } : finish}
+      title={mode === 'payment' ? 'Payment' : 'Sale Complete'}
+      description={mode === 'payment' ? 'Nothing is saved until you confirm.' : undefined}
+      size="md"
+      closeOnBackdrop={false}
+      initialFocusRef={mode === 'payment' ? cashRef : doneBtnRef}
+      defaultConfirmAction={mode === 'payment' ? () => void submit() : finish}
+      footer={
+        mode === 'payment' ? (
+          <>
+            <Button variant="outline" size="sm" onClick={onClose} hotkey="Esc" disabled={submitting}>
+              Back to Cart
+            </Button>
+            <Button
+              data-testid="confirm-btn"
+              variant="primary"
+              size="sm"
+              onClick={() => void submit()}
+              disabled={submitting || validation != null}
+              isLoading={submitting}
+              hotkey="Enter"
+            >
+              Confirm Sale
+            </Button>
+          </>
+        ) : (
           <button
-            ref={confirmBtnRef}
-            data-testid="confirm-btn"
+            ref={doneBtnRef}
+            data-testid="next-bill-btn"
             type="button"
-            onClick={handleDismiss}
+            onClick={finish}
             className="inline-flex items-center justify-center font-medium rounded-md transition-colors select-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 px-3 py-1.5 text-sm gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer"
           >
             <span>Next Customer</span>
@@ -232,9 +205,157 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
             </kbd>
             <ArrowRight className="h-4 w-4 shrink-0" />
           </button>
+        )
+      }
+    >
+      <div className="flex flex-col gap-4" onKeyDown={onBodyKeyDown} data-mode={mode}>
+        <div className="flex items-center justify-between text-xs font-mono text-slate-500">
+          <span className="font-sans text-slate-600 dark:text-slate-400">
+            {customer ? customer.name : 'Walk-in Customer'}
+          </span>
+          {(result?.transactionCode ?? invoiceCode) && (
+            <span
+              data-testid="invoice-code"
+              className="bg-slate-200 dark:bg-slate-800 px-2 py-0.5 rounded font-semibold text-slate-700 dark:text-slate-300"
+            >
+              {result?.transactionCode ?? invoiceCode}
+            </span>
+          )}
         </div>
+
+        <div className="flex flex-col items-center justify-center py-2 text-center bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-100 dark:border-slate-800">
+          <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+            Grand Total
+          </span>
+          <div data-testid="grand-total" className="text-4xl font-bold font-mono text-slate-900 dark:text-slate-50">
+            <CurrencyDisplay amount={result?.totalAmount ?? grandTotal} size="hero" />
+          </div>
+        </div>
+
+        {mode === 'payment' ? (
+          <>
+            <div
+              role="radiogroup"
+              aria-label="Payment status"
+              onKeyDown={onStatusKeyDown}
+              className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs"
+            >
+              {STATUSES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="radio"
+                  aria-checked={status === s}
+                  data-status={s}
+                  tabIndex={status === s ? 0 : -1}
+                  disabled={submitting}
+                  onClick={() => pickStatus(s)}
+                  className={cn(
+                    'flex-1 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50',
+                    status === s
+                      ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+
+            {status !== 'PAID' && !customer && (
+              <div className="flex flex-col gap-1.5" data-testid="customer-prompt">
+                <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">
+                  A customer is required for {status} sales. Select one or press Alt+C to create a new customer.
+                </span>
+                <PartySelector
+                  partyType="CUSTOMER"
+                  selectedPartyId={null}
+                  allowWalkIn={false}
+                  hotkeyScope="modal"
+                  onSelectParty={(p) =>
+                    onCustomerChange?.(p ? { id: p.id, name: p.name, phone: p.phone } : null)
+                  }
+                />
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="sale-cash-received" className="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Banknote className="h-4 w-4 text-slate-400" />
+                Cash Received
+              </label>
+              <input
+                id="sale-cash-received"
+                ref={cashRef}
+                data-testid="cash-received-input"
+                type="text"
+                inputMode="decimal"
+                name="cash"
+                autoComplete="off"
+                disabled={status === 'UNPAID' || submitting}
+                value={cashStr}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => {
+                  if (/^\d*\.?\d*$/.test(e.target.value)) {
+                    setCashStr(e.target.value);
+                    setError(null);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    if (!e.repeat) void submit();
+                  }
+                }}
+                aria-invalid={validation != null && status !== 'UNPAID' ? true : undefined}
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xl font-bold font-mono px-4 py-2.5 text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                {status === 'PAID' ? 'Change to Return' : 'Balance Due'}
+              </span>
+              {status === 'PAID' ? (
+                <div
+                  data-testid="change-badge"
+                  className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-3 py-1 rounded-md text-base font-bold font-mono tabular-nums"
+                >
+                  ₹{Number.isFinite(changeAmount) ? Math.max(changeAmount, 0).toFixed(2) : '0.00'}
+                </div>
+              ) : (
+                <div
+                  data-testid="balance-badge"
+                  className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 px-3 py-1 rounded-md text-base font-bold font-mono tabular-nums"
+                >
+                  ₹{balance.toFixed(2)}
+                </div>
+              )}
+            </div>
+
+            {message && (
+              <p role="alert" data-testid="payment-error" className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                {message}
+              </p>
+            )}
+          </>
+        ) : (
+          <div data-testid="sale-result" className="flex flex-col gap-2 text-sm">
+            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-semibold">
+              <CheckCircle2 className="h-5 w-5" /> Saved as {result?.transactionCode}
+            </div>
+            <dl className="grid grid-cols-2 gap-y-1 font-mono">
+              <dt className="text-slate-500">Paid</dt>
+              <dd data-testid="result-paid" className="text-right"><CurrencyDisplay amount={result?.paidAmount ?? 0} size="sm" /></dd>
+              <dt className="text-slate-500">Balance Due</dt>
+              <dd data-testid="result-balance" className="text-right"><CurrencyDisplay amount={result?.balanceDue ?? 0} size="sm" /></dd>
+              <dt className="text-slate-500">Change</dt>
+              <dd data-testid="result-change" className="text-right"><CurrencyDisplay amount={result?.changeAmount ?? 0} size="sm" /></dd>
+            </dl>
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 };
 

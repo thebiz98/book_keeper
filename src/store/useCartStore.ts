@@ -4,264 +4,204 @@ import type {
   ItemInput,
   BundleInput,
   CustomerInput,
-  CartState,
 } from '@/types/store';
-import type { PaymentStatus } from '@/types';
+import { round2 } from '@/lib/money';
 
-export type { CartItem, ItemInput, BundleInput, CustomerInput, CartState };
+export type { ItemInput, BundleInput, CustomerInput };
 
-function computeTotals(
-  items: CartItem[],
-  status: 'PAID' | 'PARTIAL' | 'UNPAID',
-  paidAmount: number
-) {
-  const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
-  const totalBaseUnits = items.reduce((sum, item) => sum + item.baseQuantity, 0);
-  const totalItems = items.length;
+/** Stock comparison tolerance (DD-10). */
+export const STOCK_EPS = 1e-9;
 
-  let balanceDue = 0;
-  if (status === 'PAID') {
-    balanceDue = 0;
-  } else if (status === 'PARTIAL') {
-    balanceDue = Math.max(0, subtotal - paidAmount);
-  } else if (status === 'UNPAID') {
-    balanceDue = subtotal;
-  }
+/** A cart line. Lines are keyed by `lineId`, never by item id (one item can have several lines). */
+export type CartLine = CartItem & { lineId: string };
+export type { CartLine as CartItemLine };
 
-  return { subtotal, totalBaseUnits, totalItems, balanceDue };
+export interface CartState {
+  items: CartLine[];
+  subtotal: number;
+  totalBaseUnits: number;
+  totalItems: number;
+  selectedCustomer: CustomerInput | null;
+
+  /**
+   * Add a line. Merges into an existing line only when item, unit (bundle) and
+   * rate are all identical. Rejects (returns false) a non-positive/NaN quantity
+   * or when the item's total base quantity across all lines would exceed stock.
+   * `rate` overrides the bundle/base price.
+   */
+  addItem: (
+    item: ItemInput,
+    quantity?: number,
+    bundle?: BundleInput | null,
+    rate?: number
+  ) => boolean;
+  updateQuantity: (lineId: string, quantity: number) => boolean;
+  /** Switch a line's unit; sets bundleId, reprices and rechecks aggregated stock. */
+  setBundle: (lineId: string, bundle: BundleInput | null) => boolean;
+  updateRate: (lineId: string, rate: number) => boolean;
+  removeItem: (lineId: string) => void;
+  clearCart: () => void;
+  setCustomer: (customer: CustomerInput | null) => void;
+}
+
+let lineSeq = 0;
+const nextLineId = () => `line-${++lineSeq}`;
+
+const validQty = (q: number) => typeof q === 'number' && Number.isFinite(q) && q > 0;
+const validRate = (r: number) => typeof r === 'number' && Number.isFinite(r) && r >= 0;
+
+function totalsFor(items: CartLine[]) {
+  return {
+    subtotal: round2(items.reduce((sum, i) => sum + i.lineTotal, 0)),
+    totalBaseUnits: items.reduce((sum, i) => sum + i.baseQuantity, 0),
+    totalItems: items.length,
+  };
+}
+
+/** Base quantity of `itemId` across all lines, optionally excluding one line. */
+export function cartBaseQuantity(items: CartLine[], itemId: number, excludeLineId?: string): number {
+  return items
+    .filter((i) => i.itemId === itemId && i.lineId !== excludeLineId)
+    .reduce((s, i) => s + i.baseQuantity, 0);
 }
 
 const initialState = {
-  items: [] as CartItem[],
+  items: [] as CartLine[],
   subtotal: 0,
   totalBaseUnits: 0,
   totalItems: 0,
   selectedCustomer: null as CustomerInput | null,
-  paymentStatus: 'PAID' as PaymentStatus,
-  paidAmount: 0,
-  balanceDue: 0,
 };
 
 export const useCartStore = create<CartState>((set, get) => ({
   ...initialState,
 
-  addItem: (item: ItemInput, quantity = 1, bundle: BundleInput | null = null): boolean => {
-    const availableStock = item.currentStock;
-    if (availableStock <= 0 || quantity <= 0) {
+  addItem: (item, quantity = 1, bundle = null, rate) => {
+    if (!validQty(quantity)) return false;
+    if (item.currentStock <= 0) return false;
+    if (rate !== undefined && !validRate(rate)) return false;
+
+    const multiplier = bundle ? bundle.unitsPerBundle : 1;
+    if (!validQty(multiplier)) return false;
+    const addedBase = quantity * multiplier;
+    const { items } = get();
+
+    if (cartBaseQuantity(items, item.id) + addedBase > item.currentStock + STOCK_EPS) {
       return false;
     }
 
-    const multiplier = bundle
-      ? bundle.unitsPerBundle
-      : 1;
-    const addedBaseQuantity = quantity * multiplier;
+    const unitRate =
+      rate ?? (bundle ? bundle.salePrice ?? item.defaultSalePrice * multiplier : item.defaultSalePrice);
+    const bundleId = bundle?.id;
 
-    const { items, paymentStatus, paidAmount } = get();
-    const existingIndex = items.findIndex((i) => i.itemId === item.id);
+    const existingIndex = items.findIndex(
+      (i) => i.itemId === item.id && i.bundleId === bundleId && i.rate === unitRate
+    );
 
+    let updated: CartLine[];
     if (existingIndex >= 0) {
       const existing = items[existingIndex];
-      const newBaseQuantity = existing.baseQuantity + addedBaseQuantity;
-      if (newBaseQuantity > existing.availableStock) {
-        return false;
-      }
-
-      const updatedQuantity = existing.quantity + quantity;
-      const updatedLineTotal = updatedQuantity * existing.rate;
-
-      const updatedItems = [...items];
-      updatedItems[existingIndex] = {
+      const q = existing.quantity + quantity;
+      updated = [...items];
+      updated[existingIndex] = {
         ...existing,
-        quantity: updatedQuantity,
-        baseQuantity: newBaseQuantity,
-        lineTotal: updatedLineTotal,
-      };
-
-      const totals = computeTotals(updatedItems, paymentStatus, paidAmount);
-      set({ items: updatedItems, ...totals });
-      return true;
-    }
-
-    if (addedBaseQuantity > availableStock) {
-      return false;
-    }
-
-    const defaultRate = item.defaultSalePrice;
-    const bundleRate = bundle
-      ? bundle.salePrice
-      : undefined;
-    const rate = bundleRate != null ? bundleRate : defaultRate;
-
-    const newItem: CartItem = {
-      itemId: item.id,
-      name: item.name,
-      barcode: item.barcode,
-      baseUnit: item.baseUnit,
-      unitsPerBundle: multiplier,
-      bundleId: bundle?.id,
-      bundleName: bundle ? bundle.bundleName : undefined,
-      quantity,
-      baseQuantity: addedBaseQuantity,
-      rate,
-      mrp: bundle?.mrp ?? item.mrp,
-      lineTotal: quantity * rate,
-      availableStock,
-      defaultSalePrice: defaultRate,
-    };
-
-    const updatedItems = [...items, newItem];
-    const totals = computeTotals(updatedItems, paymentStatus, paidAmount);
-    set({ items: updatedItems, ...totals });
-    return true;
-  },
-
-  updateQuantity: (itemId: number, quantity: number): boolean => {
-    if (quantity < 0) {
-      return false;
-    }
-
-    const { items, paymentStatus, paidAmount } = get();
-    const index = items.findIndex((i) => i.itemId === itemId);
-    if (index === -1) {
-      return false;
-    }
-
-    const item = items[index];
-    const newBaseQuantity = quantity * item.unitsPerBundle;
-    if (newBaseQuantity > item.availableStock) {
-      return false;
-    }
-
-    const updatedItems = [...items];
-    updatedItems[index] = {
-      ...item,
-      quantity,
-      baseQuantity: newBaseQuantity,
-      lineTotal: quantity * item.rate,
-    };
-
-    const totals = computeTotals(updatedItems, paymentStatus, paidAmount);
-    set({ items: updatedItems, ...totals });
-    return true;
-  },
-
-  setBundle: (itemId: number, bundle: BundleInput | null): void => {
-    const { items, paymentStatus, paidAmount } = get();
-    const index = items.findIndex((i) => i.itemId === itemId);
-    if (index === -1) {
-      return;
-    }
-
-    const item = items[index];
-    const updatedItems = [...items];
-
-    if (bundle != null) {
-      const multiplier = bundle.unitsPerBundle;
-      const bundleRate = bundle.salePrice ?? item.rate;
-
-      const baseQuantity = item.quantity * multiplier;
-      const rate = bundleRate;
-      const lineTotal = item.quantity * rate;
-
-      updatedItems[index] = {
-        ...item,
-        unitsPerBundle: multiplier,
-        bundleName: bundle.bundleName,
-        rate,
-        baseQuantity,
-        lineTotal,
-        mrp: bundle.mrp ?? item.mrp,
+        quantity: q,
+        baseQuantity: q * existing.unitsPerBundle,
+        lineTotal: round2(q * existing.rate),
+        availableStock: item.currentStock,
       };
     } else {
-      const rate = item.defaultSalePrice ?? item.rate;
-      const baseQuantity = item.quantity;
-      const lineTotal = item.quantity * rate;
-
-      updatedItems[index] = {
-        ...item,
-        unitsPerBundle: 1,
-        bundleName: undefined,
-        rate,
-        baseQuantity,
-        lineTotal,
-      };
+      updated = [
+        ...items,
+        {
+          lineId: nextLineId(),
+          itemId: item.id,
+          name: item.name,
+          barcode: item.barcode,
+          baseUnit: item.baseUnit,
+          unitsPerBundle: multiplier,
+          bundleId,
+          bundleName: bundle ? bundle.bundleName : undefined,
+          quantity,
+          baseQuantity: addedBase,
+          rate: unitRate,
+          mrp: bundle?.mrp ?? item.mrp,
+          lineTotal: round2(quantity * unitRate),
+          availableStock: item.currentStock,
+          defaultSalePrice: item.defaultSalePrice,
+        },
+      ];
     }
-
-    const totals = computeTotals(updatedItems, paymentStatus, paidAmount);
-    set({ items: updatedItems, ...totals });
+    set({ items: updated, ...totalsFor(updated) });
+    return true;
   },
 
-  updateRate: (itemId: number, rate: number): void => {
-    const { items, paymentStatus, paidAmount } = get();
-    const index = items.findIndex((i) => i.itemId === itemId);
-    if (index === -1) {
-      return;
+  updateQuantity: (lineId, quantity) => {
+    if (!validQty(quantity)) return false;
+    const { items } = get();
+    const index = items.findIndex((i) => i.lineId === lineId);
+    if (index === -1) return false;
+    const line = items[index];
+    const base = quantity * line.unitsPerBundle;
+    if (cartBaseQuantity(items, line.itemId, lineId) + base > line.availableStock + STOCK_EPS) {
+      return false;
     }
-
-    const item = items[index];
-    const updatedItems = [...items];
-    updatedItems[index] = {
-      ...item,
-      rate,
-      lineTotal: item.quantity * rate,
+    const updated = [...items];
+    updated[index] = {
+      ...line,
+      quantity,
+      baseQuantity: base,
+      lineTotal: round2(quantity * line.rate),
     };
-
-    const totals = computeTotals(updatedItems, paymentStatus, paidAmount);
-    set({ items: updatedItems, ...totals });
+    set({ items: updated, ...totalsFor(updated) });
+    return true;
   },
 
-  removeItem: (itemId: number): void => {
-    const { items, paymentStatus, paidAmount } = get();
-    const updatedItems = items.filter((i) => i.itemId !== itemId);
-    const totals = computeTotals(updatedItems, paymentStatus, paidAmount);
-    set({ items: updatedItems, ...totals });
-  },
-
-  clearCart: (): void => {
-    set({ ...initialState });
-  },
-
-  setCustomer: (customer: CustomerInput | null): void => {
-    set({ selectedCustomer: customer });
-  },
-
-  setPaymentStatus: (
-    status: 'PAID' | 'PARTIAL' | 'UNPAID',
-    paidAmount?: number
-  ): void => {
-    const { subtotal } = get();
-    let currentPaid = get().paidAmount;
-
-    if (status === 'PAID') {
-      set({ paymentStatus: status, balanceDue: 0 });
-    } else if (status === 'PARTIAL') {
-      if (paidAmount !== undefined) {
-        currentPaid = paidAmount;
-      }
-      set({
-        paymentStatus: status,
-        paidAmount: currentPaid,
-        balanceDue: Math.max(0, subtotal - currentPaid),
-      });
-    } else if (status === 'UNPAID') {
-      set({
-        paymentStatus: status,
-        paidAmount: 0,
-        balanceDue: subtotal,
-      });
+  setBundle: (lineId, bundle) => {
+    const { items } = get();
+    const index = items.findIndex((i) => i.lineId === lineId);
+    if (index === -1) return false;
+    const line = items[index];
+    const multiplier = bundle ? bundle.unitsPerBundle : 1;
+    if (!validQty(multiplier)) return false;
+    const base = line.quantity * multiplier;
+    if (cartBaseQuantity(items, line.itemId, lineId) + base > line.availableStock + STOCK_EPS) {
+      return false;
     }
+    const baseRate = line.defaultSalePrice ?? line.rate / line.unitsPerBundle;
+    const rate = bundle ? bundle.salePrice ?? baseRate * multiplier : baseRate;
+    const updated = [...items];
+    updated[index] = {
+      ...line,
+      bundleId: bundle?.id,
+      bundleName: bundle ? bundle.bundleName : undefined,
+      unitsPerBundle: multiplier,
+      baseQuantity: base,
+      rate,
+      mrp: bundle?.mrp ?? line.mrp,
+      lineTotal: round2(line.quantity * rate),
+    };
+    set({ items: updated, ...totalsFor(updated) });
+    return true;
   },
 
-  setPaidAmount: (amount: number): void => {
-    const { subtotal, paymentStatus } = get();
-    let balanceDue = 0;
-    if (paymentStatus === 'PAID') {
-      balanceDue = 0;
-    } else if (paymentStatus === 'PARTIAL') {
-      balanceDue = Math.max(0, subtotal - amount);
-    } else if (paymentStatus === 'UNPAID') {
-      balanceDue = subtotal;
-    }
-    set({ paidAmount: amount, balanceDue });
+  updateRate: (lineId, rate) => {
+    if (!validRate(rate)) return false;
+    const { items } = get();
+    const index = items.findIndex((i) => i.lineId === lineId);
+    if (index === -1) return false;
+    const updated = [...items];
+    updated[index] = { ...items[index], rate, lineTotal: round2(items[index].quantity * rate) };
+    set({ items: updated, ...totalsFor(updated) });
+    return true;
   },
+
+  removeItem: (lineId) => {
+    const updated = get().items.filter((i) => i.lineId !== lineId);
+    set({ items: updated, ...totalsFor(updated) });
+  },
+
+  clearCart: () => set({ ...initialState }),
+
+  setCustomer: (customer) => set({ selectedCustomer: customer }),
 }));
