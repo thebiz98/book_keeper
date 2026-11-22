@@ -2,7 +2,8 @@
 **System:** Offline-First Retail Accounting & Inventory Management Desktop Application  
 **Target Environment:** Windows Laptop (Single-Node, Embedded Database)  
 **Currency:** Indian Rupees (₹)  
-**Status:** Approved Requirements & Entity Design Baseline (rev. 2026-11-21 — aligned per [Design Decisions](DESIGN_DECISIONS.md))  
+**Status:** Approved Requirements & Entity Design Baseline (rev. 2026-11-22 — v1.1 feature set added: FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – FR-23, NFR-03 rev.; see §10 for delivery plan and [Design Decisions](DESIGN_DECISIONS.md) DD-35 – DD-46)  
+**Source of truth:** This HLD is the single source for requirements, assumptions, scope and entity design. LLDs refine it and must not contradict it.  
 **UI/UX Companion Document:** [UI/UX Specification](book_keeper_UI_UX_Specification.md)  
 
 ---
@@ -22,11 +23,13 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * The user can record purchases of items into stock with item name, quantity, unit cost (₹), purchase date, and optional vendor details.
   * The user can specify the payment status: **Cash** (`PAID`), **Credit** (`UNPAID`), or **Partial** (`PARTIAL`) with an upfront `paid_amount` and remaining `balance_due`.
   * The stated status must agree with `paid_amount` (`PAID` ⇒ paid = total; `PARTIAL` ⇒ 0 < paid < total; `UNPAID` ⇒ paid = 0); paying more than the total is rejected. A vendor is required unless `PAID`.
+  * A purchase bill may carry bill-level **charges** (e.g. transport, carrier fee) and **discounts** (FR-19). `total_amount` (the payable) = items subtotal + charges − discounts. Lot `unit_cost` stays at the item rate; charges are booked as Operating Expenses and discounts as Other Income (DD-38).
 * **FR-02: Outward Sales Management**
   * The user can record sales of items with quantity, selling price (₹), sale date, and optional customer details.
   * The user can record multi-item sales under a single transaction (cart-style billing).
   * The user can specify the payment status: **Cash** (`PAID`), **Credit** (`UNPAID`), or **Partial** (`PARTIAL`) with an upfront `paid_amount` and remaining `balance_due`.
   * The stated status must agree with `paid_amount` (`PAID` ⇒ paid ≥ total, excess is change and is not stored; `PARTIAL` ⇒ 0 < paid < total; `UNPAID` ⇒ paid = 0). A customer is required unless `PAID`.
+  * A sale bill may carry bill-level **charges** (e.g. delivery) and **discounts** (FR-19). `total_amount` (the receivable) = items subtotal + charges − discounts, and must be ≥ 0.
 * **FR-03: Strict FIFO Stock Depletion**
   * When an item is sold, the system automatically depletes inventory from the **oldest available stock lot** (First-In, First-Out). "Oldest" is entry order (lowest lot id); back-dated entries are treated as newest and never re-cost past sales.
   * When inventory for an item spans multiple batches with different purchase costs, the system splits depletion across batches and calculates the exact Cost of Goods Sold (COGS).
@@ -34,8 +37,10 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * The system strictly validates available stock across all active batches before committing a sale. Sales that exceed total available stock are blocked.
   * Validation sums the required base quantity per item across all cart lines (the same item on several lines is checked in aggregate). The same guard applies to negative adjustments, vendor returns, and replacement issues.
 * **FR-05: Real-Time Low Stock Monitoring**
-  * The system flags any item as "Low Stock" when its total aggregated stock across all batches drops below **5 units** (`current_stock < 5`).
-  * Low stock items are surfaced on the Home / Dashboard screen.
+  * *(rev. 2026-11-22)* Each item has its own **low stock level** (`ITEM.low_stock_threshold`, base units, default **5**, ≥ 0). The system flags an item as "Low Stock" when its total aggregated stock across all batches drops below that level (`current_stock < low_stock_threshold`). A level of `0` means the item is never flagged.
+  * The level is set per item: in the Item List (an inline-editable **Low Stock Level** column, which replaces the Barcode column) and in the Item edit drawer. Changing it recomputes `is_low_stock` immediately.
+  * Low stock items are surfaced on the Home / Dashboard screen, each with its own level.
+  * Applies only to `PHYSICAL` items (FR-21).
 * **FR-06: Symmetrical Credit & Dues Management**
   * **Customer Receivables**: The user can view total outstanding dues owed by customers (sum of `balance_due` on unpaid and partial sales).
   * **Vendor Payables**: The user can view total outstanding dues owed by the shop to suppliers (sum of `balance_due` on unpaid and partial purchases).
@@ -52,15 +57,24 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * The user can adjust stock quantities directly via item search (name or barcode) without referencing a sale or invoice ID, with an adjustment date and a reason: `DAMAGED`, `EXPIRED`, `THEFT_LOST`, or `COUNT_CORRECTION`.
   * **FIFO Depletion Linkage**: When an adjustment is negative (e.g. -5 damaged units), the system automatically triggers the FIFO allocation engine to deduct `remaining_quantity` from the oldest available lots, preventing phantom inventory lots and logging inventory write-off losses accurately.
   * **Positive adjustments** (found stock) create a new `ADJUSTMENT`-source lot at the item's most recent lot cost; if the item has never had a lot, the user must enter the unit cost. The selling price is never used as cost.
+  * **Unrecorded / ad-hoc stock entry** *(added 2026-11-22, DD-40)*: an existing shop holds stock that has no purchase history. From the Item List / Item edit drawer, the user can **set the stock on hand** directly (enter the counted quantity) or add a quantity, without a purchase bill:
+    * A **positive delta** is recorded as a stock adjustment with reason `UNRECORDED_STOCK`. It creates an `ADJUSTMENT`-source lot at a **user-entered unit cost** (prefilled with the item's most recent lot cost, editable; required if the item never had a lot). The lot adds to stock valuation (FR-09) at that cost. It is not a purchase: it never appears in purchase lists, totals, payables or cash flow, and it is not income in the P&L.
+    * A **negative delta** (counted less than the system shows) is a `COUNT_CORRECTION` negative adjustment (FIFO depletion, inventory loss).
+    * A delta of 0 changes nothing.
 * **FR-09: Financial Aggregations & Reports**
   * Periodic totals (Day, Week, Month, Year presets or a custom range) for:
     * Total Sales (Gross Revenue), Sales Returns, and Net Sales
     * Total Purchases (net of vendor returns; excludes adjustment/opening/return lots)
     * Cash Flow (actual cash in vs. cash out, from the payment ledger)
     * Total Stock Valuation: Sum of (Remaining Lot Qty × Lot Unit Cost) across all active lots
-    * Profit statement: Net Sales − COGS (net of returned units, plus replacement units issued) = Gross Profit; − Inventory Losses (write-offs, scrap returns) = Net Profit
+    * Profit statement *(rev. 2026-11-22, DD-39)*:
+      * Gross Sales (Σ sale items subtotals) − Sales Discounts − Sales Returns = **Net Sales**
+      * Net Sales − COGS (net of returned units, plus replacement units issued) = **Gross Profit**
+      * Gross Profit + **Other Income** (sale charges collected + purchase discounts received) − **Inventory Losses** (write-offs, scrap returns) − **Operating Expenses** (FR-18 expenses + purchase charges paid) = **Net Profit**
+    * Total Expenses for the period, broken down by expense type.
 * **FR-10: Lists & Operational Views**
-  * Complete, filterable lists of all Sales, all Purchases, Pending Customer Dues (Receivables), and Pending Vendor Dues (Payables).
+  * Complete, filterable lists of all Sales, all Purchases, all Expenses, Pending Customer Dues (Receivables), and Pending Vendor Dues (Payables).
+  * *(added 2026-11-22, DD-43)* Every list with a header row keeps the **column headers fixed (sticky)** while the rows scroll, so the user always sees what each column means. This is implemented once in the shared table component, so every list gets it.
 * **FR-11: Data Portability & Local Backup** *(v1 scope)*
   * Import items with opening stock from CSV / Excel (`.xlsx`): a dry-run validation report (row-level errors, duplicates) precedes execution with a conflict strategy (`SKIP`, `OVERWRITE`, `ADD_STOCK`); opening stock creates `OPENING`-source lots at the row's purchase cost. All-or-nothing.
   * One-click local database backup to a user-selected folder or external USB drive, plus a database integrity check.
@@ -81,6 +95,10 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **FR-14: High-Speed Typeahead Search (SQLite FTS5)**
   * Instant auto-fill suggestions powered by an inverted index via SQLite FTS5 matching across item name, category, and barcode.
   * Sub-millisecond query responses supporting prefix typing (`pen*`) and tokenized multi-word search (`blue gel`).
+  * *(rev. 2026-11-22, DD-36)* **Every search field is live and index-backed.** Results update as the user types (short debounce), with no Search button and no Enter needed. This covers the Item List page and all other search boxes (parties, history lists, pickers).
+    * Master-data lookups use an FTS5 prefix index per entity: items (`ITEM_SEARCH_FTS`), parties (`PARTY_SEARCH_FTS`: name, phone), expense types (`EXPENSE_TYPE_SEARCH_FTS`), and charge/discount types (`CHARGE_TYPE_SEARCH_FTS`). All are kept in sync by application code after commit (DD-24).
+    * History lists (sales, purchases, expenses, returns) search on code / party name / type name with the same live behaviour; they may use indexed `LIKE` instead of FTS because they are paginated SQL lists.
+    * One shared frontend search hook and typeahead component are used everywhere, so behaviour is identical across screens.
 * **FR-15: Rapid Keyboard-First Checkout Flow (Enter-Key Navigation)**
   * High-speed, heads-down counter workflow operating entirely via keyboard without mouse interaction:
     1. Focus in Item Search → Type 2-3 characters or scan barcode.
@@ -100,6 +118,45 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **FR-17: Soft-Deletion & Archival Integrity** *(deferred to v2)*
   * v1: Items and Parties cannot be deleted or archived at all. The `is_active` column is kept (always `1` in v1) and read paths already filter on it, so v2 can add archiving without schema changes.
   * v2 intent: Deletion acts as a soft archive (`is_active = 0`), hiding records from active search and selection lists while maintaining referential integrity for past bills, audit trails, and financial reports.
+* **FR-18: Store Expenses** *(added 2026-11-22, DD-35)*
+  * The user can record running expenses of the store: printer ink, electricity bill, rent, tea, cleaning supplies, and so on. Each expense has a date, an **expense type**, an amount (₹, > 0) and optional notes.
+  * **Expense types behave like items in search:** the type field is a live FTS typeahead over existing types. If the typed name does not exist, the user can create the new type inline from the same field (`[+ Create "<name>"]` / Enter on no match), without leaving the form. Types are unique by name (case-insensitive) and are master data.
+  * An expense is always paid in cash from the drawer on its date (credit or unpaid expenses are out of scope).
+  * **Cash in hand:** expenses are cash out. The live cash drawer becomes *today's ledger cash in − today's ledger cash out − today's expenses* (DD-37). Cash Flow reports show expenses as their own outflow line.
+  * **Profit:** expenses are Operating Expenses in the P&L and reduce Net Profit (FR-09).
+  * Expenses can be edited and deleted (they are manual entries; FR-20 applies).
+  * An Expenses screen lists expenses with date range, type filter and live search, plus the period total.
+* **FR-19: Bill Charges & Discounts** *(added 2026-11-22, DD-38)*
+  * Both sale and purchase bills can carry any number of bill-level **charge lines** (an extra amount: transport, carrier fee, delivery, packing) and **discount lines** (an amount off: cash discount, round-off, scheme).
+  * **Reusable charge types:** each line references a `CHARGE_TYPE` master row with a name, an **effect** (`CHARGE` adds to the bill, `DISCOUNT` reduces it), where it applies (`SALE`, `PURCHASE` or `BOTH`), and an optional default amount. The user picks a type with live FTS search or creates a new one inline (like expense types), so they never retype common charges. The amount defaults to the type's default and is editable per bill.
+  * Amounts are fixed ₹ values entered per bill (percentage discounts and per-line discounts are out of scope).
+  * **Bill math:** `items_subtotal = Σ line totals`; `charges_total = Σ CHARGE lines`; `discounts_total = Σ DISCOUNT lines`; `total_amount = items_subtotal + charges_total − discounts_total` (rounded to 2 decimals, must be ≥ 0). Payment status, dues, settlement and the ledger work on `total_amount` exactly as before.
+  * **Accounting** (DD-39):
+    * Sale discounts reduce Net Sales ("Sales Discounts"). Sale charges are Other Income.
+    * Purchase charges are Operating Expenses on the bill date. Purchase discounts are Other Income. Lot unit costs are **not** changed (no landed-cost allocation).
+    * Purchases report shows the items subtotal; charges and discounts are shown separately.
+  * **Returns on a discounted sale:** a linked return's refund rate is capped at the line's **net rate** = `unit_price × (1 − discounts_total / items_subtotal)`, so a refund never exceeds what the customer effectively paid. Charges are never auto-refunded.
+  * Charge and discount lines are shown in the Payment dialog before commit, in bill details, and are edited together with the bill (FR-20).
+* **FR-20: Bill Correction — Edit & Delete** *(added 2026-11-22, DD-41; replaces the v1 immutability rule NFR-03)*
+  * Manual entry causes mistakes, and the app must reflect the real store. The owner can **edit** or **delete** any sale or purchase bill: date, party, lines (item, quantity, pack, rate), charges/discounts, notes, and the upfront paid amount. A bill may end up very different from what was first entered; that is accepted.
+  * An edit keeps the bill's id and code. It is applied atomically as **reverse-then-repost**: all stock, allocation and ledger effects of the old version are reversed, and the new version is validated and posted through the normal create rules (stock check, FIFO, status cross-check, party rules). Either the whole edit succeeds or nothing changes.
+  * **Guards** (the edit/delete is rejected with a clear reason):
+    * A bill with any linked return cannot be edited or deleted. The user deletes the return(s) first.
+    * Purchase: a lot's quantity cannot drop below what has already left it (`quantity − remaining_quantity`: sold, adjusted, issued). A line whose lot has been consumed cannot change item or be removed. A purchase with any consumed lot cannot be deleted.
+    * Purchase **cost change** on a consumed lot is allowed: the new cost flows into the allocation rows that consumed it, so past COGS and losses are re-costed.
+    * Sale: the edited lines must pass the stock check against stock *after* the old version is reversed.
+    * The new `total_amount` cannot be less than the money already applied to the bill by later settlements (`Σ SETTLEMENT` + `Σ RETURN_CREDIT`). The user removes or reduces those first.
+  * **Payments:** the edit replaces the bill's `UPFRONT` ledger row with the new paid amount. Later `SETTLEMENT` rows are kept (and re-pointed to the new party if the party changed). Delete removes all of the bill's ledger rows, so recorded cash for that bill leaves the cash drawer and reports; the confirm dialog states the amount.
+  * **Returns** can be deleted (not edited). Deleting a return reverses its stock and ledger effects. It is rejected if units it restocked have since been consumed, or if its `RETURN`-source lot has been used.
+  * **Expenses** can be edited and deleted freely.
+  * No revision history is kept in v1; headers record `updated_at`. Codes of deleted bills are not reused.
+  * Entry points: Edit / Delete actions in the bill detail drawer (Sales History, Purchase History, party ledger). Edit opens the bill in the normal sale/purchase entry screen in edit mode, prefilled.
+* **FR-21: Item Type — Physical vs Service** *(added 2026-11-22, DD-42; entity only in v1.1)*
+  * Every item has an `item_type`: `PHYSICAL` (stocked goods, the default) or `SERVICE` (e.g. photo printing, lamination).
+  * A `SERVICE` item has a price but no stock: no lots, no FIFO, no stock check, no low-stock flag, excluded from stock valuation.
+  * **v1.1 scope:** the column, entity, DTOs and validation only. All items are created as `PHYSICAL`; the backend rejects `SERVICE` on create/update until service billing is designed. Service billing (including services that consume stock items, such as photo printing using paper) is a separate, later design.
+* **FR-22: Explicit Submit on Quick-Create Forms** *(added 2026-11-22, DD-44)*
+  * Every quick-create form (new customer / vendor, new bundle, new expense type, new charge type) shows a visible **Save** (primary) and **Cancel** button, in addition to Enter-to-submit and Escape-to-cancel. The user should never have to guess that Enter commits.
 
 ### 2.2. Non-Functional Requirements (NFR)
 
@@ -108,14 +165,17 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * Database engine: Embedded **SQLite** (`shop.db` in the OS app-data directory; overridable via `BOOK_KEEPER_DB_PATH`).
 * **NFR-02: Fast Query & Dashboard Latency**
   * Instant load times (< 100ms) for the Home Screen and Low Stock widget by maintaining cached stock counts (`current_stock`) and a boolean flag (`is_low_stock`) on the item record.
-* **NFR-03: Transaction Immutability & Audit Integrity**
-  * Transactions cannot be deleted or overwritten once committed. Corrections and reversals must occur via formal returns, settlements, or stock adjustments.
+* **NFR-03: Correctable Transactions with Consistent Derived State** *(rev. 2026-11-22, DD-41)*
+  * ~~Transactions cannot be deleted or overwritten once committed.~~ Superseded: bills, returns and expenses may be corrected through the controlled edit/delete operations of FR-20.
+  * Every correction runs in one `BEGIN IMMEDIATE` transaction and leaves all derived state consistent: lot `remaining_quantity`, allocations, `current_stock` / `is_low_stock`, ledger rows and bill cached values. No code path edits a committed row outside these operations.
+  * Returns, settlements and stock adjustments remain the normal way to record real-world reversals (a customer bringing goods back is a return, not a bill edit).
 * **NFR-04: Clean Schema Evolution**
   * Future schema enhancements are introduced via explicit, typed migrations (`ALTER TABLE ADD COLUMN`) rather than untyped JSON blobs, preserving clean 1-to-1 Excel/CSV mappings.
 * **NFR-05: Modularity & Pluggable Stock Strategy**
   * The inventory allocation engine is decoupled such that the depletion strategy (currently FIFO) can be swapped for LIFO or Weighted Average without database restructuring.
 * **NFR-06: Heads-Down Keyboard Ergonomics**
-  * The entire core retail counter billing workflow operates with zero mouse clicks. Predictable Tab/Enter focus ordering and a fixed hotkey map: `F1` Dashboard, `F2` Sale, `F3` Purchase, `F4`/`Ctrl+F` item lookup, `F5` Credit & Dues, `F6` Inventory, `Alt+B` new bundle, `Alt+C` / `Alt+V` new customer / vendor, `Ctrl+B` backup, `Ctrl+Enter` complete bill, `Escape` close/back.
+  * The entire core retail counter billing workflow operates with zero mouse clicks. Predictable Tab/Enter focus ordering and a fixed hotkey map: `F1` Dashboard, `F2` Sale, `F3` Purchase, `F4`/`Ctrl+F` item lookup, `F5` Credit & Dues, `F6` Inventory, `F7` Expenses (new expense), `Alt+B` new bundle, `Alt+C` / `Alt+V` new customer / vendor, `Alt+X` add charge/discount line on a bill, `Ctrl+B` backup, `Ctrl+Enter` complete bill, `Escape` close/back.
+  * Keyboard support never replaces visible controls: every form also has clickable Save / Cancel buttons (FR-22).
 
 ---
 
@@ -135,10 +195,21 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 11. **Due Settlements**: Dedicated `PaymentSettlement` records capturing date-accurate cash inflows and outflows as credit is cleared over time.
 12. **Returns & Swaps**: Customer returns (linked or unlinked), defective swaps, and vendor returns.
 13. **Physical Stock Adjustments**: Fast item lookup for damaged/expired write-offs and found stock.
-14. **Reports & Dashboard**: Low-stock widget (< 5 items), Total Stock Value, Customer Dues, Vendor Dues, Period-based Sales & Purchases (Day/Week/Month/Year), Profit statement, Cash Flow.
+14. **Reports & Dashboard**: Low-stock widget (below each item's low stock level), Total Stock Value, Customer Dues, Vendor Dues, Period-based Sales & Purchases (Day/Week/Month/Year), Profit statement, Cash Flow.
 15. **Import**: CSV/Excel import of Items with opening stock (dry-run + conflict strategy).
 16. **Local Backup**: Direct database snapshot copy to local or removable drive, with integrity check.
 17. **Shop Profile**: 1-row configuration table storing shop details for future invoice printing.
+
+### 3.1a. In Scope — v1.1 additions (2026-11-22)
+18. **Store Expenses (FR-18)**: Expense entry with searchable, inline-creatable expense types; expenses reduce cash in hand and Net Profit; Expenses list screen.
+19. **Bill Charges & Discounts (FR-19)**: Bill-level charge and discount lines on sales and purchases, from a reusable searchable `CHARGE_TYPE` master.
+20. **Bill Correction (FR-20)**: Edit and delete of sales and purchases (guarded, atomic reverse-then-repost); delete of returns; edit/delete of expenses.
+21. **Per-Item Low Stock Level (FR-05 rev.)**: `low_stock_threshold` per item, editable inline in the Item List.
+22. **Unrecorded Stock Entry (FR-08 rev.)**: Set or add stock on hand without a purchase, at a user-entered cost.
+23. **Live Indexed Search Everywhere (FR-14 rev.)**: Debounced live search on every search field; FTS5 indexes for items, parties, expense types and charge types.
+24. **Sticky Table Headers (FR-10 rev.)**: Fixed headers in the shared table component.
+25. **Explicit Save buttons on quick-create forms (FR-22).**
+26. **Item Type entity field (FR-21)**: `PHYSICAL` / `SERVICE` column, `PHYSICAL` only in v1.1.
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
@@ -147,12 +218,16 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 4. **Complex Multi-Tier Tax Engine**: Comprehensive Indian GST slabs (CGST, SGST, IGST), HSN-based automated tax reports, and e-way bill generation.
 5. **Pricing Tiers**: Wholesale, distributor, and customer-specific price rules.
 6. **Back-Ordering & Negative Stock**: Sales when physical or entered stock is <= 0.
-7. **Transaction Deletion**: Hard deletion of historical transaction records.
+7. ~~**Transaction Deletion**~~ — *moved into scope by FR-20 (2026-11-22).* Still out of scope: revision history / audit log of bill edits, undo of a delete, and editing a return (delete and re-enter instead).
 8. **Multi-Store / Multi-Branch**: Centralized inventory across multiple physical locations.
 9. **Multi-User Role-Based Access Control (RBAC)**: User roles, permissions, and shift-management logins.
 10. **Exports**: CSV/Excel exports of catalog, registers, daybook, P&L.
 11. **Parties import, opening dues, VedBill migration, restore from backup.**
 12. **Archiving / soft-deletion of Items and Parties (FR-17).**
+13. **Service billing (FR-21)**: Selling `SERVICE` items, and services that consume stock items (e.g. photo printing using paper). Only the entity field exists in v1.1.
+14. **Expense extras**: Expenses on credit / unpaid expense bills, expense vendors and payables, recurring expenses, expense attachments, and archiving expense types.
+15. **Charge/discount extras**: Percentage discounts, per-line (item-level) discounts, tax-as-a-charge, landed-cost allocation of purchase charges into lot costs, and archiving charge types.
+16. **Bulk low-stock level editing** (set one level for many items or a category at once) and a global default other than 5.
 
 ---
 
@@ -163,7 +238,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 3. **Bill-Level Partial Payments**: A transaction has `payment_status` as `PAID` (`balance_due = 0`), `PARTIAL` (something paid or credited, balance remains), or `UNPAID` (nothing paid or credited). Subsequent settlements and return credits reduce `balance_due` until 0. Money is fungible; partial payments apply to the total bill, never to specific individual items. Money is rounded to 2 decimals at line and bill level.
 4. **Manual Delayed Entry**: The shopkeeper may make physical cash/credit sales first and enter records into the system at the end of the day or when convenient.
 5. **Stock Valuation Formula**: Total Stock Value = Sum of (Remaining Quantity × Batch Unit Cost) across all active lots.
-6. **Universal Low Stock Level**: An item is considered running low when its total physical stock across all available batches is strictly less than **5 units** (`current_stock < 5`).
+6. **Per-Item Low Stock Level** *(rev. 2026-11-22)*: An item is considered running low when its total physical stock across all available batches is strictly less than its own `low_stock_threshold` (default **5** base units; `0` = never low). `is_low_stock` is recomputed whenever stock or the threshold changes. `SERVICE` items are never low.
 7. **Optional Parties**: Retail cash customers or petty-cash supplier runs do not require customer/vendor profile creation; `party_id` is nullable.
 8. **Single Payment Ledger**: Every money event is exactly one `PAYMENT_SETTLEMENT` row with a `kind`: `UPFRONT` (paid at billing), `SETTLEMENT` (later due payment), `RETURN_CREDIT` (non-cash due reduction from a return), `REFUND_OUT` (cash paid back to a customer), `REFUND_IN` (cash received back from a vendor). Bill headers are created with `paid_amount = 0, balance_due = total` and then updated only through the ledger: `paid_amount = Σ(UPFRONT + SETTLEMENT)`, `balance_due = total − paid_amount − Σ RETURN_CREDIT`. Cash in = sale UPFRONT/SETTLEMENT + purchase REFUND_IN; cash out = purchase UPFRONT/SETTLEMENT + sale REFUND_OUT. Daily cash drawer totals are ledger sums by `settlement_date`.
 9. **Deferred Payment Mode (Null in v1 UI)**: The UI minimizes counter friction by not asking for payment instruments (UPI, Card, Net Banking). All upfront cash collections and cash settlements flow directly into the daily cash drawer register. The database retains `payment_mode` as `NULLABLE` for future version extensibility.
@@ -173,6 +248,11 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 13. **Soft-Delete Archiving (v2)**: `ITEM` and `PARTY` carry an `is_active` flag reserved for v2 archiving; v1 never deletes or archives them.
 14. **Lot Sources**: Every stock lot is a `PURCHASE_ITEM` under a `PURCHASE_TRANSACTION` whose `source` is `PURCHASE` (real supplier bill), `ADJUSTMENT` (found stock), `OPENING` (import opening stock) or `RETURN` (unlinked restockable customer return). Non-`PURCHASE` headers carry `total_amount = 0`, no party, status `PAID`, and their own code prefix (`ADJ-`, `OPN-`, `RTL-`). All purchase lists, counts, totals, payables and vendor-return pickers include only `source = PURCHASE`.
 15. **FIFO Order**: Lots are consumed in entry order (ascending `PURCHASE_ITEM.id`).
+16. **Expenses are standalone cash-out events** *(2026-11-22)*: An `EXPENSE` row is itself the money event (always cash, paid on `expense_date`); it does not create `PAYMENT_SETTLEMENT` rows, because it has no bill, no party and no due. Assumption 8 still holds for every bill. Cash out for any period = ledger cash out + Σ `EXPENSE.amount` by `expense_date`.
+17. **Bill totals include charges and discounts** *(2026-11-22)*: `total_amount = items_subtotal + charges_total − discounts_total`. Everything that used `total_amount` (status cross-check, dues, ledger caps, receivables/payables) keeps using it unchanged. Reports that need item revenue or item purchase cost use `items_subtotal`.
+18. **Purchase charges are expenses, not cost** *(2026-11-22)*: Purchase charges/discounts never change lot `unit_cost`, FIFO costs or stock valuation. They are P&L lines (Operating Expenses / Other Income) on the purchase's `transaction_date`.
+19. **Edit = reverse then repost** *(2026-11-22)*: A bill edit reverses the old version's effects and posts the new version through the same service code used for creation, inside one transaction, keeping id and code. Back-dated or edited bills follow DD-09: FIFO order is entry order, so re-posted sale lines take the oldest lots available at edit time.
+20. **Unrecorded stock is valued at entered cost** *(2026-11-22)*: `UNRECORDED_STOCK` adjustments create lots at a user-entered cost (prefilled from the latest lot), unlike other positive adjustments (DD-08), because this stock never had a purchase to take a cost from.
 
 ---
 
@@ -185,8 +265,10 @@ flowchart TD
         SaleScreen["Sales Billing Screen<br/>(Qty default 1, Bundle Selector)"]
         SummaryModal["On-Screen Sale Summary<br/>(Total, Cash, Change - Enter to Close)"]
         PurchaseScreen["Add Purchase<br/>(Base Units or Bundles, Cost)"]
-        Home["Home Dashboard<br/>(Low Stock &lt; 5, Stock Value, Dues)"]
+        Home["Home Dashboard<br/>(Low Stock, Stock Value, Dues, Cash in Hand)"]
         ReportsScreen["Reports<br/>(Day / Week / Month / Year)"]
+        ExpenseScreen["Expenses<br/>(Type typeahead, inline create)"]
+        BillEdit["Bill Edit / Delete<br/>(from Bill Details)"]
     end
 
     subgraph Logic ["Business Logic Layer"]
@@ -196,6 +278,8 @@ flowchart TD
         StockCheck["Stock Validator<br/>(Prevents negative stock)"]
         Aggregator["Metrics Calculator<br/>(Stock Value, Receivables, Payables, Profit)"]
         SettlementManager["Settlement Manager<br/>(Clears Partial &amp; Credit Dues)"]
+        BillMath["Bill Math<br/>(Subtotal + Charges − Discounts)"]
+        Corrector["Bill Corrector<br/>(Reverse then Repost, Guards)"]
     end
 
     subgraph DB ["Local Embedded SQLite (shop.db)"]
@@ -206,7 +290,16 @@ flowchart TD
         T_Sale[("SALE<br/>(Headers &amp; Sale Lines)")]
         T_Depletion[("SALE_STOCK_ALLOCATION<br/>(FIFO Audit &amp; Cost Tracking)")]
         T_Settlement[("PAYMENT_SETTLEMENT<br/>(Date-Accurate Cash Logs)")]
+        T_Expense[("EXPENSE &amp; EXPENSE_TYPE<br/>(Store Running Costs)")]
+        T_Charge[("BILL_CHARGE &amp; CHARGE_TYPE<br/>(Charges &amp; Discounts)")]
     end
+    ExpenseScreen --> FTS5Engine
+    ExpenseScreen --> T_Expense
+    SaleScreen --> BillMath --> T_Charge
+    PurchaseScreen --> BillMath
+    BillEdit --> Corrector --> FIFO
+    Corrector --> SettlementManager --> T_Settlement
+    T_Expense --> Aggregator
 
     Search --> FTS5Engine --> T_FTS
     Search -->|Enter| SaleScreen
@@ -265,18 +358,64 @@ erDiagram
     SALE_ITEM ||--o{ RETURN_ITEM : "returned_via"
     PURCHASE_ITEM ||--o{ RETURN_ITEM : "vendor_returned_via"
 
+    EXPENSE_TYPE ||--o{ EXPENSE : "classifies"
+    CHARGE_TYPE ||--o{ BILL_CHARGE : "classifies"
+    SALE_TRANSACTION ||--o{ BILL_CHARGE : "has_charges"
+    PURCHASE_TRANSACTION ||--o{ BILL_CHARGE : "has_charges"
+
     ITEM {
         int id PK
         string name "Item Name (Unique)"
+        string item_type "PHYSICAL (default) or SERVICE"
         string category "Category"
         string barcode "Optional Barcode"
         string base_unit "Smallest unit: PCS, SHEET, KG"
         decimal mrp "Optional printed MRP"
         decimal default_sale_price "Default base rate"
         decimal current_stock "Cached total in base units"
-        boolean is_low_stock "1 if stock under 5 base units"
+        decimal low_stock_threshold "Per-item level, default 5"
+        boolean is_low_stock "1 if stock under its threshold"
         boolean is_active "1 if active, 0 if archived"
         datetime created_at "Creation timestamp"
+    }
+
+    EXPENSE_TYPE {
+        int id PK
+        string name "Unique (NOCASE), e.g. Printer Ink"
+        boolean is_active "Reserved, always 1"
+        datetime created_at "Creation timestamp"
+    }
+
+    EXPENSE {
+        int id PK
+        string expense_code "e.g. EXP-1001"
+        date expense_date "Date paid (cash)"
+        int expense_type_id FK
+        string expense_type_name "Snapshot (DD-30)"
+        decimal amount "Paid amount, > 0"
+        string notes "Remarks"
+        datetime created_at "Creation timestamp"
+        datetime updated_at "Last edit"
+    }
+
+    CHARGE_TYPE {
+        int id PK
+        string name "Unique (NOCASE), e.g. Transport"
+        string effect "CHARGE or DISCOUNT"
+        string applies_to "SALE, PURCHASE or BOTH"
+        decimal default_amount "Optional preset"
+        boolean is_active "Reserved, always 1"
+        datetime created_at "Creation timestamp"
+    }
+
+    BILL_CHARGE {
+        int id PK
+        string transaction_type "SALE or PURCHASE"
+        int transaction_id FK "Sale or purchase header"
+        int charge_type_id FK
+        string charge_name "Snapshot (DD-30)"
+        string effect "Snapshot: CHARGE or DISCOUNT"
+        decimal amount "Always > 0"
     }
 
     ITEM_BUNDLE {
@@ -309,11 +448,15 @@ erDiagram
         string party_name "Snapshot at write time (DD-30)"
         string payment_mode "Optional / NULL in v1"
         string payment_status "PAID, PARTIAL, UNPAID"
-        decimal total_amount "Total amount"
+        decimal items_subtotal "Sum of line totals"
+        decimal charges_total "Sum of CHARGE lines"
+        decimal discounts_total "Sum of DISCOUNT lines"
+        decimal total_amount "subtotal + charges - discounts"
         decimal paid_amount "Paid upfront"
         decimal balance_due "Remaining payable"
         string notes "Remarks"
         datetime created_at "Creation timestamp"
+        datetime updated_at "Last edit (FR-20)"
     }
 
     PURCHASE_ITEM {
@@ -337,11 +480,15 @@ erDiagram
         string party_name "Snapshot at write time (DD-30)"
         string payment_mode "Optional / NULL in v1"
         string payment_status "PAID, PARTIAL, UNPAID"
-        decimal total_amount "Total amount"
+        decimal items_subtotal "Sum of line totals"
+        decimal charges_total "Sum of CHARGE lines"
+        decimal discounts_total "Sum of DISCOUNT lines"
+        decimal total_amount "subtotal + charges - discounts"
         decimal paid_amount "Paid upfront"
         decimal balance_due "Remaining due"
         string notes "Remarks"
         datetime created_at "Creation timestamp"
+        datetime updated_at "Last edit (FR-20)"
     }
 
     SALE_ITEM {
@@ -422,7 +569,7 @@ erDiagram
         int item_id FK "Item lookup"
         decimal quantity "Positive or Negative"
         decimal unit_cost "Positive adj lot cost"
-        string reason "DAMAGED, EXPIRED, THEFT_LOST, COUNT_CORRECTION"
+        string reason "DAMAGED, EXPIRED, THEFT_LOST, COUNT_CORRECTION, UNRECORDED_STOCK"
         string notes "Remarks"
         datetime created_at "Creation timestamp"
     }
@@ -438,13 +585,15 @@ erDiagram
 | :--- | :--- | :--- | :--- |
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Unique item identifier. |
 | `name` | TEXT | NOT NULL, UNIQUE | Product name (e.g., "Apsara Platinum Pencil"). |
+| `item_type` | TEXT | NOT NULL DEFAULT 'PHYSICAL', CHECK IN ('PHYSICAL','SERVICE') | *(v1.1, FR-21)* Stocked good or service. Only `PHYSICAL` accepted by services in v1.1. |
 | `category` | TEXT | NULLABLE | Product category (e.g., "Stationery", "Snacks"). |
 | `barcode` | TEXT | NULLABLE, INDEXED | Base unit barcode / SKU for instant scanner lookup. |
 | `base_unit` | TEXT | NOT NULL DEFAULT 'PCS' | Smallest indivisible unit ('PCS', 'SHEET', 'KG', 'LTR'). |
 | `mrp` | REAL | NULLABLE | Optional printed Maximum Retail Price in ₹. |
 | `default_sale_price`| REAL | NOT NULL DEFAULT 0.0 | Suggested selling price per base unit in ₹. |
 | `current_stock` | REAL | NOT NULL DEFAULT 0.0 | Cached sum of all active batch quantities (in base units). |
-| `is_low_stock` | INTEGER | NOT NULL DEFAULT 0 | Fast-lookup flag: `1` if `current_stock < 5` base units, else `0`. |
+| `low_stock_threshold` | REAL | NOT NULL DEFAULT 5, CHECK (≥ 0) | *(v1.1, FR-05)* Per-item low stock level in base units; `0` = never low. |
+| `is_low_stock` | INTEGER | NOT NULL DEFAULT 0 | Fast-lookup flag: `1` if `item_type = 'PHYSICAL' AND current_stock < low_stock_threshold`, else `0`. |
 | `is_active` | INTEGER | NOT NULL DEFAULT 1 | Soft-delete status: `1` active, `0` archived. |
 | `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
 
@@ -464,6 +613,7 @@ erDiagram
 *SQLite FTS5 inverted index virtual table for instant typeahead search.*
 * Indexed fields: `name`, `category`, `barcode` (plus one extra row per bundle barcode, pointing at the parent item).
 * Kept in sync by the application's item service after each committed item/bundle change (no SQLite triggers).
+* *(v1.1, FR-14 rev.)* Sibling FTS5 tables with the same sync rule: `PARTY_SEARCH_FTS` (name, phone), `EXPENSE_TYPE_SEARCH_FTS` (name) and `CHARGE_TYPE_SEARCH_FTS` (name). One generic indexer abstraction serves all four.
 
 #### 4. `PARTY`
 *Unified directory for customers and suppliers.*
@@ -489,9 +639,13 @@ erDiagram
 | `party_name` | TEXT | NULLABLE | Party name snapshot at write time (DD-30); bills display this, not the live name. |
 | `payment_mode` | TEXT | NULLABLE | Upfront payment mode (deferred in v1 UI; defaults to cash drawer). |
 | `payment_status` | TEXT | CHECK IN ('PAID', 'PARTIAL', 'UNPAID') | Settlement status. |
-| `total_amount` | REAL | NOT NULL | Sum of all purchase line items in ₹. |
+| `items_subtotal` | REAL | NOT NULL DEFAULT 0.0 | *(v1.1)* Σ purchase line totals in ₹. |
+| `charges_total` | REAL | NOT NULL DEFAULT 0.0 | *(v1.1)* Σ `BILL_CHARGE` amounts with effect `CHARGE`. |
+| `discounts_total` | REAL | NOT NULL DEFAULT 0.0 | *(v1.1)* Σ `BILL_CHARGE` amounts with effect `DISCOUNT`. |
+| `total_amount` | REAL | NOT NULL | Payable: `items_subtotal + charges_total − discounts_total` in ₹ (≥ 0). |
 | `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount paid upfront in ₹. |
 | `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining payable in ₹ (`total_amount - paid_amount`). |
+| `updated_at` | TEXT (ISO) | NULLABLE | *(v1.1, FR-20)* Last edit time; NULL if never edited. |
 | `supplier_invoice_ref` | TEXT | NULLABLE | Supplier's own invoice / DC number. |
 | `notes` | TEXT | NULLABLE | Remarks. |
 | `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
@@ -522,9 +676,13 @@ erDiagram
 | `party_name` | TEXT | NULLABLE | Party name snapshot at write time (DD-30). |
 | `payment_mode` | TEXT | NULLABLE | Upfront payment mode (deferred in v1 UI; defaults to cash drawer). |
 | `payment_status` | TEXT | CHECK IN ('PAID', 'PARTIAL', 'UNPAID') | Paid, Partial, or Due later. |
-| `total_amount` | REAL | NOT NULL | Total bill value in ₹. |
+| `items_subtotal` | REAL | NOT NULL DEFAULT 0.0 | *(v1.1)* Σ sale line totals in ₹ (Gross Sales basis). |
+| `charges_total` | REAL | NOT NULL DEFAULT 0.0 | *(v1.1)* Σ `BILL_CHARGE` amounts with effect `CHARGE`. |
+| `discounts_total` | REAL | NOT NULL DEFAULT 0.0 | *(v1.1)* Σ `BILL_CHARGE` amounts with effect `DISCOUNT`. |
+| `total_amount` | REAL | NOT NULL | Receivable: `items_subtotal + charges_total − discounts_total` in ₹ (≥ 0). |
 | `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount received upfront in ₹. |
 | `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining due in ₹ (`total_amount - paid_amount`). |
+| `updated_at` | TEXT (ISO) | NULLABLE | *(v1.1, FR-20)* Last edit time; NULL if never edited. |
 | `notes` | TEXT | NULLABLE | Customer or delivery notes. |
 | `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
 
@@ -572,7 +730,8 @@ erDiagram
 
 #### 12. `STOCK_ADJUSTMENT`
 *Direct physical stock count corrections (in base units).*
-* Stores `adjustment_date`, `item_id` (via direct search/barcode), `quantity` (+/- base units, non-zero), `unit_cost` (positive adjustments only), `reason` (`DAMAGED`, `EXPIRED`, `COUNT_CORRECTION`, `THEFT_LOST`), `notes`, and `created_at`.
+* Stores `adjustment_date`, `item_id` (via direct search/barcode), `quantity` (+/- base units, non-zero), `unit_cost` (positive adjustments only), `reason` (`DAMAGED`, `EXPIRED`, `COUNT_CORRECTION`, `THEFT_LOST`, `UNRECORDED_STOCK`), `notes`, and `created_at`.
+* *(v1.1)* `UNRECORDED_STOCK` is positive-only and always stores the user-entered `unit_cost` used for its lot (Assumption 20).
 * **Negative:** FIFO depletion against the oldest lots, logged in `STOCK_OUTFLOW_ALLOCATION(source_type = ADJUSTMENT)`; the consumed cost is an inventory loss.
 * **Positive (found stock):** creates an `ADJUSTMENT`-source lot at the item's most recent lot cost; if the item never had a lot, the user-supplied `unit_cost` is required.
 
@@ -583,29 +742,81 @@ erDiagram
 *Single-row shop profile.*
 * Stores `shop_name`, `phone`, `address`, and `tax_id` (optional GSTIN/PAN) to populate future bill headers.
 
+#### 14. `EXPENSE_TYPE` *(v1.1, FR-18)*
+*Master list of expense categories, searchable and created inline.*
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Type identifier. |
+| `name` | TEXT | NOT NULL, UNIQUE COLLATE NOCASE | e.g. "Printer Ink", "Electricity Bill". Trimmed. |
+| `is_active` | INTEGER | NOT NULL DEFAULT 1 | Reserved for archiving (out of scope; always 1). |
+| `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
+
+#### 15. `EXPENSE` *(v1.1, FR-18)*
+*One store running-cost payment. Itself a cash-out event (Assumption 16).*
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Expense identifier. |
+| `expense_code` | TEXT | NOT NULL, UNIQUE | `EXP-` sequence. |
+| `expense_date` | TEXT (ISO) | NOT NULL, INDEXED | Date the cash was paid. |
+| `expense_type_id` | INTEGER | NOT NULL, FK -> `EXPENSE_TYPE(id)` | Classification. |
+| `expense_type_name` | TEXT | NOT NULL | Type name snapshot (DD-30). |
+| `amount` | REAL | NOT NULL, CHECK (> 0) | ₹, rounded to 2 decimals. |
+| `notes` | TEXT | NULLABLE | Remarks (e.g. "March bill", "HP 803 black"). |
+| `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
+| `updated_at` | TEXT (ISO) | NULLABLE | Last edit time. |
+
+#### 16. `CHARGE_TYPE` *(v1.1, FR-19)*
+*Reusable master of bill-level charges and discounts.*
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Type identifier. |
+| `name` | TEXT | NOT NULL, UNIQUE COLLATE NOCASE | e.g. "Transport", "Carrier Fee", "Cash Discount". |
+| `effect` | TEXT | NOT NULL, CHECK IN ('CHARGE','DISCOUNT') | `CHARGE` adds to the bill total; `DISCOUNT` reduces it. |
+| `applies_to` | TEXT | NOT NULL DEFAULT 'BOTH', CHECK IN ('SALE','PURCHASE','BOTH') | Which bill screens offer it. |
+| `default_amount` | REAL | NULLABLE, CHECK (> 0) | Prefilled amount, editable per bill. |
+| `is_active` | INTEGER | NOT NULL DEFAULT 1 | Reserved for archiving (always 1). |
+| `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
+
+#### 17. `BILL_CHARGE` *(v1.1, FR-19)*
+*A charge or discount line on one sale or purchase bill.*
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Line identifier. |
+| `transaction_type` | TEXT | NOT NULL, CHECK IN ('SALE','PURCHASE') | Which header table `transaction_id` refers to. |
+| `transaction_id` | INTEGER | NOT NULL, INDEXED with `transaction_type` | Sale or purchase header id (polymorphic, like `PAYMENT_SETTLEMENT`). Only `source = PURCHASE` purchases may carry charges. |
+| `charge_type_id` | INTEGER | NOT NULL, FK -> `CHARGE_TYPE(id)` | Type used. |
+| `charge_name` | TEXT | NOT NULL | Name snapshot (DD-30). |
+| `effect` | TEXT | NOT NULL, CHECK IN ('CHARGE','DISCOUNT') | Effect snapshot, so editing a type never changes old bills. |
+| `amount` | REAL | NOT NULL, CHECK (> 0) | ₹, rounded to 2 decimals. |
+
 ---
 
 ## 7. Operational Query & Calculation Matrix
 
 | Business Objective | Underlying SQL / Engine Logic |
 | :--- | :--- |
-| **Instant Low Stock List** | `SELECT * FROM ITEM WHERE is_active = 1 AND is_low_stock = 1 ORDER BY current_stock ASC;` |
+| **Instant Low Stock List** | `SELECT * FROM ITEM WHERE is_active = 1 AND is_low_stock = 1 ORDER BY current_stock ASC;` (flag maintained as `item_type = 'PHYSICAL' AND current_stock < low_stock_threshold`) |
 | **Typeahead Auto-Fill (FTS5)** | `SELECT item_id, name, category, barcode, mrp, default_sale_price FROM item_search_fts JOIN ITEM ON item_search_fts.item_id = ITEM.id WHERE ITEM.is_active = 1 AND item_search_fts MATCH ? LIMIT 8;` |
 | **Bundle to Base Unit Conversion** (write time only) | `quantity = pack_quantity * units_per_bundle; unit_price = line_total / quantity;` then snapshot `pack_label`, `pack_quantity` on the line |
 | **Total Stock Valuation** | `SELECT SUM(remaining_quantity * unit_cost) FROM PURCHASE_ITEM WHERE remaining_quantity > 0;` |
 | **Customer Receivables (Dues)** | `SELECT SUM(balance_due) FROM SALE_TRANSACTION WHERE payment_status IN ('UNPAID', 'PARTIAL');` |
 | **Vendor Payables (Dues)** | `SELECT SUM(balance_due) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND payment_status IN ('UNPAID', 'PARTIAL');` |
-| **Period Sales (Gross Revenue)** | `SELECT SUM(total_amount) FROM SALE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
+| **Period Sales (Gross Revenue)** *(rev. v1.1)* | `SELECT SUM(items_subtotal) FROM SALE_TRANSACTION WHERE transaction_date BETWEEN ? AND ?;` |
+| **Period Sales Discounts / Sale Charges** *(v1.1)* | `SUM(discounts_total)` / `SUM(charges_total)` over `SALE_TRANSACTION` by `transaction_date` |
+| **Period Purchase Charges / Discounts** *(v1.1)* | `SUM(charges_total)` / `SUM(discounts_total)` over `PURCHASE_TRANSACTION WHERE source = 'PURCHASE'` by `transaction_date` |
+| **Period Expenses** *(v1.1)* | `SELECT expense_type_name, SUM(amount) FROM EXPENSE WHERE expense_date BETWEEN ? AND ? GROUP BY expense_type_id;` |
+| **Other Income** *(v1.1)* | sale `charges_total` + purchase `discounts_total` in period |
+| **Operating Expenses** *(v1.1)* | Σ `EXPENSE.amount` + purchase `charges_total` in period |
 | **Period Sales Returns** | `SELECT SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'CUSTOMER' AND settlement_type = 'REFUND' AND return_date BETWEEN ? AND ?;` |
 | **Period Purchases (net)** | `SUM(total_amount) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND transaction_date BETWEEN ? AND ?` − `SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'VENDOR' AND return_date BETWEEN ? AND ?` |
 | **Period COGS** | `SELECT SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` **+** `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type = 'REPLACEMENT'` whose return is dated in range |
 | **Period Inventory Losses** | `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type = 'ADJUSTMENT'` dated by adjustment date, + `SUM(ri.cost_amount)` for customer `RETURNED` lines (REFUND or REPLACEMENT returns) with `condition = 'DAMAGED_SCRAP'`, by return date |
-| **Period Profit** | Net Sales (Gross − Returns) − COGS = Gross Profit; Gross Profit − Inventory Losses = Net Profit |
+| **Period Profit** *(rev. v1.1)* | Net Sales = Gross (items subtotal) − Sales Discounts − Returns; Gross Profit = Net Sales − COGS; Net Profit = Gross Profit + Other Income − Inventory Losses − Operating Expenses |
 | **FIFO Depletion Query** | `SELECT id, remaining_quantity, unit_cost FROM PURCHASE_ITEM WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC;` |
 | **Linked Return Reversal** | `SELECT * FROM SALE_STOCK_ALLOCATION WHERE sale_item_id = ? AND quantity_depleted > returned_quantity ORDER BY id DESC;` then per row `UPDATE ... SET returned_quantity = returned_quantity + ?` and, if restockable, `UPDATE PURCHASE_ITEM SET remaining_quantity = remaining_quantity + ? WHERE id = ?;` |
 | **Stock Outflow Depletion** (neg. adjustment, replacement, vendor return) | FIFO depletion loop deducting from oldest `PURCHASE_ITEM.remaining_quantity`, inserting `STOCK_OUTFLOW_ALLOCATION` rows |
 | **Dynamic Bundle Presets & Sizes** | `SELECT bundle_name, units_per_bundle, COUNT(*) as usage_count FROM ITEM_BUNDLE GROUP BY bundle_name, units_per_bundle ORDER BY usage_count DESC;` |
-| **Cash Flow / Drawer (period)** | From `PAYMENT_SETTLEMENT` where `settlement_date BETWEEN ? AND ?`: cash in = Σ(SALE·UPFRONT + SALE·SETTLEMENT + PURCHASE·REFUND_IN); cash out = Σ(PURCHASE·UPFRONT + PURCHASE·SETTLEMENT + SALE·REFUND_OUT); `RETURN_CREDIT` excluded. Live drawer = today's net. |
+| **Cash Flow / Drawer (period)** | From `PAYMENT_SETTLEMENT` where `settlement_date BETWEEN ? AND ?`: cash in = Σ(SALE·UPFRONT + SALE·SETTLEMENT + PURCHASE·REFUND_IN); cash out = Σ(PURCHASE·UPFRONT + PURCHASE·SETTLEMENT + SALE·REFUND_OUT) **+ Σ EXPENSE.amount by `expense_date`** *(v1.1)*; `RETURN_CREDIT` excluded. Live drawer (cash in hand) = today's cash in − today's cash out (i.e. today's sales cash − purchase cash − refunds − expenses). |
 
 ---
 
@@ -668,7 +879,8 @@ interface DashboardMetrics {
   total_stock_valuation: number;      // Sum of (remaining_qty * unit_cost)
   customer_receivables: number;       // Total outstanding customer dues
   vendor_payables: number;            // Total outstanding vendor dues
-  live_cash_in_drawer: number;        // Today's ledger cash in − cash out
+  live_cash_in_drawer: number;        // Today's ledger cash in − cash out − today's expenses (v1.1)
+  today_expenses_amount: number;      // v1.1: Σ EXPENSE.amount for today
 }
 // today_purchase_* count/sum only source = 'PURCHASE'.
 
@@ -692,7 +904,8 @@ interface LowStockItem {
   name: string;
   category: string | null;
   base_unit: string;
-  current_stock: number;              // strictly < 5
+  current_stock: number;              // strictly < low_stock_threshold
+  low_stock_threshold: number;        // v1.1, per item (default 5)
   default_sale_price: number;
   mrp: number | null;
 }
@@ -1012,9 +1225,15 @@ interface PnLReport {
   cogs: number;                       // FIFO COGS net of returned units + replacement units issued
   gross_profit: number;               // net_sales - cogs
   inventory_losses: number;           // write-offs + scrap returns
-  net_profit: number;                 // gross_profit - inventory_losses
-  total_purchases: number;            // PURCHASE-source purchases - vendor returns
+  net_profit: number;                 // gross_profit + other_income - inventory_losses - operating_expenses (v1.1)
+  total_purchases: number;            // PURCHASE-source items subtotals - vendor returns
+  // v1.1 additions (DD-39):
+  sales_discounts: number;            // Σ sale discounts_total (reduces net_sales)
+  other_income: number;               // sale charges_total + purchase discounts_total
+  operating_expenses: number;         // Σ EXPENSE.amount + purchase charges_total
+  expenses_by_type: Array<{ expense_type_name: string; amount: number }>;
 }
+// v1.1: net_sales = gross_sales - sales_discounts - sales_returns; gross_sales = Σ items_subtotal.
 
 // Command: get_stock_valuation_report
 // Input: none
@@ -1037,7 +1256,8 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
   purchase_cash_outflow: number;        // PURCHASE·UPFRONT
   vendor_settlements_outflow: number;   // PURCHASE·SETTLEMENT
   refunds_cash_outflow: number;         // SALE·REFUND_OUT
-  net_cash_balance: number;             // inflows - outflows
+  expenses_cash_outflow: number;        // v1.1: Σ EXPENSE.amount by expense_date
+  net_cash_balance: number;             // inflows - outflows (outflows include expenses)
 }
 
 // Command: backup_database
@@ -1059,7 +1279,68 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // -> { created, updated, skipped, stock_lots_created }
 ```
 
+#### 8. v1.1 Additions (summary — exact payloads live in the LLD)
+
+```typescript
+// --- Expenses (FR-18) — expense_api
+// search_expense_types { query, limit? } -> ExpenseType[]        (FTS prefix)
+// create_expense_type { name } -> ExpenseType                     (inline create; duplicate name -> existing/409)
+// create_expense { payload: { expense_date, expense_type_id, amount, notes } } -> Expense
+// update_expense { expense_id, payload } / delete_expense { expense_id }
+// list_expenses { filter: { start_date?, end_date?, expense_type_id?, search_query?, page, limit } }
+//   -> Paginated<Expense> + period_total
+// get_next_expense_code -> "EXP-1001"
+
+// --- Charges & discounts (FR-19) — charge_api
+// search_charge_types { query, applies_to: "SALE" | "PURCHASE", limit? } -> ChargeType[]
+// create_charge_type { name, effect: "CHARGE" | "DISCOUNT", applies_to, default_amount? } -> ChargeType
+// CreateSalePayload / CreatePurchasePayload gain:
+//   charges: Array<{ charge_type_id: number; amount: number }>   // [] when none
+// Sale/purchase detail + history rows gain items_subtotal, charges_total, discounts_total, charges[]
+
+// --- Bill correction (FR-20) — sale_api / purchase_api / returns_api
+// update_sale { sale_id, payload: CreateSalePayload } -> SaleSummaryResponse
+// delete_sale { sale_id } -> { removed_cash_amount }
+// update_purchase { purchase_id, payload: CreatePurchasePayload } -> purchase summary
+// delete_purchase { purchase_id } -> { removed_cash_amount }
+// delete_return { return_id }
+// get_bill_edit_guard { transaction_type, id } -> { can_edit, can_delete, reasons[] }  (UI pre-check)
+
+// --- Items (FR-05 rev., FR-08 rev., FR-21)
+// CreateItemPayload / UpdateItemPayload gain low_stock_threshold?: number (default 5), item_type?: "PHYSICAL"
+// update_item_low_stock_threshold { item_id, threshold } -> ItemSearchResult   (inline list edit)
+// set_item_stock { item_id, counted_quantity, unit_cost?, adjustment_date, notes }
+//   -> { adjustment_id | null, delta }   (delta > 0 => UNRECORDED_STOCK lot; < 0 => COUNT_CORRECTION)
+// ItemSearchResult gains low_stock_threshold, item_type; get_items_catalog gains search (live, FTS)
+
+// --- Parties (FR-14 rev.)
+// search_parties is served by PARTY_SEARCH_FTS (same contract)
+```
+
 ### 9.4. Atomic Transaction & Concurrency Controls
-* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
-* No operation updates or deletes a committed transaction row except through the cached-value updates defined above (`paid_amount`, `balance_due`, `payment_status`, `remaining_quantity`, `returned_quantity`, `current_stock`, `is_low_stock`).
+* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`, and the v1.1 commands `create/update/delete_expense`, `create_expense_type`, `create_charge_type`, `update/delete_sale`, `update/delete_purchase`, `delete_return`, `update_item_low_stock_threshold`, `set_item_stock`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
+* No operation updates or deletes a committed transaction row except through the cached-value updates defined above (`paid_amount`, `balance_due`, `payment_status`, `remaining_quantity`, `returned_quantity`, `current_stock`, `is_low_stock`) **and the FR-20 correction operations** (`update_*` / `delete_*`), which reverse and repost all dependent rows in the same transaction.
 * This guarantees that FIFO lot allocation and inventory decrement operate in complete isolation, preventing double-depletion or race conditions even under rapid scanning.
+
+---
+
+## 10. v1.1 Delivery Plan (2026-11-22)
+
+Each feature is delivered on its own branch as small, phased commits (docs → schema → repositories/services → IPC → UI → tests), then reviewed and merged to `main` **in the order below**. Each branch is created from `main` after the previous one is merged. Schema migration numbers are pre-assigned so branches never collide; a branch that turns out to need no migration leaves its number unused (the runner only requires ascending order).
+
+| Order | Branch | Feature (user request #) | Requirements | Schema migration | Depends on |
+|---|---|---|---|---|---|
+| 1 | `feat/quick-create-submit` | Visible Save/Cancel on quick-create forms (#6) | FR-22 | — | — |
+| 2 | `feat/sticky-table-headers` | Fixed table headers in the shared table (#7) | FR-10 rev. | — | — |
+| 3 | `feat/item-type` | `item_type` entity field (#8) | FR-21 | **v3** `item_type` | — |
+| 4 | `feat/live-search-low-stock` | Live FTS search everywhere + per-item low stock level; Barcode column → Low Stock Level (#2) | FR-05 rev., FR-14 rev. | **v4** `low_stock_threshold`, `party_search_fts` | 3 |
+| 5 | `feat/unrecorded-stock` | Set/add stock on hand without a purchase (#4) | FR-08 rev. | **v5** `stock_adjustments.reason` + `UNRECORDED_STOCK` (table rebuild) | 4 |
+| 6 | `feat/expenses` | Store expenses, cash in hand, P&L (#1) | FR-18, FR-09 rev. | **v6** `expense_types`, `expenses`, `expense_type_search_fts` | 4 |
+| 7 | `feat/bill-charges` | Bill charges & discounts (#3) | FR-19, FR-09 rev. | **v7** `charge_types`, `bill_charges`, header subtotal/charges/discounts columns (backfill `items_subtotal = total_amount`), `charge_type_search_fts` | 4, 6 |
+| 8 | `feat/bill-edit-delete` | Edit/delete sales & purchases, delete returns (#5) | FR-20, NFR-03 rev. | **v8** `updated_at` on headers | 7 |
+
+Rules for every branch:
+* The first commit(s) update the LLD (`book_keeper_LLD.md`), UI LLD and UI/UX spec for that feature, consistent with this HLD. If the LLD work finds that this HLD is wrong or incomplete, the HLD is amended in the same branch and the change is called out in the review.
+* Each migration ships with a frozen-fixture upgrade test (DD-29).
+* The integrator gate (`bash run_e2e_tests.sh`: cargo test, clippy, tsc, vitest, vite build) passes before merge.
+* The mock client stays a thin fixture client (DD-27): new IPC methods get typed stub data, no business rules.

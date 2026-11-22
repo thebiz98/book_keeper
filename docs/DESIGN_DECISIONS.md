@@ -236,3 +236,34 @@ Bill views read the snapshot. Directory and catalog screens read the live record
 - `MaintenanceRepository` does the bulk deletes child tables first, inside one transaction, so a failure leaves the data untouched.
 - The stock cache is repaired from the restored OPENING lots, so on-hand quantities match the opening stock again.
 - The FTS search index is rebuilt after the commit (the indexer uses its own connection, see CHECKPOINT conventions).
+
+## v1.1 feature set (2026-11-22)
+
+Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – FR-22, NFR-03 rev., §10 delivery plan). The decisions below record the choices made between alternatives.
+
+**DD-35 — Expenses are their own entity with a searchable type master (FR-18).** `EXPENSE_TYPE` (unique name, FTS-indexed, created inline from the type field) and `EXPENSE` (date, type, amount, notes, type-name snapshot, `EXP-` code). Expenses are always cash, paid on their date; credit expenses are out of scope.
+
+**DD-36 — Every search field is live and index-backed (FR-14 rev.).** Debounced search as you type, no Search button. FTS5 per master entity (items, parties, expense types, charge types) with the DD-24 sync rule; paginated history lists may use indexed `LIKE`. One shared frontend hook/component.
+
+**DD-37 — Expenses join cash flow outside the ledger (amends DD-01).** DD-01 still governs every *bill* money event. An `EXPENSE` row is itself a cash-out event and writes no `PAYMENT_SETTLEMENT` row. Cash out = ledger cash out + Σ expenses by date; the live cash drawer is today's cash in − today's cash out.
+
+**DD-38 — Bill charges and discounts are bill-level lines from a reusable type master (FR-19).** `CHARGE_TYPE` (name, `effect` ∈ `CHARGE | DISCOUNT`, `applies_to` ∈ `SALE | PURCHASE | BOTH`, optional default amount) and `BILL_CHARGE` (polymorphic `transaction_type` + `transaction_id`, name and effect snapshots, amount > 0). Headers cache `items_subtotal`, `charges_total`, `discounts_total`; `total_amount = subtotal + charges − discounts ≥ 0`. Fixed amounts only.
+- **Chosen (user, 2026-11-22):** purchase charges are **Operating Expenses** and purchase discounts are **Other Income**; lot costs are not changed. *Rejected:* landed-cost allocation into lot `unit_cost`.
+
+**DD-39 — P&L v1.1 (amends DD-13).** Gross Sales = Σ sale `items_subtotal`. Net Sales = Gross − Sales Discounts − Sales Returns. Gross Profit = Net Sales − COGS. Net Profit = Gross Profit + Other Income (sale charges + purchase discounts) − Inventory Losses − Operating Expenses (expenses + purchase charges). Purchases report = Σ purchase `items_subtotal` − vendor returns. Linked-return refund cap on a discounted sale = line rate × (1 − discounts_total / items_subtotal).
+- **Chosen (user, 2026-11-22):** expenses reduce Net Profit, not just cash.
+
+**DD-40 — Unrecorded stock entry (FR-08 rev.).** New adjustment reason `UNRECORDED_STOCK` (positive only) creates an `ADJUSTMENT`-source lot at a user-entered cost (prefilled from the latest lot; amends DD-08 for this reason only). "Set stock on hand" computes the delta: positive → `UNRECORDED_STOCK`, negative → `COUNT_CORRECTION`. Never a purchase, never income.
+
+**DD-41 — Bills are correctable (FR-20; supersedes v1 NFR-03 immutability).** Sales and purchases can be edited (reverse-then-repost in one transaction, same id/code) or deleted; returns can be deleted; expenses edited/deleted. No revision history in v1.1 (`updated_at` only).
+- **Chosen (user, 2026-11-22):** *guard, and allow return delete.* A bill with linked returns is locked until the returns are deleted. A purchase lot cannot shrink below its consumed quantity, and a consumed line cannot change item or be removed; a cost change re-costs dependent allocations. A bill's new total cannot fall below its later settlements + return credits. *Rejected:* cascading re-allocation; immutable returns.
+
+**DD-42 — Item type (FR-21).** `ITEM.item_type` ∈ `PHYSICAL | SERVICE`, default `PHYSICAL`. Entity only in v1.1; services reject `SERVICE` until service billing is designed.
+
+**DD-43 — Sticky table headers (FR-10 rev.).** Implemented once in the shared `Table`/`DataTable` primitives (scroll container + `position: sticky` header), so every list gets it.
+
+**DD-44 — Visible Save/Cancel on quick-create forms (FR-22).** Enter/Escape remain, but every quick-create form also shows buttons.
+
+**DD-45 — Per-item low stock level (FR-05 rev.; amends HLD Assumption 6).** `ITEM.low_stock_threshold` (default 5, ≥ 0, 0 = never low); `is_low_stock = PHYSICAL AND current_stock < threshold`. Editable inline in the Item List (replaces the Barcode column) and in the item drawer. `constants::LOW_STOCK_THRESHOLD` becomes only the default for new items.
+
+**DD-46 — Delivery order and migration numbers.** See HLD §10. Branches merge to `main` in that order; migrations v3 – v8 are pre-assigned per branch.
