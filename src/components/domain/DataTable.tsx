@@ -1,59 +1,94 @@
-import React, { useState, useMemo } from 'react';
-import { Search, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../ui/Table';
+import { Pager } from './Pager';
 
-export interface DataTableColumn<T = any> {
+export interface DataTableColumn<T> {
   key: string;
   header: string;
   align?: 'left' | 'center' | 'right';
   mono?: boolean;
   width?: string;
-  render?: (row: T, index: number) => React.ReactNode;
+  render: (row: T, index: number) => React.ReactNode;
 }
 
-export interface DataTableProps<T = any> {
+export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
-  data: T[];
-  keyField?: string;
+  /** Current page rows (server-side paging). */
+  items: T[];
+  rowKey: (row: T) => string | number;
   isLoading?: boolean;
-  searchPlaceholder?: string;
-  onRowClick?: (row: T) => void;
-  className?: string;
-  dense?: boolean;
+  /** Already-formatted error text (use errorMessage(e)). Shown instead of the empty state. */
+  error?: string | null;
+  onRetry?: () => void;
   emptyMessage?: string;
+  onRowClick?: (row: T) => void;
+  /** Optional expandable detail row. */
+  isExpanded?: (row: T) => boolean;
+  renderExpanded?: (row: T) => React.ReactNode;
+  dense?: boolean;
+  className?: string;
+  // Server-side paging
+  total?: number;
   page?: number;
-  totalPages?: number;
+  limit?: number;
   onPageChange?: (page: number) => void;
 }
 
-export function DataTable<T extends Record<string, any> = any>({
+/**
+ * Presentational table with loading / error / empty states, keyboard row navigation
+ * (ArrowUp/Down, Home/End, Enter) and an optional server-side Pager.
+ */
+export function DataTable<T>({
   columns,
-  data = [],
-  keyField = 'id',
+  items,
+  rowKey,
   isLoading = false,
-  searchPlaceholder = 'Search table...',
-  onRowClick,
-  className,
-  dense = false,
+  error = null,
+  onRetry,
   emptyMessage = 'No records found',
+  onRowClick,
+  isExpanded,
+  renderExpanded,
+  dense = true,
+  className,
+  total,
   page = 1,
-  totalPages = 1,
+  limit = 50,
   onPageChange,
 }: DataTableProps<T>) {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [active, setActive] = useState(0);
 
-  const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
-    const q = searchQuery.toLowerCase();
-    return data.filter((row) =>
-      columns.some((col) => {
-        const val = row[col.key];
-        if (val === null || val === undefined) return false;
-        return String(val).toLowerCase().includes(q);
-      })
-    );
-  }, [data, columns, searchQuery]);
+  useEffect(() => {
+    setActive(0);
+  }, [items]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.target instanceof HTMLElement && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(e.target.tagName)) {
+      return;
+    }
+    if (items.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive((a) => Math.min(items.length - 1, a + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((a) => Math.max(0, a - 1));
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setActive(items.length - 1);
+    } else if (e.key === 'Enter' && onRowClick) {
+      e.preventDefault();
+      onRowClick(items[Math.min(active, items.length - 1)]);
+    }
+  };
+
+  const colSpan = columns.length;
+  const showRows = !isLoading && !error && items.length > 0;
 
   return (
     <div
@@ -62,34 +97,20 @@ export function DataTable<T extends Record<string, any> = any>({
         className
       )}
     >
-      {/* Top Search Toolbar */}
-      {searchPlaceholder && (
-        <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
-          <div className="relative flex items-center w-64">
-            <Search className="h-3.5 w-3.5 absolute left-2.5 text-slate-400" />
-            <input
-              type="text"
-              placeholder={searchPlaceholder}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full text-xs pl-8 pr-2.5 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-          <span className="text-xs text-slate-400 font-mono">
-            {filteredData.length} records
-          </span>
-        </div>
-      )}
-
-      {/* Table Body */}
-      <div className="overflow-x-auto flex-1">
+      <div
+        className="overflow-x-auto flex-1 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+        tabIndex={0}
+        role="grid"
+        aria-rowcount={items.length}
+        onKeyDown={onKeyDown}
+      >
         <Table dense={dense}>
           <TableHeader>
             <TableRow>
               {columns.map((col) => (
                 <TableHead
                   key={col.key}
-                  align={col.align || 'left'}
+                  align={col.align ?? 'left'}
                   style={col.width ? { width: col.width } : undefined}
                 >
                   {col.header}
@@ -98,78 +119,73 @@ export function DataTable<T extends Record<string, any> = any>({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? (
+            {isLoading && (
               <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="py-12 text-center text-slate-400 text-xs"
-                >
+                <TableCell colSpan={colSpan} className="py-10 text-center text-slate-400 text-xs">
                   <div className="flex items-center justify-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                    <span>Loading data...</span>
+                    <span>Loading...</span>
                   </div>
                 </TableCell>
               </TableRow>
-            ) : filteredData.length === 0 ? (
+            )}
+            {!isLoading && error && (
               <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="py-10 text-center text-slate-400 text-xs"
-                >
+                <TableCell colSpan={colSpan} className="py-10 text-center text-xs">
+                  <div role="alert" className="flex flex-col items-center gap-2 text-rose-600 dark:text-rose-400">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <AlertCircle className="h-4 w-4" />
+                      {error}
+                    </span>
+                    {onRetry && (
+                      <button type="button" onClick={onRetry} className="underline cursor-pointer">
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            )}
+            {!isLoading && !error && items.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={colSpan} className="py-10 text-center text-slate-400 text-xs">
                   {emptyMessage}
                 </TableCell>
               </TableRow>
-            ) : (
-              filteredData.map((row, rIdx) => {
-                const rowKey = row[keyField] ?? rIdx;
-                return (
+            )}
+            {showRows &&
+              items.map((row, rIdx) => (
+                <React.Fragment key={rowKey(row)}>
                   <TableRow
-                    key={String(rowKey)}
-                    onClick={() => onRowClick?.(row)}
-                    className={cn(onRowClick && 'cursor-pointer hover:bg-blue-50/40 dark:hover:bg-blue-950/20')}
+                    role="row"
+                    aria-selected={rIdx === active}
+                    selected={rIdx === active}
+                    onClick={() => {
+                      setActive(rIdx);
+                      onRowClick?.(row);
+                    }}
+                    className={cn(onRowClick && 'cursor-pointer')}
                   >
                     {columns.map((col) => (
-                      <TableCell
-                        key={col.key}
-                        align={col.align || 'left'}
-                        mono={col.mono}
-                      >
-                        {col.render ? col.render(row, rIdx) : String(row[col.key] ?? '')}
+                      <TableCell key={col.key} align={col.align ?? 'left'} mono={col.mono}>
+                        {col.render(row, rIdx)}
                       </TableCell>
                     ))}
                   </TableRow>
-                );
-              })
-            )}
+                  {isExpanded?.(row) && renderExpanded && (
+                    <TableRow>
+                      <TableCell colSpan={colSpan} className="bg-slate-50/60 dark:bg-slate-800/30 p-3">
+                        {renderExpanded(row)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </React.Fragment>
+              ))}
           </TableBody>
         </Table>
       </div>
-
-      {/* Pagination Footer */}
-      {totalPages > 1 && (
-        <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/40 flex items-center justify-between text-xs">
-          <span className="text-slate-500 dark:text-slate-400 font-mono">
-            Page {page} of {totalPages}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={() => onPageChange?.(page - 1)}
-              className="p-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              disabled={page >= totalPages}
-              onClick={() => onPageChange?.(page + 1)}
-              className="p-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
+      {total !== undefined && onPageChange && (
+        <Pager page={page} total={total} limit={limit} onPageChange={onPageChange} />
       )}
     </div>
   );

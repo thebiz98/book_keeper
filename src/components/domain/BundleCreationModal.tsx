@@ -1,19 +1,43 @@
-import React, { useState, useEffect } from 'react';
-import { Package, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Package } from 'lucide-react';
 import { api } from '@/api';
+import { errorMessage } from '@/api/errors';
 import type { BundleSuggestion, ItemBundle } from '@/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { TextInput } from '../ui/TextInput';
-import { NumericInput } from '../ui/NumericInput';
+import { parseOptional, validationField } from './formUtils';
 
 export interface BundleCreationModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Receives the full persisted ItemBundle (create or update). */
   onBundleCreated?: (bundle: ItemBundle) => void;
   initialItemId?: number;
   baseUnit?: string;
+  /** When set the modal edits this bundle (updateBundle) instead of creating one. */
+  bundle?: ItemBundle | null;
+  /**
+   * False when `bundle.mrp` is not known to the caller (catalog rows omit bundle MRP):
+   * the modal warns that saving with an empty MRP clears it.
+   */
+  mrpKnown?: boolean;
 }
+
+type FieldErrors = Partial<
+  Record<'bundleName' | 'unitsPerBundle' | 'mrp' | 'defaultBundlePrice' | 'barcode', string>
+>;
+
+const FIELD_MAP: Record<string, keyof FieldErrors> = {
+  bundle_name: 'bundleName',
+  bundleName: 'bundleName',
+  units_per_bundle: 'unitsPerBundle',
+  unitsPerBundle: 'unitsPerBundle',
+  mrp: 'mrp',
+  default_bundle_price: 'defaultBundlePrice',
+  defaultBundlePrice: 'defaultBundlePrice',
+  barcode: 'barcode',
+};
 
 export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
   isOpen,
@@ -21,78 +45,138 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
   onBundleCreated,
   initialItemId,
   baseUnit = 'PCS',
+  bundle = null,
+  mrpKnown = true,
 }) => {
   const [bundleName, setBundleName] = useState('');
-  const [multiplier, setMultiplier] = useState<number>(10);
-  const [salePrice, setSalePrice] = useState<number>(0);
-  const [mrp, setMrp] = useState<number>(0);
+  const [multiplier, setMultiplier] = useState('10');
+  const [salePrice, setSalePrice] = useState('');
+  const [mrp, setMrp] = useState('');
   const [barcode, setBarcode] = useState('');
   const [suggestions, setSuggestions] = useState<BundleSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [highlight, setHighlight] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const submitting = useRef(false);
+  const priceRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      setBundleName('');
-      setMultiplier(10);
-      setSalePrice(0);
-      setMrp(0);
-      setBarcode('');
-      setError(null);
+    if (!isOpen) return;
+    setBundleName(bundle?.bundleName ?? '');
+    setMultiplier(bundle ? String(bundle.unitsPerBundle) : '10');
+    setSalePrice(bundle?.defaultBundlePrice != null ? String(bundle.defaultBundlePrice) : '');
+    setMrp(bundle?.mrp != null ? String(bundle.mrp) : '');
+    setBarcode(bundle?.barcode ?? '');
+    setError(null);
+    setFieldErrors({});
+    setShowSuggestions(false);
+    submitting.current = false;
 
-      // Fetch dynamic suggestions
-      api
-        .getBundleSuggestions()
-        .then((sugs) => {
-          setSuggestions(sugs.slice(0, 4));
-        })
-        .catch(() => {});
-    }
-  }, [isOpen]);
+    api
+      .getBundleSuggestions()
+      .then((sugs) => setSuggestions(Array.isArray(sugs) ? sugs : []))
+      .catch(() => {});
+  }, [isOpen, bundle]);
 
-  const handleApplySuggestion = (sug: BundleSuggestion) => {
+  const filtered = useMemo(() => {
+    const q = bundleName.trim().toLowerCase();
+    return suggestions
+      .filter((s) => !q || s.bundleName.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [suggestions, bundleName]);
+
+  const applySuggestion = (sug: BundleSuggestion) => {
     setBundleName(sug.bundleName);
-    setMultiplier(sug.unitsPerBundle);
+    setMultiplier(String(sug.unitsPerBundle));
+    setShowSuggestions(false);
+    setFieldErrors((f) => ({ ...f, bundleName: undefined, unitsPerBundle: undefined }));
+    setTimeout(() => priceRef.current?.focus(), 0);
   };
 
   const handleSave = async () => {
-    if (!bundleName.trim()) {
-      setError('Bundle name is required');
-      return;
+    if (submitting.current) return;
+    const errs: FieldErrors = {};
+    const mult = Number(multiplier);
+    const price = parseOptional(salePrice);
+    const mrpVal = parseOptional(mrp);
+
+    if (!bundleName.trim()) errs.bundleName = 'Bundle name is required';
+    if (!Number.isFinite(mult) || mult <= 1) errs.unitsPerBundle = 'Multiplier must be greater than 1';
+    if (price !== null && (!Number.isFinite(price) || price <= 0)) {
+      errs.defaultBundlePrice = 'Price must be greater than 0 (or leave empty)';
     }
-    if (multiplier <= 0) {
-      setError('Multiplier must be greater than 0');
+    if (mrpVal !== null && (!Number.isFinite(mrpVal) || mrpVal <= 0)) {
+      errs.mrp = 'MRP must be greater than 0 (or leave empty)';
+    }
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) {
+      setError(null);
       return;
     }
 
+    submitting.current = true;
     setIsLoading(true);
     setError(null);
 
-    const payload = {
-      itemId: initialItemId ?? null,
+    const body = {
       bundleName: bundleName.trim(),
-      unitsPerBundle: multiplier,
-      defaultBundlePrice: salePrice > 0 ? salePrice : null,
-      mrp: mrp > 0 ? mrp : null,
+      unitsPerBundle: mult,
+      defaultBundlePrice: price,
+      mrp: mrpVal,
       barcode: barcode.trim() || null,
     };
 
     try {
-      const res = await api.createBundle(payload);
+      const res = bundle
+        ? await api.updateBundle(bundle.id, body)
+        : await api.createBundle({ itemId: initialItemId ?? null, ...body });
       onBundleCreated?.(res);
       onClose();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to create bundle');
+    } catch (err) {
+      const field = validationField(err);
+      const key = field ? FIELD_MAP[field] : undefined;
+      if (key) setFieldErrors({ [key]: errorMessage(err) });
+      else setError(errorMessage(err) || 'Failed to save bundle');
     } finally {
+      submitting.current = false;
       setIsLoading(false);
     }
   };
+
+  const onBodyKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      void handleSave();
+    }
+  };
+
+  const onNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showSuggestions || filtered.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight((h) => (h + 1) % filtered.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight((h) => (h <= 0 ? filtered.length - 1 : h - 1));
+    } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      applySuggestion(filtered[Math.min(highlight, filtered.length - 1)]);
+    } else if (e.key === 'Escape') {
+      e.stopPropagation();
+      setShowSuggestions(false);
+    }
+  };
+
+  const isEdit = !!bundle;
+  const multNum = Number(multiplier);
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Create Packaging Bundle"
+      title={isEdit ? 'Edit Packaging Bundle' : 'Create Packaging Bundle'}
       description={`Define a packaged selling unit (e.g. Box of 10 ${baseUnit})`}
       size="md"
       footer={
@@ -103,85 +187,132 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
           <Button
             variant="primary"
             size="sm"
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             isLoading={isLoading}
             hotkey="Ctrl+Enter"
           >
-            Create Bundle
+            {isEdit ? 'Save Bundle' : 'Create Bundle'}
           </Button>
         </>
       }
     >
-      <div className="flex flex-col gap-4 py-1">
-        {/* Dynamic Self-Learning Suggestions */}
-        {suggestions.length > 0 && (
-          <div className="flex flex-col gap-1.5 p-2.5 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>Suggested Packaging Tiers</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {suggestions.map((sug, idx) => {
-                const name = sug.bundleName;
-                const mult = sug.unitsPerBundle;
-                return (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleApplySuggestion(sug)}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors cursor-pointer"
+      <div className="flex flex-col gap-4 py-1" onKeyDown={onBodyKeyDown}>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="relative">
+            <TextInput
+              label="Bundle Name *"
+              placeholder="e.g. Box, Dozen, Pack"
+              value={bundleName}
+              onChange={(e) => {
+                setBundleName(e.target.value);
+                setShowSuggestions(true);
+                setHighlight(0);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 120)}
+              onKeyDown={onNameKeyDown}
+              error={fieldErrors.bundleName}
+              autoFocus
+              autoComplete="off"
+              role="combobox"
+              aria-expanded={showSuggestions && filtered.length > 0}
+              aria-autocomplete="list"
+            />
+            {showSuggestions && filtered.length > 0 && (
+              <ul
+                role="listbox"
+                aria-label="Bundle suggestions"
+                className="absolute z-50 mt-0.5 w-full max-h-48 overflow-auto rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg py-1"
+              >
+                {filtered.map((s, idx) => (
+                  <li
+                    key={`${s.bundleName}-${s.unitsPerBundle}`}
+                    role="option"
+                    aria-selected={idx === highlight}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      applySuggestion(s);
+                    }}
+                    onMouseEnter={() => setHighlight(idx)}
+                    className={`flex items-center gap-1.5 px-3 py-1 text-xs cursor-pointer ${
+                      idx === highlight ? 'bg-blue-50 dark:bg-blue-950/40' : ''
+                    }`}
                   >
-                    <Package className="h-3 w-3" />
-                    <span>
-                      {name} ({mult} {baseUnit})
+                    <Package className="h-3 w-3 text-slate-400" />
+                    <span className="font-medium">{s.bundleName}</span>
+                    <span className="text-slate-400">
+                      ({s.unitsPerBundle} {baseUnit})
                     </span>
-                  </button>
-                );
-              })}
-            </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        )}
+
+          <div>
+            <TextInput
+              label={`Multiplier (${baseUnit} per Bundle) *`}
+              type="number"
+              min={2}
+              step="any"
+              value={multiplier}
+              onChange={(e) => setMultiplier(e.target.value)}
+              error={fieldErrors.unitsPerBundle}
+              autoSelectOnFocus
+              className="text-right font-mono"
+            />
+          </div>
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
+          <div>
+            <TextInput
+              ref={priceRef}
+              label="Bundle Sale Price (₹)"
+              type="number"
+              min={0}
+              step="any"
+              placeholder="optional"
+              value={salePrice}
+              onChange={(e) => setSalePrice(e.target.value)}
+              error={fieldErrors.defaultBundlePrice}
+              autoSelectOnFocus
+              className="text-right font-mono"
+            />
+          </div>
+
+          <div>
+            <TextInput
+              label="Bundle MRP (₹)"
+              title={isEdit && !mrpKnown ? 'Current MRP is not loaded: leaving this empty clears it' : undefined}
+              type="number"
+              min={0}
+              step="any"
+              placeholder={isEdit && !mrpKnown ? 'not loaded: re-enter or it is cleared' : 'optional'}
+              value={mrp}
+              onChange={(e) => setMrp(e.target.value)}
+              error={fieldErrors.mrp}
+              autoSelectOnFocus
+              className="text-right font-mono"
+            />
+          </div>
+        </div>
+
+        <div>
           <TextInput
-            label="Bundle Name *"
-            placeholder="e.g. Box, Dozen, Pack"
-            value={bundleName}
-            onChange={(e) => setBundleName(e.target.value)}
-            autoFocus
-          />
-
-          <NumericInput
-            label={`Multiplier (${baseUnit} per Bundle) *`}
-            value={multiplier}
-            onChange={setMultiplier}
-            min={1}
-            allowDecimals={false}
+            label="Outer Package Barcode"
+            placeholder="Scan outer package barcode (optional)"
+            value={barcode}
+            onChange={(e) => setBarcode(e.target.value)}
+            error={fieldErrors.barcode}
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <NumericInput
-            label="Bundle Sale Price (₹)"
-            value={salePrice}
-            onChange={setSalePrice}
-            min={0}
-          />
-
-          <NumericInput
-            label="Bundle MRP (₹)"
-            value={mrp}
-            onChange={setMrp}
-            min={0}
-          />
-        </div>
-
-        <TextInput
-          label="Outer Package Barcode"
-          placeholder="Scan outer package barcode (optional)"
-          value={barcode}
-          onChange={(e) => setBarcode(e.target.value)}
-        />
+        {Number.isFinite(multNum) && multNum > 1 && bundleName.trim() && (
+          <p className="text-[11px] text-slate-500 font-mono">
+            1 {bundleName.trim()} = {multNum} {baseUnit}
+          </p>
+        )}
 
         {error && (
           <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
