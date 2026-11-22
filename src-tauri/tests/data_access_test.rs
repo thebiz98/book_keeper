@@ -389,3 +389,25 @@ fn adjustment_and_opening_creators_use_their_own_sequences() {
     assert_eq!((page.items.len(), page.total), (2, 3));
     assert_eq!(page.items[0].quantity, 3.0, "newest first");
 }
+
+#[test]
+fn backup_directory_roundtrips_and_survives_shop_setting_upsert() {
+    let db = TestDb::new();
+    {
+        let mut tx = db.begin_transaction().unwrap();
+        assert_eq!(tx.settings().get_backup_directory().unwrap(), None);
+        tx.settings().set_backup_directory(Some("D:/my backups")).unwrap();
+        let mut s = tx.settings().get_shop_setting().unwrap();
+        s.shop_name = "Renamed".into();
+        tx.settings().upsert_shop_setting(&s).unwrap();
+        tx.commit().unwrap();
+    }
+    let mut rd = db.begin_read().unwrap();
+    assert_eq!(rd.settings().get_backup_directory().unwrap().as_deref(), Some("D:/my backups"));
+    assert_eq!(rd.settings().get_shop_setting().unwrap().shop_name, "Renamed");
+    drop(rd);
+    let mut tx = db.begin_transaction().unwrap();
+    tx.settings().set_backup_directory(None).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(db.begin_read().unwrap().settings().get_backup_directory().unwrap(), None);
+}

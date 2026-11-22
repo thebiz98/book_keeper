@@ -28,6 +28,7 @@ import type {
   SaleHistoryRow,
   SettlementType,
   ShopSettings,
+  AppConfigView,
   StockAdjustment,
   StockCondition,
   StockValuationReport,
@@ -350,6 +351,9 @@ export interface ApiClient {
   getShopSettings(): Promise<ShopSettings>;
   updateShopSettings(settings: ShopSettings): Promise<void>;
   backupDatabase(destinationPath: string): Promise<string>;
+  getAppConfig(): Promise<AppConfigView>;
+  /** `null` resets to the default backup folder. */
+  setBackupDirectory(path: string | null): Promise<AppConfigView>;
   verifyDatabaseIntegrity(): Promise<boolean>;
 
   // Items import

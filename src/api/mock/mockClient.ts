@@ -24,6 +24,7 @@ import type {
   SaleDetailView,
   SaleHistoryRow,
   ShopSettings,
+  AppConfigView,
   StockAdjustment,
 } from '@/types';
 import type { AppError } from '../errors';
@@ -40,6 +41,7 @@ import {
 
 export type { MockItem, MockParty, MockBundle };
 
+const MOCK_DEFAULT_BACKUP_DIR = 'C:/mock/backups';
 const nowIso = () => new Date().toISOString();
 const localDate = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -632,6 +634,22 @@ export class MockApiClient implements ApiClient {
   }
   async backupDatabase(destinationPath: string) {
     return `${destinationPath}/book_keeper_backup.db`;
+  }
+  private backupDir: string | null = null;
+  private mockConfigView(): AppConfigView {
+    return {
+      testingMode: true,
+      backupDirectory: this.backupDir ?? MOCK_DEFAULT_BACKUP_DIR,
+      isDefaultDirectory: this.backupDir === null,
+      lastAutoBackupAt: null,
+    };
+  }
+  async getAppConfig() {
+    return this.mockConfigView();
+  }
+  async setBackupDirectory(path: string | null) {
+    this.backupDir = path && path.trim() ? path.trim() : null;
+    return this.mockConfigView();
   }
   async verifyDatabaseIntegrity() {
     return true;

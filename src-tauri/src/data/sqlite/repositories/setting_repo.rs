@@ -46,4 +46,18 @@ impl SettingRepository for SqliteSettingRepository {
         )?;
         Ok(())
     }
+
+    fn get_backup_directory(&self) -> Result<Option<String>, AppError> {
+        Ok(self
+            .conn
+            .query_row("SELECT backup_directory FROM shop_settings WHERE id = 1", [], |r| r.get(0))
+            .optional()?
+            .flatten())
+    }
+
+    fn set_backup_directory(&mut self, dir: Option<&str>) -> Result<(), AppError> {
+        self.conn
+            .execute("UPDATE shop_settings SET backup_directory = ?1 WHERE id = 1", params![dir])?;
+        Ok(())
+    }
 }

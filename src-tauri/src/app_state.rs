@@ -183,6 +183,13 @@ fn build_sqlite_app_state_full(
 
     ensure_search_index(&*uow, &*search_indexer)?;
 
+    // A previously chosen backup folder overrides the default.
+    let saved_dir = uow.begin_read()?.settings().get_backup_directory()?;
+    let initial_backup_dir = match saved_dir {
+        Some(d) if !d.trim().is_empty() => std::path::PathBuf::from(d),
+        _ => default_backup_dir.clone(),
+    };
+
     Ok(AppState {
         unit_of_work: uow,
         search_indexer,
@@ -201,7 +208,7 @@ fn build_sqlite_app_state_full(
         shop_setting_service,
         config,
         db_path: db_path.to_path_buf(),
-        backup_dir: std::sync::RwLock::new(default_backup_dir.clone()),
+        backup_dir: std::sync::RwLock::new(initial_backup_dir),
         default_backup_dir,
     })
 }

@@ -137,6 +137,9 @@ export class TauriClient implements ApiClient {
     invokeCmd('update_shop_settings', { settings });
   backupDatabase: ApiClient['backupDatabase'] = (destinationPath) =>
     invokeCmd('backup_database', { destinationPath });
+  getAppConfig: ApiClient['getAppConfig'] = () => invokeCmd('get_app_config');
+  setBackupDirectory: ApiClient['setBackupDirectory'] = (path) =>
+    invokeCmd('set_backup_directory', { path });
   verifyDatabaseIntegrity: ApiClient['verifyDatabaseIntegrity'] = () =>
     invokeCmd('verify_database_integrity');
 

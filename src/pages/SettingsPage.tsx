@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Save, DatabaseBackup, ShieldCheck } from 'lucide-react';
 import { api, errorMessage } from '@/api';
+import { pickFolder } from '@/api/pickFolder';
+import type { AppConfigView } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { useThemeStore } from '@/store/useThemeStore';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
@@ -38,27 +40,22 @@ export const SettingsPage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [profileNotice, setProfileNotice] = useState<Notice>(null);
 
-  const [backupPath, setBackupPath] = useState('');
+  const [config, setConfig] = useState<AppConfigView | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [dbNotice, setDbNotice] = useState<Notice>(null);
   const [integrityOk, setIntegrityOk] = useState<boolean | null>(null);
   const [lastBackup, setLastBackup] = useState<{ path: string; at: Date } | null>(null);
-  const backupInput = useRef<HTMLInputElement>(null);
 
-  // TODO(F6-integrate): the shell adds an app-store `requestBackup` flag for Ctrl+B. Typed loosely
-  // until it lands. We cannot pick a folder natively, so we run the backup when a folder is set,
-  // otherwise focus the folder field.
+  // The shell sets the app-store `requestBackup` flag for Ctrl+B; it runs a backup into the current folder.
   const requestBackup = useAppStore((s) => (s as unknown as { requestBackup?: boolean }).requestBackup);
   const handleBackupRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('bk.backupDir');
-      if (saved) setBackupPath(saved);
-    } catch {
-      /* storage unavailable */
-    }
+    api
+      .getAppConfig()
+      .then(setConfig)
+      .catch((err) => setDbNotice({ kind: 'error', text: `Failed to load backup settings: ${errorMessage(err)}` }));
   }, []);
 
   useEffect(() => {
@@ -105,26 +102,35 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handleBackup = async () => {
-    if (!backupPath.trim()) {
-      setDbNotice({ kind: 'error', text: 'Enter a destination folder for the backup' });
-      backupInput.current?.focus();
-      return;
-    }
+    if (!config) return;
     setIsBackingUp(true);
     setDbNotice(null);
     try {
-      const written = await api.backupDatabase(backupPath.trim());
+      const written = await api.backupDatabase(config.backupDirectory);
       setDbNotice({ kind: 'success', text: `Backup written to ${written}` });
       setLastBackup({ path: written, at: new Date() });
-      try {
-        localStorage.setItem('bk.backupDir', backupPath.trim());
-      } catch {
-        /* storage unavailable */
-      }
     } catch (err) {
       setDbNotice({ kind: 'error', text: errorMessage(err) });
     } finally {
       setIsBackingUp(false);
+    }
+  };
+
+  const applyDirectory = async (path: string | null) => {
+    setDbNotice(null);
+    try {
+      setConfig(await api.setBackupDirectory(path));
+    } catch (err) {
+      setDbNotice({ kind: 'error', text: errorMessage(err) });
+    }
+  };
+
+  const handleChoose = async () => {
+    try {
+      const picked = await pickFolder();
+      if (picked) await applyDirectory(picked);
+    } catch (err) {
+      setDbNotice({ kind: 'error', text: errorMessage(err) });
     }
   };
 
@@ -200,13 +206,29 @@ export const SettingsPage: React.FC = () => {
             Database file: <span className="font-mono">&lt;app data&gt;/shop.db</span> (or the path in{' '}
             <span className="font-mono">BOOK_KEEPER_DB_PATH</span>).
           </p>
-          <TextInput
-            ref={backupInput}
-            label="Backup Destination Folder (must already exist)"
-            placeholder="/storage/emulated/0/Backups"
-            value={backupPath}
-            onChange={(e) => setBackupPath(e.target.value)}
-          />
+          <div className="text-xs">
+            <p className="font-medium text-slate-600 dark:text-slate-300">Backup folder</p>
+            <p className="font-mono break-all" data-testid="backup-folder">
+              {config?.backupDirectory ?? '…'}
+              {config?.isDefaultDirectory && <span className="font-sans text-slate-500"> (default)</span>}
+            </p>
+          </div>
+          <p className="text-xs text-slate-500" data-testid="last-auto-backup">
+            Last auto backup:{' '}
+            {config?.lastAutoBackupAt ? new Date(config.lastAutoBackupAt).toLocaleString() : 'Never'}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={handleChoose}>
+              Choose folder…
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!config || config.isDefaultDirectory}
+              onClick={() => applyDirectory(null)}
+            >
+              Use default
+            </Button>
+          </div>
           <p className="text-xs text-slate-500" data-testid="last-backup">
             {lastBackup
               ? `Last backup this session: ${lastBackup.at.toLocaleString()} (${lastBackup.path})`
@@ -216,6 +238,7 @@ export const SettingsPage: React.FC = () => {
             <Button
               variant="primary"
               isLoading={isBackingUp}
+              disabled={!config}
               leftIcon={<DatabaseBackup className="h-4 w-4" />}
               onClick={handleBackup}
             >

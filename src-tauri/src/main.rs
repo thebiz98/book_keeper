@@ -6,6 +6,7 @@ use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             let env_override = std::env::var(book_keeper::app_state::DB_PATH_ENV).ok();
@@ -23,6 +24,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             settings_controller::backup_database,
+            settings_controller::get_app_config,
+            settings_controller::set_backup_directory,
             item_controller::create_bundle,
             item_controller::update_bundle,
             item_controller::delete_bundle,

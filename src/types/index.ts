@@ -396,6 +396,14 @@ export interface RecentTransaction {
   paymentStatus: PaymentStatus | null;
 }
 
+/** Runtime config + backup folder state shown on the Settings page. */
+export interface AppConfigView {
+  testingMode: boolean;
+  backupDirectory: string;
+  isDefaultDirectory: boolean;
+  lastAutoBackupAt: string | null;
+}
+
 export interface ShopSettings {
   id: number;
   shopName: string;

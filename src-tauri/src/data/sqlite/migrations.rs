@@ -242,7 +242,14 @@ CREATE VIRTUAL TABLE item_search_fts USING fts5(
 "#;
 
 /// All known migrations, ascending and gap-free. Append only; never edit a shipped step.
-pub const MIGRATIONS: &[Migration] = &[Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 }];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 },
+    Migration {
+        version: 2,
+        name: "backup_directory",
+        sql: "ALTER TABLE shop_settings ADD COLUMN backup_directory TEXT;",
+    },
+];
 
 /// Highest schema version this build knows.
 pub fn latest_version() -> i64 {
