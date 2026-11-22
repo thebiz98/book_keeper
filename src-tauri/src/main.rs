@@ -13,7 +13,11 @@ fn main() {
             if let Some(parent) = db_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            let state = book_keeper::app_state::build_sqlite_app_state(&db_path)?;
+            let state = book_keeper::app_state::build_sqlite_app_state_with_config(
+                &db_path,
+                book_keeper::config::AppConfig::compiled(),
+                dir.join(book_keeper::app_state::DEFAULT_BACKUP_DIR),
+            )?;
             app.manage(state);
             Ok(())
         })

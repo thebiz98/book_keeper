@@ -42,6 +42,10 @@ pub enum AppError {
 
     #[error("IO / File system error: {0}")]
     IoError(String),
+
+    /// The operation is disabled in this build (e.g. data reset when `testingMode` is off).
+    #[error("Operation not allowed: {0}")]
+    OperationNotAllowed(String),
 }
 
 pub type DomainResult<T> = Result<T, AppError>;
@@ -108,6 +112,7 @@ mod tests {
             (AppError::SearchIndexError("s".into()), json!({"type":"SearchIndexError","details":"s"})),
             (AppError::MigrationError("g".into()), json!({"type":"MigrationError","details":"g"})),
             (AppError::IoError("i".into()), json!({"type":"IoError","details":"i"})),
+            (AppError::OperationNotAllowed("o".into()), json!({"type":"OperationNotAllowed","details":"o"})),
         ];
         for (err, expected) in cases {
             assert_eq!(serde_json::to_value(&err).unwrap(), expected);

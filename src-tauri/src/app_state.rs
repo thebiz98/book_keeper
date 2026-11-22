@@ -31,7 +31,18 @@ pub struct AppState {
     pub item_import_service: Arc<dyn ItemImportService>,
     pub backup_service: Arc<dyn BackupService>,
     pub shop_setting_service: Arc<dyn ShopSettingService>,
+    /// Compiled-in config (`app.config.json`).
+    pub config: crate::config::AppConfig,
+    /// Absolute path of the live database file.
+    pub db_path: std::path::PathBuf,
+    /// Backup folder used when the user has not picked one (`<app data>/backups`).
+    pub default_backup_dir: std::path::PathBuf,
+    /// Backup folder currently in effect (the user's choice, or the default).
+    pub backup_dir: std::sync::RwLock<std::path::PathBuf>,
 }
+
+/// Name of the default backup folder inside the app data directory.
+pub const DEFAULT_BACKUP_DIR: &str = "backups";
 
 /// Env var holding a full database file path that overrides the default location (DD-20).
 pub const DB_PATH_ENV: &str = "BOOK_KEEPER_DB_PATH";
@@ -80,9 +91,37 @@ pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, cra
 }
 
 /// Same wiring with an explicit allocation strategy (tests inject alternative strategies here).
+/// Uses the compiled config and `<db dir>/backups` as the default backup folder.
 pub fn build_sqlite_app_state_with_strategy(
     db_path: &std::path::Path,
     allocation_strategy: Arc<dyn InventoryAllocationStrategy>,
+) -> Result<AppState, crate::core::error::AppError> {
+    let default_backup_dir = db_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(DEFAULT_BACKUP_DIR);
+    build_sqlite_app_state_full(db_path, allocation_strategy, crate::config::AppConfig::compiled(), default_backup_dir)
+}
+
+/// App startup entry: compiled-in or test config plus an explicit default backup folder.
+pub fn build_sqlite_app_state_with_config(
+    db_path: &std::path::Path,
+    config: crate::config::AppConfig,
+    default_backup_dir: std::path::PathBuf,
+) -> Result<AppState, crate::core::error::AppError> {
+    build_sqlite_app_state_full(
+        db_path,
+        strategy_for(crate::core::value_objects::AllocationMethod::default()),
+        config,
+        default_backup_dir,
+    )
+}
+
+fn build_sqlite_app_state_full(
+    db_path: &std::path::Path,
+    allocation_strategy: Arc<dyn InventoryAllocationStrategy>,
+    config: crate::config::AppConfig,
+    default_backup_dir: std::path::PathBuf,
 ) -> Result<AppState, crate::core::error::AppError> {
     use crate::core::error::AppError;
     use crate::data::sqlite::connection::create_pool;
@@ -160,5 +199,9 @@ pub fn build_sqlite_app_state_with_strategy(
         item_import_service,
         backup_service,
         shop_setting_service,
+        config,
+        db_path: db_path.to_path_buf(),
+        backup_dir: std::sync::RwLock::new(default_backup_dir.clone()),
+        default_backup_dir,
     })
 }
