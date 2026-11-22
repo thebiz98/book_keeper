@@ -3,6 +3,7 @@ use tauri::State;
 use crate::core::error::AppError;
 use crate::core::entities::ShopSetting;
 use serde::Serialize;
+use crate::services::contracts::backup_service::BackupKind;
 
 /// Runtime config shown on the Settings page.
 #[derive(Debug, Clone, Serialize)]
@@ -20,7 +21,12 @@ pub fn build_config_view(state: &AppState) -> AppConfigView {
         testing_mode: state.config.testing_mode,
         backup_directory: dir.to_string_lossy().into_owned(),
         is_default_directory: dir == state.default_backup_dir,
-        last_auto_backup_at: None, // Stage C fills this
+        last_auto_backup_at: state
+            .backup_service
+            .last_auto_backup(&dir.to_string_lossy())
+            .ok()
+            .flatten()
+            .map(|t| t.format("%Y-%m-%dT%H:%M:00").to_string()),
     }
 }
 
@@ -71,7 +77,8 @@ pub async fn update_shop_settings(state: State<'_, AppState>, settings: ShopSett
 #[tauri::command]
 pub async fn backup_database(state: State<'_, AppState>, destination_path: String) -> Result<String, AppError> {
     let svc = state.backup_service.clone();
-    super::run_blocking(move || svc.backup_database(&destination_path)).await
+    // Creates the folder if missing (the default `<app data>/backups` may not exist yet).
+    super::run_blocking(move || svc.backup_to_dir(&destination_path, BackupKind::Manual)).await
 }
 #[tauri::command]
 pub async fn verify_database_integrity(state: State<'_, AppState>) -> Result<bool, AppError> {

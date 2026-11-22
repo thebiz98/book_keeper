@@ -1,4 +1,5 @@
 pub mod accounting_service_impl;
+pub mod backup_scheduler;
 pub mod backup_service_impl;
 pub mod fifo_strategy;
 pub mod inventory_service_impl;

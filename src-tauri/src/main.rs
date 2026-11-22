@@ -19,7 +19,18 @@ fn main() {
                 book_keeper::config::AppConfig::compiled(),
                 dir.join(book_keeper::app_state::DEFAULT_BACKUP_DIR),
             )?;
+            let backup_svc = state.backup_service.clone();
+            let backup_cfg = state.config.backup.clone();
             app.manage(state);
+
+            // Auto backups: one check now, then hourly. Reads the folder each time so a change
+            // in Settings applies without a restart.
+            let handle = app.handle().clone();
+            book_keeper::services::r#impl::backup_scheduler::spawn(backup_svc, backup_cfg, move || {
+                let st = handle.state::<book_keeper::app_state::AppState>();
+                let guard = st.backup_dir.read().unwrap_or_else(|e| e.into_inner());
+                guard.clone()
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -72,6 +83,20 @@ fn main() {
             settings_controller::update_shop_settings,
             settings_controller::verify_database_integrity,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // On-close backup; skipped when nothing changed since the last auto backup.
+                if let Some(st) = app.try_state::<book_keeper::app_state::AppState>() {
+                    let dir = st.backup_dir.read().unwrap_or_else(|e| e.into_inner()).clone();
+                    book_keeper::services::r#impl::backup_scheduler::backup_on_exit(
+                        &*st.backup_service,
+                        &st.db_path,
+                        &dir,
+                        &st.config.backup,
+                    );
+                }
+            }
+        });
 }

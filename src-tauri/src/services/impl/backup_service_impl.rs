@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use crate::core::error::AppError;
-use crate::services::contracts::backup_service::BackupService;
+use crate::services::contracts::backup_service::{BackupKind, BackupService};
 
 #[derive(Clone, Debug)]
 pub struct BackupServiceImpl {
@@ -50,8 +50,9 @@ impl BackupServiceImpl {
     }
 }
 
-impl BackupService for BackupServiceImpl {
-    fn backup_database(&self, destination_path: &str) -> Result<String, AppError> {
+impl BackupServiceImpl {
+    /// Validated, never-overwriting backup of the live DB into the existing `destination_path`.
+    fn backup_into(&self, destination_path: &str, kind: BackupKind) -> Result<String, AppError> {
         let dest_dir = Path::new(destination_path);
         let meta = std::fs::metadata(dest_dir).map_err(|e| {
             AppError::IoError(format!("Backup destination '{destination_path}' is not accessible: {e}"))
@@ -76,10 +77,11 @@ impl BackupService for BackupServiceImpl {
         let stamp = chrono::Local::now().format("%Y%m%d_%H%M");
         let mut n = 1u32;
         let final_dest_path: PathBuf = loop {
+            let prefix = kind.prefix();
             let name = if n == 1 {
-                format!("book_keeper_backup_{stamp}.db")
+                format!("{prefix}{stamp}.db")
             } else {
-                format!("book_keeper_backup_{stamp}_{n}.db")
+                format!("{prefix}{stamp}_{n}.db")
             };
             let candidate = dest_dir.join(name);
             match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
@@ -107,6 +109,39 @@ impl BackupService for BackupServiceImpl {
             .to_string_lossy()
             .to_string())
     }
+}
+
+impl BackupService for BackupServiceImpl {
+    fn backup_database(&self, destination_path: &str) -> Result<String, AppError> {
+        self.backup_into(destination_path, BackupKind::Manual)
+    }
+
+    fn backup_to_dir(&self, dir: &str, kind: BackupKind) -> Result<String, AppError> {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| AppError::IoError(format!("Cannot create backup folder '{dir}': {e}")))?;
+        self.backup_into(dir, kind)
+    }
+
+    fn rotate(&self, dir: &str, retention_days: u32) -> Result<Vec<String>, AppError> {
+        let names = list_file_names(dir)?;
+        let now = chrono::Local::now().naive_local();
+        let doomed = select_for_deletion(&names, now, retention_days);
+        let mut deleted = Vec::new();
+        for name in doomed {
+            match std::fs::remove_file(Path::new(dir).join(&name)) {
+                Ok(()) => deleted.push(name),
+                Err(e) => eprintln!("[backup] could not delete old backup {name}: {e}"),
+            }
+        }
+        Ok(deleted)
+    }
+
+    fn last_auto_backup(&self, dir: &str) -> Result<Option<chrono::NaiveDateTime>, AppError> {
+        Ok(list_file_names(dir)?
+            .iter()
+            .filter_map(|n| parse_stamp(n, BackupKind::Auto))
+            .max())
+    }
 
     fn verify_database_integrity(&self) -> Result<bool, AppError> {
         if !self.db_path.exists() && self.db_path.to_str() != Some(":memory:") {
@@ -126,4 +161,52 @@ impl BackupService for BackupServiceImpl {
 
         Ok(integrity == "ok")
     }
+}
+
+/// File names directly inside `dir`; an absent folder has no files.
+fn list_file_names(dir: &str) -> Result<Vec<String>, AppError> {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(AppError::IoError(format!("Cannot read backup folder '{dir}': {e}"))),
+    };
+    Ok(rd
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect())
+}
+
+/// Stamp of a backup file name of `kind`: `<prefix>YYYYMMDD_HHMM[_n].db`. `None` for other files.
+pub fn parse_stamp(name: &str, kind: BackupKind) -> Option<chrono::NaiveDateTime> {
+    let rest = name.strip_prefix(kind.prefix())?.strip_suffix(".db")?;
+    let stamp = rest.get(..13)?;
+    let tail = &rest[13..];
+    if !(tail.is_empty() || (tail.starts_with('_') && tail.len() > 1 && tail[1..].chars().all(|c| c.is_ascii_digit()))) {
+        return None;
+    }
+    chrono::NaiveDateTime::parse_from_str(stamp, "%Y%m%d_%H%M").ok()
+}
+
+/// Pure rotation rule: auto and pre-reset backups older than `retention_days` before `now`,
+/// except the newest auto backup. Manual and unrecognised files are never selected.
+pub fn select_for_deletion(names: &[String], now: chrono::NaiveDateTime, retention_days: u32) -> Vec<String> {
+    let cutoff = now - chrono::Duration::days(i64::from(retention_days));
+    let newest_auto = names
+        .iter()
+        .filter_map(|n| parse_stamp(n, BackupKind::Auto).map(|t| (t, n)))
+        .max()
+        .map(|(_, n)| n.clone());
+    let mut doomed: Vec<String> = names
+        .iter()
+        .filter(|n| Some(*n) != newest_auto.as_ref())
+        .filter(|n| {
+            [BackupKind::Auto, BackupKind::PreReset]
+                .iter()
+                .any(|k| parse_stamp(n, *k).is_some_and(|t| t < cutoff))
+        })
+        .cloned()
+        .collect();
+    doomed.sort();
+    doomed
 }
