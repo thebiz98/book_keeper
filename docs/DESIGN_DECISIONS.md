@@ -211,3 +211,27 @@ Bill views read the snapshot. Directory and catalog screens read the live record
 - Payloads may still send `bundle_id`. The backend uses it only at write time, to resolve the multiplier and label (the bundle must belong to the item), then snapshots both.
 - Bundles can be edited, including the multiplier, or deleted at any time; history is unaffected.
 - FIFO, returns and reports work purely in base units.
+
+**DD-31 — Compiled-in app config (2026-11-22).** `src-tauri/app.config.json` (`testingMode`, `backup.intervalHours`, `backup.retentionDays`, `backup.onExit`) is embedded at build time, not read from disk or environment variables at run time.
+- A shop owner cannot flip `testingMode` (which enables destructive resets) by editing a file or setting an env var; it takes a rebuild.
+- One build behaves the same on every machine; there is no config file to lose or corrupt.
+- Cost: changing a value needs a rebuild or a `tauri dev` restart. A real shop build sets `testingMode` to false.
+
+**DD-32 — Backup folder: stored in the database, chosen with a native picker (2026-11-22).**
+- The folder path is a setting in the database (schema v2), so it follows the data. Empty means the default, `%APPDATA%\com.bookkeeper.app\backups`, which is created automatically.
+- The UI has no typed-path field. It uses the Tauri dialog plugin's native folder picker, which needs `capabilities/default.json` to grant `core:default` and `dialog:allow-open`.
+- `set_backup_directory(null)` resets to the default.
+
+**DD-33 — Auto backup and rotation (2026-11-22).**
+- Triggers: at startup when the last auto backup is at least `intervalHours` old, then an hourly check; on close when `onExit` is true and the database changed since the last auto backup.
+- File names carry a minute stamp: `book_keeper_backup_` (manual), `book_keeper_auto_`, `book_keeper_prereset_` + `YYYYMMDD_HHMM.db`.
+- "Database changed" on close is detected by comparing the database file's mtime with the last auto backup, with no change counter to maintain.
+- Rotation deletes auto and pre-reset files older than `retentionDays`, always keeps the newest auto backup, and never deletes manual backups.
+
+**DD-34 — Testing-only data reset (2026-11-22).**
+- Two scopes: `Transactions` (sales, purchases except opening stock lots, payments, returns, stock adjustments; stock returns to opening stock; items, bundles, parties and shop profile stay; invoice codes restart) and `All` (also items, bundles, parties and opening stock; only the shop profile and the backup folder setting remain; ids restart).
+- The backend is the gate: `reset_data` returns `OperationNotAllowed` when `testingMode` is off. The UI hides the card, but that is only convenience. The UI also requires typing `RESET` or `DELETE ALL`.
+- A pre-reset backup (`book_keeper_prereset_...`) is mandatory and written before anything is deleted; if it fails, the reset does not run.
+- `MaintenanceRepository` does the bulk deletes child tables first, inside one transaction, so a failure leaves the data untouched.
+- The stock cache is repaired from the restored OPENING lots, so on-hand quantities match the opening stock again.
+- The FTS search index is rebuilt after the commit (the indexer uses its own connection, see CHECKPOINT conventions).

@@ -18,7 +18,8 @@ TABLE OF CONTENTS:
 8. Building the .exe and Installers, Installing, Running
 9. Running the Test Gate on Windows
 10. Platform Notes (What Is and Isn't Windows-Specific)
-11. Troubleshooting
+11. App Config, Backups and Restore
+12. Troubleshooting
 
 ================================================================================
 1. WINDOWS SMART APP CONTROL VS. WINDOWS DEFENDER ANTIVIRUS
@@ -340,7 +341,55 @@ extension. Changing it moves the default data folder on every OS (existing
 shop.db would need to be moved), so it is left as is until macOS is targeted.
 
 ================================================================================
-11. TROUBLESHOOTING
+11. APP CONFIG, BACKUPS AND RESTORE
+================================================================================
+--- src-tauri/app.config.json (compiled in) ---
+{ "testingMode": true, "backup": { "intervalHours": 24, "retentionDays": 7, "onExit": true } }
+  testingMode            true shows the "Testing tools" card in Settings (clear
+                         transactions / clear all data). The backend refuses
+                         resets when it is false. SET IT TO false FOR A REAL
+                         SHOP BUILD.
+  backup.intervalHours   minimum age of the last auto backup before a new one.
+  backup.retentionDays   auto and pre-reset backups older than this are deleted.
+  backup.onExit          also back up when the app closes (see below).
+The file is compiled into the program, not read at run time. After changing it,
+rebuild (npm run tauri build) or restart `npm run tauri dev`.
+
+--- Backup folder ---
+Chosen in Settings with the native folder picker (no typed path). The choice is
+saved in the database. "Use default" returns to
+  %APPDATA%\com.bookkeeper.app\backups
+which is created automatically.
+
+--- When backups happen ---
+  * At startup, when the last auto backup is at least intervalHours old; then
+    checked again every hour while the app is open.
+  * On close, when the database changed since the last auto backup.
+  * Manually: Settings -> Backup Now (or Ctrl+B).
+  * Before every data reset (testing tools), always.
+
+--- File names ---
+  book_keeper_backup_YYYYMMDD_HHMM.db    manual
+  book_keeper_auto_YYYYMMDD_HHMM.db      automatic
+  book_keeper_prereset_YYYYMMDD_HHMM.db  written just before a reset
+
+--- Rotation ---
+Auto and pre-reset backups older than retentionDays are deleted, but the newest
+auto backup is always kept. Manual backups are never deleted.
+
+--- Restoring a backup ---
+1. Close Book Keeper completely.
+2. Copy the backup file over shop.db (%APPDATA%\com.bookkeeper.app\shop.db,
+   or the path in BOOK_KEEPER_DB_PATH).
+3. Delete shop.db-wal and shop.db-shm next to it, if they exist.
+4. Start the app.
+
+--- If shop.db is deleted ---
+The app creates a new, empty database at the next start. All data is lost unless
+you restore a backup as described above.
+
+================================================================================
+12. TROUBLESHOOTING
 ================================================================================
 "error: linker `link.exe` not found"
   -> ARM64 machine without the ARM64 MSVC component. See section 2, Step 2.
