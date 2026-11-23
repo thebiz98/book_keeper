@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api, errorMessage } from '@/api';
 import type { PartyLedgerView } from '@/types';
 import { Drawer } from '../ui/Drawer';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 
 export interface PartyLedgerDrawerProps {
@@ -54,32 +55,32 @@ export const PartyLedgerDrawer: React.FC<PartyLedgerDrawerProps> = ({ partyId, o
           {ledger.entries.length === 0 ? (
             <p className="text-slate-500">No ledger entries yet.</p>
           ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400">
-                  <th className="py-1">Date</th>
-                  <th>Ref</th>
-                  <th>Type</th>
-                  <th className="text-right">Debit</th>
-                  <th className="text-right">Credit</th>
-                  <th className="text-right">Balance</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table dense scroll="page">
+              <TableHeader>
+                <TableRow className="text-left text-slate-400">
+                  <TableHead className="py-1">Date</TableHead>
+                  <TableHead>Ref</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right">Debit</TableHead>
+                  <TableHead className="text-right">Credit</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {ledger.entries.map((e, i) => (
-                  <tr key={i} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="py-1 font-mono">{e.date}</td>
-                    <td className="font-mono">{e.transactionCode}</td>
-                    <td>{e.transactionType}</td>
-                    <td className="text-right">{e.debit > 0 ? <CurrencyDisplay amount={e.debit} size="sm" /> : ''}</td>
-                    <td className="text-right">{e.credit > 0 ? <CurrencyDisplay amount={e.credit} size="sm" /> : ''}</td>
-                    <td className="text-right">
+                  <TableRow key={i} >
+                    <TableCell className="py-1 font-mono">{e.date}</TableCell>
+                    <TableCell className="font-mono">{e.transactionCode}</TableCell>
+                    <TableCell>{e.transactionType}</TableCell>
+                    <TableCell className="text-right">{e.debit > 0 ? <CurrencyDisplay amount={e.debit} size="sm" /> : ''}</TableCell>
+                    <TableCell className="text-right">{e.credit > 0 ? <CurrencyDisplay amount={e.credit} size="sm" /> : ''}</TableCell>
+                    <TableCell className="text-right">
                       <CurrencyDisplay amount={e.runningBalance} size="sm" />
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </div>
       )}

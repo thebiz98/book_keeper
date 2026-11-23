@@ -6,6 +6,7 @@ import { startOfMonth, todayLocal } from '@/lib/dates';
 import type { CashFlowReport, PnLReport, StockValuationReport } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { DateRangePicker } from '@/components/common/DateRangePicker';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 
 interface Section<T> {
   data: T | null;
@@ -40,7 +41,7 @@ const Line: React.FC<{ label: string; amount: number; strong?: boolean; testId?:
 }) => (
   <div
     data-testid={testId}
-    className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold border-t border-slate-200 dark:border-slate-700' : ''}`}
+    className={`flex items-center justify-between py-1.5 text-sm ${strong ? 'font-bold ' : ''}`}
   >
     <span className={strong ? '' : 'text-slate-600 dark:text-slate-300'}>{label}</span>
     <span className="font-mono">
@@ -144,26 +145,26 @@ export const ReportsPage: React.FC = () => {
             {val.data.categoriesBreakdown.length === 0 ? (
               <p className="text-xs text-slate-500">No stock on hand.</p>
             ) : (
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-slate-400">
-                    <th className="py-1">Category</th>
-                    <th className="text-right">Items</th>
-                    <th className="text-right">Valuation</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table dense scroll="bounded">
+                <TableHeader>
+                  <TableRow className="text-left text-slate-400">
+                    <TableHead className="py-1">Category</TableHead>
+                    <TableHead className="text-right">Items</TableHead>
+                    <TableHead className="text-right">Valuation</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {val.data.categoriesBreakdown.map((cat) => (
-                    <tr key={cat.category} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="py-1">{cat.category}</td>
-                      <td className="text-right font-mono">{cat.itemsCount}</td>
-                      <td className="text-right">
+                    <TableRow key={cat.category} >
+                      <TableCell className="py-1">{cat.category}</TableCell>
+                      <TableCell className="text-right font-mono">{cat.itemsCount}</TableCell>
+                      <TableCell className="text-right">
                         <CurrencyDisplay amount={cat.valuation} size="sm" />
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             )}
           </div>
         )}

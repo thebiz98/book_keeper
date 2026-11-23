@@ -7,6 +7,7 @@ import type {
   TransactionType,
 } from '@/types';
 import { Drawer } from '../ui/Drawer';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { PaymentStatusBadge } from '../common/PaymentStatusBadge';
 
@@ -35,28 +36,28 @@ export const LedgerRows: React.FC<{ rows: PaymentSettlement[] }> = ({ rows }) =>
   rows.length === 0 ? (
     <p className="text-xs text-slate-500">No payments recorded.</p>
   ) : (
-    <table className="w-full text-xs">
-      <thead>
-        <tr className="text-left text-slate-400">
-          <th className="py-1">Date</th>
-          <th>Kind</th>
-          <th>Mode</th>
-          <th className="text-right">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table dense scroll="page">
+      <TableHeader>
+        <TableRow className="text-left text-slate-400">
+          <TableHead className="py-1">Date</TableHead>
+          <TableHead>Kind</TableHead>
+          <TableHead>Mode</TableHead>
+          <TableHead className="text-right">Amount</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {rows.map((r) => (
-          <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
-            <td className="py-1 font-mono">{r.settlementDate}</td>
-            <td>{KIND_LABEL[r.kind] ?? r.kind}</td>
-            <td>{r.paymentMode ?? '-'}</td>
-            <td className="text-right">
+          <TableRow key={r.id} >
+            <TableCell className="py-1 font-mono">{r.settlementDate}</TableCell>
+            <TableCell>{KIND_LABEL[r.kind] ?? r.kind}</TableCell>
+            <TableCell>{r.paymentMode ?? '-'}</TableCell>
+            <TableCell className="text-right">
               <CurrencyDisplay amount={r.amountPaid} size="sm" />
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 
 export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId, onClose }) => {
@@ -123,33 +124,33 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
             )}
           </div>
 
-          <table className="w-full">
-            <thead>
-              <tr className="text-left text-slate-400">
-                <th className="py-1">Item</th>
-                <th>Pack / Qty</th>
-                <th className="text-right">{kind === 'SALE' ? 'Rate/unit' : 'Cost/unit'}</th>
-                <th className="text-right">Total</th>
-                <th className="text-right">{kind === 'SALE' ? 'Returned' : 'Remaining'}</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table dense scroll="page">
+            <TableHeader>
+              <TableRow className="text-left text-slate-400">
+                <TableHead className="py-1">Item</TableHead>
+                <TableHead>Pack / Qty</TableHead>
+                <TableHead className="text-right">{kind === 'SALE' ? 'Rate/unit' : 'Cost/unit'}</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right">{kind === 'SALE' ? 'Returned' : 'Remaining'}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {sale?.items.map((it) => (
                 <React.Fragment key={it.saleItem.id}>
-                  <tr className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="py-1 font-medium">{it.itemName}</td>
-                    <td>{packDisplay(it.saleItem.packLabel, it.saleItem.packQuantity, it.saleItem.quantity)}</td>
-                    <td className="text-right">
+                  <TableRow >
+                    <TableCell className="py-1 font-medium">{it.itemName}</TableCell>
+                    <TableCell>{packDisplay(it.saleItem.packLabel, it.saleItem.packQuantity, it.saleItem.quantity)}</TableCell>
+                    <TableCell className="text-right">
                       <CurrencyDisplay amount={it.saleItem.unitPrice} size="sm" />
-                    </td>
-                    <td className="text-right">
+                    </TableCell>
+                    <TableCell className="text-right">
                       <CurrencyDisplay amount={it.saleItem.totalAmount} size="sm" />
-                    </td>
-                    <td className="text-right font-mono">{it.returnedQuantity}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="text-right font-mono">{it.returnedQuantity}</TableCell>
+                  </TableRow>
                   {it.allocations.length > 0 && (
-                    <tr>
-                      <td colSpan={5} className="pb-1.5 pl-3 text-[11px] text-slate-500">
+                    <TableRow>
+                      <TableCell colSpan={5} className="pb-1.5 pl-3 text-[11px] text-slate-500">
                         FIFO cost:{' '}
                         {it.allocations.map((a, i) => (
                           <span key={a.id} className="font-mono">
@@ -157,26 +158,26 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
                             {a.quantityDepleted} @ ₹{a.unitCost.toFixed(2)}
                           </span>
                         ))}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )}
                 </React.Fragment>
               ))}
               {purchase?.items.map((it) => (
-                <tr key={it.purchaseItem.id} className="border-t border-slate-100 dark:border-slate-800">
-                  <td className="py-1 font-medium">{it.itemName}</td>
-                  <td>{packDisplay(it.purchaseItem.packLabel, it.purchaseItem.packQuantity, it.purchaseItem.quantity)}</td>
-                  <td className="text-right">
+                <TableRow key={it.purchaseItem.id} >
+                  <TableCell className="py-1 font-medium">{it.itemName}</TableCell>
+                  <TableCell>{packDisplay(it.purchaseItem.packLabel, it.purchaseItem.packQuantity, it.purchaseItem.quantity)}</TableCell>
+                  <TableCell className="text-right">
                     <CurrencyDisplay amount={it.purchaseItem.unitCost} size="sm" />
-                  </td>
-                  <td className="text-right">
+                  </TableCell>
+                  <TableCell className="text-right">
                     <CurrencyDisplay amount={it.purchaseItem.totalAmount} size="sm" />
-                  </td>
-                  <td className="text-right font-mono">{it.purchaseItem.remainingQuantity}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="text-right font-mono">{it.purchaseItem.remainingQuantity}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
 
           <div className="flex flex-col items-end gap-0.5">
             <div>

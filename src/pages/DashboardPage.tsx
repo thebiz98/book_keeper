@@ -8,6 +8,7 @@ import { StockStatusBadge } from '@/components/common/StockStatusBadge';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { StockAdjustmentModal } from '@/components/domain/StockAdjustmentModal';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { navigateWithParam } from '@/components/domain/navParams';
@@ -241,33 +242,33 @@ export const DashboardPage: React.FC = () => {
             ) : base.recent.data.length === 0 ? (
               <p className="py-4 text-center text-xs text-slate-400">No transactions yet.</p>
             ) : (
-              <table className="w-full text-left text-xs" data-testid="recent">
-                <thead>
-                  <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 select-none">
-                    <th className="py-2">Time</th>
-                    <th>Type</th>
-                    <th>Code</th>
-                    <th>Party</th>
-                    <th className="text-right">Amount</th>
-                    <th className="text-center">Status</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
+              <Table dense scroll="bounded" containerClassName="max-h-[420px]" data-testid="recent">
+                <TableHeader>
+                  <TableRow className="border-b border-slate-100 dark:border-slate-800 text-slate-400 select-none">
+                    <TableHead className="py-2">Time</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Code</TableHead>
+                    <TableHead>Party</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {base.recent.data.map((t) => (
-                    <tr key={`${t.kind}-${t.id}`} className="border-b border-slate-50 dark:border-slate-800/60">
-                      <td className="py-1.5 font-mono text-slate-500">
+                    <TableRow key={`${t.kind}-${t.id}`} className="border-b border-slate-50 dark:border-slate-800/60">
+                      <TableCell className="py-1.5 font-mono text-slate-500">
                         {t.date}
                         {t.createdAt ? ` ${t.createdAt.slice(11, 16)}` : ''}
-                      </td>
-                      <td>{t.kind}</td>
-                      <td className="font-mono font-semibold">{t.code}</td>
-                      <td>{t.partyName ?? '-'}</td>
-                      <td className="text-right">
+                      </TableCell>
+                      <TableCell>{t.kind}</TableCell>
+                      <TableCell className="font-mono font-semibold">{t.code}</TableCell>
+                      <TableCell>{t.partyName ?? '-'}</TableCell>
+                      <TableCell className="text-right">
                         <CurrencyDisplay amount={t.amount} size="sm" />
-                      </td>
-                      <td className="text-center">{t.paymentStatus ? <PaymentStatusBadge status={t.paymentStatus} /> : null}</td>
-                      <td className="text-right">
+                      </TableCell>
+                      <TableCell className="text-center">{t.paymentStatus ? <PaymentStatusBadge status={t.paymentStatus} /> : null}</TableCell>
+                      <TableCell className="text-right">
                         <button
                           type="button"
                           className="text-blue-600 hover:underline cursor-pointer"
@@ -277,11 +278,11 @@ export const DashboardPage: React.FC = () => {
                         >
                           Open
                         </button>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             )}
           </div>
         </div>

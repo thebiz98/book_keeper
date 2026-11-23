@@ -14,6 +14,7 @@ import type {
 import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { ItemSearchTypeahead } from './ItemSearchTypeahead';
 import { PartySelector } from './PartySelector';
@@ -231,24 +232,24 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
                   Change bill
                 </Button>
               </div>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-slate-400">
-                    <th className="py-1">Item</th>
-                    <th className="text-right">Remaining</th>
-                    <th className="text-right">Lot cost</th>
-                    <th className="w-28">Return qty</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table dense scroll="bounded">
+                <TableHeader>
+                  <TableRow className="text-left text-slate-400">
+                    <TableHead className="py-1">Item</TableHead>
+                    <TableHead className="text-right">Remaining</TableHead>
+                    <TableHead className="text-right">Lot cost</TableHead>
+                    <TableHead className="w-28">Return qty</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {billLines.map((l, i) => (
-                    <tr key={l.purchaseItemId} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="py-1 font-medium">{l.name}</td>
-                      <td className="text-right font-mono">{l.remaining}</td>
-                      <td className="text-right">
+                    <TableRow key={l.purchaseItemId} >
+                      <TableCell className="py-1 font-medium">{l.name}</TableCell>
+                      <TableCell className="text-right font-mono">{l.remaining}</TableCell>
+                      <TableCell className="text-right">
                         <CurrencyDisplay amount={l.cost} size="sm" />
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <NumericInput
                           aria-label={`Return quantity for ${l.name}`}
                           value={l.qty}
@@ -256,11 +257,11 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
                           min={0}
                           precision={3}
                         />
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </>

@@ -15,6 +15,7 @@ import type {
 import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { ItemSearchTypeahead } from './ItemSearchTypeahead';
 import { PartySelector } from './PartySelector';
@@ -287,30 +288,30 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
                   Change bill
                 </Button>
               </div>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-slate-400">
-                    <th className="py-1">Item</th>
-                    <th className="text-right">Sold</th>
-                    <th className="text-right">Returned</th>
-                    <th className="text-right">Returnable</th>
-                    <th className="text-right">Sold rate</th>
-                    <th className="w-24">Return qty</th>
-                    <th className="w-24">Rate</th>
-                    <th className="w-36">Condition</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table dense scroll="bounded">
+                <TableHeader>
+                  <TableRow className="text-left text-slate-400">
+                    <TableHead className="py-1">Item</TableHead>
+                    <TableHead className="text-right">Sold</TableHead>
+                    <TableHead className="text-right">Returned</TableHead>
+                    <TableHead className="text-right">Returnable</TableHead>
+                    <TableHead className="text-right">Sold rate</TableHead>
+                    <TableHead className="w-24">Return qty</TableHead>
+                    <TableHead className="w-24">Rate</TableHead>
+                    <TableHead className="w-36">Condition</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {lines.map((l, i) => (
-                    <tr key={l.saleItemId} className="border-t border-slate-100 dark:border-slate-800">
-                      <td className="py-1 font-medium">{l.name}</td>
-                      <td className="text-right font-mono">{l.sold}</td>
-                      <td className="text-right font-mono">{l.returned}</td>
-                      <td className="text-right font-mono">{returnable(l)}</td>
-                      <td className="text-right">
+                    <TableRow key={l.saleItemId} >
+                      <TableCell className="py-1 font-medium">{l.name}</TableCell>
+                      <TableCell className="text-right font-mono">{l.sold}</TableCell>
+                      <TableCell className="text-right font-mono">{l.returned}</TableCell>
+                      <TableCell className="text-right font-mono">{returnable(l)}</TableCell>
+                      <TableCell className="text-right">
                         <CurrencyDisplay amount={l.soldRate} size="sm" />
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <NumericInput
                           aria-label={`Return quantity for ${l.name}`}
                           value={l.qty}
@@ -318,27 +319,27 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
                           min={0}
                           precision={3}
                         />
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <NumericInput
                           aria-label={`Return rate for ${l.name}`}
                           value={l.rate}
                           onChange={(v) => patchLine(i, { rate: v })}
                           min={0}
                         />
-                      </td>
-                      <td>
+                      </TableCell>
+                      <TableCell>
                         <Select
                           aria-label={`Condition for ${l.name}`}
                           value={l.condition}
                           onChange={(v) => patchLine(i, { condition: v as StockCondition })}
                           options={[...CONDITIONS]}
                         />
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </>
@@ -357,22 +358,22 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
             <ItemSearchTypeahead onSelectItem={addFreeItem} placeholder="Search item to return..." />
           </div>
           {freeLines.length > 0 && (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-slate-400">
-                  <th className="py-1">Item</th>
-                  <th className="w-24">Qty</th>
-                  <th className="w-24">Rate</th>
-                  <th className="w-36">Condition</th>
-                  <th className="w-28">Unit cost</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
+            <Table dense scroll="bounded">
+              <TableHeader>
+                <TableRow className="text-left text-slate-400">
+                  <TableHead className="py-1">Item</TableHead>
+                  <TableHead className="w-24">Qty</TableHead>
+                  <TableHead className="w-24">Rate</TableHead>
+                  <TableHead className="w-36">Condition</TableHead>
+                  <TableHead className="w-28">Unit cost</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {freeLines.map((l) => (
-                  <tr key={l.key} className="border-t border-slate-100 dark:border-slate-800">
-                    <td className="py-1 font-medium">{l.name}</td>
-                    <td>
+                  <TableRow key={l.key} >
+                    <TableCell className="py-1 font-medium">{l.name}</TableCell>
+                    <TableCell>
                       <NumericInput
                         aria-label={`Return quantity for ${l.name}`}
                         value={l.qty}
@@ -380,24 +381,24 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
                         min={0}
                         precision={3}
                       />
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <NumericInput
                         aria-label={`Return rate for ${l.name}`}
                         value={l.rate}
                         onChange={(v) => patchFree(l.key, { rate: v })}
                         min={0}
                       />
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <Select
                         aria-label={`Condition for ${l.name}`}
                         value={l.condition}
                         onChange={(v) => patchFree(l.key, { condition: v as StockCondition })}
                         options={[...CONDITIONS]}
                       />
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       {l.hasLots === true ? (
                         <span className="text-slate-400">from lots</span>
                       ) : (
@@ -408,8 +409,8 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
                           min={0}
                         />
                       )}
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <button
                         type="button"
                         aria-label={`Remove ${l.name}`}
@@ -418,11 +419,11 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </div>
       )}

@@ -4,6 +4,7 @@ import { errorMessage } from '@/api/errors';
 import type { ItemLot, LotSource } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { STOCK_EPS } from '../common/StockStatusBadge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 
 const SOURCE_LABEL: Record<LotSource, string> = {
   PURCHASE: 'Purchase',
@@ -67,50 +68,50 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit }) 
   if (lots.length === 0) return <p className="text-xs text-slate-400 px-2 py-1">No lots recorded.</p>;
 
   return (
-    <table className="w-full text-xs" data-testid="lot-table">
-      <thead>
-        <tr className="text-left text-slate-400">
-          <th className="py-1 px-2 font-medium">Lot Date</th>
-          <th className="py-1 px-2 font-medium">Code</th>
-          <th className="py-1 px-2 font-medium">Source</th>
-          <th className="py-1 px-2 font-medium">Vendor</th>
-          <th className="py-1 px-2 font-medium text-right">Original Qty</th>
-          <th className="py-1 px-2 font-medium text-right">Remaining</th>
-          <th className="py-1 px-2 font-medium text-right">Unit Cost</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table dense scroll="none" data-testid="lot-table">
+      <TableHeader>
+        <TableRow className="text-left text-slate-400">
+          <TableHead className="py-1 px-2 font-medium">Lot Date</TableHead>
+          <TableHead className="py-1 px-2 font-medium">Code</TableHead>
+          <TableHead className="py-1 px-2 font-medium">Source</TableHead>
+          <TableHead className="py-1 px-2 font-medium">Vendor</TableHead>
+          <TableHead className="py-1 px-2 font-medium text-right">Original Qty</TableHead>
+          <TableHead className="py-1 px-2 font-medium text-right">Remaining</TableHead>
+          <TableHead className="py-1 px-2 font-medium text-right">Unit Cost</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {lots.map((l) => (
-          <tr
+          <TableRow
             key={l.purchaseItemId}
             data-testid="lot-row"
-            className={`border-t border-slate-100 dark:border-slate-800 ${
+            className={`${
               l.remainingQuantity > STOCK_EPS ? '' : 'opacity-50'
             }`}
           >
-            <td className="py-1 px-2 font-mono">{l.transactionDate}</td>
-            <td className="py-1 px-2 font-mono">{l.transactionCode}</td>
-            <td className="py-1 px-2">
+            <TableCell className="py-1 px-2 font-mono">{l.transactionDate}</TableCell>
+            <TableCell className="py-1 px-2 font-mono">{l.transactionCode}</TableCell>
+            <TableCell className="py-1 px-2">
               <span
                 className={`inline-flex px-1.5 py-0.5 rounded border text-[10px] font-semibold ${SOURCE_STYLE[l.source]}`}
               >
                 {SOURCE_LABEL[l.source] ?? l.source}
               </span>
-            </td>
-            <td className="py-1 px-2">{l.vendorName || '—'}</td>
-            <td className="py-1 px-2 text-right font-mono">
+            </TableCell>
+            <TableCell className="py-1 px-2">{l.vendorName || '—'}</TableCell>
+            <TableCell className="py-1 px-2 text-right font-mono">
               {l.quantity} {baseUnit}
-            </td>
-            <td className="py-1 px-2 text-right font-mono font-semibold">
+            </TableCell>
+            <TableCell className="py-1 px-2 text-right font-mono font-semibold">
               {l.remainingQuantity} {baseUnit}
-            </td>
-            <td className="py-1 px-2 text-right">
+            </TableCell>
+            <TableCell className="py-1 px-2 text-right">
               <CurrencyDisplay amount={l.unitCost} size="sm" />
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 };
 

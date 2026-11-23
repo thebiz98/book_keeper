@@ -11,6 +11,7 @@ import { fetchOpenBills, transactionTypeFor, type OpenBill } from '@/components/
 import { refreshAppMetrics } from '@/components/domain/navParams';
 import { Button } from '@/components/ui/Button';
 import { Tabs } from '@/components/ui/Tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 
 interface SettleTarget {
   party: PartyDueSummary;
@@ -49,44 +50,44 @@ const OpenBillsPanel: React.FC<{
   if (!bills) return <p className="text-xs text-slate-500">Loading open bills...</p>;
   if (bills.length === 0) return <p className="text-xs text-slate-500">No open bills.</p>;
   return (
-    <table className="w-full text-xs" data-testid="open-bills">
-      <thead>
-        <tr className="text-left text-slate-400">
-          <th>Code</th>
-          <th>Date</th>
-          <th className="text-right">Total</th>
-          <th className="text-right">Paid</th>
-          <th className="text-right">Balance</th>
-          <th className="text-center">Status</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>
+    <Table dense scroll="none" data-testid="open-bills">
+      <TableHeader>
+        <TableRow className="text-left text-slate-400">
+          <TableHead>Code</TableHead>
+          <TableHead>Date</TableHead>
+          <TableHead className="text-right">Total</TableHead>
+          <TableHead className="text-right">Paid</TableHead>
+          <TableHead className="text-right">Balance</TableHead>
+          <TableHead className="text-center">Status</TableHead>
+          <TableHead />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {bills.map((b) => (
-          <tr key={b.id} className="border-t border-slate-100 dark:border-slate-800">
-            <td className="py-1 font-mono font-semibold">{b.transactionCode}</td>
-            <td className="font-mono">{b.transactionDate}</td>
-            <td className="text-right">
+          <TableRow key={b.id} >
+            <TableCell className="py-1 font-mono font-semibold">{b.transactionCode}</TableCell>
+            <TableCell className="font-mono">{b.transactionDate}</TableCell>
+            <TableCell className="text-right">
               <CurrencyDisplay amount={b.totalAmount} size="sm" />
-            </td>
-            <td className="text-right">
+            </TableCell>
+            <TableCell className="text-right">
               <CurrencyDisplay amount={b.paidAmount} size="sm" />
-            </td>
-            <td className="text-right">
+            </TableCell>
+            <TableCell className="text-right">
               <CurrencyDisplay amount={b.balanceDue} size="sm" colored />
-            </td>
-            <td className="text-center">
+            </TableCell>
+            <TableCell className="text-center">
               <PaymentStatusBadge status={b.paymentStatus} />
-            </td>
-            <td className="text-right">
+            </TableCell>
+            <TableCell className="text-right">
               <Button variant="secondary" size="xs" onClick={() => onSettle(b)}>
                 Settle
               </Button>
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 };
 

@@ -62,6 +62,10 @@ describe('CreditDuesPage', () => {
     click(document.querySelector('[aria-label^="Toggle open bills"]')!);
     await waitFor(() => !!document.querySelector('[data-testid="open-bills"]'));
     // oldest first: SAL-1 is the first row
+    // nested table in an expanded row: plain (non-sticky) header, must not cover the outer one
+    const nestedTh = document.querySelector('[data-testid="open-bills"] th');
+    expect(nestedTh?.className).not.toContain('sticky');
+    expect(document.querySelector('[data-testid="open-bills"]')?.closest('[data-table-scroll]')?.getAttribute('data-table-scroll')).toBe('none');
     const rows = document.querySelectorAll('[data-testid="open-bills"] tbody tr');
     expect(rows[0].textContent).toContain('SAL-1');
     click(buttonByText('Settle', rows[0] as HTMLElement));

@@ -5,6 +5,7 @@ import { errorMessage } from '@/api/errors';
 import type { ItemBundle, ItemBundleSearchResult } from '@/types';
 import { Button } from '../ui/Button';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { BundleCreationModal } from './BundleCreationModal';
 
 export interface BundleTableProps {
@@ -79,28 +80,28 @@ export const BundleTable: React.FC<BundleTableProps> = ({ itemId, baseUnit, bund
       {bundles.length === 0 ? (
         <p className="text-xs text-slate-400">No bundles configured. Items sell in {baseUnit} only.</p>
       ) : (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-left text-slate-400">
-              <th className="py-1 font-medium">Name</th>
-              <th className="py-1 font-medium text-right">Multiplier</th>
-              <th className="py-1 font-medium text-right">Price</th>
-              <th className="py-1 font-medium">Barcode</th>
-              <th className="py-1" />
-            </tr>
-          </thead>
-          <tbody>
+        <Table dense scroll="page">
+          <TableHeader>
+            <TableRow className="text-left text-slate-400">
+              <TableHead className="py-1 font-medium">Name</TableHead>
+              <TableHead className="py-1 font-medium text-right">Multiplier</TableHead>
+              <TableHead className="py-1 font-medium text-right">Price</TableHead>
+              <TableHead className="py-1 font-medium">Barcode</TableHead>
+              <TableHead className="py-1" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {bundles.map((b) => (
-              <tr key={b.bundleId} data-testid="bundle-row" className="border-t border-slate-100 dark:border-slate-800">
-                <td className="py-1 font-medium">{b.bundleName}</td>
-                <td className="py-1 text-right font-mono">
+              <TableRow key={b.bundleId} data-testid="bundle-row" >
+                <TableCell className="py-1 font-medium">{b.bundleName}</TableCell>
+                <TableCell className="py-1 text-right font-mono">
                   × {b.unitsPerBundle} {baseUnit}
-                </td>
-                <td className="py-1 text-right">
+                </TableCell>
+                <TableCell className="py-1 text-right">
                   {b.bundlePrice != null ? <CurrencyDisplay amount={b.bundlePrice} size="sm" /> : '—'}
-                </td>
-                <td className="py-1 font-mono text-slate-500">{b.barcode || '—'}</td>
-                <td className="py-1 text-right whitespace-nowrap">
+                </TableCell>
+                <TableCell className="py-1 font-mono text-slate-500">{b.barcode || '—'}</TableCell>
+                <TableCell className="py-1 text-right whitespace-nowrap">
                   {confirmId === b.bundleId ? (
                     <>
                       <button
@@ -138,11 +139,11 @@ export const BundleTable: React.FC<BundleTableProps> = ({ itemId, baseUnit, bund
                       </button>
                     </>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
 
       {error && (
