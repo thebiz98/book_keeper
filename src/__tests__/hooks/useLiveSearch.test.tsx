@@ -199,4 +199,26 @@ describe('useLiveSearch', () => {
     expect(out.current.query).toBe('');
     expect(out.current.results).toEqual([]);
   });
+
+  it('StrictMode remount: the initial fetch still settles (lists stuck on loading regression)', async () => {
+    // React StrictMode mounts, unmounts and re-mounts every component in dev. The unmount
+    // invalidates the first request; the remount must start a fresh one, not wait on the stale one.
+    const fetcher = vi.fn(
+      (q: string) => new Promise<string[]>((resolve) => setTimeout(() => resolve([`all:${q}`]), 20))
+    );
+    const out: { current: R } = { current: undefined as unknown as R };
+    const Probe: React.FC = () => {
+      out.current = useLiveSearch<string[]>({ initial: [], fetcher, emptyBehavior: 'fetch', deps: ['ALL', 1] });
+      return null;
+    };
+    render(
+      <React.StrictMode>
+        <Probe />
+      </React.StrictMode>
+    );
+    await ms(50);
+    expect(out.current.isLoading).toBe(false);
+    expect(out.current.results).toEqual(['all:']);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });
