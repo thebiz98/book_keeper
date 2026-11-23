@@ -9,7 +9,7 @@ All milestones M1–M6 are done. Gate (`bash run_e2e_tests.sh`): 54 backend test
 |---|---|
 | Domain, DTOs, contracts | `src-tauri/src/core`, `src-tauri/src/{data,services}/contracts` |
 | Services | `src-tauri/src/services/impl` |
-| SQLite (pool, schema v2, unit of work, FTS5, 12 repos) | `src-tauri/src/data/sqlite` |
+| SQLite (pool, schema v3, unit of work, FTS5, 12 repos) | `src-tauri/src/data/sqlite` |
 | Bootstrap | `app_state::build_sqlite_app_state(db_path)` |
 | IPC (49 commands) | `src-tauri/src/api`, `src-tauri/src/main.rs` |
 | Frontend | `src/` — one IPC boundary in `src/api/ipc.ts` (`invokeCmd`, converts snake_case ↔ camelCase) |
@@ -40,6 +40,12 @@ Windows 11 ARM64 (verified 2026-11-22): requires VS Build Tools 2022 with the **
 ## Branch feat/sticky-table-headers (FR-10 rev., DD-43; frontend only, no schema)
 - Shared `Table` has a sticky opaque header and four scroll modes (`bounded` default, `fill`, `page`, `none`). Shipped with the **`border-collapse` + sticky `th` + inset shadow line** variant (the lower-risk fallback); the `border-separate` variant was not used. `DataTable` no longer adds its own scroll box. Full-page lists (Inventory, Sales/Purchase history, Parties, Credit & Dues) fill the page height and scroll inside; cart and inward tables scroll inside and keep the newest line in view; hand-rolled tables moved onto the shared `Table` (nested ones use `none`). `ImportItemsDialog` tables unchanged (already sticky). New tables must use `Table` with a `scroll` mode; nested ones `none`.
 - **Manual `tauri dev` checklist (not done yet, light and dark):** (1) Inventory with more than 30 items: the header stays put and is opaque, the pager stays visible, no double scrollbar at 1366x768, and row separator lines look right. (2) Narrow window: horizontal scroll, header scrolls sideways with its columns. (3) Sales and Purchase history, Parties, Credit & Dues behave like 1; expanding a party shows open bills with a plain (non-sticky) header that does not cover the outer header. (4) Inventory row expand shows the lot table correctly. (5) New Sale: add 20 lines; the cart scrolls inside itself, the header stays, the newest line is visible. (6) New Purchase: same. (7) Bill detail and party ledger drawers with many rows: header sticks to the top of the drawer body. (8) Returns forms, Dashboard recent, Reports valuation look right. (9) Very small window: `main` scrolls and tables keep 240px.
+
+## Branch feat/item-type (FR-21, DD-42; migration v3)
+- Schema is now **v3**: `items.item_type` (`PHYSICAL` default | `SERVICE`). `ItemType` is on `Item`, `ItemSearchResult` and both item payloads; the services reject `SERVICE` (ValidationError field `item_type`). The UI shows a read-only "Type: Physical (stocked item)" line in the item drawer and never sends `itemType`.
+- Frozen schema fixtures now live in `src-tauri/tests/fixtures/schema/vN.sql` (v1 = full aligned schema, v2, ...). Each later migration adds its own `vN.sql` and builds the previous database from fixtures 1..N-1. Never edit a shipped fixture; never assert `latest_version() == N`.
+- **Pre-migration backup (DD-29):** a real upgrade (database already has applied migrations and one is pending) writes `<db dir>/backups/book_keeper_premigration_v{from}_to_v{to}_YYYYMMDD_HHMM.db` via `VACUUM INTO` before applying anything; failure aborts the upgrade untouched. Fresh, current and in-memory databases write nothing. Rotation deletes these after `retentionDays` (only in the configured backup folder). Later migration tests must tolerate the backups folder.
+- **Manual check:** start the app on an existing v2 `shop.db`: it upgrades, a `book_keeper_premigration_v2_to_v3_*.db` appears in `backups/` next to it, existing items open with "Type: Physical (stocked item)", and Add Item shows the same line.
 
 ## Next (not started)
 - Package and run with `tauri build` on a desktop machine, then do a manual UI pass in Tauri mode (so far only the mock client and IPC contracts have been checked).

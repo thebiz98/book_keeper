@@ -18,6 +18,8 @@
 | `report_service_test` | Dashboard (today-scoped), P&L, valuation (§11.9) |
 | `e2e_lifecycle_test`, `e2e_scenarios_test` | Lifecycle and real-world counter scenarios S1–S4 |
 | `e2e_tier3_combinations_test` | Cross-feature combinations |
+| `schema_test` | Migration runner, CHECK/enum rules, frozen upgrade fixtures under `tests/fixtures/schema/` (v1, v2, ...), pre-migration backup |
+| `item_service_test` | Item/bundle master data, MRP, item type (TC-TYP-01..04) |
 | `sqlite_smoke_test` | `build_sqlite_app_state` bootstrap end to end |
 
 Shared fixtures live in `tests/common/fixtures.rs`. Low-level strategy and repository tests use `seed_sale_line` / `ensure_item` / `ensure_purchase` / `ensure_lot` / `seed_adjustment` to create the parent rows that foreign keys require.
