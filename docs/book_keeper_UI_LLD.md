@@ -614,3 +614,11 @@ gantt
 * **After save:** sale: `handleSelectItem` (focus Qty); purchase: `chooseItem` (focus Purchase Price).
 * **Category / barcode removal (D5):** Inventory loses the Category column and filter; `ItemEditDrawer` loses both fields but an edit re-sends the stored `category` / `barcode` unchanged (never null). Item validation and the backend `field` to input map live in `itemForm.ts` and are shared by the drawer and the modal.
 * **Labels (V3):** lot `unit_cost` is "Purchase Price"; item `default_sale_price` is "Sale Price"; sale screen rates stay "Rate".
+
+## Bill printing (FR-27, DD-53, `feat/bill-print`, v1.2)
+* **No Rust, no schema.** A4 print of sale and purchase bills through the webview: render a print view into `#print-root`, call `window.print()` (system dialog: printer or Save as PDF), unmount on `afterprint`.
+* **`BillPrintDocument`** (`src/components/print/`): pure `{kind, shop, detail}`. Header from the existing Shop Profile only (name, address, phone, GSTIN/Tax ID; empty fields omitted). Meta: code, date, party (sale: "Walk-in" when empty; purchase: vendor plus `supplierInvoiceRef`). Lines: `# | Item | Qty (pack) | Rate | Amount`, Rate per pack = `total / packQuantity` (per base unit for loose lines). Totals: Items subtotal, each charge (+) and discount (-) by name, Grand Total, Paid, Balance due (only if > 0), status, notes.
+* **`usePrintBill`**: mounts a `createRoot` into a `div#print-root` appended to `body`, waits two `requestAnimationFrame`s, calls `window.print()`, and unmounts on `afterprint` (a 60 s timeout is the fallback). `printBillById(kind, id)` loads the bill and the shop profile (`loadShopSettings` when not yet loaded).
+* **CSS** (`src/index.css`): screen `#print-root{display:none}`. Print: `@page{size:A4;margin:12mm}`, `body > *:not(#print-root){display:none}`, light colours forced (white background, black text) even in the dark theme, `thead{display:table-header-group}` so the header repeats, `tr{break-inside:avoid}`.
+* **Entry points:** `BillDetailDrawer` footer **Print** (Ctrl+P while the drawer is open, `preventDefault`) for both kinds; `SaleSummaryModal` result step **Print bill (P)**. Settings Shop Profile card help text: "Printed at the top of bills".
+* **Out of scope:** thermal receipts, logos/footers/templates, direct PDF export, printing returns.

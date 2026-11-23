@@ -26,3 +26,113 @@ body {
   color: var(--foreground);
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
+
+/* Bill printing (FR-27): the print view lives in #print-root, hidden on screen. */
+#print-root {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    background: #fff !important;
+    color: #000 !important;
+    color-scheme: light !important;
+  }
+
+  /* Hide the whole app (and any portal layers); only the print view stays. */
+  body > *:not(#print-root) {
+    display: none !important;
+  }
+
+  #print-root {
+    display: block !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 11pt;
+  }
+
+  #print-root,
+  #print-root * {
+    color: #000 !important;
+    background: transparent !important;
+    border-color: #000 !important;
+  }
+
+  #print-root .print-shop {
+    text-align: center;
+    margin-bottom: 4mm;
+  }
+  #print-root .print-shop h1 {
+    font-size: 18pt;
+    font-weight: 700;
+    margin: 0 0 1mm;
+  }
+  #print-root .print-title {
+    font-size: 13pt;
+    font-weight: 700;
+    text-align: center;
+    margin: 0 0 3mm;
+    border-top: 1px solid #000;
+    border-bottom: 1px solid #000;
+    padding: 1mm 0;
+  }
+  #print-root .print-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1mm 6mm;
+    margin-bottom: 4mm;
+  }
+  #print-root .print-lines {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  #print-root .print-lines thead {
+    display: table-header-group;
+  }
+  #print-root .print-lines th {
+    text-align: left;
+    border-bottom: 1px solid #000;
+    padding: 1mm 2mm;
+  }
+  #print-root .print-lines td {
+    padding: 1mm 2mm;
+    border-bottom: 1px solid #ccc !important;
+  }
+  #print-root .print-lines tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #print-root .print-num {
+    width: 8mm;
+  }
+  #print-root .print-right {
+    text-align: right !important;
+  }
+  #print-root .print-totals {
+    width: 70mm;
+    margin: 4mm 0 0 auto;
+    break-inside: avoid;
+  }
+  #print-root .print-totals > div {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5mm 0;
+  }
+  #print-root .print-totals .print-grand {
+    font-weight: 700;
+    border-top: 1px solid #000;
+    border-bottom: 1px solid #000;
+    margin: 1mm 0;
+  }
+  #print-root .print-notes {
+    margin-top: 4mm;
+    break-inside: avoid;
+  }
+}
