@@ -22,7 +22,7 @@ describe('MockApiClient contract shapes', () => {
       'getBundleSuggestions', 'createBundle', 'updateBundle', 'deleteBundle',
       'getPartyDuesSummary', 'settleBillPayment', 'getPartyLedger',
       'createParty', 'updateParty', 'getParty', 'listParties', 'searchParties',
-      'updateSale', 'deleteSale', 'updatePurchase', 'deletePurchase', 'deleteReturn', 'getBillEditGuard',
+      'updateSale', 'deleteSale', 'updatePurchase', 'updateLotPurchasePrice', 'deletePurchase', 'deleteReturn', 'getBillEditGuard',
       'getNextReturnCode', 'createCustomerReturn', 'createVendorReturn', 'getReturnDetails',
       'listReturns', 'createStockAdjustment', 'setItemStock', 'getItemLots', 'getItemSales', 'getItemPurchases', 'listStockAdjustments',
       'getDashboardMetrics', 'getLowStockAlerts', 'getSalesPurchaseTrend', 'getRecentTransactions',

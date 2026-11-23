@@ -208,6 +208,31 @@ export interface UpdateSettlementPayload {
   notes: string | null;
 }
 
+/** FR-25: new Purchase Price of one lot (per pack when the lot has a pack label, else per base unit). */
+export interface UpdateLotPricePayload {
+  purchaseItemId: number;
+  unitPrice: number;
+}
+
+export interface LotPriceBillEffect {
+  purchaseId: number;
+  transactionCode: string;
+  oldTotal: number;
+  newTotal: number;
+  oldPaid: number;
+  newPaid: number;
+  balanceDue: number;
+  paymentStatus: PaymentStatus;
+}
+
+export interface LotPriceUpdateResult {
+  purchaseItemId: number;
+  oldUnitCost: number;
+  newUnitCost: number;
+  /** Null for OPENING / ADJUSTMENT lots (no bill). */
+  bill: LotPriceBillEffect | null;
+}
+
 export interface DeleteSettlementResult {
   removedAmount: number;
   transactionId: number;
@@ -486,6 +511,8 @@ export interface ApiClient {
   getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailView>;
   updatePurchase(purchaseId: number, payload: CreatePurchasePayload): Promise<PurchaseSummaryResponse>;
   deletePurchase(purchaseId: number): Promise<DeleteBillResult>;
+  /** FR-25: re-price one lot (bill + payment rule for PURCHASE lots; re-cost only otherwise). */
+  updateLotPurchasePrice(payload: UpdateLotPricePayload): Promise<LotPriceUpdateResult>;
 
   // Items & Catalog
   searchItemsFts(query: string, limit?: number): Promise<ItemSearchResult[]>;
