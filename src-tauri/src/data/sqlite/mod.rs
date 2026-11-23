@@ -11,7 +11,8 @@
 //!   `shop_settings`, `items`, `item_bundles`, `parties`, `purchase_transactions`,
 //!   `purchase_items`, `sale_transactions`, `sale_items`, `sale_stock_allocations`,
 //!   `return_transactions`, `return_items`, `payment_settlements`, `stock_adjustments`,
-//!   `stock_outflow_allocations`, plus FTS5 virtual table `item_search_fts`.
+//!   `stock_outflow_allocations`, `code_sequences`, `expense_types`, `expenses`, plus FTS5 virtual
+//!   tables `item_search_fts`, `party_search_fts` and `expense_type_search_fts`.
 //! * **Columns** are exactly the Rust entity field names (`core::entities`), same order; repositories
 //!   use explicit named column lists (never positional `SELECT *`).
 //!   `id INTEGER PRIMARY KEY AUTOINCREMENT`. Booleans are `INTEGER` 0/1, money/qty `REAL`,

@@ -9,7 +9,13 @@
 //! over codes that are exactly `prefix` + digits. Anything else (legacy or hand-made codes such as
 //! `PUR-C1`) is ignored, gaps are never refilled, and the sequence keeps growing past the zero
 //! padding (`SAL-9999` then `SAL-10000`).
-use rusqlite::{params, Connection};
+//!
+//! **No reuse (FR-20, schema v6):** the table `code_sequences(prefix, last_value)` is a high-water
+//! mark. A code is `MAX(last_value, MAX(code number in the table)) + 1`; on a writable connection
+//! the issued number is upserted into `last_value` inside the caller's transaction, so deleting the
+//! newest bill never frees its code. Read-only (`query_only`) previews compute the same number
+//! without writing.
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::core::error::AppError;
 use crate::core::value_objects::LotSource;
@@ -31,6 +37,7 @@ pub const RETURN_CODE: CodeSeq = CodeSeq { prefix: "RET-", start: 1001, width: 4
 pub const ADJUSTMENT_LOT_CODE: CodeSeq = CodeSeq { prefix: "ADJ-", start: 1, width: 4 };
 pub const OPENING_LOT_CODE: CodeSeq = CodeSeq { prefix: "OPN-", start: 1, width: 4 };
 pub const RETURN_LOT_CODE: CodeSeq = CodeSeq { prefix: "RTL-", start: 1, width: 4 };
+pub const EXPENSE_CODE: CodeSeq = CodeSeq { prefix: "EXP-", start: 1001, width: 4 };
 
 /// The `purchase_transactions` sequence for a lot header of the given source (DD-07).
 pub fn seq_for_source(source: LotSource) -> &'static CodeSeq {
@@ -58,12 +65,24 @@ pub fn next_code(
     let starts_with_digit = format!("{}[0-9]*", seq.prefix);
     let has_non_digit = format!("{}*[^0-9]*", seq.prefix);
     let max: Option<i64> = conn.query_row(&sql, params![digits_start, starts_with_digit, has_non_digit], |r| r.get(0))?;
-    let next = match max {
-        Some(m) => m
-            .checked_add(1)
+    let mark: Option<i64> = conn
+        .query_row("SELECT last_value FROM code_sequences WHERE prefix = ?1", [seq.prefix], |r| r.get(0))
+        .optional()?;
+    let base = max.unwrap_or(0).max(mark.unwrap_or(0));
+    let next = if base == 0 {
+        seq.start
+    } else {
+        base.checked_add(1)
             .ok_or_else(|| AppError::DatabaseError(format!("{} code sequence exhausted", seq.prefix)))?
-            .max(seq.start),
-        None => seq.start,
+            .max(seq.start)
     };
+    let query_only: i64 = conn.query_row("PRAGMA query_only", [], |r| r.get(0))?;
+    if query_only == 0 {
+        conn.execute(
+            "INSERT INTO code_sequences (prefix, last_value) VALUES (?1, ?2) \
+             ON CONFLICT(prefix) DO UPDATE SET last_value = excluded.last_value",
+            params![seq.prefix, next],
+        )?;
+    }
     Ok(format!("{}{:0width$}", seq.prefix, next, width = seq.width))
 }

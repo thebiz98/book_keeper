@@ -422,6 +422,9 @@ const V1: &str = include_str!("fixtures/schema/v1.sql");
 const V2: &str = include_str!("fixtures/schema/v2.sql");
 const V3: &str = include_str!("fixtures/schema/v3.sql");
 const V4: &str = include_str!("fixtures/schema/v4.sql");
+const V5: &str = include_str!("fixtures/schema/v5.sql");
+#[allow(dead_code)]
+const V6: &str = include_str!("fixtures/schema/v6.sql");
 
 /// Builds a database at the version reached by replaying `steps` (fixtures 1..N).
 fn db_from_fixtures(tag: &str, steps: &[&str]) -> (PathBuf, Connection) {
@@ -704,5 +707,69 @@ fn v4_database_upgrades_stock_adjustments_to_accept_unrecorded_stock() {
     let ic: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
     assert_eq!(ic, "ok");
     drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn v5_database_with_data_upgrades_to_v6_expenses_and_seeds_code_sequences() {
+    let (path, conn) = db_from_fixtures("v5up", &[V1, V2, V3, V4, V5]);
+    conn.execute_batch(
+        "INSERT INTO items (id, name) VALUES (1, 'Pen');
+         INSERT INTO purchase_transactions (id, transaction_code, transaction_date, payment_status, total_amount)
+           VALUES (1, 'PUR-1007', '2026-11-01', 'PAID', 50), (2, 'OPN-0003', '2026-11-01', 'PAID', 0),
+                  (3, 'PUR-C1', '2026-11-01', 'PAID', 0);
+         INSERT INTO sale_transactions (id, transaction_code, transaction_date, payment_status, total_amount)
+           VALUES (1, 'SAL-1004', '2026-11-02', 'PAID', 20);",
+    )
+    .unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 6);
+    let seq = |p: &str| -> i64 {
+        conn.query_row("SELECT last_value FROM code_sequences WHERE prefix = ?1", [p], |r| r.get(0)).unwrap()
+    };
+    assert_eq!(seq("PUR-"), 1007, "non-numeric PUR-C1 ignored");
+    assert_eq!(seq("OPN-"), 3);
+    assert_eq!(seq("SAL-"), 1004);
+    assert_eq!(seq("ADJ-"), 0);
+    assert_eq!(seq("EXP-"), 0);
+    let pur: i64 = conn.query_row("SELECT COUNT(*) FROM purchase_transactions", [], |r| r.get(0)).unwrap();
+    assert_eq!(pur, 3);
+    for t in ["expense_types", "expenses"] {
+        let n: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+    }
+    let fts: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name='expense_type_search_fts'", [], |r| r.get(0)).unwrap();
+    assert_eq!(fts, 1);
+    let fk: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(fk, 0);
+    let before = current_version(&conn).unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(current_version(&conn).unwrap(), before);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn expense_checks() {
+    let (path, pool) = fresh();
+    let conn = pool.get().unwrap();
+    assert!(latest_version() >= 6);
+    conn.execute("INSERT INTO expense_types (id, name) VALUES (1, 'Printer Ink')", []).unwrap();
+    assert!(conn.execute("INSERT INTO expense_types (name) VALUES ('printer ink')", []).is_err(), "NOCASE unique");
+    assert!(conn.execute("INSERT INTO expense_types (name) VALUES ('   ')", []).is_err(), "blank");
+    let ins = |code: &str, type_id: i64, amount: f64| {
+        conn.execute(
+            "INSERT INTO expenses (expense_code, expense_date, expense_type_id, expense_type_name, amount)
+             VALUES (?1, '2026-11-01', ?2, 'Printer Ink', ?3)",
+            rusqlite::params![code, type_id, amount],
+        )
+    };
+    assert!(ins("EXP-1001", 1, 0.0).is_err());
+    assert!(ins("EXP-1001", 1, -1.0).is_err());
+    assert!(ins("EXP-1001", 99, 5.0).is_err(), "dangling type (FK)");
+    assert!(ins("EXP-1001", 1, 5.0).is_ok());
+    assert!(ins("EXP-1001", 1, 6.0).is_err(), "duplicate code");
+    drop(conn);
+    drop(pool);
     cleanup(&path);
 }

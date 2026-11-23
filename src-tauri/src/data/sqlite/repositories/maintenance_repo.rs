@@ -33,6 +33,7 @@ impl SqliteMaintenanceRepository {
 
 /// Child tables first. OPENING lots (and their purchase headers) are kept.
 const TRANSACTION_STEPS: &[(&str, &str)] = &[
+    ("expenses", "DELETE FROM expenses"),
     ("stock_outflow_allocations", "DELETE FROM stock_outflow_allocations"),
     ("sale_stock_allocations", "DELETE FROM sale_stock_allocations"),
     ("payment_settlements", "DELETE FROM payment_settlements"),
@@ -47,12 +48,17 @@ const TRANSACTION_STEPS: &[(&str, &str)] = &[
          (SELECT id FROM purchase_transactions WHERE source <> 'OPENING')",
     ),
     ("purchase_transactions", "DELETE FROM purchase_transactions WHERE source <> 'OPENING'"),
+    // Codes restart (DD-34). OPN- stays: OPENING lots are kept.
+    (
+        "code_sequences",
+        "DELETE FROM code_sequences WHERE prefix IN ('SAL-', 'PUR-', 'ADJ-', 'RTL-', 'RET-', 'EXP-')",
+    ),
 ];
 
 const TRANSACTION_TABLES: &[&str] = &[
     "stock_outflow_allocations", "sale_stock_allocations", "payment_settlements", "return_items",
     "return_transactions", "sale_items", "sale_transactions", "stock_adjustments",
-    "purchase_items", "purchase_transactions",
+    "purchase_items", "purchase_transactions", "expenses",
 ];
 
 const CATALOG_STEPS: &[(&str, &str)] = &[
@@ -61,9 +67,11 @@ const CATALOG_STEPS: &[(&str, &str)] = &[
     ("item_bundles", "DELETE FROM item_bundles"),
     ("items", "DELETE FROM items"),
     ("parties", "DELETE FROM parties"),
+    ("expense_types", "DELETE FROM expense_types"),
+    ("code_sequences", "DELETE FROM code_sequences"),
 ];
 
-const CATALOG_TABLES: &[&str] = &["purchase_items", "purchase_transactions", "item_bundles", "items", "parties"];
+const CATALOG_TABLES: &[&str] = &["purchase_items", "purchase_transactions", "item_bundles", "items", "parties", "expense_types"];
 
 impl MaintenanceRepository for SqliteMaintenanceRepository {
     fn clear_transactions(&mut self) -> Result<Vec<(String, i64)>, AppError> {
