@@ -47,6 +47,7 @@ impl SqliteUnitOfWork {
             outflow_allocations: SqliteOutflowAllocationRepository::new(conn.clone()),
             settings: SqliteSettingRepository::new(conn.clone()),
             parties: SqlitePartyRepository::new(conn.clone()),
+            expenses: SqliteExpenseRepository::new(conn.clone()),
             reports: SqliteReportRepository::new(conn.clone()),
             maintenance: SqliteMaintenanceRepository::new(conn.clone()),
             conn,
@@ -81,6 +82,7 @@ pub struct SqliteTransactionContext {
     outflow_allocations: SqliteOutflowAllocationRepository,
     settings: SqliteSettingRepository,
     parties: SqlitePartyRepository,
+    expenses: SqliteExpenseRepository,
     reports: SqliteReportRepository,
     maintenance: SqliteMaintenanceRepository,
 }
@@ -142,6 +144,7 @@ impl TransactionContext for SqliteTransactionContext {
     fn outflow_allocations(&mut self) -> &mut dyn OutflowAllocationRepository { &mut self.outflow_allocations }
     fn settings(&mut self) -> &mut dyn SettingRepository { &mut self.settings }
     fn parties(&mut self) -> &mut dyn PartyRepository { &mut self.parties }
+    fn expenses(&mut self) -> &mut dyn ExpenseRepository { &mut self.expenses }
     fn reports(&mut self) -> &mut dyn ReportRepository { &mut self.reports }
     fn maintenance(&mut self) -> &mut dyn MaintenanceRepository { &mut self.maintenance }
 }

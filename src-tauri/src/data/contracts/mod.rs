@@ -1,6 +1,7 @@
 pub mod adjustment_repository;
 pub mod allocation_repository;
 pub mod bundle_repository;
+pub mod expense_repository;
 pub mod item_repository;
 pub mod maintenance_repository;
 pub mod outflow_allocation_repository;
@@ -18,6 +19,7 @@ pub mod vedbill_reader;
 pub use adjustment_repository::AdjustmentRepository;
 pub use allocation_repository::AllocationRepository;
 pub use bundle_repository::BundleRepository;
+pub use expense_repository::ExpenseRepository;
 pub use item_repository::ItemRepository;
 pub use maintenance_repository::MaintenanceRepository;
 pub use outflow_allocation_repository::OutflowAllocationRepository;

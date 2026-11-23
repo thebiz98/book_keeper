@@ -2,6 +2,7 @@ use crate::core::error::AppError;
 use super::adjustment_repository::AdjustmentRepository;
 use super::allocation_repository::AllocationRepository;
 use super::bundle_repository::BundleRepository;
+use super::expense_repository::ExpenseRepository;
 use super::item_repository::ItemRepository;
 use super::maintenance_repository::MaintenanceRepository;
 use super::outflow_allocation_repository::OutflowAllocationRepository;
@@ -58,6 +59,7 @@ pub trait TransactionContext {
     fn outflow_allocations(&mut self) -> &mut dyn OutflowAllocationRepository;
     fn settings(&mut self) -> &mut dyn SettingRepository;
     fn parties(&mut self) -> &mut dyn PartyRepository;
+    fn expenses(&mut self) -> &mut dyn ExpenseRepository;
     fn reports(&mut self) -> &mut dyn ReportRepository;
     /// Bulk deletes for the testing-only data reset.
     fn maintenance(&mut self) -> &mut dyn MaintenanceRepository;
