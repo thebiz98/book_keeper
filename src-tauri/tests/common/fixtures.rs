@@ -106,6 +106,9 @@ pub fn create_test_purchase_tx(
         balance_due: balance.max(0.0),
         notes: None,
         created_at: format!("{}T10:00:00Z", date),
+        items_subtotal: total,
+        charges_total: 0.0,
+        discounts_total: 0.0,
     }
 }
 
@@ -167,6 +170,9 @@ pub fn create_test_sale_tx(
         balance_due: balance.max(0.0),
         notes: None,
         created_at: format!("{}T10:00:00Z", date),
+        items_subtotal: total,
+        charges_total: 0.0,
+        discounts_total: 0.0,
     }
 }
 

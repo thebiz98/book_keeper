@@ -7,6 +7,10 @@ use crate::core::dtos::{
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::money::{check_date, round2, MONEY_EPS};
+use crate::services::r#impl::bill_math::{
+    compute_bill_totals, insert_bill_charges, net_unit_price, resolve_bill_charges, sale_payment_split,
+    validate_charge_inputs,
+};
 use crate::core::value_objects::{PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::inventory_service::InventoryService;
@@ -51,6 +55,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             return Err(validation("items", "items cannot be empty"));
         }
         check_date("transaction_date", &payload.transaction_date)?;
+        validate_charge_inputs(&payload.charges)?;
         if !payload.paid_amount.is_finite() || payload.paid_amount < 0.0 {
             return Err(validation("paid_amount", "paid_amount must be a non-negative number"));
         }
@@ -89,7 +94,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         // 3. Line resolution: active item, bundle belongs to the item, snapshots, round2 totals.
         let mut resolved = Vec::with_capacity(payload.items.len());
         let mut required: BTreeMap<i64, f64> = BTreeMap::new();
-        let mut total_amount = 0.0;
+        let mut line_totals: Vec<f64> = Vec::with_capacity(payload.items.len());
         for line in &payload.items {
             let item = tx.items().find_by_id(line.item_id)?.ok_or_else(|| AppError::NotFound {
                 entity: "Item".to_string(),
@@ -119,47 +124,21 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             };
             let base_qty = line.bundle_quantity * multiplier;
             let line_total = round2(line.bundle_quantity * line.unit_price);
-            total_amount += line_total;
+            line_totals.push(line_total);
             *required.entry(item.id).or_insert(0.0) += base_qty;
             resolved.push((item, pack_label, line.bundle_quantity, base_qty, line_total));
         }
-        let total_amount = round2(total_amount);
 
         // 4. Aggregated stock check across all lines of the same item (DD-10).
         let requirements: Vec<(i64, f64)> = required.into_iter().collect();
         self.inventory_service.validate_stock_availability(&mut *tx, &requirements)?;
 
-        // 5. Payment status cross-check (DD-02).
+        // 5. Charges (FR-19), totals and the payment cross-check (DD-02).
+        let charges = resolve_bill_charges(&mut *tx, TransactionType::Sale, &payload.charges)?;
+        let totals = compute_bill_totals(&line_totals, &charges)?;
+        let total_amount = totals.total_amount;
         let paid = round2(payload.paid_amount);
-        let (upfront, change) = match payload.payment_status {
-            PaymentStatus::Paid => {
-                if total_amount <= MONEY_EPS {
-                    if paid > MONEY_EPS {
-                        return Err(validation("paid_amount", "A zero-value bill takes no payment"));
-                    }
-                    (0.0, 0.0)
-                } else if paid + MONEY_EPS < total_amount {
-                    return Err(validation("paid_amount", "PAID needs paid_amount >= total"));
-                } else {
-                    (total_amount, round2((paid - total_amount).max(0.0)))
-                }
-            }
-            PaymentStatus::Partial => {
-                if !(paid > MONEY_EPS && paid + MONEY_EPS < total_amount) {
-                    return Err(validation("paid_amount", "PARTIAL needs 0 < paid_amount < total"));
-                }
-                (paid, 0.0)
-            }
-            PaymentStatus::Unpaid => {
-                if paid > MONEY_EPS {
-                    return Err(validation("paid_amount", "UNPAID needs paid_amount = 0"));
-                }
-                if total_amount <= MONEY_EPS {
-                    return Err(validation("payment_status", "A zero-value bill must be PAID"));
-                }
-                (0.0, 0.0)
-            }
-        };
+        let (upfront, change) = sale_payment_split(payload.payment_status, total_amount, paid)?;
         if payload.payment_status != PaymentStatus::Paid && payload.party_id.is_none() {
             return Err(validation("party_id", "customer required for credit"));
         }
@@ -179,8 +158,12 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             balance_due: total_amount,
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
+            items_subtotal: totals.items_subtotal,
+            charges_total: totals.charges_total,
+            discounts_total: totals.discounts_total,
         };
         let sale_id = tx.sales().create_transaction(&sale_tx)?;
+        insert_bill_charges(&mut *tx, TransactionType::Sale, sale_id, &charges)?;
 
         // 7. Lines and stock depletion.
         for (item, pack_label, pack_quantity, base_qty, line_total) in resolved {
@@ -269,20 +252,24 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             let bundle_name = item.pack_label.clone();
             let allocations = tx.allocations().find_by_sale_item_id(item.id)?;
             let returned_quantity = returned.get(&item.id).copied().unwrap_or(0.0);
+            let net_unit_price = net_unit_price(item.unit_price, sale.items_subtotal, sale.discounts_total);
             details.push(SaleItemDetail {
                 sale_item: item,
                 item_name,
                 bundle_name,
                 returned_quantity,
                 allocations,
+                net_unit_price,
             });
         }
         let settlements = tx.settlements().list_by_transaction(TransactionType::Sale, sale_id)?;
+        let charges = tx.bill_charges().list_by_transaction(TransactionType::Sale, sale_id)?;
         Ok(SaleDetailView {
             sale,
             party,
             items: details,
             settlements,
+            charges,
         })
     }
 }

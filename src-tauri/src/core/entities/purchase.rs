@@ -17,6 +17,10 @@ pub struct PurchaseTransaction {
     pub balance_due: f64,
     pub notes: Option<String>,
     pub created_at: String,
+    /// Σ line totals for PURCHASE-source bills (0 on source-lot headers); FR-19.
+    pub items_subtotal: f64,
+    pub charges_total: f64,
+    pub discounts_total: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

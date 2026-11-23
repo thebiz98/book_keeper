@@ -1,4 +1,4 @@
-//! `FtsSpec` constants, one per FTS5 table. A later branch adds `CHARGE_TYPE_FTS` (v7) here.
+//! `FtsSpec` constants, one per FTS5 table.
 use super::fts::FtsSpec;
 
 /// Item name/category/barcode plus one extra row per bundle barcode (several rows per key).
@@ -39,4 +39,14 @@ pub static EXPENSE_TYPE_FTS: FtsSpec = FtsSpec {
     source_all_sql: "SELECT id, name FROM expense_types WHERE is_active = 1",
     source_one_sql: "SELECT id, name FROM expense_types WHERE is_active = 1 AND id = ?1",
     source_count_sql: "SELECT COUNT(*) FROM expense_types WHERE is_active = 1",
+};
+
+/// Charge/discount type name (v7). Typeahead for bill charge lines.
+pub static CHARGE_TYPE_FTS: FtsSpec = FtsSpec {
+    table: "charge_type_search_fts",
+    key_column: "charge_type_id",
+    columns: &["name"],
+    source_all_sql: "SELECT id, name FROM charge_types WHERE is_active = 1",
+    source_one_sql: "SELECT id, name FROM charge_types WHERE is_active = 1 AND id = ?1",
+    source_count_sql: "SELECT COUNT(*) FROM charge_types WHERE is_active = 1",
 };

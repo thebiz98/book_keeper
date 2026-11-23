@@ -1,6 +1,8 @@
 pub mod adjustment_repository;
 pub mod allocation_repository;
+pub mod bill_charge_repository;
 pub mod bundle_repository;
+pub mod charge_type_repository;
 pub mod expense_repository;
 pub mod item_repository;
 pub mod maintenance_repository;
@@ -18,7 +20,9 @@ pub mod vedbill_reader;
 
 pub use adjustment_repository::AdjustmentRepository;
 pub use allocation_repository::AllocationRepository;
+pub use bill_charge_repository::BillChargeRepository;
 pub use bundle_repository::BundleRepository;
+pub use charge_type_repository::ChargeTypeRepository;
 pub use expense_repository::ExpenseRepository;
 pub use item_repository::ItemRepository;
 pub use maintenance_repository::MaintenanceRepository;

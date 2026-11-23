@@ -37,6 +37,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
     // STEP 1: Inward Purchase 1 (Lot #1) - 100 Pencils @ ₹5/pc (Paid = ₹500)
     println!("--- Step 1: Purchase 100 Pencils @ ₹5/pc ---");
     let pur1_payload = CreatePurchasePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -73,6 +74,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
     // STEP 2: Inward Purchase 2 (Lot #2) - 50 Pencils @ ₹6/pc (Paid = ₹300)
     println!("--- Step 2: Purchase 50 Pencils @ ₹6/pc ---");
     let pur2_payload = CreatePurchasePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -107,6 +109,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
     // STEP 3: Counter Sale - 120 Pencils @ ₹10/pc (Paid = ₹1,200)
     println!("--- Step 3: Sale 120 Pencils @ ₹10/pc ---");
     let sale_payload = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),

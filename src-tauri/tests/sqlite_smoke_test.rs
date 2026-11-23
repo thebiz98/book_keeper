@@ -28,6 +28,7 @@ fn sqlite_end_to_end_smoke() {
     state
         .purchase_service
         .create_purchase(CreatePurchasePayload {
+            charges: vec![],
             transaction_date: "2026-01-01".to_string(),
             party_id: None,
             supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 100.0,
@@ -40,6 +41,7 @@ fn sqlite_end_to_end_smoke() {
     state
         .sale_service
         .create_sale(CreateSalePayload {
+            charges: vec![],
             transaction_date: "2026-01-02".to_string(),
             party_id: None,
             payment_status: PaymentStatus::Paid, paid_amount: 30.0,
@@ -52,6 +54,7 @@ fn sqlite_end_to_end_smoke() {
     let second = state
         .sale_service
         .create_sale(CreateSalePayload {
+            charges: vec![],
             transaction_date: "2026-01-02".to_string(),
             party_id: None,
             payment_status: PaymentStatus::Paid, paid_amount: 10.0,
@@ -86,12 +89,14 @@ fn sales_history_honours_start_end_date_filter() {
         default_sale_price: 5.0, initial_stock: None, initial_cost: None, bundles: None,
     }).expect("item");
     state.purchase_service.create_purchase(CreatePurchasePayload {
+        charges: vec![],
         transaction_date: "2026-01-01".into(), party_id: None, supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 50.0,
         payment_mode: Some("CASH".into()), notes: None,
         items: vec![CreatePurchaseItemPayload { item_id, bundle_id: None, bundle_quantity: 10.0, unit_cost: 5.0 }],
     }).expect("purchase");
     for date in ["2026-01-05", "2026-02-05"] {
         state.sale_service.create_sale(CreateSalePayload {
+            charges: vec![],
             transaction_date: date.into(), party_id: None, payment_status: PaymentStatus::Paid, paid_amount: 5.0,
             payment_mode: Some("CASH".into()), notes: None,
             items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: 5.0 }],

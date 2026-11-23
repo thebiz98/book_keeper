@@ -244,6 +244,10 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             balance_due: 0.0,
             notes,
             created_at: chrono::Utc::now().to_rfc3339(),
+            // Source-lot headers are not bills: no subtotal, no charges (FR-19).
+            items_subtotal: 0.0,
+            charges_total: 0.0,
+            discounts_total: 0.0,
         };
         let header_id = uow.purchases().create_transaction(&header)?;
         let mut ids = Vec::with_capacity(resolved.len());

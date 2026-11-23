@@ -3,7 +3,9 @@
 
 pub mod adjustment_repo;
 pub mod allocation_repo;
+pub mod bill_charge_repo;
 pub mod bundle_repo;
+pub mod charge_type_repo;
 pub mod expense_repo;
 pub mod item_repo;
 pub mod maintenance_repo;
@@ -18,7 +20,9 @@ pub mod settlement_repo;
 
 pub use adjustment_repo::SqliteAdjustmentRepository;
 pub use allocation_repo::SqliteAllocationRepository;
+pub use bill_charge_repo::SqliteBillChargeRepository;
 pub use bundle_repo::SqliteBundleRepository;
+pub use charge_type_repo::SqliteChargeTypeRepository;
 pub use expense_repo::SqliteExpenseRepository;
 pub use item_repo::SqliteItemRepository;
 pub use maintenance_repo::SqliteMaintenanceRepository;

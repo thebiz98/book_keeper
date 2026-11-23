@@ -263,6 +263,7 @@ fn sale_harness() -> (TestDb, SaleServiceImpl<InventoryServiceImpl<FifoStrategy>
 
 fn sale_payload(qty: f64, status: PaymentStatus, paid: f64, party: Option<i64>) -> CreateSalePayload {
     CreateSalePayload {
+        charges: vec![],
         transaction_date: TODAY.to_string(),
         party_id: party,
         payment_mode: Some("CASH".to_string()),
@@ -330,6 +331,7 @@ fn tc_rep_unrec_2_later_sale_and_writeoff_use_the_entered_cost() {
     let (uow, inv, sale) = unrec_harness();
     inv.set_item_stock(set_stock(1, 45.0, Some(3.0))).unwrap(); // 10 @5 + 35 @3
     sale.create_sale(CreateSalePayload {
+        charges: vec![],
         transaction_date: TODAY.to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),

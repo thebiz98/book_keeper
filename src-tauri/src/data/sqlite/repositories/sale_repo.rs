@@ -9,7 +9,7 @@ use crate::data::contracts::sale_repository::SaleRepository;
 use crate::data::sqlite::code_gen::{next_code, SALE_CODE};
 use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
-const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
+const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total";
 const ITEM_COLS: &str = "id, sale_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_price, total_amount";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<SaleTransaction> {
@@ -26,6 +26,9 @@ fn map_tx(r: &Row<'_>) -> rusqlite::Result<SaleTransaction> {
         balance_due: r.get(9)?,
         notes: r.get(10)?,
         created_at: r.get(11)?,
+        items_subtotal: r.get(12)?,
+        charges_total: r.get(13)?,
+        discounts_total: r.get(14)?,
     })
 }
 
@@ -98,11 +101,11 @@ impl SqliteSaleRepository {
 impl SaleRepository for SqliteSaleRepository {
     fn create_transaction(&mut self, tx: &SaleTransaction) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO sale_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
+            &format!("INSERT INTO sale_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"),
             params![
                 opt_id(tx.id), tx.transaction_code, tx.transaction_date, tx.party_id, tx.party_name,
                 tx.payment_mode, enum_to_sql(&tx.payment_status)?, tx.total_amount, tx.paid_amount, tx.balance_due,
-                tx.notes, tx.created_at
+                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -208,7 +211,7 @@ impl SaleRepository for SqliteSaleRepository {
         let sql = format!(
             "SELECT t.id, t.transaction_code, t.transaction_date, t.created_at, t.party_id, t.party_name, \
              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_transaction_id = t.id), \
-             t.total_amount, t.paid_amount, t.balance_due, t.payment_status \
+             t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total \
              FROM sale_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -226,6 +229,9 @@ impl SaleRepository for SqliteSaleRepository {
                     paid_amount: r.get(8)?,
                     balance_due: r.get(9)?,
                     payment_status: enum_col(r, 10)?,
+                    items_subtotal: r.get(11)?,
+                    charges_total: r.get(12)?,
+                    discounts_total: r.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

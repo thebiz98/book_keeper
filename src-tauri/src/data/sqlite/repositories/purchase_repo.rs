@@ -9,7 +9,7 @@ use crate::data::contracts::purchase_repository::PurchaseRepository;
 use crate::data::sqlite::code_gen::{next_code, seq_for_source};
 use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
-const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at";
+const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total";
 const ITEM_COLS: &str = "id, purchase_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_cost, total_amount, remaining_quantity";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<PurchaseTransaction> {
@@ -28,6 +28,9 @@ fn map_tx(r: &Row<'_>) -> rusqlite::Result<PurchaseTransaction> {
         balance_due: r.get(11)?,
         notes: r.get(12)?,
         created_at: r.get(13)?,
+        items_subtotal: r.get(14)?,
+        charges_total: r.get(15)?,
+        discounts_total: r.get(16)?,
     })
 }
 
@@ -102,12 +105,12 @@ impl SqlitePurchaseRepository {
 impl PurchaseRepository for SqlitePurchaseRepository {
     fn create_transaction(&mut self, tx: &PurchaseTransaction) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"),
+            &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"),
             params![
                 opt_id(tx.id), tx.transaction_code, enum_to_sql(&tx.source)?, tx.supplier_invoice_ref,
                 tx.transaction_date, tx.party_id, tx.party_name, tx.payment_mode,
                 enum_to_sql(&tx.payment_status)?, tx.total_amount, tx.paid_amount, tx.balance_due,
-                tx.notes, tx.created_at
+                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -287,7 +290,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
             "SELECT t.id, t.transaction_code, t.supplier_invoice_ref, t.transaction_date, t.created_at, \
              t.party_id, t.party_name, \
              (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_transaction_id = t.id), \
-             t.total_amount, t.paid_amount, t.balance_due, t.payment_status \
+             t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total \
              FROM purchase_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -306,6 +309,9 @@ impl PurchaseRepository for SqlitePurchaseRepository {
                     paid_amount: r.get(9)?,
                     balance_due: r.get(10)?,
                     payment_status: enum_col(r, 11)?,
+                    items_subtotal: r.get(12)?,
+                    charges_total: r.get(13)?,
+                    discounts_total: r.get(14)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

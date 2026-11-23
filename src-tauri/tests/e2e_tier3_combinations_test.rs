@@ -73,6 +73,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
 
     // Step 1: Inward 100 pcs @ ₹60/pc = ₹6,000
     let pur_payload = CreatePurchasePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -89,6 +90,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
 
     // Step 2: Sale of 40 pcs @ ₹100/pc (leaves 60 pcs)
     let sale_payload = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -163,6 +165,7 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
 
     // Step 1: Customer Credit Sale: 30 clipboards @ ₹50 = ₹1,500 due
     let sale_payload = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-01".to_string(),
         party_id: Some(1),
         payment_mode: None,
@@ -217,6 +220,7 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
 
     // Inward: 5 boxes of 10 = 50 base units @ ₹80/box (cost ₹8/pc)
     let pur_payload = CreatePurchasePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -233,6 +237,7 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
 
     // Loose sale of 7 base units @ ₹15 = ₹105
     let sale_payload = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -271,6 +276,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
 
     // Purchase 50 units @ ₹30 = ₹1,500 on credit
     let pur_payload = CreatePurchasePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: None,
@@ -303,6 +309,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
 
     // Sell 20 units @ ₹50 = ₹1,000 revenue. COGS = 20 * 30 = ₹600. Net profit = ₹400.
     let sale_payload = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -342,6 +349,7 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
 
     // Total = 2 * 300 = ₹600. Cash tendered upfront = ₹200. Balance due = ₹400.
     let sale_payload = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
         payment_mode: Some("CASH".to_string()),
@@ -406,6 +414,7 @@ fn test_tc_t3_cmb_007_barcode_scan_bundle_multiplier_tender() {
 
     // 2. Add 2 packs (10 base units) @ ₹45 = ₹90
     let sale_payload = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -446,6 +455,7 @@ fn test_tc_t3_cmb_008_low_stock_alert_reorder_cleared() {
 
     // 2. Inward purchase of 25 units
     let pur_payload = CreatePurchasePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -494,6 +504,7 @@ fn test_tc_t3_cmb_009_shop_settings_profile_and_sale_summary() {
     }
 
     let sale_payload = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -532,6 +543,7 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
 
     // Sale 1 executed at initial price ₹60.0
     let sale1 = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),
@@ -563,6 +575,7 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
 
     // Sale 2 executed at new updated price ₹75.0
     let sale2 = CreateSalePayload {
+        charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
         payment_mode: Some("CASH".to_string()),

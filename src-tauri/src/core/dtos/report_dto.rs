@@ -67,12 +67,18 @@ pub struct PnLReport {
     pub inventory_losses: f64,
     pub net_profit: f64,
     pub total_purchases: f64,
-    /// Placeholder until v7 (FR-19): 0.
+    /// Σ sale `discounts_total` (FR-19).
     pub sales_discounts: f64,
-    /// Placeholder until v7 (FR-19): 0.
+    /// `sale_charges_income + purchase_discounts_income` (FR-19).
     pub other_income: f64,
-    /// Σ expenses by `expense_date` in range (v7 adds purchase charges).
+    /// Σ expenses by `expense_date` in range + `purchase_charges_expense`.
     pub operating_expenses: f64,
+    /// Σ sale `charges_total` in range.
+    pub sale_charges_income: f64,
+    /// Σ PURCHASE-source `discounts_total` in range.
+    pub purchase_discounts_income: f64,
+    /// Σ PURCHASE-source `charges_total` in range (already inside `operating_expenses`).
+    pub purchase_charges_expense: f64,
     /// Per expense type, `amount DESC, name`; filled by the service from the expense repository.
     pub expenses_by_type: Vec<crate::core::dtos::ExpenseTypeTotal>,
 }

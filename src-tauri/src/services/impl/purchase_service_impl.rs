@@ -6,6 +6,9 @@ use crate::core::dtos::{
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
 use crate::core::money::{check_date, round2, MONEY_EPS};
+use crate::services::r#impl::bill_math::{
+    compute_bill_totals, insert_bill_charges, purchase_upfront, resolve_bill_charges, validate_charge_inputs,
+};
 use crate::core::value_objects::{LotSource, PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::inventory_service::InventoryService;
@@ -50,6 +53,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             return Err(validation("items", "items cannot be empty"));
         }
         check_date("transaction_date", &payload.transaction_date)?;
+        validate_charge_inputs(&payload.charges)?;
         if !payload.paid_amount.is_finite() || payload.paid_amount < 0.0 {
             return Err(validation("paid_amount", "paid_amount must be a non-negative number"));
         }
@@ -87,7 +91,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
 
         // 3. Lines: active item, bundle belongs to the item, cost normalised to base units.
         let mut resolved = Vec::with_capacity(payload.items.len());
-        let mut total_amount = 0.0;
+        let mut line_totals: Vec<f64> = Vec::with_capacity(payload.items.len());
         for line in &payload.items {
             let item = tx.items().find_by_id(line.item_id)?.ok_or_else(|| AppError::NotFound {
                 entity: "Item".to_string(),
@@ -117,40 +121,18 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             };
             let base_qty = line.bundle_quantity * multiplier;
             let line_total = round2(line.bundle_quantity * line.unit_cost);
-            total_amount += line_total;
+            line_totals.push(line_total);
             resolved.push((item, pack_label, line.bundle_quantity, base_qty, line_total));
         }
-        let total_amount = round2(total_amount);
-
-        // 4. Payment status cross-check (DD-02).
+        // 4. Charges (FR-19), totals and the payment cross-check (DD-02).
+        let charges = resolve_bill_charges(&mut *tx, TransactionType::Purchase, &payload.charges)?;
+        let totals = compute_bill_totals(&line_totals, &charges)?;
+        let total_amount = totals.total_amount;
         let paid = round2(payload.paid_amount);
-        if paid > total_amount + MONEY_EPS {
-            return Err(validation("paid_amount", "paid_amount cannot exceed the purchase total"));
-        }
-        match payload.payment_status {
-            PaymentStatus::Paid => {
-                if (paid - total_amount).abs() > MONEY_EPS {
-                    return Err(validation("paid_amount", "PAID needs paid_amount = total"));
-                }
-            }
-            PaymentStatus::Partial => {
-                if !(paid > MONEY_EPS && paid + MONEY_EPS < total_amount) {
-                    return Err(validation("paid_amount", "PARTIAL needs 0 < paid_amount < total"));
-                }
-            }
-            PaymentStatus::Unpaid => {
-                if paid > MONEY_EPS {
-                    return Err(validation("paid_amount", "UNPAID needs paid_amount = 0"));
-                }
-                if total_amount <= MONEY_EPS {
-                    return Err(validation("payment_status", "A zero-value bill must be PAID"));
-                }
-            }
-        }
+        let upfront = purchase_upfront(payload.payment_status, total_amount, paid)?;
         if payload.payment_status != PaymentStatus::Paid && payload.party_id.is_none() {
             return Err(validation("party_id", "vendor required for credit"));
         }
-        let upfront = if payload.payment_status == PaymentStatus::Paid { total_amount } else { paid };
 
         // 5. Header: paid 0 / balance = total; the ledger fixes both in step 7.
         let pur_code = tx.purchases().get_next_transaction_code(LotSource::Purchase)?;
@@ -173,10 +155,15 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             balance_due: total_amount,
             notes: payload.notes,
             created_at: chrono::Utc::now().to_rfc3339(),
+            items_subtotal: totals.items_subtotal,
+            charges_total: totals.charges_total,
+            discounts_total: totals.discounts_total,
         };
         let purchase_id = tx.purchases().create_transaction(&purchase_tx)?;
+        insert_bill_charges(&mut *tx, TransactionType::Purchase, purchase_id, &charges)?;
 
-        // 6. Lots and stock cache.
+        // 6. Lots and stock cache. Lot unit_cost = line_total / base_qty, unaffected by bill-level
+        // charges and discounts (DD-38).
         for (item, pack_label, pack_quantity, base_qty, line_total) in resolved {
             let purchase_item = PurchaseItem {
                 id: 0,
@@ -251,11 +238,13 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             });
         }
         let settlements = tx.settlements().list_by_transaction(TransactionType::Purchase, purchase_id)?;
+        let charges = tx.bill_charges().list_by_transaction(TransactionType::Purchase, purchase_id)?;
         Ok(PurchaseDetailView {
             purchase: pur,
             party,
             items: details,
             settlements,
+            charges,
         })
     }
 }

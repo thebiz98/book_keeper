@@ -18,6 +18,7 @@ use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
 use crate::services::contracts::return_service::ReturnService;
+use crate::services::r#impl::bill_math::net_unit_price;
 
 
 #[derive(Clone)]
@@ -222,10 +223,13 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                     if line.item_id != it.item_id {
                         return Err(validation("item_id", format!("Item does not match sale line {sid}")));
                     }
-                    if it.unit_price > line.unit_price + MONEY_EPS {
+                    // Refund cap = the sold rate net of the bill-level discount share (FR-19).
+                    let s = sale.as_ref().expect("a linked line implies the original sale");
+                    let cap = net_unit_price(line.unit_price, s.items_subtotal, s.discounts_total);
+                    if it.unit_price > cap + MONEY_EPS {
                         return Err(validation(
                             "unit_price",
-                            format!("unit_price {} exceeds the sold price {}", it.unit_price, line.unit_price),
+                            format!("unit_price {} exceeds the net sold rate {:.4} (after bill discounts)", it.unit_price, cap),
                         ));
                     }
                     *per_line_qty.entry(sid).or_insert(0.0) += it.quantity;

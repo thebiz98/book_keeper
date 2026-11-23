@@ -1,7 +1,9 @@
 use crate::core::error::AppError;
 use super::adjustment_repository::AdjustmentRepository;
 use super::allocation_repository::AllocationRepository;
+use super::bill_charge_repository::BillChargeRepository;
 use super::bundle_repository::BundleRepository;
+use super::charge_type_repository::ChargeTypeRepository;
 use super::expense_repository::ExpenseRepository;
 use super::item_repository::ItemRepository;
 use super::maintenance_repository::MaintenanceRepository;
@@ -60,6 +62,8 @@ pub trait TransactionContext {
     fn settings(&mut self) -> &mut dyn SettingRepository;
     fn parties(&mut self) -> &mut dyn PartyRepository;
     fn expenses(&mut self) -> &mut dyn ExpenseRepository;
+    fn charge_types(&mut self) -> &mut dyn ChargeTypeRepository;
+    fn bill_charges(&mut self) -> &mut dyn BillChargeRepository;
     fn reports(&mut self) -> &mut dyn ReportRepository;
     /// Bulk deletes for the testing-only data reset.
     fn maintenance(&mut self) -> &mut dyn MaintenanceRepository;

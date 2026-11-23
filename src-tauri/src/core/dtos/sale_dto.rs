@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use crate::core::entities::{Party, PaymentSettlement, SaleItem, SaleStockAllocation, SaleTransaction};
+use crate::core::dtos::charge_dto::BillChargeInput;
+use crate::core::entities::{BillCharge, Party, PaymentSettlement, SaleItem, SaleStockAllocation, SaleTransaction};
 use crate::core::dtos::pagination::{validate_date_range, PageRequest};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
@@ -13,6 +14,9 @@ pub struct CreateSalePayload {
     pub payment_mode: Option<String>,  // e.g. "CASH", "UPI"
     pub notes: Option<String>,
     pub items: Vec<CreateSaleItemPayload>,
+    /// Bill-level charge/discount lines (FR-19).
+    #[serde(default)]
+    pub charges: Vec<BillChargeInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -99,6 +103,9 @@ pub struct SaleHistoryRow {
     pub paid_amount: f64,
     pub balance_due: f64,
     pub payment_status: PaymentStatus,
+    pub items_subtotal: f64,
+    pub charges_total: f64,
+    pub discounts_total: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,6 +117,8 @@ pub struct SaleItemDetail {
     pub returned_quantity: f64,
     /// FIFO cost breakdown of the line.
     pub allocations: Vec<SaleStockAllocation>,
+    /// Sold rate net of the bill-level discount share (FR-19): the refund cap of a linked return.
+    pub net_unit_price: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -118,4 +127,5 @@ pub struct SaleDetailView {
     pub party: Option<Party>,
     pub items: Vec<SaleItemDetail>,
     pub settlements: Vec<PaymentSettlement>,
+    pub charges: Vec<BillCharge>,
 }

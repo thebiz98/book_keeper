@@ -48,6 +48,8 @@ impl SqliteUnitOfWork {
             settings: SqliteSettingRepository::new(conn.clone()),
             parties: SqlitePartyRepository::new(conn.clone()),
             expenses: SqliteExpenseRepository::new(conn.clone()),
+            charge_types: SqliteChargeTypeRepository::new(conn.clone()),
+            bill_charges: SqliteBillChargeRepository::new(conn.clone()),
             reports: SqliteReportRepository::new(conn.clone()),
             maintenance: SqliteMaintenanceRepository::new(conn.clone()),
             conn,
@@ -83,6 +85,8 @@ pub struct SqliteTransactionContext {
     settings: SqliteSettingRepository,
     parties: SqlitePartyRepository,
     expenses: SqliteExpenseRepository,
+    charge_types: SqliteChargeTypeRepository,
+    bill_charges: SqliteBillChargeRepository,
     reports: SqliteReportRepository,
     maintenance: SqliteMaintenanceRepository,
 }
@@ -145,6 +149,8 @@ impl TransactionContext for SqliteTransactionContext {
     fn settings(&mut self) -> &mut dyn SettingRepository { &mut self.settings }
     fn parties(&mut self) -> &mut dyn PartyRepository { &mut self.parties }
     fn expenses(&mut self) -> &mut dyn ExpenseRepository { &mut self.expenses }
+    fn charge_types(&mut self) -> &mut dyn ChargeTypeRepository { &mut self.charge_types }
+    fn bill_charges(&mut self) -> &mut dyn BillChargeRepository { &mut self.bill_charges }
     fn reports(&mut self) -> &mut dyn ReportRepository { &mut self.reports }
     fn maintenance(&mut self) -> &mut dyn MaintenanceRepository { &mut self.maintenance }
 }

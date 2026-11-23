@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use crate::core::entities::{Party, PaymentSettlement, PurchaseItem, PurchaseTransaction};
+use crate::core::dtos::charge_dto::BillChargeInput;
+use crate::core::entities::{BillCharge, Party, PaymentSettlement, PurchaseItem, PurchaseTransaction};
 use crate::core::value_objects::PaymentStatus;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -12,6 +13,9 @@ pub struct CreatePurchasePayload {
     pub payment_mode: Option<String>,
     pub notes: Option<String>,
     pub items: Vec<CreatePurchaseItemPayload>,
+    /// Bill-level charge/discount lines (FR-19).
+    #[serde(default)]
+    pub charges: Vec<BillChargeInput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,6 +51,9 @@ pub struct PurchaseHistoryRow {
     pub paid_amount: f64,
     pub balance_due: f64,
     pub payment_status: PaymentStatus,
+    pub items_subtotal: f64,
+    pub charges_total: f64,
+    pub discounts_total: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,4 +69,5 @@ pub struct PurchaseDetailView {
     pub party: Option<Party>,
     pub items: Vec<PurchaseItemDetail>,
     pub settlements: Vec<PaymentSettlement>,
+    pub charges: Vec<BillCharge>,
 }

@@ -1,5 +1,7 @@
 pub mod adjustment_reason;
 pub mod allocation_method;
+pub mod charge_applies_to;
+pub mod charge_effect;
 pub mod item_type;
 pub mod lot_source;
 pub mod outflow_source;
@@ -16,6 +18,8 @@ pub mod transaction_type;
 
 pub use adjustment_reason::AdjustmentReason;
 pub use allocation_method::AllocationMethod;
+pub use charge_applies_to::ChargeAppliesTo;
+pub use charge_effect::ChargeEffect;
 pub use item_type::ItemType;
 pub use lot_source::LotSource;
 pub use outflow_source::OutflowSourceType;

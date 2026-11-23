@@ -138,6 +138,7 @@ pub fn sale_payload(
     lines: &[(i64, Option<i64>, f64, f64)],
 ) -> CreateSalePayload {
     CreateSalePayload {
+        charges: vec![],
         transaction_date: DAY.to_string(),
         party_id,
         payment_status: status,
@@ -164,6 +165,7 @@ pub fn purchase_payload(
     lines: &[(i64, Option<i64>, f64, f64)],
 ) -> CreatePurchasePayload {
     CreatePurchasePayload {
+        charges: vec![],
         transaction_date: DAY.to_string(),
         party_id,
         supplier_invoice_ref: None,

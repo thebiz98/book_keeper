@@ -47,6 +47,7 @@ fn seed(app: &AppState) -> i64 {
         .unwrap();
     app.purchase_service
         .create_purchase(CreatePurchasePayload {
+            charges: vec![],
             transaction_date: "2026-11-20".into(), party_id: None, payment_mode: Some("CASH".into()),
             supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 35.0, notes: None,
             items: vec![CreatePurchaseItemPayload { item_id: item, bundle_id: None, bundle_quantity: 5.0, unit_cost: 7.0 }],
@@ -54,6 +55,7 @@ fn seed(app: &AppState) -> i64 {
         .unwrap();
     app.sale_service
         .create_sale(CreateSalePayload {
+            charges: vec![],
             transaction_date: "2026-11-21".into(), party_id: Some(party), payment_mode: Some("CASH".into()),
             payment_status: PaymentStatus::Partial, paid_amount: 50.0, notes: None,
             items: vec![CreateSaleItemPayload { item_id: item, bundle_id: None, bundle_quantity: 12.0, unit_price: 10.0 }],
@@ -125,6 +127,7 @@ fn transactions_scope_restores_opening_stock_and_keeps_masters() {
 fn seed_sale_again(app: &AppState, item: i64) {
     app.sale_service
         .create_sale(CreateSalePayload {
+            charges: vec![],
             transaction_date: "2026-11-22".into(), party_id: None, payment_mode: Some("CASH".into()),
             payment_status: PaymentStatus::Paid, paid_amount: 20.0, notes: None,
             items: vec![CreateSaleItemPayload { item_id: item, bundle_id: None, bundle_quantity: 2.0, unit_price: 10.0 }],

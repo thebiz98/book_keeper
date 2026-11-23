@@ -22,7 +22,7 @@ impl SqliteReportRepository {
 
 /// All P&L components in one statement (?1 = from, ?2 = to, inclusive lexical date range).
 const PNL_SQL: &str = "SELECT
-  (SELECT COALESCE(SUM(total_amount), 0.0) FROM sale_transactions
+  (SELECT COALESCE(SUM(items_subtotal), 0.0) FROM sale_transactions
      WHERE transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(total_amount), 0.0) FROM return_transactions
      WHERE return_type = 'CUSTOMER' AND settlement_type = 'REFUND' AND return_date BETWEEN ?1 AND ?2),
@@ -44,30 +44,43 @@ const PNL_SQL: &str = "SELECT
      JOIN return_transactions r ON r.id = ri.return_transaction_id
      WHERE r.return_type = 'CUSTOMER' AND ri.line_type = 'RETURNED'
        AND ri.condition = 'DAMAGED_SCRAP' AND r.return_date BETWEEN ?1 AND ?2),
-  (SELECT COALESCE(SUM(total_amount), 0.0) FROM purchase_transactions
+  (SELECT COALESCE(SUM(items_subtotal), 0.0) FROM purchase_transactions
      WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(total_amount), 0.0) FROM return_transactions
      WHERE return_type = 'VENDOR' AND return_date BETWEEN ?1 AND ?2),
-  (SELECT COALESCE(SUM(amount), 0.0) FROM expenses WHERE expense_date BETWEEN ?1 AND ?2)";
+  (SELECT COALESCE(SUM(amount), 0.0) FROM expenses WHERE expense_date BETWEEN ?1 AND ?2),
+  (SELECT COALESCE(SUM(discounts_total), 0.0) FROM sale_transactions
+     WHERE transaction_date BETWEEN ?1 AND ?2),
+  (SELECT COALESCE(SUM(charges_total), 0.0) FROM sale_transactions
+     WHERE transaction_date BETWEEN ?1 AND ?2),
+  (SELECT COALESCE(SUM(discounts_total), 0.0) FROM purchase_transactions
+     WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2),
+  (SELECT COALESCE(SUM(charges_total), 0.0) FROM purchase_transactions
+     WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2)";
 
 impl ReportRepository for SqliteReportRepository {
     fn pnl(&self, from: &str, to: &str) -> Result<PnLReport, AppError> {
-        let v: [f64; 9] = self.conn.query_row(PNL_SQL, params![from, to], |r| {
-            let mut a = [0.0; 9];
+        let v: [f64; 13] = self.conn.query_row(PNL_SQL, params![from, to], |r| {
+            let mut a = [0.0; 13];
             for (i, slot) in a.iter_mut().enumerate() {
                 *slot = r.get(i)?;
             }
             Ok(a)
         })?;
-        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses] = v;
+        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses, sale_disc, sale_chg, pur_disc, pur_chg] =
+            v;
         let gross_sales = round2(gross);
         let sales_returns = round2(returns);
-        let net_sales = round2(gross_sales - sales_returns);
+        let sales_discounts = round2(sale_disc);
+        let net_sales = round2(gross_sales - sales_discounts - sales_returns);
         let cogs = round2(cogs_sales + cogs_repl);
         let gross_profit = round2(net_sales - cogs);
         let inventory_losses = round2(loss_adj + loss_scrap);
-        let operating_expenses = round2(expenses);
-        let (sales_discounts, other_income) = (0.0, 0.0); // v7 fills these
+        let sale_charges_income = round2(sale_chg);
+        let purchase_discounts_income = round2(pur_disc);
+        let purchase_charges_expense = round2(pur_chg);
+        let other_income = round2(sale_charges_income + purchase_discounts_income);
+        let operating_expenses = round2(expenses + purchase_charges_expense);
         Ok(PnLReport {
             gross_sales,
             sales_returns,
@@ -80,13 +93,16 @@ impl ReportRepository for SqliteReportRepository {
             sales_discounts,
             other_income,
             operating_expenses,
+            sale_charges_income,
+            purchase_discounts_income,
+            purchase_charges_expense,
             expenses_by_type: Vec::new(),
         })
     }
 
     fn sales_totals(&self, from: &str, to: &str) -> Result<(f64, usize), AppError> {
         let (sum, n): (f64, i64) = self.conn.query_row(
-            "SELECT COALESCE(SUM(total_amount), 0.0), COUNT(*) FROM sale_transactions \
+            "SELECT COALESCE(SUM(items_subtotal), 0.0), COUNT(*) FROM sale_transactions \
              WHERE transaction_date BETWEEN ?1 AND ?2",
             params![from, to],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -96,7 +112,7 @@ impl ReportRepository for SqliteReportRepository {
 
     fn purchase_totals(&self, from: &str, to: &str) -> Result<(f64, usize), AppError> {
         let (sum, n): (f64, i64) = self.conn.query_row(
-            "SELECT COALESCE(SUM(total_amount), 0.0), COUNT(*) FROM purchase_transactions \
+            "SELECT COALESCE(SUM(items_subtotal), 0.0), COUNT(*) FROM purchase_transactions \
              WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2",
             params![from, to],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -171,10 +187,10 @@ impl ReportRepository for SqliteReportRepository {
     fn trend_buckets(&self, from: &str, to: &str, key_len: usize) -> Result<Vec<(String, f64, f64)>, AppError> {
         let mut stmt = self.conn.prepare(
             "SELECT k, SUM(s), SUM(p) FROM ( \
-               SELECT substr(transaction_date, 1, ?3) AS k, total_amount AS s, 0.0 AS p \
+               SELECT substr(transaction_date, 1, ?3) AS k, items_subtotal AS s, 0.0 AS p \
                  FROM sale_transactions WHERE transaction_date BETWEEN ?1 AND ?2 \
                UNION ALL \
-               SELECT substr(transaction_date, 1, ?3), 0.0, total_amount \
+               SELECT substr(transaction_date, 1, ?3), 0.0, items_subtotal \
                  FROM purchase_transactions WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2 \
              ) GROUP BY k ORDER BY k",
         )?;

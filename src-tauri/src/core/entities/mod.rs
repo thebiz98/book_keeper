@@ -1,4 +1,5 @@
 pub mod adjustment;
+pub mod charge;
 pub mod expense;
 pub mod item;
 pub mod party;
@@ -9,6 +10,7 @@ pub mod shop_setting;
 pub mod stock_return;
 
 pub use adjustment::{StockAdjustment, StockOutflowAllocation};
+pub use charge::{BillCharge, ChargeType};
 pub use expense::{Expense, ExpenseType};
 pub use item::{Item, ItemBundle};
 pub use party::{CreatePartyPayload, Party, PartyListRow, UpdatePartyPayload};
