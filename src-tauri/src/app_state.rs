@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::data::contracts::search_indexer::ItemSearchIndexer;
+use crate::data::contracts::search_indexer::{FtsIndex, ItemSearchIndexer};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::backup_service::BackupService;
@@ -20,6 +20,11 @@ use crate::services::contracts::vedbill_import_service::VedbillImportService;
 pub struct AppState {
     pub unit_of_work: Arc<dyn UnitOfWork>,
     pub search_indexer: Arc<dyn ItemSearchIndexer>,
+    /// FTS index over active parties (`party_search_fts`).
+    pub party_index: Arc<dyn FtsIndex>,
+    /// Every generic FTS index (items, parties, later expense/charge types). Reset-All rebuilds
+    /// them; push new ones here and call [`ensure_fts_index`] at startup.
+    pub fts_indexes: Vec<Arc<dyn FtsIndex>>,
     pub inventory_allocation_strategy: Arc<dyn InventoryAllocationStrategy>,
     pub inventory_service: Arc<dyn InventoryService>,
     pub item_service: Arc<dyn ItemService>,
@@ -90,6 +95,19 @@ pub fn ensure_search_index(
     Ok(true)
 }
 
+/// Startup consistency check for a generic FTS index: it must index exactly the keys its source
+/// has. On a mismatch it is rebuilt from storage and logged. Returns whether a rebuild happened.
+pub fn ensure_fts_index(index: &dyn FtsIndex) -> Result<bool, crate::core::error::AppError> {
+    let source = index.source_count()?;
+    let indexed = index.indexed_count()?;
+    if source == indexed {
+        return Ok(false);
+    }
+    eprintln!("[search] {} has {indexed} keys but {source} expected; rebuilding", index.table());
+    index.rebuild()?;
+    Ok(true)
+}
+
 pub fn build_sqlite_app_state(db_path: &std::path::Path) -> Result<AppState, crate::core::error::AppError> {
     build_sqlite_app_state_with_strategy(db_path, strategy_for(crate::core::value_objects::AllocationMethod::default()))
 }
@@ -129,7 +147,9 @@ fn build_sqlite_app_state_full(
 ) -> Result<AppState, crate::core::error::AppError> {
     use crate::core::error::AppError;
     use crate::data::sqlite::connection::create_pool;
+    use crate::data::sqlite::fts::SqliteFtsIndex;
     use crate::data::sqlite::fts_indexer::SqliteFts5SearchIndexer;
+    use crate::data::sqlite::fts_specs::{ITEM_FTS, PARTY_FTS};
     use crate::data::sqlite::migrations::run_migrations;
     use crate::data::sqlite::sqlite_uow::SqliteUnitOfWork;
     use crate::services::r#impl::*;
@@ -143,6 +163,9 @@ fn build_sqlite_app_state_full(
     }
 
     let uow: Arc<dyn UnitOfWork> = Arc::new(SqliteUnitOfWork::new(pool.clone()));
+    let item_fts: Arc<dyn FtsIndex> = Arc::new(SqliteFtsIndex::new(pool.clone(), &ITEM_FTS));
+    let party_index: Arc<dyn FtsIndex> = Arc::new(SqliteFtsIndex::new(pool.clone(), &PARTY_FTS));
+    let fts_indexes: Vec<Arc<dyn FtsIndex>> = vec![item_fts, party_index.clone()];
     let search_indexer: Arc<dyn ItemSearchIndexer> = Arc::new(SqliteFts5SearchIndexer::new(pool));
 
     // Inventory first: ItemService and ItemImportService delegate opening stock to it, and it
@@ -165,7 +188,7 @@ fn build_sqlite_app_state_full(
         inventory_service.clone(), payment_service.clone(), accounting_service.clone(), uow.clone(),
     ));
     let report_service: Arc<dyn ReportService> = Arc::new(ReportServiceImpl::new(uow.clone()));
-    let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone()));
+    let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone(), party_index.clone()));
     let item_import_service: Arc<dyn ItemImportService> =
         Arc::new(ItemImportServiceImpl::new(uow.clone(), inventory_service.clone()).with_indexer(search_indexer.clone()));
     let vedbill_reader: Arc<dyn crate::data::contracts::vedbill_reader::VedbillBackupReader> =
@@ -178,9 +201,12 @@ fn build_sqlite_app_state_full(
     let shop_setting_service: Arc<dyn ShopSettingService> =
         Arc::new(ShopSettingServiceImpl::new(uow.clone()));
 
-    let data_reset_service: Arc<dyn DataResetService> = Arc::new(DataResetServiceImpl::new(
-        config.testing_mode, uow.clone(), inventory_service.clone(), search_indexer.clone(), backup_service.clone(),
-    ));
+    let data_reset_service: Arc<dyn DataResetService> = Arc::new(
+        DataResetServiceImpl::new(
+            config.testing_mode, uow.clone(), inventory_service.clone(), search_indexer.clone(), backup_service.clone(),
+        )
+        .with_fts_indexes(fts_indexes.clone()),
+    );
 
     // Startup invariant (NFR-02 cache audit): current_stock == Σ lot remainders. A mismatch is
     // repaired from the lots (the source of truth) and logged, never silently ignored.
@@ -196,6 +222,7 @@ fn build_sqlite_app_state_full(
     }
 
     ensure_search_index(&*uow, &*search_indexer)?;
+    ensure_fts_index(&*party_index)?;
 
     // A previously chosen backup folder overrides the default.
     let saved_dir = uow.begin_read()?.settings().get_backup_directory()?;
@@ -207,6 +234,8 @@ fn build_sqlite_app_state_full(
     Ok(AppState {
         unit_of_work: uow,
         search_indexer,
+        party_index,
+        fts_indexes,
         inventory_allocation_strategy: allocation_strategy,
         inventory_service,
         item_service,

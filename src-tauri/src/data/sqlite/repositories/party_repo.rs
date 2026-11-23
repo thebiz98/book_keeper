@@ -6,7 +6,8 @@ use crate::core::entities::{Party, PartyListRow};
 use crate::core::error::AppError;
 use crate::core::value_objects::PartyType;
 use crate::data::contracts::PartyRepository;
-use crate::data::sqlite::{enum_col, enum_to_sql, like_contains, SqliteConn};
+use crate::data::sqlite::fts::fts_prefix_query;
+use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
 
 pub struct SqlitePartyRepository {
     conn: SqliteConn,
@@ -77,7 +78,19 @@ impl PartyRepository for SqlitePartyRepository {
         search: Option<&str>,
     ) -> Result<Vec<PartyListRow>, AppError> {
         let pt = party_type.as_ref().map(enum_to_sql).transpose()?;
-        let pat = search.map(str::trim).filter(|q| !q.is_empty()).map(like_contains);
+        let q = search.map(str::trim).filter(|q| !q.is_empty());
+        // Non-blank query with no alphanumeric token matches nothing.
+        let fq = match q {
+            Some(q) => match fts_prefix_query(q) {
+                Some(f) => Some(f),
+                None => return Ok(Vec::new()),
+            },
+            None => None,
+        };
+        // 3+ digits also match anywhere in the phone digits ("last digits" lookup).
+        let digits = q
+            .filter(|q| q.len() >= 3 && q.chars().all(|c| c.is_ascii_digit()))
+            .map(|q| format!("%{q}%"));
         // Balance and bill count per party in the same statement (sale side for customers,
         // PURCHASE-source side for vendors, DD-07).
         let sql = "SELECT p.id, p.name, p.phone, p.party_type, p.notes, p.is_active, p.created_at, p.updated_at, \
@@ -91,11 +104,13 @@ impl PartyRepository for SqlitePartyRepository {
                END \
              FROM parties p \
              WHERE (?1 IS NULL OR p.party_type = ?1) AND (?2 = 0 OR p.is_active = 1) \
-               AND (?3 IS NULL OR p.name LIKE ?3 ESCAPE '\\' OR COALESCE(p.phone, '') LIKE ?3 ESCAPE '\\') \
+               AND (?3 IS NULL \
+                    OR p.id IN (SELECT party_id FROM party_search_fts WHERE party_search_fts MATCH ?3) \
+                    OR (?4 IS NOT NULL AND p.id IN (SELECT party_id FROM party_search_fts WHERE phone_digits LIKE ?4))) \
              ORDER BY p.name COLLATE NOCASE, p.id";
         let mut stmt = self.conn.prepare_cached(sql)?;
         let rows = stmt
-            .query_map(params![pt, active_only as i64, pat], |r| {
+            .query_map(params![pt, active_only as i64, fq, digits], |r| {
                 Ok(PartyListRow {
                     party: map_party(r)?,
                     outstanding_balance: r.get(8)?,

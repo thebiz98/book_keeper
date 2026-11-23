@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::core::error::AppError;
-use crate::data::contracts::search_indexer::ItemSearchIndexer;
+use crate::data::contracts::search_indexer::{FtsIndex, ItemSearchIndexer};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::backup_service::{BackupKind, BackupService};
 use crate::services::contracts::data_reset_service::{DataResetService, DeletedRows, ResetScope, ResetSummary};
@@ -13,9 +13,16 @@ pub struct DataResetServiceImpl {
     inventory: Arc<dyn InventoryService>,
     indexer: Arc<dyn ItemSearchIndexer>,
     backup: Arc<dyn BackupService>,
+    fts_indexes: Vec<Arc<dyn FtsIndex>>,
 }
 
 impl DataResetServiceImpl {
+    /// Extra FTS indexes rebuilt after a `ResetScope::All` reset (parties, expense types, ...).
+    pub fn with_fts_indexes(mut self, indexes: Vec<Arc<dyn FtsIndex>>) -> Self {
+        self.fts_indexes = indexes;
+        self
+    }
+
     pub fn new(
         testing_mode: bool,
         uow: Arc<dyn UnitOfWork>,
@@ -23,7 +30,7 @@ impl DataResetServiceImpl {
         indexer: Arc<dyn ItemSearchIndexer>,
         backup: Arc<dyn BackupService>,
     ) -> Self {
-        Self { testing_mode, uow, inventory, indexer, backup }
+        Self { testing_mode, uow, inventory, indexer, backup, fts_indexes: Vec::new() }
     }
 }
 
@@ -49,6 +56,11 @@ impl DataResetService for DataResetServiceImpl {
         if scope == ResetScope::All {
             if let Err(e) = self.indexer.rebuild_index() {
                 eprintln!("[reset] search index rebuild failed (fixed at next start): {e}");
+            }
+            for idx in &self.fts_indexes {
+                if let Err(e) = idx.rebuild() {
+                    eprintln!("[reset] {} rebuild failed (fixed at next start): {e}", idx.table());
+                }
             }
         }
 

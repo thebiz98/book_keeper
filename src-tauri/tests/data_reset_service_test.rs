@@ -113,6 +113,7 @@ fn transactions_scope_restores_opening_stock_and_keeps_masters() {
     assert_eq!(count(&e.db, "items"), 1);
     assert_eq!(count(&e.db, "item_bundles"), 1);
     assert_eq!(count(&e.db, "parties"), 1);
+    assert_eq!(e.app.party_index.indexed_count().unwrap(), 1, "parties stay searchable");
     assert_eq!(e.app.sale_service.get_next_sale_code().unwrap(), "SAL-1001");
     assert!(e.app.inventory_service.verify_stock_cache(&mut *e.app.unit_of_work.begin_transaction().unwrap()).unwrap().is_empty());
 
@@ -142,6 +143,7 @@ fn all_scope_empties_everything_but_the_shop_profile() {
     }
     assert_eq!(count(&e.db, "shop_settings"), 1);
     assert_eq!(e.app.search_indexer.indexed_item_count().unwrap(), 0);
+    assert_eq!(count(&e.db, "party_search_fts"), 0, "reset All rebuilds every registered FTS index");
     // Ids restart, so a fresh item is #1 again.
     let id = e.app.item_service.create_item(CreateItemPayload { item_type: None, low_stock_threshold: None,
         name: "Ink".into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,

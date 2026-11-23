@@ -26,7 +26,7 @@ pub use purchase_repository::PurchaseRepository;
 pub use report_repository::ReportRepository;
 pub use return_repository::ReturnRepository;
 pub use sale_repository::SaleRepository;
-pub use search_indexer::ItemSearchIndexer;
+pub use search_indexer::{FtsIndex, ItemSearchIndexer};
 pub use setting_repository::SettingRepository;
 pub use settlement_repository::SettlementRepository;
 pub use unit_of_work::{TransactionContext, UnitOfWork};

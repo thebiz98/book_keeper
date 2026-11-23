@@ -46,7 +46,7 @@ fn env() -> Env {
         purchases: PurchaseServiceImpl::new(inv.clone(), PaymentServiceImpl, db.clone()),
         rets: ReturnServiceImpl::new(inv.clone(), PaymentServiceImpl, acct.clone(), db.clone()),
         items: ItemServiceImpl::new(db.clone(), Arc::new(db.indexer()), inv.clone()),
-        parties: PartyServiceImpl::new(db.clone()),
+        parties: PartyServiceImpl::new(db.clone(), Arc::new(db.party_index())),
         acct,
         inv,
         db,
@@ -392,7 +392,9 @@ fn test_tc_list_07_party_rows_balances_and_counts() {
     let v = serde_json::to_value(by("zed Cust")).unwrap();
     assert!(v.get("name").is_some() && v.get("outstanding_balance").is_some() && v.get("transaction_count").is_some());
 
-    // Search by name / phone, case-insensitive; type filter.
+    // Search by name / phone, case-insensitive; type filter. Parties were seeded through the
+    // repository, so build the FTS rows first.
+    book_keeper::data::contracts::FtsIndex::rebuild(&e.db.party_index()).unwrap();
     assert_eq!(e.parties.search_parties("VENDOR", None).unwrap().len(), 2);
     assert_eq!(e.parties.search_parties("vendor", Some(PartyType::Customer)).unwrap().len(), 0);
     assert_eq!(e.parties.search_parties("", None).unwrap().len(), 4);

@@ -2,6 +2,52 @@ use crate::core::dtos::ItemSearchResult;
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
 
+/// One FTS5 table mirroring a master table. All writes use the indexer's own pooled
+/// connection: call them only AFTER the owning transaction has committed (DD-24).
+pub trait FtsIndex: Send + Sync {
+    fn table(&self) -> &'static str;
+    /// Re-reads the source rows for `key` and replaces its index rows. A missing or inactive
+    /// source row means the key is removed.
+    fn reindex(&self, key: i64) -> Result<(), AppError>;
+    fn reindex_many(&self, keys: &[i64]) -> Result<(), AppError>;
+    fn remove(&self, key: i64) -> Result<(), AppError>;
+    /// Delete all + insert from the source, one transaction.
+    fn rebuild(&self) -> Result<(), AppError>;
+    /// `COUNT(DISTINCT key)` in the FTS table.
+    fn indexed_count(&self) -> Result<usize, AppError>;
+    /// Number of keys that should be indexed.
+    fn source_count(&self) -> Result<usize, AppError>;
+    /// Distinct keys, best rank first, then key; empty when the query has no token.
+    fn search_keys(&self, query: &str, limit: usize) -> Result<Vec<i64>, AppError>;
+}
+
+impl<T: FtsIndex + ?Sized> FtsIndex for std::sync::Arc<T> {
+    fn table(&self) -> &'static str {
+        (**self).table()
+    }
+    fn reindex(&self, key: i64) -> Result<(), AppError> {
+        (**self).reindex(key)
+    }
+    fn reindex_many(&self, keys: &[i64]) -> Result<(), AppError> {
+        (**self).reindex_many(keys)
+    }
+    fn remove(&self, key: i64) -> Result<(), AppError> {
+        (**self).remove(key)
+    }
+    fn rebuild(&self) -> Result<(), AppError> {
+        (**self).rebuild()
+    }
+    fn indexed_count(&self) -> Result<usize, AppError> {
+        (**self).indexed_count()
+    }
+    fn source_count(&self) -> Result<usize, AppError> {
+        (**self).source_count()
+    }
+    fn search_keys(&self, query: &str, limit: usize) -> Result<Vec<i64>, AppError> {
+        (**self).search_keys(query, limit)
+    }
+}
+
 pub trait ItemSearchIndexer: Send + Sync {
     /// High-speed typeahead lookup matching prefix across name, barcode, and category (< 1ms).
     fn search(&self, query: &str) -> Result<Vec<ItemSearchResult>, AppError> {

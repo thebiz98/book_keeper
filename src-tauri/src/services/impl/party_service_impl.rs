@@ -2,17 +2,20 @@ use std::sync::Arc;
 use crate::core::entities::{CreatePartyPayload, Party, PartyListRow, UpdatePartyPayload};
 use crate::core::error::AppError;
 use crate::core::value_objects::PartyType;
+use crate::data::contracts::search_indexer::FtsIndex;
 use crate::data::contracts::unit_of_work::UnitOfWork;
+use crate::data::sqlite::fts::sync_after_commit;
 use crate::services::contracts::party_service::PartyService;
 
 #[derive(Clone)]
 pub struct PartyServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>> {
     pub uow: U,
+    pub search_index: Arc<dyn FtsIndex>,
 }
 
 impl<U: UnitOfWork> PartyServiceImpl<U> {
-    pub fn new(uow: U) -> Self {
-        Self { uow }
+    pub fn new(uow: U, search_index: Arc<dyn FtsIndex>) -> Self {
+        Self { uow, search_index }
     }
 }
 
@@ -39,6 +42,7 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
 
         let party_id = tx.parties().create(&party)?;
         tx.commit()?;
+        sync_after_commit(&*self.search_index, party_id, "party");
         Ok(party_id)
     }
 
@@ -67,6 +71,7 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
 
         tx.parties().update(&party)?;
         tx.commit()?;
+        sync_after_commit(&*self.search_index, id, "party");
         Ok(())
     }
 

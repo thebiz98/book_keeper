@@ -24,7 +24,9 @@
 
 pub mod code_gen;
 pub mod connection;
+pub mod fts;
 pub mod fts_indexer;
+pub mod fts_specs;
 pub mod migrations;
 pub mod repositories;
 pub mod sqlite_uow;

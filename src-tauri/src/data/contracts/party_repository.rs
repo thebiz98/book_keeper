@@ -7,7 +7,9 @@ pub trait PartyRepository {
     fn find_by_id(&self, id: i64) -> Result<Option<Party>, AppError>;
     fn list(&self, party_type: Option<PartyType>, active_only: bool) -> Result<Vec<Party>, AppError>;
     /// Directory rows with `outstanding_balance` and `transaction_count` computed in the same
-    /// query, ordered by name. `search` matches name or phone (LIKE-escaped); blank = no filter.
+    /// query, ordered by name. `search` goes through `party_search_fts` (token prefix over name, phone, phone digits; a digits-only
+    /// query of 3+ digits also matches anywhere in the phone digits); blank = no filter; a non-blank
+    /// query with no alphanumeric token matches nothing.
     fn list_rows(
         &self,
         party_type: Option<PartyType>,

@@ -4,17 +4,21 @@ use rusqlite::{params, Connection};
 use crate::core::dtos::{ItemBundleSearchResult, ItemSearchResult};
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
-use crate::data::contracts::search_indexer::ItemSearchIndexer;
+use crate::data::contracts::search_indexer::{FtsIndex, ItemSearchIndexer};
 use super::connection::SqlitePool;
 use super::enum_col;
+use super::fts::{fts_prefix_query, SqliteFtsIndex};
+use super::fts_specs::ITEM_FTS;
 
 pub struct SqliteFts5SearchIndexer {
     pool: SqlitePool,
+    fts: SqliteFtsIndex,
 }
 
 impl SqliteFts5SearchIndexer {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        let fts = SqliteFtsIndex::new(pool.clone(), &ITEM_FTS);
+        Self { pool, fts }
     }
 
     fn conn(&self) -> Result<r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>, AppError> {
@@ -28,23 +32,17 @@ fn idx_err(e: rusqlite::Error) -> AppError {
     AppError::SearchIndexError(e.to_string())
 }
 
-fn insert_rows(conn: &Connection, item: &Item, bundles: &[ItemBundle]) -> Result<(), AppError> {
+/// Index rows for an item: its own row plus one row per non-empty bundle barcode.
+/// Inactive items have no rows.
+fn build_rows(item: &Item, bundles: &[ItemBundle]) -> Vec<Vec<Option<String>>> {
     if !item.is_active {
-        return Ok(());
+        return Vec::new();
     }
-    conn.execute(
-        "INSERT INTO item_search_fts (item_id, name, category, barcode) VALUES (?1, ?2, ?3, ?4)",
-        params![item.id, item.name, item.category, item.barcode],
-    )
-    .map_err(idx_err)?;
+    let mut rows = vec![vec![Some(item.name.clone()), item.category.clone(), item.barcode.clone()]];
     for b in bundles.iter().filter(|b| b.barcode.as_deref().is_some_and(|s| !s.is_empty())) {
-        conn.execute(
-            "INSERT INTO item_search_fts (item_id, name, category, barcode) VALUES (?1, ?2, ?3, ?4)",
-            params![item.id, item.name, item.category, b.barcode],
-        )
-        .map_err(idx_err)?;
+        rows.push(vec![Some(item.name.clone()), item.category.clone(), b.barcode.clone()]);
     }
-    Ok(())
+    rows
 }
 
 fn map_bundle(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemBundle> {
@@ -68,15 +66,6 @@ fn load_bundles(conn: &Connection, item_id: i64) -> Result<Vec<ItemBundle>, AppE
         .map_err(idx_err)?;
     let rows = stmt.query_map(params![item_id], map_bundle).map_err(idx_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(idx_err)
-}
-
-fn fts_query(q: &str) -> Option<String> {
-    let toks: Vec<String> = q
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .map(|t| format!("\"{t}\"*"))
-        .collect();
-    if toks.is_empty() { None } else { Some(toks.join(" ")) }
 }
 
 /// Default typeahead page size.
@@ -173,7 +162,7 @@ impl ItemSearchIndexer for SqliteFts5SearchIndexer {
         if clean_q.is_empty() || limit == 0 {
             return Ok(Vec::new());
         }
-        let Some(fq) = fts_query(clean_q) else { return Ok(Vec::new()) };
+        let Some(fq) = fts_prefix_query(clean_q) else { return Ok(Vec::new()) };
         let limit = limit.min(MAX_SEARCH_LIMIT);
         let conn = self.conn()?;
 
@@ -209,7 +198,7 @@ impl ItemSearchIndexer for SqliteFts5SearchIndexer {
         limit: usize,
     ) -> Result<(Vec<ItemSearchResult>, usize), AppError> {
         let clean_q = query.trim().trim_end_matches('*').trim();
-        let Some(fq) = fts_query(clean_q) else { return Ok((Vec::new(), 0)) };
+        let Some(fq) = fts_prefix_query(clean_q) else { return Ok((Vec::new(), 0)) };
         let conn = self.conn()?;
         let total: i64 = conn
             .query_row(
@@ -250,70 +239,26 @@ impl ItemSearchIndexer for SqliteFts5SearchIndexer {
     }
 
     fn index_item_with_bundles(&self, item: &Item, bundles: &[ItemBundle]) -> Result<(), AppError> {
-        let conn = self.conn()?;
-        // Delete + insert are one atomic unit on this connection.
-        let tx = conn.unchecked_transaction().map_err(idx_err)?;
-        tx.execute("DELETE FROM item_search_fts WHERE item_id = ?1", params![item.id]).map_err(idx_err)?;
-        if bundles.is_empty() {
-            let stored = load_bundles(&tx, item.id)?;
-            insert_rows(&tx, item, &stored)?;
+        // An empty `bundles` slice means "load them from storage".
+        let rows = if bundles.is_empty() {
+            let conn = self.conn()?;
+            build_rows(item, &load_bundles(&conn, item.id)?)
         } else {
-            insert_rows(&tx, item, bundles)?;
-        }
-        tx.commit().map_err(idx_err)
+            build_rows(item, bundles)
+        };
+        self.fts.replace_rows(item.id, &rows)
     }
 
     fn remove_item(&self, item_id: i64) -> Result<(), AppError> {
-        let conn = self.conn()?;
-        conn.execute("DELETE FROM item_search_fts WHERE item_id = ?1", params![item_id]).map_err(idx_err)?;
-        Ok(())
+        self.fts.remove(item_id)
     }
 
     fn indexed_item_count(&self) -> Result<usize, AppError> {
-        let conn = self.conn()?;
-        let n: i64 = conn
-            .query_row("SELECT COUNT(DISTINCT item_id) FROM item_search_fts", [], |r| r.get(0))
-            .map_err(idx_err)?;
-        Ok(n as usize)
+        self.fts.indexed_count()
     }
 
     fn rebuild_index(&self) -> Result<(), AppError> {
-        let conn = self.conn()?;
-        let tx = conn.unchecked_transaction().map_err(idx_err)?;
-        let items: Vec<Item> = {
-            let mut stmt = tx
-                .prepare(
-                    "SELECT id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, \
-                     is_low_stock, is_active, created_at, updated_at, item_type, low_stock_threshold FROM items WHERE is_active = 1",
-                )
-                .map_err(idx_err)?;
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok(Item {
-                        id: r.get(0)?,
-                        name: r.get(1)?,
-                        category: r.get(2)?,
-                        barcode: r.get(3)?,
-                        base_unit: r.get(4)?,
-                        mrp: r.get(5)?,
-                        default_sale_price: r.get(6)?,
-                        current_stock: r.get(7)?,
-                        is_low_stock: r.get(8)?,
-                        is_active: r.get(9)?,
-                        created_at: r.get(10)?,
-                        updated_at: r.get(11)?,
-                        item_type: enum_col(r, 12)?,
-                        low_stock_threshold: r.get(13)?,
-                    })
-                })
-                .map_err(idx_err)?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(idx_err)?
-        };
-        tx.execute("DELETE FROM item_search_fts", []).map_err(idx_err)?;
-        for item in &items {
-            let bundles = load_bundles(&tx, item.id)?;
-            insert_rows(&tx, item, &bundles)?;
-        }
-        tx.commit().map_err(idx_err)
+        self.fts.rebuild()
     }
 }
+

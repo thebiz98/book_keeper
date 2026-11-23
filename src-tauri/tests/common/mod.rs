@@ -70,6 +70,14 @@ impl TestDb {
         }
     }
 
+    /// Party FTS index bound to this test database.
+    pub fn party_index(&self) -> book_keeper::data::sqlite::fts::SqliteFtsIndex {
+        book_keeper::data::sqlite::fts::SqliteFtsIndex::new(
+            self.pool.clone(),
+            &book_keeper::data::sqlite::fts_specs::PARTY_FTS,
+        )
+    }
+
     /// Production FTS5 indexer bound to this test database.
     pub fn indexer(&self) -> SqliteFts5SearchIndexer {
         SqliteFts5SearchIndexer::new(self.pool.clone())

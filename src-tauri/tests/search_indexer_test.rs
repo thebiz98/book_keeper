@@ -242,3 +242,84 @@ fn test_srch_startup_rebuild_on_count_mismatch() {
     assert!(indexer.search("gamma").unwrap().is_empty());
     assert!(!book_keeper::app_state::ensure_search_index(&uow, &indexer).unwrap(), "consistent: no rebuild");
 }
+
+// ---------------------------------------------------------------- generic FtsIndex (TC-FTS-01..05)
+
+use book_keeper::data::contracts::FtsIndex;
+use book_keeper::data::sqlite::fts::{fts_prefix_query, SqliteFtsIndex};
+use book_keeper::data::sqlite::fts_specs::ITEM_FTS;
+
+fn item_fts(db: &TestDb) -> SqliteFtsIndex {
+    SqliteFtsIndex::new(db.pool.clone(), &ITEM_FTS)
+}
+
+#[test]
+fn tc_fts_01_source_count_equals_indexed_count_after_rebuild() {
+    let db = TestDb::new();
+    let mut tx = db.begin_transaction().unwrap();
+    tx.items().create(&create_test_item(1, "Blue Gel Pen", None, Some("111"), 9.0, 10.0)).unwrap();
+    tx.items().create(&create_test_item(2, "Red Pen", None, None, 9.0, 10.0)).unwrap();
+    tx.bundles().create(&create_test_bundle(1, 1, "Box", 10.0, None, Some("222"))).unwrap();
+    tx.bundles().create(&create_test_bundle(2, 1, "Case", 50.0, None, Some("333"))).unwrap();
+    tx.commit().unwrap();
+    let idx = item_fts(&db);
+    idx.rebuild().unwrap();
+    assert_eq!(idx.source_count().unwrap(), 2);
+    assert_eq!(idx.indexed_count().unwrap(), 2, "bundle-barcode rows count as one key");
+    let rows: i64 = db.pool.get().unwrap().query_row("SELECT COUNT(*) FROM item_search_fts", [], |r| r.get(0)).unwrap();
+    assert_eq!(rows, 4, "item rows + 2 bundle barcode rows + Red Pen");
+}
+
+#[test]
+fn tc_fts_02_replace_rows_touches_only_that_key() {
+    let db = TestDb::new();
+    let mut tx = db.begin_transaction().unwrap();
+    tx.items().create(&create_test_item(1, "Alpha", None, None, 9.0, 10.0)).unwrap();
+    tx.items().create(&create_test_item(2, "Beta", None, None, 9.0, 10.0)).unwrap();
+    tx.commit().unwrap();
+    let idx = item_fts(&db);
+    idx.rebuild().unwrap();
+    idx.replace_rows(1, &[vec![Some("Gamma".into()), None, None]]).unwrap();
+    assert_eq!(idx.search_keys("gamma", 10).unwrap(), vec![1]);
+    assert!(idx.search_keys("alpha", 10).unwrap().is_empty());
+    assert_eq!(idx.search_keys("beta", 10).unwrap(), vec![2]);
+}
+
+#[test]
+fn tc_fts_03_search_keys_dedupes_honours_limit_and_empty_for_no_token() {
+    let db = TestDb::new();
+    let mut tx = db.begin_transaction().unwrap();
+    tx.items().create(&create_test_item(1, "Pen One", None, Some("p1"), 9.0, 10.0)).unwrap();
+    tx.items().create(&create_test_item(2, "Pen Two", None, None, 9.0, 10.0)).unwrap();
+    tx.items().create(&create_test_item(3, "Pen Three", None, None, 9.0, 10.0)).unwrap();
+    tx.bundles().create(&create_test_bundle(1, 1, "Box", 10.0, None, Some("p1box"))).unwrap();
+    tx.commit().unwrap();
+    let idx = item_fts(&db);
+    idx.rebuild().unwrap();
+    let all = idx.search_keys("pen", 10).unwrap();
+    assert_eq!(all.len(), 3, "item 1 has two index rows but one key");
+    assert_eq!(idx.search_keys("pen", 2).unwrap().len(), 2);
+    assert!(idx.search_keys("%!", 10).unwrap().is_empty());
+}
+
+#[test]
+fn tc_fts_04_reindex_of_inactive_or_missing_row_removes_it() {
+    let db = TestDb::new();
+    let mut tx = db.begin_transaction().unwrap();
+    tx.items().create(&create_test_item(1, "Alpha", None, None, 9.0, 10.0)).unwrap();
+    tx.commit().unwrap();
+    let idx = item_fts(&db);
+    idx.reindex(1).unwrap();
+    assert_eq!(idx.indexed_count().unwrap(), 1);
+    db.pool.get().unwrap().execute("UPDATE items SET is_active = 0 WHERE id = 1", []).unwrap();
+    idx.reindex(1).unwrap();
+    assert_eq!(idx.indexed_count().unwrap(), 0);
+    idx.reindex(999).unwrap();
+    assert_eq!(idx.indexed_count().unwrap(), 0);
+}
+
+#[test]
+fn tc_fts_05_prefix_query_builder() {
+    assert_eq!(fts_prefix_query("blue gel*").as_deref(), Some("\"blue\"* \"gel\"*"));
+    assert_eq!(fts_prefix_query("%"), None);
+}
