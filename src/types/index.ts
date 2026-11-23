@@ -13,7 +13,7 @@ export * from './api';
 export type PartyType = 'CUSTOMER' | 'VENDOR';
 export type ItemType = 'PHYSICAL' | 'SERVICE';
 export type PaymentStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
-export type AdjustmentReason = 'DAMAGED' | 'EXPIRED' | 'COUNT_CORRECTION' | 'THEFT_LOST';
+export type AdjustmentReason = 'DAMAGED' | 'EXPIRED' | 'COUNT_CORRECTION' | 'THEFT_LOST' | 'UNRECORDED_STOCK';
 /** Refund = value applied to dues first, remainder as cash. Replacement = customer-only no-money swap. */
 export type SettlementType = 'REFUND' | 'REPLACEMENT';
 export type StockCondition = 'RESTOCKABLE' | 'DAMAGED_SCRAP';

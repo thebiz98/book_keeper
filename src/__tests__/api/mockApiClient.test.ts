@@ -23,7 +23,7 @@ describe('MockApiClient contract shapes', () => {
       'getPartyDuesSummary', 'settleBillPayment', 'getPartyLedger',
       'createParty', 'updateParty', 'getParty', 'listParties', 'searchParties',
       'getNextReturnCode', 'createCustomerReturn', 'createVendorReturn', 'getReturnDetails',
-      'listReturns', 'createStockAdjustment', 'getItemLots', 'listStockAdjustments',
+      'listReturns', 'createStockAdjustment', 'setItemStock', 'getItemLots', 'listStockAdjustments',
       'getDashboardMetrics', 'getLowStockAlerts', 'getSalesPurchaseTrend', 'getRecentTransactions',
       'getPnLReport', 'getStockValuationReport', 'getCashFlowReport',
       'getShopSettings', 'updateShopSettings', 'backupDatabase', 'verifyDatabaseIntegrity',
@@ -122,6 +122,13 @@ describe('MockApiClient contract shapes', () => {
     );
     expect(keys(adj)).toEqual(['adjustmentId', 'lossValue']);
     expect(keys(await c.listStockAdjustments())).toEqual(['items', 'limit', 'page', 'total']);
+    const base = { itemId: 1001, unitCost: 4, adjustmentDate: '2026-11-21', notes: null };
+    const cur = (await c.getItemsCatalog({ limit: 50 })).items.find((i) => i.itemId === 1001)!.currentStock;
+    const up = await c.setItemStock({ ...base, countedQuantity: cur + 5 });
+    expect(keys(up)).toEqual(['adjustmentId', 'delta', 'newStock', 'previousStock', 'reason', 'unitCost', 'valueChange']);
+    expect(up.reason).toBe('UNRECORDED_STOCK');
+    const same = await c.setItemStock({ ...base, countedQuantity: cur });
+    expect([same.reason, same.adjustmentId]).toEqual([null, null]);
     has((await c.getItemLots(1001))[0], ['purchaseItemId', 'remainingQuantity', 'unitCost', 'vendorName']);
   });
 

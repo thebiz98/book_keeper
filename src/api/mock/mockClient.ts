@@ -524,6 +524,20 @@ export class MockApiClient implements ApiClient {
     });
     return { adjustmentId: id, lossValue: 0 };
   }
+  async setItemStock(payload: Parameters<ApiClient['setItemStock']>[0]) {
+    // Thin stub (DD-27): no mutation, no lots, no rules.
+    const prev = this.items.find((i) => i.id === payload.itemId)?.currentStock ?? 0;
+    const delta = payload.countedQuantity - prev;
+    return {
+      adjustmentId: delta === 0 ? null : this.id(),
+      delta,
+      reason: delta > 0 ? ('UNRECORDED_STOCK' as const) : delta < 0 ? ('COUNT_CORRECTION' as const) : null,
+      previousStock: prev,
+      newStock: payload.countedQuantity,
+      unitCost: delta > 0 ? payload.unitCost : null,
+      valueChange: 0,
+    };
+  }
   async getItemLots(itemId: number) {
     return [
       {

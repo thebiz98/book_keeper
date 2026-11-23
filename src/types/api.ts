@@ -266,6 +266,24 @@ export interface StockAdjustmentResult {
   lossValue: number;
 }
 
+export interface SetItemStockPayload {
+  itemId: number;
+  countedQuantity: number;
+  unitCost: number | null;
+  adjustmentDate: string;
+  notes: string | null;
+}
+
+export interface SetItemStockResult {
+  adjustmentId: number | null;
+  delta: number;
+  reason: AdjustmentReason | null;
+  previousStock: number;
+  newStock: number;
+  unitCost: number | null;
+  valueChange: number;
+}
+
 export type ConflictStrategy = 'SKIP' | 'OVERWRITE' | 'ADD_STOCK';
 
 export interface ImportRowError {
@@ -372,6 +390,8 @@ export interface ApiClient {
   getReturnDetails(returnId: number): Promise<ReturnDetailView>;
   listReturns(filter?: ReturnsFilter): Promise<Paginated<ReturnTransaction>>;
   createStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentResult>;
+  /** Set counted stock on hand; delta>0 = unrecorded stock lot, <0 = count-correction write-off, 0 = no-op. */
+  setItemStock(payload: SetItemStockPayload): Promise<SetItemStockResult>;
   /**
    * NOTE: get_item_lots is implemented in adjustment_controller.rs but is NOT yet in
    * main.rs generate_handler!. It will reject until the backend registers it.
