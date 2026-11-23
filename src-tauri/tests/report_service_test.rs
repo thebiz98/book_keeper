@@ -359,6 +359,23 @@ fn test_low_stock_ordering_and_no_cap() {
 }
 
 #[test]
+fn low_stock_alerts_use_each_items_own_level() {
+    let uow = TestDb::new();
+    let mut tx = uow.begin_transaction().unwrap();
+    let mut a = create_test_item(1, "Above5", None, None, 15.0, 10.0);
+    a.low_stock_threshold = 20.0;
+    a.is_low_stock = true;
+    let mut b = create_test_item(2, "Never", None, None, 3.0, 10.0);
+    b.low_stock_threshold = 0.0;
+    tx.items().create(&a).unwrap();
+    tx.items().create(&b).unwrap();
+    tx.commit().unwrap();
+    let alerts = svc(&uow).get_low_stock_alerts().unwrap();
+    assert_eq!(alerts.len(), 1);
+    assert_eq!((alerts[0].id, alerts[0].low_stock_threshold), (1, 20.0));
+}
+
+#[test]
 fn test_recent_transactions_union_newest_first() {
     let uow = TestDb::new();
     let mut tx = uow.begin_transaction().unwrap();

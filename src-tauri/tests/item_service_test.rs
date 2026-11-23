@@ -26,7 +26,7 @@ fn setup() -> (Items, InventoryServiceImpl<FifoStrategy>, TestDb) {
 }
 
 fn item_payload(name: &str) -> CreateItemPayload {
-    CreateItemPayload { item_type: None,
+    CreateItemPayload { item_type: None, low_stock_threshold: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0, initial_stock: None, initial_cost: None, bundles: None,
     }
@@ -40,7 +40,7 @@ fn bundle_payload(item_id: i64, name: &str, units: f64) -> CreateBundlePayload {
 }
 
 fn update_payload(name: &str) -> UpdateItemPayload {
-    UpdateItemPayload { item_type: None,
+    UpdateItemPayload { item_type: None, low_stock_threshold: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0,
     }
@@ -401,4 +401,63 @@ fn old_frontend_payload_without_item_type_deserializes_to_none() {
     )
     .unwrap();
     assert_eq!(p.item_type, None);
+}
+
+// ------------------------------- per-item low stock level (v4) -------------------------------
+
+#[test]
+fn tc_low_05_create_item_threshold_default_custom_and_validation() {
+    let (items, _, db) = setup();
+    let a = items.create_item(item_payload("A")).unwrap();
+    assert_eq!(stored_item(&db, a).low_stock_threshold, 5.0);
+    let mut p = item_payload("B");
+    p.low_stock_threshold = Some(12.0);
+    let b = items.create_item(p).unwrap();
+    let it = stored_item(&db, b);
+    assert_eq!(it.low_stock_threshold, 12.0);
+    assert!(it.is_low_stock, "stock 0 < 12");
+    let mut p = item_payload("C");
+    p.low_stock_threshold = Some(-1.0);
+    assert_eq!(field_of(items.create_item(p)), "low_stock_threshold");
+    let mut p = item_payload("D");
+    p.low_stock_threshold = Some(f64::NAN);
+    assert_eq!(field_of(items.create_item(p)), "low_stock_threshold");
+}
+
+#[test]
+fn tc_low_06_update_low_stock_threshold_returns_refreshed_row() {
+    let (items, _, _db) = setup();
+    let mut p = item_payload("Pen");
+    p.initial_stock = Some(4.0);
+    p.initial_cost = Some(1.0);
+    let id = items.create_item(p).unwrap();
+    items.create_bundle(bundle_payload(id, "Box", 10.0)).unwrap();
+    let r = items.update_low_stock_threshold(id, 3.0).unwrap();
+    assert_eq!((r.low_stock_threshold, r.is_low_stock, r.bundles.len()), (3.0, false, 1));
+    let r = items.update_low_stock_threshold(id, 10.0).unwrap();
+    assert!(r.is_low_stock);
+    assert!(matches!(items.update_low_stock_threshold(9999, 1.0), Err(AppError::NotFound { .. })));
+    assert_eq!(field_of(items.update_low_stock_threshold(id, -2.0)), "low_stock_threshold");
+}
+
+#[test]
+fn tc_low_07_update_item_keeps_or_changes_threshold_and_catalog_follows_flag() {
+    let (items, _, db) = setup();
+    let mut p = item_payload("Pen");
+    p.low_stock_threshold = Some(7.0);
+    let id = items.create_item(p).unwrap();
+    items.update_item(id, update_payload("Pen")).unwrap();
+    assert_eq!(stored_item(&db, id).low_stock_threshold, 7.0);
+    let mut u = update_payload("Pen");
+    u.low_stock_threshold = Some(2.0);
+    items.update_item(id, u).unwrap();
+    let it = stored_item(&db, id);
+    assert_eq!((it.low_stock_threshold, it.is_low_stock), (2.0, true)); // stock 0 < 2
+    items.update_low_stock_threshold(id, 0.0).unwrap();
+    for search in [None, Some("pen".to_string())] {
+        let page = items
+            .get_catalog(CatalogFilter { low_stock_only: Some(true), search, ..Default::default() })
+            .unwrap();
+        assert_eq!(page.total, 0, "threshold 0 means never low");
+    }
 }

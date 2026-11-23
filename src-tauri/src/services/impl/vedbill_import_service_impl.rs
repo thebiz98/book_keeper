@@ -190,6 +190,7 @@ pub(crate) fn map_snapshot(snap: &VedbillSnapshot) -> (Vec<ImportRow>, Vec<Impor
             sale_price,
             lots,
             bundle: None,
+            low_stock_threshold: None,
         });
     }
 

@@ -6,6 +6,9 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
+use crate::core::stock_rules::{
+    is_low_stock, validate_low_stock_threshold, DEFAULT_LOW_STOCK_THRESHOLD,
+};
 use crate::core::value_objects::{clean_name, clean_optional, ItemType, LotSource};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
@@ -155,6 +158,25 @@ fn ensure_bundle_name_unique(
     Ok(())
 }
 
+/// Catalog/typeahead row for an item with its already-converted bundles.
+pub fn to_search_result(i: Item, bundles: Vec<ItemBundleSearchResult>) -> ItemSearchResult {
+    ItemSearchResult {
+        bundles,
+        item_id: i.id,
+        name: i.name,
+        category: i.category,
+        barcode: i.barcode,
+        base_unit: i.base_unit,
+        item_type: i.item_type,
+        mrp: i.mrp,
+        default_sale_price: i.default_sale_price,
+        current_stock: i.current_stock,
+        is_low_stock: i.is_low_stock,
+        low_stock_threshold: i.low_stock_threshold,
+        matched_bundle_id: None,
+    }
+}
+
 fn not_found(entity: &str, id: i64) -> AppError {
     AppError::NotFound { entity: entity.to_string(), id: id.to_string() }
 }
@@ -232,19 +254,9 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         }
         let rows = items
             .into_iter()
-            .map(|i| ItemSearchResult {
-                bundles: by_item.remove(&i.id).unwrap_or_default(),
-                item_id: i.id,
-                name: i.name,
-                category: i.category,
-                barcode: i.barcode,
-                base_unit: i.base_unit,
-                item_type: i.item_type,
-                mrp: i.mrp,
-                default_sale_price: i.default_sale_price,
-                current_stock: i.current_stock,
-                is_low_stock: i.is_low_stock,
-                matched_bundle_id: None,
+            .map(|i| {
+                let b = by_item.remove(&i.id).unwrap_or_default();
+                to_search_result(i, b)
             })
             .collect();
         Ok(Paginated::new(rows, total, page.page, page.limit))
@@ -266,6 +278,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let item_type = payload.item_type.unwrap_or_default();
         validate_item_type(item_type)?;
         validate_item_fields(&payload.name, payload.default_sale_price, payload.mrp)?;
+        let threshold = payload.low_stock_threshold.unwrap_or(DEFAULT_LOW_STOCK_THRESHOLD);
+        validate_low_stock_threshold(threshold)?;
         if let Some(bundles) = &payload.bundles {
             for b in bundles {
                 validate_bundle_fields(&b.bundle_name, b.units_per_bundle, b.mrp, b.default_bundle_price)?;
@@ -292,10 +306,11 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
             default_sale_price: payload.default_sale_price,
             // Stock cache starts at 0; the opening lot below raises it (InventoryService is the sole writer).
             current_stock: 0.0,
-            is_low_stock: true,
+            is_low_stock: is_low_stock(item_type, 0.0, threshold),
             is_active: true,
             created_at: now.clone(),
             updated_at: now,
+            low_stock_threshold: threshold,
         };
 
         let item_id = tx.items().create(&item)?;
@@ -337,6 +352,9 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         if let Some(t) = payload.item_type {
             validate_item_type(t)?;
         }
+        if let Some(t) = payload.low_stock_threshold {
+            validate_low_stock_threshold(t)?;
+        }
 
         let mut tx = self.uow.begin_transaction()?;
         let mut existing = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
@@ -356,6 +374,9 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         if let Some(t) = payload.item_type {
             existing.item_type = t;
         }
+        if let Some(t) = payload.low_stock_threshold {
+            existing.low_stock_threshold = t;
+        }
         existing.updated_at = chrono::Utc::now().to_rfc3339();
 
         tx.items().update(&existing)?;
@@ -363,6 +384,29 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         tx.commit()?;
 
         self.reindex(&existing, &bundles)
+    }
+
+    fn update_low_stock_threshold(&self, item_id: i64, threshold: f64) -> Result<ItemSearchResult, AppError> {
+        validate_low_stock_threshold(threshold)?;
+        let mut tx = self.uow.begin_transaction()?;
+        tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        tx.items().update_low_stock_threshold(item_id, threshold, &chrono::Utc::now().to_rfc3339())?;
+        let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let bundles = tx
+            .bundles()
+            .find_by_item_id(item_id)?
+            .into_iter()
+            .map(|b| ItemBundleSearchResult {
+                bundle_id: b.id,
+                bundle_name: b.bundle_name,
+                units_per_bundle: b.units_per_bundle,
+                bundle_price: b.default_bundle_price,
+                barcode: b.barcode,
+            })
+            .collect();
+        tx.commit()?;
+        // The threshold is not indexed: no reindex needed.
+        Ok(to_search_result(item, bundles))
     }
 
     fn create_bundle(&self, payload: CreateBundlePayload) -> Result<ItemBundle, AppError> {

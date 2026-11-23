@@ -295,7 +295,7 @@ fn validate_stock_availability_checks_every_item() {
 fn verify_and_repair_stock_cache() {
     let (db, inv) = setup(&[(1, 1, 10.0, 1.0)]);
     let mut tx = db.begin_transaction().unwrap();
-    tx.items().update_stock_cache(1, 99.0, false).unwrap(); // corrupt
+    tx.items().update_stock_cache(1, 99.0).unwrap(); // corrupt
     assert_eq!(inv.verify_stock_cache(&mut *tx).unwrap(), vec![(1, 99.0, 10.0)]);
     assert_eq!(inv.repair_stock_cache(&mut *tx).unwrap(), vec![(1, 99.0, 10.0)]);
     assert!(inv.verify_stock_cache(&mut *tx).unwrap().is_empty());
@@ -303,11 +303,81 @@ fn verify_and_repair_stock_cache() {
 }
 
 #[test]
+fn tc_low_01_threshold_10_follows_stock_changes() {
+    let (db, _inv) = setup(&[(1, 1, 8.0, 1.0)]);
+    let mut tx = db.begin_transaction().unwrap();
+    tx.items().update_low_stock_threshold(1, 10.0, "2026-11-20T10:00:00Z").unwrap();
+    assert!(tx.items().find_by_id(1).unwrap().unwrap().is_low_stock); // 8 < 10
+    tx.items().apply_stock_delta(1, 2.0).unwrap(); // 10 -> not low
+    assert!(!tx.items().find_by_id(1).unwrap().unwrap().is_low_stock);
+    tx.items().apply_stock_delta(1, -1.0).unwrap(); // 9 -> low
+    assert!(tx.items().find_by_id(1).unwrap().unwrap().is_low_stock);
+}
+
+#[test]
+fn tc_low_02_threshold_zero_is_never_low() {
+    let (db, _inv) = setup(&[(1, 1, 1.0, 1.0)]);
+    let mut tx = db.begin_transaction().unwrap();
+    tx.items().update_low_stock_threshold(1, 0.0, "2026-11-20T10:00:00Z").unwrap();
+    tx.items().update_stock_cache(1, 0.0).unwrap();
+    assert!(!tx.items().find_by_id(1).unwrap().unwrap().is_low_stock);
+}
+
+#[test]
+fn tc_low_03_recompute_fixes_a_corrupted_flag() {
+    let (db, _inv) = setup(&[(1, 1, 10.0, 1.0)]);
+    db.pool.get().unwrap().execute("UPDATE items SET is_low_stock = 1 WHERE id = 1", []).unwrap();
+    let mut tx = db.begin_transaction().unwrap();
+    assert_eq!(tx.items().recompute_low_stock_flags().unwrap(), 1);
+    assert!(!tx.items().find_by_id(1).unwrap().unwrap().is_low_stock);
+    assert_eq!(tx.items().recompute_low_stock_flags().unwrap(), 0);
+}
+
+#[test]
+fn tc_low_04_rust_and_sql_rules_agree() {
+    use book_keeper::core::{is_low_stock, ItemType};
+    let (db, _inv) = setup(&[(1, 1, 1.0, 1.0)]);
+    let mut tx = db.begin_transaction().unwrap();
+    let mut n = 10;
+    for stock in [0.0, 4.5, 5.0, 6.0] {
+        for thr in [0.0, 5.0, 5.5] {
+            n += 1;
+            let mut it = tx.items().find_by_id(1).unwrap().unwrap();
+            it.id = n;
+            it.name = format!("grid{n}");
+            it.barcode = None;
+            it.current_stock = stock;
+            it.low_stock_threshold = thr;
+            tx.items().create(&it).unwrap();
+            let got = tx.items().find_by_id(n).unwrap().unwrap();
+            assert_eq!(got.is_low_stock, is_low_stock(ItemType::Physical, stock, thr), "stock {stock} thr {thr}");
+        }
+    }
+}
+
+#[test]
+fn tc_low_08_service_items_are_never_low() {
+    use book_keeper::core::ItemType;
+    let (db, _inv) = setup(&[(1, 1, 1.0, 1.0)]);
+    let mut tx = db.begin_transaction().unwrap();
+    let mut it = tx.items().find_by_id(1).unwrap().unwrap();
+    it.id = 50;
+    it.name = "Svc".into();
+    it.barcode = None;
+    it.item_type = ItemType::Service;
+    it.current_stock = 0.0;
+    tx.items().create(&it).unwrap();
+    assert!(!tx.items().find_by_id(50).unwrap().unwrap().is_low_stock);
+    tx.items().apply_stock_delta(50, -1.0).unwrap();
+    assert!(!tx.items().find_by_id(50).unwrap().unwrap().is_low_stock);
+}
+
+#[test]
 fn startup_repairs_a_drifted_stock_cache() {
     let path = std::env::temp_dir().join(format!("bk_inv_startup_{}.db", uuid::Uuid::new_v4()));
     {
         let app = book_keeper::app_state::build_sqlite_app_state(&path).unwrap();
-        let id = app.item_service.create_item(CreateItemPayload { item_type: None,
+        let id = app.item_service.create_item(CreateItemPayload { item_type: None, low_stock_threshold: None,
             name: "Pen".into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
             default_sale_price: 10.0, initial_stock: Some(8.0), initial_cost: Some(6.0), bundles: None,
         }).unwrap();
@@ -332,7 +402,7 @@ fn item_create_with_opening_stock_goes_through_inventory_service() {
     let db = TestDb::new();
     let inv = InventoryServiceImpl::new(FifoStrategy, db.clone());
     let items = ItemServiceImpl::new(db.clone(), Arc::new(db.indexer()), inv.clone());
-    let mk = |name: &str, cost: Option<f64>| CreateItemPayload { item_type: None,
+    let mk = |name: &str, cost: Option<f64>| CreateItemPayload { item_type: None, low_stock_threshold: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0, initial_stock: Some(8.0), initial_cost: cost, bundles: None,
     };

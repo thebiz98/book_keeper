@@ -15,6 +15,8 @@ pub trait ItemService: Send + Sync {
     fn list_categories(&self) -> Result<Vec<String>, AppError>;
     fn create_item(&self, payload: CreateItemPayload) -> Result<i64, AppError>;
     fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError>;
+    /// Sets the per-item low stock level (0 = never) and returns the refreshed row with bundles.
+    fn update_low_stock_threshold(&self, item_id: i64, threshold: f64) -> Result<ItemSearchResult, AppError>;
     fn create_bundle(&self, payload: CreateBundlePayload) -> Result<ItemBundle, AppError>;
     fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<ItemBundle, AppError>;
     fn delete_bundle(&self, bundle_id: i64) -> Result<(), AppError>;
@@ -40,6 +42,10 @@ impl<T: ItemService + ?Sized> ItemService for std::sync::Arc<T> {
 
     fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError> {
         (**self).update_item(item_id, payload)
+    }
+
+    fn update_low_stock_threshold(&self, item_id: i64, threshold: f64) -> Result<ItemSearchResult, AppError> {
+        (**self).update_low_stock_threshold(item_id, threshold)
     }
 
     fn create_bundle(&self, payload: CreateBundlePayload) -> Result<ItemBundle, AppError> {

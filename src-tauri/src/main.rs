@@ -84,6 +84,7 @@ fn main() {
             party_controller::search_parties,
             dues_controller::settle_bill_payment,
             item_controller::update_item,
+            item_controller::update_item_low_stock_threshold,
             party_controller::update_party,
             settings_controller::update_shop_settings,
             settings_controller::verify_database_integrity,

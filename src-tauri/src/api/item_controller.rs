@@ -30,6 +30,15 @@ pub async fn update_item(state: State<'_, AppState>, item_id: i64, payload: Upda
     super::run_blocking(move || svc.update_item(item_id, payload)).await
 }
 #[tauri::command]
+pub async fn update_item_low_stock_threshold(
+    state: State<'_, AppState>,
+    item_id: i64,
+    threshold: f64,
+) -> Result<ItemSearchResult, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.update_low_stock_threshold(item_id, threshold)).await
+}
+#[tauri::command]
 pub async fn create_bundle(state: State<'_, AppState>, payload: CreateBundlePayload) -> Result<ItemBundle, AppError> {
     let svc = state.item_service.clone();
     super::run_blocking(move || svc.create_bundle(payload)).await

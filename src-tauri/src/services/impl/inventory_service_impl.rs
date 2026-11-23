@@ -363,6 +363,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         for &(item_id, cached, lots) in &bad {
             uow.items().apply_stock_delta(item_id, lots - cached)?;
         }
+        uow.items().recompute_low_stock_flags()?;
         Ok(bad)
     }
 }

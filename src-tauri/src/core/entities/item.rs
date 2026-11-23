@@ -17,6 +17,8 @@ pub struct Item {
     pub is_active: bool,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default = "crate::core::stock_rules::default_low_stock_threshold")]
+    pub low_stock_threshold: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -302,7 +302,7 @@ fn test_tc_list_05_history_row_fields_and_detail_views() {
 fn new_item(e: &Env, name: &str, cat: Option<&str>, stock: f64, bundles: &[(&str, f64)]) -> i64 {
     let id = e
         .items
-        .create_item(CreateItemPayload { item_type: None,
+        .create_item(CreateItemPayload { item_type: None, low_stock_threshold: None,
             name: name.into(), category: cat.map(str::to_string), barcode: None, base_unit: "PCS".into(), mrp: None,
             default_sale_price: 10.0, initial_stock: if stock > 0.0 { Some(stock) } else { None },
             initial_cost: if stock > 0.0 { Some(5.0) } else { None },

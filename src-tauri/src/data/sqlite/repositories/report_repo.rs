@@ -140,7 +140,7 @@ impl ReportRepository for SqliteReportRepository {
 
     fn low_stock_items(&self) -> Result<Vec<LowStockItem>, AppError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, category, base_unit, current_stock, default_sale_price, mrp \
+            "SELECT id, name, category, base_unit, current_stock, default_sale_price, mrp, low_stock_threshold \
              FROM items WHERE is_active = 1 AND is_low_stock = 1 \
              ORDER BY current_stock ASC, name COLLATE NOCASE, id",
         )?;
@@ -154,6 +154,7 @@ impl ReportRepository for SqliteReportRepository {
                     current_stock: r.get(4)?,
                     default_sale_price: r.get(5)?,
                     mrp: r.get(6)?,
+                    low_stock_threshold: r.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

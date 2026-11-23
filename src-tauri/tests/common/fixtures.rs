@@ -30,6 +30,7 @@ pub fn create_test_item(
         is_active: true,
         created_at: "2026-11-20T10:00:00Z".to_string(),
         updated_at: "2026-11-20T10:00:00Z".to_string(),
+        low_stock_threshold: 5.0,
     }
 }
 

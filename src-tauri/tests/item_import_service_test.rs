@@ -162,7 +162,7 @@ fn header_rules() {
     assert!(rep.header_issues.iter().any(|i| i.kind == HeaderIssueKind::Missing && i.column == "Purchase Cost"));
     let rate = rep.header_issues.iter().find(|i| i.column == "Sale Rate").unwrap();
     assert_eq!(rate.suggestion.as_deref(), Some("Sale Price"));
-    assert_eq!(rep.expected_columns.len(), 10);
+    assert_eq!(rep.expected_columns.len(), 11);
     // execute refuses, quoting every header message
     let e = svc.execute_items_import(s(&missing), ConflictStrategy::Skip).unwrap_err();
     assert!(e.to_string().contains("Purchase Cost") && e.to_string().contains("Sale Price"), "{e}");
@@ -240,7 +240,48 @@ fn template_round_trip_csv_and_xlsx() {
     assert_eq!(wb.sheet_names(), vec!["Items".to_string(), "Instructions".to_string()]);
     let range = wb.worksheet_range_at(0).unwrap().unwrap();
     let header: Vec<String> = range.rows().next().unwrap().iter().map(|c| c.to_string()).collect();
-    assert_eq!(header.join(","), HEADER);
+    assert_eq!(header.join(","), format!("{HEADER},Low Stock Level"));
+}
+
+fn csv_low(body: &str) -> String {
+    let p = std::env::temp_dir().join(format!("bk_import_{}.csv", uuid::Uuid::new_v4()));
+    std::fs::write(&p, format!("{HEADER},Low Stock Level\n{body}")).unwrap();
+    p.to_str().unwrap().to_string()
+}
+
+#[test]
+fn imp_lsl_01_and_02_column_is_stored_blank_is_5_and_negative_is_an_error() {
+    let (db, svc) = setup();
+    let f = csv_low("A,,,PCS,,1,1,,,,10\nB,,,PCS,,1,1,,,,\n");
+    svc.execute_items_import(&f, ConflictStrategy::Skip).unwrap();
+    assert_eq!(item(&db, "A").low_stock_threshold, 10.0);
+    assert!(item(&db, "A").is_low_stock);
+    assert_eq!(item(&db, "B").low_stock_threshold, 5.0);
+    let bad = csv_low("C,,,PCS,,1,1,,,,-1\n");
+    let rep = svc.validate_items_import(&bad).unwrap();
+    assert!(rep.rows_with_errors.iter().any(|e| e.field == "Low Stock Level"), "{rep:?}");
+}
+
+#[test]
+fn imp_lsl_03_overwrite_updates_only_when_non_blank_and_add_stock_ignores() {
+    let (db, svc) = setup();
+    svc.execute_items_import(&csv_low("A,,,PCS,,1,1,,,,7\n"), ConflictStrategy::Skip).unwrap();
+    svc.execute_items_import(&csv_low("A,,,PCS,,1,1,,,,\n"), ConflictStrategy::Overwrite).unwrap();
+    assert_eq!(item(&db, "A").low_stock_threshold, 7.0);
+    svc.execute_items_import(&csv_low("A,,,PCS,,1,1,,,,2\n"), ConflictStrategy::Overwrite).unwrap();
+    assert_eq!(item(&db, "A").low_stock_threshold, 2.0);
+    svc.execute_items_import(&csv_low("A,,,PCS,,1,1,3,,,9\n"), ConflictStrategy::AddStock).unwrap();
+    assert_eq!(item(&db, "A").low_stock_threshold, 2.0);
+}
+
+#[test]
+fn imp_lsl_04_header_suggestion() {
+    let (_db, svc) = setup();
+    let f = std::env::temp_dir().join(format!("bk_import_{}.csv", uuid::Uuid::new_v4()));
+    std::fs::write(&f, "Item Name,Base Unit,Sale Price,Purchase Cost,Reorder Level\nA,PCS,1,1,3\n").unwrap();
+    let rep = svc.validate_items_import(f.to_str().unwrap()).unwrap();
+    let h = rep.header_issues.iter().find(|i| i.column == "Reorder Level").unwrap();
+    assert_eq!(h.suggestion.as_deref(), Some("Low Stock Level"));
 }
 
 #[test]

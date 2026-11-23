@@ -15,6 +15,9 @@ pub struct CreateItemPayload {
     /// `None` => `PHYSICAL`. `SERVICE` is rejected in v1.1 (FR-21).
     #[serde(default)]
     pub item_type: Option<ItemType>,
+    /// `None` => 5 (DEFAULT_LOW_STOCK_THRESHOLD). 0 = never low.
+    #[serde(default)]
+    pub low_stock_threshold: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -28,6 +31,9 @@ pub struct UpdateItemPayload {
     /// `None` => keep the current type. `SERVICE` is rejected in v1.1 (FR-21).
     #[serde(default)]
     pub item_type: Option<ItemType>,
+    /// `None` => keep the current level.
+    #[serde(default)]
+    pub low_stock_threshold: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -72,6 +78,8 @@ pub struct ItemSearchResult {
     pub default_sale_price: f64,
     pub current_stock: f64,
     pub is_low_stock: bool,
+    #[serde(default = "crate::core::stock_rules::default_low_stock_threshold")]
+    pub low_stock_threshold: f64,
     pub bundles: Vec<ItemBundleSearchResult>,
     /// Set when the hit came from a bundle barcode row (scanner on a pack barcode).
     #[serde(default)]

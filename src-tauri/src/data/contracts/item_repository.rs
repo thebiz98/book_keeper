@@ -22,14 +22,15 @@ pub trait ItemRepository {
     /// Writes master fields only (name, category, barcode, unit, prices, active flag, updated_at).
     /// The stock cache and `created_at` are never touched.
     fn update(&mut self, item: &Item) -> Result<(), AppError>;
-    fn update_stock_cache(
-        &mut self,
-        item_id: i64,
-        new_stock: f64,
-        is_low_stock: bool,
-    ) -> Result<(), AppError>;
-    /// Applies `delta` to `current_stock` and recomputes `is_low_stock` against
-    /// [`crate::core::LOW_STOCK_THRESHOLD`] in one statement. No clamping: the cache must equal
+    /// Sets `current_stock`; `is_low_stock` is derived in the same statement from the item's own
+    /// `low_stock_threshold` ([`crate::core::LOW_STOCK_SQL`]).
+    fn update_stock_cache(&mut self, item_id: i64, new_stock: f64) -> Result<(), AppError>;
+    /// Sets the per-item low stock level and recomputes its flag. NotFound when no such row.
+    fn update_low_stock_threshold(&mut self, item_id: i64, threshold: f64, updated_at: &str) -> Result<(), AppError>;
+    /// Re-derives every `is_low_stock` flag; returns the number of rows corrected.
+    fn recompute_low_stock_flags(&mut self) -> Result<usize, AppError>;
+    /// Applies `delta` to `current_stock` and recomputes `is_low_stock` against the item's own
+    /// `low_stock_threshold` in one statement. No clamping: the cache must equal
     /// the sum of lot remainders (F3/T4 routes every stock write through this).
     fn apply_stock_delta(&mut self, item_id: i64, delta: f64) -> Result<(), AppError>;
     /// One row per item: `(item_id, cached current_stock, Σ lot remaining_quantity)`. Read-only;

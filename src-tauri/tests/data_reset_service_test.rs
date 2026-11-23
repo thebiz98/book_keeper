@@ -32,7 +32,7 @@ fn env(testing_mode: bool) -> Env {
 fn seed(app: &AppState) -> i64 {
     let item = app
         .item_service
-        .create_item(CreateItemPayload { item_type: None,
+        .create_item(CreateItemPayload { item_type: None, low_stock_threshold: None,
             name: "Pen".into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
             default_sale_price: 10.0, initial_stock: Some(10.0), initial_cost: Some(6.0),
             bundles: Some(vec![CreateBundlePayload {
@@ -143,7 +143,7 @@ fn all_scope_empties_everything_but_the_shop_profile() {
     assert_eq!(count(&e.db, "shop_settings"), 1);
     assert_eq!(e.app.search_indexer.indexed_item_count().unwrap(), 0);
     // Ids restart, so a fresh item is #1 again.
-    let id = e.app.item_service.create_item(CreateItemPayload { item_type: None,
+    let id = e.app.item_service.create_item(CreateItemPayload { item_type: None, low_stock_threshold: None,
         name: "Ink".into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 5.0, initial_stock: None, initial_cost: None, bundles: None,
     }).unwrap();

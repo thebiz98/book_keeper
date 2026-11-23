@@ -95,6 +95,7 @@ pub fn xlsx_template_bytes() -> Result<Vec<u8>, AppError> {
             "Extra spaces in names are removed automatically. Names must be unique (case does not matter).",
             "Items whose name already exists can be skipped, updated, or have their stock added; you choose when importing.",
             "Opening Stock creates a stock lot dated on the import day, at the Purchase Cost per unit.",
+            "Low Stock Level: leave empty for 5; 0 turns the low-stock alert off.",
             "This sheet is ignored by the importer.",
         ];
         for (i, n) in notes.iter().enumerate() {

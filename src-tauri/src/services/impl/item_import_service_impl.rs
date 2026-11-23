@@ -7,6 +7,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
+use crate::core::stock_rules::{is_low_stock, DEFAULT_LOW_STOCK_THRESHOLD};
 use crate::core::value_objects::{clean_name, clean_optional, ItemType, LotSource};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
@@ -48,6 +49,7 @@ const H_COST: &str = "purchase cost";
 const H_STOCK: &str = "opening stock";
 const H_BUNDLE: &str = "packaging bundle";
 const H_UNITS: &str = "units per bundle";
+const H_LOW: &str = "low stock level";
 
 pub(crate) struct ColumnSpec {
     pub key: &'static str,
@@ -59,7 +61,7 @@ pub(crate) struct ColumnSpec {
 }
 
 /// Template A, in file order.
-pub(crate) const COLUMNS: [ColumnSpec; 10] = [
+pub(crate) const COLUMNS: [ColumnSpec; 11] = [
     ColumnSpec { key: H_NAME, display: "Item Name", required: true, numeric: false,
         rule: "Text. Must be unique in the file (case does not matter). Extra spaces are removed.", example: "Pen Blue" },
     ColumnSpec { key: H_CATEGORY, display: "Category", required: false, numeric: false,
@@ -80,6 +82,8 @@ pub(crate) const COLUMNS: [ColumnSpec; 10] = [
         rule: "Text, e.g. Box. Give it together with Units Per Bundle.", example: "Box" },
     ColumnSpec { key: H_UNITS, display: "Units Per Bundle", required: false, numeric: true,
         rule: "Number greater than 1. Give it together with Packaging Bundle.", example: "10" },
+    ColumnSpec { key: H_LOW, display: "Low Stock Level", required: false, numeric: true,
+        rule: "Number, 0 or more. Low-stock alert level in base units. Empty = 5; 0 = never.", example: "10" },
 ];
 
 fn spec(key: &str) -> &'static ColumnSpec {
@@ -135,6 +139,8 @@ pub(crate) struct ImportRow {
     /// In FIFO order (oldest first).
     pub lots: Vec<OpeningLot>,
     pub bundle: Option<(String, f64)>,
+    /// `None` = blank cell (new item: 5; OVERWRITE: keep the current level).
+    pub low_stock_threshold: Option<f64>,
 }
 
 pub(crate) fn vfail(field: &str, message: impl Into<String>) -> AppError {
@@ -274,7 +280,9 @@ pub(crate) fn suggest_column(header: &str) -> Option<&'static str> {
     }
     // 2. Meaning: common words used for the same thing in other software.
     let has = |w: &[&str]| w.iter().any(|x| sq.contains(x));
-    let key = if has(&["perbundle", "perbox", "perpack", "conversion", "pcsper", "unitsper", "packsize"]) {
+    let key = if has(&["lowstock", "reorder", "minstock", "minimum", "minqty", "alertlevel"]) {
+        H_LOW
+    } else if has(&["perbundle", "perbox", "perpack", "conversion", "pcsper", "unitsper", "packsize"]) {
         H_UNITS
     } else if has(&["mrp", "maxretail", "maximumretail"]) {
         H_MRP
@@ -496,6 +504,7 @@ fn check_rows(raws: &[RawRow], errors: &mut Vec<ImportRowError>) -> Vec<ImportRo
             push(errors, H_MRP, "MRP is 0. Leave it empty for no MRP, or enter a number greater than 0.".into());
         }
         let opening = parse_number(raw, nm, H_STOCK, false, errors);
+        let low = parse_number(raw, nm, H_LOW, false, errors);
 
         let barcode = Some(text(H_BARCODE).trim().to_string()).filter(|b| !b.is_empty());
 
@@ -529,6 +538,7 @@ fn check_rows(raws: &[RawRow], errors: &mut Vec<ImportRowError>) -> Vec<ImportRo
                 sale_price: sale_price.unwrap_or(0.0),
                 lots,
                 bundle,
+                low_stock_threshold: low,
             });
         }
     }
@@ -681,10 +691,11 @@ pub(crate) fn execute_checked<U: UnitOfWork, I: InventoryService>(
                     default_sale_price: row.sale_price,
                     // The cache starts at 0; the opening lots raise it.
                     current_stock: 0.0,
-                    is_low_stock: true,
+                    is_low_stock: is_low_stock(ItemType::Physical, 0.0, row.low_stock_threshold.unwrap_or(DEFAULT_LOW_STOCK_THRESHOLD)),
                     is_active: true,
                     created_at: now.clone(),
                     updated_at: now.clone(),
+                    low_stock_threshold: row.low_stock_threshold.unwrap_or(DEFAULT_LOW_STOCK_THRESHOLD),
                 };
                 let item_id = tx.items().create(&item)?;
                 if let Some((bundle_name, units)) = &row.bundle {
@@ -714,6 +725,9 @@ pub(crate) fn execute_checked<U: UnitOfWork, I: InventoryService>(
                     }
                     if row.mrp.is_some() {
                         existing.mrp = row.mrp;
+                    }
+                    if let Some(t) = row.low_stock_threshold {
+                        existing.low_stock_threshold = t;
                     }
                     existing.default_sale_price = row.sale_price;
                     existing.updated_at = now.clone();

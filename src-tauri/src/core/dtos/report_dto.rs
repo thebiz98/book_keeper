@@ -45,6 +45,8 @@ pub struct LowStockItem {
     pub current_stock: f64,
     pub default_sale_price: f64,
     pub mrp: Option<f64>,
+    #[serde(default = "crate::core::stock_rules::default_low_stock_threshold")]
+    pub low_stock_threshold: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -2,7 +2,7 @@
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::core::entities::Item;
-use crate::core::constants::LOW_STOCK_THRESHOLD;
+use crate::core::stock_rules::LOW_STOCK_SQL;
 use crate::core::error::AppError;
 use crate::data::contracts::ItemRepository;
 use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
@@ -17,7 +17,7 @@ impl SqliteItemRepository {
     }
 }
 
-const COLS: &str = "id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, is_low_stock, is_active, created_at, updated_at, item_type";
+const COLS: &str = "id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, is_low_stock, is_active, created_at, updated_at, item_type, low_stock_threshold";
 
 fn map_item(r: &Row<'_>) -> rusqlite::Result<Item> {
     Ok(Item {
@@ -34,6 +34,7 @@ fn map_item(r: &Row<'_>) -> rusqlite::Result<Item> {
         created_at: r.get(10)?,
         updated_at: r.get(11)?,
         item_type: enum_col(r, 12)?,
+        low_stock_threshold: r.get(13)?,
     })
 }
 
@@ -113,11 +114,14 @@ impl ItemRepository for SqliteItemRepository {
         let id = if item.id > 0 { Some(item.id) } else { None };
         let t = enum_to_sql(&item.item_type)?;
         self.conn.execute(
-            &format!("INSERT INTO items ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"),
+            &format!(
+                "INSERT INTO items ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8, \
+                 (?13 = 'PHYSICAL' AND ?8 < ?14), ?10,?11,?12,?13,?14)"
+            ),
             params![
                 id, item.name, item.category, item.barcode, item.base_unit, item.mrp,
                 item.default_sale_price, item.current_stock, item.is_low_stock, item.is_active,
-                item.created_at, item.updated_at, t
+                item.created_at, item.updated_at, t, item.low_stock_threshold
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -127,30 +131,49 @@ impl ItemRepository for SqliteItemRepository {
         let t = enum_to_sql(&item.item_type)?;
         let n = self.conn.execute(
             "UPDATE items SET name=?2, category=?3, barcode=?4, base_unit=?5, mrp=?6, \
-             default_sale_price=?7, is_active=?8, updated_at=?9, item_type=?10 WHERE id=?1",
+             default_sale_price=?7, is_active=?8, updated_at=?9, item_type=?10, low_stock_threshold=?11, \
+             is_low_stock = (?10 = 'PHYSICAL' AND current_stock < ?11) WHERE id=?1",
             params![
                 item.id, item.name, item.category, item.barcode, item.base_unit, item.mrp,
-                item.default_sale_price, item.is_active, item.updated_at, t
+                item.default_sale_price, item.is_active, item.updated_at, t, item.low_stock_threshold
             ],
         )?;
         if n == 0 { Err(not_found(item.id)) } else { Ok(()) }
     }
 
-    fn update_stock_cache(&mut self, item_id: i64, new_stock: f64, is_low_stock: bool) -> Result<(), AppError> {
+    fn update_stock_cache(&mut self, item_id: i64, new_stock: f64) -> Result<(), AppError> {
         let n = self.conn.execute(
-            "UPDATE items SET current_stock = ?2, is_low_stock = ?3 WHERE id = ?1",
-            params![item_id, new_stock, is_low_stock],
+            "UPDATE items SET current_stock = ?2, \
+             is_low_stock = (item_type = 'PHYSICAL' AND ?2 < low_stock_threshold) WHERE id = ?1",
+            params![item_id, new_stock],
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
     }
 
     fn apply_stock_delta(&mut self, item_id: i64, delta: f64) -> Result<(), AppError> {
+        // SQLite evaluates the right-hand sides against the OLD row values.
         let n = self.conn.execute(
             "UPDATE items SET current_stock = current_stock + ?1, \
-             is_low_stock = (current_stock + ?1) < ?2 WHERE id = ?3",
-            params![delta, LOW_STOCK_THRESHOLD, item_id],
+             is_low_stock = (item_type = 'PHYSICAL' AND (current_stock + ?1) < low_stock_threshold) WHERE id = ?2",
+            params![delta, item_id],
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
+    }
+
+    fn update_low_stock_threshold(&mut self, item_id: i64, threshold: f64, updated_at: &str) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE items SET low_stock_threshold = ?2, \
+             is_low_stock = (item_type = 'PHYSICAL' AND current_stock < ?2), updated_at = ?3 WHERE id = ?1",
+            params![item_id, threshold, updated_at],
+        )?;
+        if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
+    }
+
+    fn recompute_low_stock_flags(&mut self) -> Result<usize, AppError> {
+        Ok(self.conn.execute(
+            &format!("UPDATE items SET is_low_stock = {LOW_STOCK_SQL} WHERE is_low_stock <> {LOW_STOCK_SQL}"),
+            [],
+        )?)
     }
 
     fn stock_cache_audit(&self) -> Result<Vec<(i64, f64, f64)>, AppError> {

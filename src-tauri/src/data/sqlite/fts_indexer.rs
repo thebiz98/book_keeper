@@ -99,6 +99,7 @@ fn map_item_result(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemSearchResult> 
         current_stock: r.get(7)?,
         is_low_stock: r.get(8)?,
         item_type: enum_col(r, 9)?,
+        low_stock_threshold: r.get(10)?,
         bundles: Vec::new(),
         matched_bundle_id: None,
     })
@@ -111,7 +112,7 @@ fn load_results(conn: &Connection, ids: Vec<i64>, clean_q: &str) -> Result<Vec<I
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, \
-                 is_low_stock, item_type FROM items WHERE is_active = 1 AND id IN ({ph})"
+                 is_low_stock, item_type, low_stock_threshold FROM items WHERE is_active = 1 AND id IN ({ph})"
             ))
             .map_err(idx_err)?;
         let rows = stmt
@@ -283,7 +284,7 @@ impl ItemSearchIndexer for SqliteFts5SearchIndexer {
             let mut stmt = tx
                 .prepare(
                     "SELECT id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, \
-                     is_low_stock, is_active, created_at, updated_at, item_type FROM items WHERE is_active = 1",
+                     is_low_stock, is_active, created_at, updated_at, item_type, low_stock_threshold FROM items WHERE is_active = 1",
                 )
                 .map_err(idx_err)?;
             let rows = stmt
@@ -302,6 +303,7 @@ impl ItemSearchIndexer for SqliteFts5SearchIndexer {
                         created_at: r.get(10)?,
                         updated_at: r.get(11)?,
                         item_type: enum_col(r, 12)?,
+                        low_stock_threshold: r.get(13)?,
                     })
                 })
                 .map_err(idx_err)?;

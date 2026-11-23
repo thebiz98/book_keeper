@@ -60,6 +60,6 @@ pub fn assert_stock_invariant(tx: &mut dyn TransactionContext) {
             "item {item_id}: cached {cached} != lots {lots}"
         );
         let item = tx.items().find_by_id(item_id).unwrap().unwrap();
-        assert_eq!(item.is_low_stock, item.current_stock < book_keeper::core::LOW_STOCK_THRESHOLD, "item {item_id} low flag");
+        assert_eq!(item.is_low_stock, book_keeper::core::is_low_stock(item.item_type, item.current_stock, item.low_stock_threshold), "item {item_id} low flag");
     }
 }
