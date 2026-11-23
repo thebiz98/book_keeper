@@ -10,7 +10,7 @@
 |---|---|
 | `fifo_strategy_test` | FIFO depletion, split lots, return restore, scrap, adjustment write-off (LLD §11.2) |
 | `payment_service_test` | Payments, refunds, settlement (§11.3) |
-| `inventory_service_test` | Stock cache, inward, restore, adjustments, low-stock flag (§11.4) |
+| `inventory_service_test` | Stock cache, inward, restore, adjustments, unrecorded stock & set_item_stock, low-stock flag (§11.4) |
 | `sale_service_test` | Billing, bundles, credit, validation, code sequence (§11.5) |
 | `purchase_service_test` | Inward receipts and lots (§11.6) |
 | `search_indexer_test` | FTS5 prefix and barcode search (§11.7); generic `FtsIndex` (TC-FTS-01..05) |

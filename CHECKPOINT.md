@@ -11,7 +11,7 @@ All milestones M1–M6 are done. Gate (`bash run_e2e_tests.sh`): 54 backend test
 | Services | `src-tauri/src/services/impl` |
 | SQLite (pool, schema v4, unit of work, FTS5, 12 repos) | `src-tauri/src/data/sqlite` |
 | Bootstrap | `app_state::build_sqlite_app_state(db_path)` |
-| IPC (50 commands) | `src-tauri/src/api`, `src-tauri/src/main.rs` |
+| IPC (51 commands) | `src-tauri/src/api`, `src-tauri/src/main.rs` |
 | Frontend | `src/` — one IPC boundary in `src/api/ipc.ts` (`invokeCmd`, converts snake_case ↔ camelCase) |
 
 ## Conventions that matter
@@ -52,6 +52,13 @@ Windows 11 ARM64 (verified 2026-11-22): requires VS Build Tools 2022 with the **
 - **Conventions:** every search field uses `useLiveSearch` (`src/hooks/useLiveSearch.ts`; debounce `TYPEAHEAD_DEBOUNCE_MS` 50 / `LIST_SEARCH_DEBOUNCE_MS` 150; no hand-rolled `setTimeout`); typeaheads are built on `LiveSearchTypeahead` (`onCreate` for inline create). FTS: `FtsIndex` / `FtsSpec` / `SqliteFtsIndex` / `fts_prefix_query` / `sync_after_commit` (post-commit, failures logged); specs in `data/sqlite/fts_specs.rs`; new indexes are pushed to `AppState.fts_indexes`, call `ensure_fts_index` at startup (reset-All rebuilds them via `with_fts_indexes`). Low-stock rule lives only in `core::stock_rules` (`is_low_stock`, `LOW_STOCK_SQL`).
 - Party search moved from substring to token-prefix (mid-word "mesh" no longer finds "Ramesh"); 3+ digits also match anywhere in the phone.
 - **Manual check:** Inventory: type in the search box (results update without a button, Enter is immediate); Barcode column gone; edit a Low Stock Level cell (Enter moves down, Esc reverts, blur saves, -1 shows an error); Status badge changes; 0 turns the alert off. Drawer has "Low Stock Level". Dashboard shows `stock / level`. Parties page, party selector, sales/purchase history and the return bill picker filter as you type; "9876543210" finds "98765-43210". On an existing v3 `shop.db` the app upgrades and writes a pre-migration backup.
+
+## Branch feat/unrecorded-stock (FR-08 rev., DD-40; migration v5)
+- Schema is now **v5**: `stock_adjustments` rebuilt (ids and `sqlite_sequence` preserved) so `reason` accepts `UNRECORDED_STOCK`, with `CHECK (reason <> 'UNRECORDED_STOCK' OR (quantity > 0 AND unit_cost IS NOT NULL))`. Fixture `v5.sql` added. IPC commands: 51 (`set_item_stock`).
+- `InventoryService::set_item_stock` computes `delta = counted - current_stock` inside its own transaction: delta > 0 posts an `UNRECORDED_STOCK` lot at the entered cost, delta < 0 a `COUNT_CORRECTION` FIFO write-off, 0 is a no-op. Both it and `create_adjustment` share the private `post_adjustment` and reject inactive or SERVICE items. Reports need no change (tests TC-REP-UNREC-1/2 prove valuation-only effect).
+- UI: `SetStockDialog` (row action "Set stock" on PHYSICAL items and the item drawer's "Stock on hand" line), `lotCost.ts` (`latestLotCost` = highest `purchaseItemId`, fixes the old date-sorted prefill), `UNRECORDED_STOCK` reason in the adjustment form (increase only, shows valuation effect).
+- A `Transactions` testing reset removes unrecorded-stock lots like any adjustment (accepted).
+- **Manual check:** Inventory row "Set stock": raise the count (cost prefilled, preview adds value), lower it (count correction, estimated write-off), leave equal (Save disabled), "Add quantity" mode; Reports valuation rises by qty x cost while Purchase History and cash flow stay unchanged; the low-stock badge flips; on an existing v4 `shop.db` the app upgrades and writes a pre-migration backup.
 
 ## Next (not started)
 - Package and run with `tauri build` on a desktop machine, then do a manual UI pass in Tauri mode (so far only the mock client and IPC contracts have been checked).
