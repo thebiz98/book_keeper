@@ -117,6 +117,8 @@ export interface SaleTransaction {
   itemsSubtotal: number;
   chargesTotal: number;
   discountsTotal: number;
+  /** Last edit time (FR-20); null if never edited. */
+  updatedAt: string | null;
 }
 
 export interface SaleItem {
@@ -170,6 +172,8 @@ export interface PurchaseTransaction {
   itemsSubtotal: number;
   chargesTotal: number;
   discountsTotal: number;
+  /** Last edit time (FR-20); null if never edited. */
+  updatedAt: string | null;
 }
 
 export interface PurchaseItem {

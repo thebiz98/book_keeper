@@ -43,6 +43,9 @@ export class TauriClient implements ApiClient {
     invokeCmd('get_sales_history', { filter: filter ?? {} });
   getSaleDetails: ApiClient['getSaleDetails'] = (saleId) =>
     invokeCmd('get_sale_details', { saleId });
+  updateSale: ApiClient['updateSale'] = (saleId, payload) =>
+    invokeCmd('update_sale', { saleId, payload });
+  deleteSale: ApiClient['deleteSale'] = (saleId) => invokeCmd('delete_sale', { saleId });
 
   // --- Purchases ---
   getNextPurchaseCode: ApiClient['getNextPurchaseCode'] = () =>
@@ -53,6 +56,10 @@ export class TauriClient implements ApiClient {
     invokeCmd('get_purchases_history', { filter: filter ?? {} });
   getPurchaseDetails: ApiClient['getPurchaseDetails'] = (purchaseId) =>
     invokeCmd('get_purchase_details', { purchaseId });
+  updatePurchase: ApiClient['updatePurchase'] = (purchaseId, payload) =>
+    invokeCmd('update_purchase', { purchaseId, payload });
+  deletePurchase: ApiClient['deletePurchase'] = (purchaseId) =>
+    invokeCmd('delete_purchase', { purchaseId });
 
   // --- Items & Catalog ---
   searchItemsFts: ApiClient['searchItemsFts'] = (query, limit) =>
@@ -126,6 +133,9 @@ export class TauriClient implements ApiClient {
     invokeCmd('create_vendor_return', { payload });
   getReturnDetails: ApiClient['getReturnDetails'] = (returnId) =>
     invokeCmd('get_return_details', { returnId });
+  deleteReturn: ApiClient['deleteReturn'] = (returnId) => invokeCmd('delete_return', { returnId });
+  getBillEditGuard: ApiClient['getBillEditGuard'] = (target, id) =>
+    invokeCmd('get_bill_edit_guard', { target, id });
   listReturns: ApiClient['listReturns'] = (filter) =>
     invokeCmd('list_returns', { filter: filter ?? {} });
   createStockAdjustment: ApiClient['createStockAdjustment'] = (payload) =>

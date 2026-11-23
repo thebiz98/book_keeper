@@ -17,7 +17,8 @@ export type AppError =
   | { type: 'SearchIndexError'; details: string }
   | { type: 'MigrationError'; details: string }
   | { type: 'IoError'; details: string }
-  | { type: 'OperationNotAllowed'; details: string };
+  | { type: 'OperationNotAllowed'; details: string }
+  | { type: 'BillLocked'; details: { code: string; message: string } };
 
 export const APP_ERROR_TYPES = [
   'ValidationError',
@@ -29,6 +30,7 @@ export const APP_ERROR_TYPES = [
   'MigrationError',
   'IoError',
   'OperationNotAllowed',
+  'BillLocked',
 ] as const;
 
 export function isAppError(x: unknown): x is AppError {

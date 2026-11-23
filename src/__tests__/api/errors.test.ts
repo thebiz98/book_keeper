@@ -68,3 +68,29 @@ describe('errorMessage', () => {
     expect(errorMessage(42)).toBe('42');
   });
 });
+
+describe('BillLocked (FR-20)', () => {
+  it('is a typed error whose message is the guard reason', () => {
+    const e = { type: 'BillLocked', details: { code: 'LINKED_RETURNS', message: 'This bill has returns (RET-1001).' } };
+    expect(isAppError(e)).toBe(true);
+    expect(errorMessage(e)).toBe('This bill has returns (RET-1001).');
+  });
+
+  it('keeps code and message unconverted through invokeCmd', async () => {
+    mocked.mockReset();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocked.mockRejectedValue({ type: 'BillLocked', details: { code: 'NEWER_RETURN', message: 'Delete RET-1002 first.' } });
+    const err = await invokeCmd<any>('delete_return').catch((x): any => x);
+    expect(err.details.code).toBe('NEWER_RETURN');
+    expect(err.message).toBe('Delete RET-1002 first.');
+  });
+
+  it('sends camelCase args and the enum target as is', async () => {
+    mocked.mockReset();
+    mocked.mockResolvedValue({ target: 'SALE', id: 1, can_edit: true, lot_limits: [] });
+    const g = await invokeCmd<any>('get_bill_edit_guard', { target: 'SALE', id: 1 });
+    expect(mocked).toHaveBeenCalledWith('get_bill_edit_guard', { target: 'SALE', id: 1 });
+    expect(g.canEdit).toBe(true);
+    expect(g.lotLimits).toEqual([]);
+  });
+});

@@ -183,6 +183,45 @@ export class MockApiClient implements ApiClient {
   async getSalesHistory(filter: Parameters<ApiClient['getSalesHistory']>[0] = {}) {
     return paginate(this.sales, filter?.page, filter?.limit);
   }
+  // FR-20 (thin stubs, DD-27: no business rules, no stock or ledger effects)
+  async updateSale(saleId: number, payload: Parameters<ApiClient['createSale']>[0]) {
+    const idx = this.sales.findIndex((s) => s.id === saleId);
+    if (idx < 0) throw notFound('SaleTransaction', saleId);
+    const itemsSubtotal = payload.items.reduce((s, l) => s + l.bundleQuantity * l.unitPrice, 0);
+    const { chargesTotal, discountsTotal } = this.recordCharges('SALE', saleId, payload.charges ?? []);
+    const total = itemsSubtotal + chargesTotal - discountsTotal;
+    const paid = Math.min(payload.paidAmount, total);
+    const row: SaleHistoryRow = {
+      ...this.sales[idx],
+      transactionDate: payload.transactionDate,
+      partyId: payload.partyId,
+      partyName: this.partyName(payload.partyId),
+      lineCount: payload.items.length,
+      totalAmount: total,
+      paidAmount: paid,
+      balanceDue: total - paid,
+      paymentStatus: payload.paymentStatus,
+      itemsSubtotal,
+      chargesTotal,
+      discountsTotal,
+    };
+    this.sales[idx] = row;
+    return {
+      saleId,
+      transactionCode: row.transactionCode,
+      totalAmount: total,
+      paidAmount: paid,
+      balanceDue: total - paid,
+      changeAmount: Math.max(0, payload.paidAmount - total),
+      paymentStatus: payload.paymentStatus,
+    };
+  }
+  async deleteSale(saleId: number) {
+    const row = this.sales.find((s) => s.id === saleId);
+    if (!row) throw notFound('SaleTransaction', saleId);
+    this.sales = this.sales.filter((s) => s.id !== saleId);
+    return { removedCashAmount: row.paidAmount };
+  }
   async getSaleDetails(saleId: number): Promise<SaleDetailView> {
     const row = this.sales.find((s) => s.id === saleId);
     if (!row) throw notFound('SaleTransaction', saleId);
@@ -204,6 +243,7 @@ export class MockApiClient implements ApiClient {
         itemsSubtotal: row.itemsSubtotal,
         chargesTotal: row.chargesTotal,
         discountsTotal: row.discountsTotal,
+        updatedAt: null,
       },
       party: row.partyId ? toParty(this.findParty(row.partyId)) : null,
       items: [
@@ -266,6 +306,36 @@ export class MockApiClient implements ApiClient {
   async getPurchasesHistory(filter: Parameters<ApiClient['getPurchasesHistory']>[0] = {}) {
     return paginate(this.purchases, filter?.page, filter?.limit);
   }
+  async updatePurchase(purchaseId: number, payload: Parameters<ApiClient['createPurchase']>[0]) {
+    const idx = this.purchases.findIndex((p) => p.id === purchaseId);
+    if (idx < 0) throw notFound('PurchaseTransaction', purchaseId);
+    const itemsSubtotal = payload.items.reduce((s, l) => s + l.bundleQuantity * l.unitCost, 0);
+    const { chargesTotal, discountsTotal } = this.recordCharges('PURCHASE', purchaseId, payload.charges ?? []);
+    const total = itemsSubtotal + chargesTotal - discountsTotal;
+    const row: PurchaseHistoryRow = {
+      ...this.purchases[idx],
+      supplierInvoiceRef: payload.supplierInvoiceRef,
+      transactionDate: payload.transactionDate,
+      partyId: payload.partyId,
+      partyName: this.partyName(payload.partyId),
+      lineCount: payload.items.length,
+      totalAmount: total,
+      paidAmount: payload.paidAmount,
+      balanceDue: total - payload.paidAmount,
+      paymentStatus: payload.paymentStatus,
+      itemsSubtotal,
+      chargesTotal,
+      discountsTotal,
+    };
+    this.purchases[idx] = row;
+    return { purchaseId, transactionCode: row.transactionCode };
+  }
+  async deletePurchase(purchaseId: number) {
+    const row = this.purchases.find((p) => p.id === purchaseId);
+    if (!row) throw notFound('PurchaseTransaction', purchaseId);
+    this.purchases = this.purchases.filter((p) => p.id !== purchaseId);
+    return { removedCashAmount: row.paidAmount };
+  }
   async getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailView> {
     const row = this.purchases.find((p) => p.id === purchaseId);
     if (!row) throw notFound('PurchaseTransaction', purchaseId);
@@ -289,6 +359,7 @@ export class MockApiClient implements ApiClient {
         itemsSubtotal: row.itemsSubtotal,
         chargesTotal: row.chargesTotal,
         discountsTotal: row.discountsTotal,
+        updatedAt: null,
       },
       party: row.partyId ? toParty(this.findParty(row.partyId)) : null,
       items: [
@@ -661,6 +732,40 @@ export class MockApiClient implements ApiClient {
   }
   async createVendorReturn(payload: Parameters<ApiClient['createVendorReturn']>[0]) {
     return this.addReturn('VENDOR', { ...payload, originalId: payload.originalPurchaseId, total: 0 });
+  }
+  async deleteReturn(returnId: number) {
+    if (!this.returns.some((r) => r.id === returnId)) throw notFound('ReturnTransaction', returnId);
+    this.returns = this.returns.filter((r) => r.id !== returnId);
+    return { removedCashAmount: 0, removedCreditAmount: 0 };
+  }
+  async getBillEditGuard(target: Parameters<ApiClient['getBillEditGuard']>[0], id: number) {
+    const code =
+      target === 'SALE'
+        ? this.sales.find((s) => s.id === id)?.transactionCode
+        : target === 'PURCHASE'
+          ? this.purchases.find((p) => p.id === id)?.transactionCode
+          : this.returns.find((r) => r.id === id)?.returnCode;
+    if (!code) throw notFound('Bill', id);
+    const paid =
+      target === 'SALE'
+        ? (this.sales.find((s) => s.id === id)?.paidAmount ?? 0)
+        : target === 'PURCHASE'
+          ? (this.purchases.find((p) => p.id === id)?.paidAmount ?? 0)
+          : 0;
+    return {
+      target,
+      id,
+      code,
+      canEdit: target !== 'RETURN',
+      canDelete: true,
+      canChangeParty: true,
+      reasons: [],
+      upfrontAmount: paid,
+      appliedAmount: 0,
+      removedCashAmount: paid,
+      removedCreditAmount: 0,
+      lotLimits: [],
+    };
   }
   async getReturnDetails(returnId: number): Promise<ReturnDetailView> {
     const r = this.returns.find((x) => x.id === returnId);

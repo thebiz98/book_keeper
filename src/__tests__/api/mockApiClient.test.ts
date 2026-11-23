@@ -22,6 +22,7 @@ describe('MockApiClient contract shapes', () => {
       'getBundleSuggestions', 'createBundle', 'updateBundle', 'deleteBundle',
       'getPartyDuesSummary', 'settleBillPayment', 'getPartyLedger',
       'createParty', 'updateParty', 'getParty', 'listParties', 'searchParties',
+      'updateSale', 'deleteSale', 'updatePurchase', 'deletePurchase', 'deleteReturn', 'getBillEditGuard',
       'getNextReturnCode', 'createCustomerReturn', 'createVendorReturn', 'getReturnDetails',
       'listReturns', 'createStockAdjustment', 'setItemStock', 'getItemLots', 'listStockAdjustments',
       'getDashboardMetrics', 'getLowStockAlerts', 'getSalesPurchaseTrend', 'getRecentTransactions',
@@ -205,5 +206,36 @@ describe('MockApiClient contract shapes', () => {
     expect(e.expenseTypeName).toBe('Toner');
     await m.deleteExpense(e.id);
     expect((await m.listExpenses()).total).toBe(5);
+  });
+
+  it('bill correction stubs update, delete and guard (FR-20, no rules)', async () => {
+    const sale = await c.createSale(
+      payload<Parameters<ApiClient['createSale']>[0]>({
+        transactionDate: '2026-11-20', partyId: null, paymentStatus: 'PAID', paidAmount: 100,
+        items: [{ itemId: 1, bundleId: null, bundleQuantity: 2, unitPrice: 50 }], charges: [],
+      }),
+    );
+    const guard = await c.getBillEditGuard('SALE', sale.saleId);
+    has(guard, ['canEdit', 'canDelete', 'canChangeParty', 'reasons', 'upfrontAmount', 'appliedAmount', 'removedCashAmount', 'lotLimits']);
+    expect(guard.code).toBe(sale.transactionCode);
+    const upd = await c.updateSale(
+      sale.saleId,
+      payload<Parameters<ApiClient['createSale']>[0]>({
+        transactionDate: '2026-11-21', partyId: null, paymentStatus: 'PAID', paidAmount: 150,
+        items: [{ itemId: 1, bundleId: null, bundleQuantity: 3, unitPrice: 50 }], charges: [],
+      }),
+    );
+    expect(upd).toMatchObject({ saleId: sale.saleId, transactionCode: sale.transactionCode, totalAmount: 150 });
+    const del = await c.deleteSale(sale.saleId);
+    expect(del.removedCashAmount).toBe(150);
+    await expect(c.getBillEditGuard('SALE', sale.saleId)).rejects.toSatisfy(isAppError);
+    const pur = await c.createPurchase(
+      payload<Parameters<ApiClient['createPurchase']>[0]>({
+        transactionDate: '2026-11-20', partyId: null, supplierInvoiceRef: null, paymentStatus: 'PAID', paidAmount: 40,
+        items: [{ itemId: 1, bundleId: null, bundleQuantity: 4, unitCost: 10 }], charges: [],
+      }),
+    );
+    expect((await c.deletePurchase(pur.purchaseId)).removedCashAmount).toBe(40);
+    has(await c.deleteReturn((await c.createVendorReturn(payload({ returnDate: '2026-11-20', items: [] }))).returnId), ['removedCashAmount', 'removedCreditAmount']);
   });
 });

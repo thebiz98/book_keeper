@@ -150,6 +150,8 @@ export interface CreatePurchaseItemPayload {
   bundleId: number | null;
   bundleQuantity: number;
   unitCost: number;
+  /** Edit only (FR-20): the existing lot this line keeps; null/absent = a new line. Create rejects non-null. */
+  purchaseItemId?: number | null;
 }
 
 export interface CreatePurchasePayload {
@@ -389,18 +391,71 @@ export interface ImportSummary {
   stockLotsCreated: number;
 }
 
+/** FR-20: what an edit/delete of a bill or return is blocked by (mirrors Rust `BillEditGuard`). */
+export type CorrectionTarget = 'SALE' | 'PURCHASE' | 'RETURN';
+
+export interface GuardReason {
+  code: string;
+  message: string;
+  blocksEdit: boolean;
+  blocksDelete: boolean;
+}
+
+export interface LotEditLimit {
+  purchaseItemId: number;
+  /** Base units that already left the lot: the floor for its new quantity. */
+  consumedQuantity: number;
+  /** Item change / removal is blocked. */
+  referenced: boolean;
+  /** The cost is locked (a vendor return used the lot). */
+  vendorReturned: boolean;
+}
+
+export interface BillEditGuard {
+  target: CorrectionTarget;
+  id: number;
+  code: string;
+  canEdit: boolean;
+  canDelete: boolean;
+  canChangeParty: boolean;
+  reasons: GuardReason[];
+  /** Σ UPFRONT of the bill. */
+  upfrontAmount: number;
+  /** Σ SETTLEMENT + Σ RETURN_CREDIT: stays on an edit. */
+  appliedAmount: number;
+  /** Cash that leaves the records on delete. */
+  removedCashAmount: number;
+  /** Return credit that is taken back (returns only). */
+  removedCreditAmount: number;
+  lotLimits: LotEditLimit[];
+}
+
+export interface DeleteBillResult {
+  removedCashAmount: number;
+}
+
+export interface DeleteReturnResult {
+  removedCashAmount: number;
+  removedCreditAmount: number;
+}
+
 export interface ApiClient {
   // Sales
   getNextSaleCode(): Promise<string>;
   createSale(payload: CreateSalePayload): Promise<SaleSummaryResponse>;
   getSalesHistory(filter?: HistoryFilter): Promise<Paginated<SaleHistoryRow>>;
   getSaleDetails(saleId: number): Promise<SaleDetailView>;
+  /** FR-20: replaces the bill (same id and code). Rejects with `BillLocked` when guarded. */
+  updateSale(saleId: number, payload: CreateSalePayload): Promise<SaleSummaryResponse>;
+  deleteSale(saleId: number): Promise<DeleteBillResult>;
 
   // Purchases
   getNextPurchaseCode(): Promise<string>;
   createPurchase(payload: CreatePurchasePayload): Promise<PurchaseSummaryResponse>;
   getPurchasesHistory(filter?: HistoryFilter): Promise<Paginated<PurchaseHistoryRow>>;
   getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailView>;
+  updatePurchase(purchaseId: number, payload: CreatePurchasePayload): Promise<PurchaseSummaryResponse>;
+  deletePurchase(purchaseId: number): Promise<DeleteBillResult>;
 
   // Items & Catalog
   searchItemsFts(query: string, limit?: number): Promise<ItemSearchResult[]>;
@@ -451,6 +506,10 @@ export interface ApiClient {
   createCustomerReturn(payload: CustomerReturnPayload): Promise<ReturnResult>;
   createVendorReturn(payload: VendorReturnPayload): Promise<ReturnResult>;
   getReturnDetails(returnId: number): Promise<ReturnDetailView>;
+  /** FR-20: newest return of a bill first; rejects with `BillLocked` otherwise. */
+  deleteReturn(returnId: number): Promise<DeleteReturnResult>;
+  /** FR-20 pre-check shown before edit/delete actions. */
+  getBillEditGuard(target: CorrectionTarget, id: number): Promise<BillEditGuard>;
   listReturns(filter?: ReturnsFilter): Promise<Paginated<ReturnTransaction>>;
   createStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentResult>;
   /** Set counted stock on hand; delta>0 = unrecorded stock lot, <0 = count-correction write-off, 0 = no-op. */
