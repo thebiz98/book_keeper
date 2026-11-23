@@ -4,6 +4,8 @@ import { errorMessage } from '@/api/errors';
 import type { ItemLot, LotSource } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { STOCK_EPS } from '../common/StockStatusBadge';
+import { Pencil } from 'lucide-react';
+import { LotPriceEditModal } from './LotPriceEditModal';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 
 const SOURCE_LABEL: Record<LotSource, string> = {
@@ -34,10 +36,14 @@ export function sortLots(lots: ItemLot[]): ItemLot[] {
 export interface LotInspectorProps {
   itemId: number;
   baseUnit: string;
+  /** FR-25: show the Purchase Price edit button (hidden for RETURN lots). */
+  editable?: boolean;
 }
 
-export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit }) => {
+export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, editable = false }) => {
   const [lots, setLots] = useState<ItemLot[] | null>(null);
+  const [editing, setEditing] = useState<ItemLot | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,7 +61,7 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit }) 
     return () => {
       cancelled = true;
     };
-  }, [itemId]);
+  }, [itemId, reloadKey]);
 
   if (error) {
     return (
@@ -68,6 +74,7 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit }) 
   if (lots.length === 0) return <p className="text-xs text-slate-400 px-2 py-1">No lots recorded.</p>;
 
   return (
+    <>
     <Table dense scroll="none" data-testid="lot-table">
       <TableHeader>
         <TableRow className="text-left text-slate-400">
@@ -78,6 +85,7 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit }) 
           <TableHead className="py-1 px-2 font-medium text-right">Original Qty</TableHead>
           <TableHead className="py-1 px-2 font-medium text-right">Remaining</TableHead>
           <TableHead className="py-1 px-2 font-medium text-right">Purchase Price</TableHead>
+          {editable && <TableHead className="py-1 px-2" />}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -108,10 +116,33 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit }) 
             <TableCell className="py-1 px-2 text-right">
               <CurrencyDisplay amount={l.unitCost} size="sm" />
             </TableCell>
+            {editable && (
+              <TableCell className="py-1 px-2 text-right">
+                {l.source !== 'RETURN' && (
+                  <button
+                    type="button"
+                    aria-label={`Edit purchase price of ${l.transactionCode}`}
+                    className="p-1 rounded text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    onClick={() => setEditing(l)}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                )}
+              </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>
     </Table>
+    {editable && (
+      <LotPriceEditModal
+        lot={editing}
+        baseUnit={baseUnit}
+        onClose={() => setEditing(null)}
+        onSaved={() => setReloadKey((k) => k + 1)}
+      />
+    )}
+    </>
   );
 };
 

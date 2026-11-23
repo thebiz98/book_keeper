@@ -58,6 +58,8 @@ export class TauriClient implements ApiClient {
     invokeCmd('get_purchase_details', { purchaseId });
   updatePurchase: ApiClient['updatePurchase'] = (purchaseId, payload) =>
     invokeCmd('update_purchase', { purchaseId, payload });
+  updateLotPurchasePrice: ApiClient['updateLotPurchasePrice'] = (payload) =>
+    invokeCmd('update_lot_purchase_price', { payload });
   deletePurchase: ApiClient['deletePurchase'] = (purchaseId) =>
     invokeCmd('delete_purchase', { purchaseId });
 

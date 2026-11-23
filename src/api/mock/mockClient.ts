@@ -338,6 +338,9 @@ export class MockApiClient implements ApiClient {
     this.purchases = this.purchases.filter((p) => p.id !== purchaseId);
     return { removedCashAmount: row.paidAmount };
   }
+  async updateLotPurchasePrice(payload: Parameters<ApiClient['updateLotPurchasePrice']>[0]) {
+    return { purchaseItemId: payload.purchaseItemId, oldUnitCost: 5, newUnitCost: payload.unitPrice, bill: null };
+  }
   async getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailView> {
     const row = this.purchases.find((p) => p.id === purchaseId);
     if (!row) throw notFound('PurchaseTransaction', purchaseId);
@@ -853,6 +856,8 @@ export class MockApiClient implements ApiClient {
         source: 'PURCHASE' as const,
         transactionDate: '2026-11-01',
         vendorName: 'Sample Vendor',
+        packLabel: null,
+        packQuantity: 100,
         quantity: 100,
         remainingQuantity: this.items.find((i) => i.id === itemId)?.currentStock ?? 0,
         unitCost: 5,

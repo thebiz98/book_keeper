@@ -106,6 +106,8 @@ pub struct ItemLot {
     pub source: LotSource,
     pub transaction_date: String,
     pub vendor_name: Option<String>,
+    pub pack_label: Option<String>,
+    pub pack_quantity: f64,
     pub quantity: f64,
     pub remaining_quantity: f64,
     pub unit_cost: f64,

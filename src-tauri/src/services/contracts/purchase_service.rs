@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    BillEditGuard, CreatePurchasePayload, DeleteBillResult, Paginated, PurchaseDetailView,
+    BillEditGuard, CreatePurchasePayload, LotPriceUpdateResult, UpdateLotPricePayload, DeleteBillResult, Paginated, PurchaseDetailView,
     PurchaseHistoryFilter, PurchaseHistoryRow, PurchaseSummaryResponse,
 };
 use crate::core::error::AppError;
@@ -26,6 +26,10 @@ pub trait PurchaseService: Send + Sync {
 
     /// FR-20 pre-check for the UI (same evaluation as the commands).
     fn get_purchase_edit_guard(&self, purchase_id: i64) -> Result<BillEditGuard, AppError>;
+
+    /// FR-25: changes one lot's Purchase Price in a single transaction (bill + payment rule for
+    /// PURCHASE lots, re-cost only for OPENING / ADJUSTMENT, RETURN rejected).
+    fn update_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError>;
 }
 
 impl<T: PurchaseService + ?Sized> PurchaseService for std::sync::Arc<T> {
@@ -62,5 +66,9 @@ impl<T: PurchaseService + ?Sized> PurchaseService for std::sync::Arc<T> {
 
     fn get_purchase_edit_guard(&self, purchase_id: i64) -> Result<BillEditGuard, AppError> {
         (**self).get_purchase_edit_guard(purchase_id)
+    }
+
+    fn update_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
+        (**self).update_lot_purchase_price(payload)
     }
 }

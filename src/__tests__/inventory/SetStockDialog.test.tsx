@@ -8,7 +8,7 @@ import type { ItemLot } from '@/types';
 
 const lot = (id: number, date: string, cost: number, remaining: number): ItemLot => ({
   purchaseItemId: id, purchaseTransactionId: id, transactionCode: `PUR-${id}`, source: 'PURCHASE',
-  transactionDate: date, vendorName: null, quantity: remaining, remainingQuantity: remaining, unitCost: cost,
+  transactionDate: date, vendorName: null, packLabel: null, packQuantity: remaining, quantity: remaining, remainingQuantity: remaining, unitCost: cost,
 });
 
 const ITEM = { itemId: 9, name: 'Gel Pen', currentStock: 10, baseUnit: 'PCS' };

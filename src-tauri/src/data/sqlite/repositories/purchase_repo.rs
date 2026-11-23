@@ -269,7 +269,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
 
     fn list_lots_for_item(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
         let mut stmt = self.conn.prepare(
-            "SELECT pi.id, pi.purchase_transaction_id, pt.transaction_code, pt.source, pt.transaction_date,                     pt.party_name, pi.quantity, pi.remaining_quantity, pi.unit_cost              FROM purchase_items pi JOIN purchase_transactions pt ON pt.id = pi.purchase_transaction_id              WHERE pi.item_id = ?1 ORDER BY pi.id",
+            "SELECT pi.id, pi.purchase_transaction_id, pt.transaction_code, pt.source, pt.transaction_date,                     pt.party_name, pi.quantity, pi.remaining_quantity, pi.unit_cost, pi.pack_label, pi.pack_quantity              FROM purchase_items pi JOIN purchase_transactions pt ON pt.id = pi.purchase_transaction_id              WHERE pi.item_id = ?1 ORDER BY pi.id",
         )?;
         let rows = stmt
             .query_map(params![item_id], |r| {
@@ -283,6 +283,8 @@ impl PurchaseRepository for SqlitePurchaseRepository {
                     quantity: r.get(6)?,
                     remaining_quantity: r.get(7)?,
                     unit_cost: r.get(8)?,
+                    pack_label: r.get(9)?,
+                    pack_quantity: r.get(10)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

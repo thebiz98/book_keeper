@@ -68,6 +68,9 @@ export interface ItemLot {
   source: LotSource;
   transactionDate: string;
   vendorName: string | null;
+  /** Pack the lot was entered in (null = base units). */
+  packLabel: string | null;
+  packQuantity: number;
   quantity: number;
   remainingQuantity: number;
   unitCost: number;

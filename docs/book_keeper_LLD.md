@@ -2419,3 +2419,24 @@ The test `item_history_queries_use_the_v9_indexes_without_a_temp_btree` runs EXP
 
 ### 15.5 UI
 `ItemDetailsDrawer` (summary, Lots with `LotInspector`, lazy Sales / Purchases tabs with `Pager` + `Table scroll="none"`, View opens `BillDetailDrawer`, Edit opens `ItemEditDrawer`). Inventory keys (D1) live in `hooks/useGridKeyboardNav.ts`: Up/Down, Enter, Right/Left (lots row), PageUp/PageDown, Home/End, Down from search enters the grid, Up on row 0 returns, E edit, S set stock (PHYSICAL only); keys typed in INPUT/SELECT/TEXTAREA/BUTTON are ignored; the active row is kept by item id across refreshes.
+
+## 16. Lot Purchase Price Edit (FR-25, no schema, `feat/lot-purchase-price`)
+
+### 16.1 Placement
+`update_lot_purchase_price(UpdateLotPricePayload { purchase_item_id, unit_price }) -> LotPriceUpdateResult` lives on `PurchaseService` (it needs `InventoryService` and `PaymentService`, which `InventoryServiceImpl` must not depend on). It runs in ONE `BEGIN IMMEDIATE` and reuses `edit_purchase_lot` (which enforces `VENDOR_RETURNED_COST_CHANGE` and calls `recost_lot`) and the `bill_guard` rules.
+`ItemLot` gains `pack_label` and `pack_quantity` (`source` and `purchase_transaction_id` already exist). `AdjustmentRepository::update_unit_cost(id, cost)` is new.
+
+### 16.2 Algorithm
+1. Validate `unit_price` finite and `>= 0`. Load the lot and its header. `RETURN` source: `ValidationError`.
+2. `total = round2(pack_quantity * unit_price)`, `unit_cost = total / quantity`. `|unit_cost - lot.unit_cost| <= 1e-9`: no-op (nothing written).
+3. `OPENING` / `ADJUSTMENT`: `edit_purchase_lot` with the same item/pack/qty and the new cost (so `recost_lot` runs). For `ADJUSTMENT` also set `stock_adjustments.unit_cost` for the id in the header note `Stock adjustment #{id}` (skipped if absent).
+4. `PURCHASE`: `evaluate_purchase_guard` (`LINKED_RETURNS`, `NOT_A_PURCHASE`); `edit_purchase_lot`; header totals = `compute_bill_totals(stored line totals, existing charges)` (lines are never rebuilt from rates); `update_header_for_edit` (sets `updated_at`); then the V4 payment rule:
+   - `applied = SUM(SETTLEMENT) + SUM(RETURN_CREDIT)`, `upfront_old = SUM(UPFRONT)`, `open = new_total - applied`.
+   - `open < -EPS`: `BillLocked TOTAL_BELOW_APPLIED`.
+   - Paid entirely upfront (`old balance_due <= EPS` and `applied <= EPS`): `upfront_new = new_total`.
+   - Else `upfront_new = min(upfront_old, open)`. No UPFRONT row is ever created where none existed unless the bill was paid entirely upfront.
+   - `delete_bill_ledger([Upfront])`, `record_payment(Upfront)` on the bill date when `> 0`, `recompute`.
+5. Sale bills are never touched; only allocation / outflow costs (COGS) change through `recost_lot`.
+
+### 16.3 UI mirror
+`src/lib/lotPriceEffect.ts` implements step 4 with the same table of cases as the Rust unit test of `lot_price_payment_rule`.

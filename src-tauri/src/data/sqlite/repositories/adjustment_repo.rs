@@ -43,6 +43,11 @@ impl AdjustmentRepository for SqliteAdjustmentRepository {
         Ok(self.conn.last_insert_rowid())
     }
 
+    fn update_unit_cost(&mut self, id: i64, unit_cost: f64) -> Result<(), AppError> {
+        self.conn.execute("UPDATE stock_adjustments SET unit_cost = ?1 WHERE id = ?2", params![unit_cost, id])?;
+        Ok(())
+    }
+
     fn list_adjustments(
         &self,
         item_id: Option<i64>,

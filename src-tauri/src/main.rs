@@ -76,6 +76,7 @@ fn main() {
             sale_controller::update_sale,
             sale_controller::delete_sale,
             purchase_controller::update_purchase,
+            purchase_controller::update_lot_purchase_price,
             purchase_controller::delete_purchase,
             return_controller::delete_return,
             correction_controller::get_bill_edit_guard,

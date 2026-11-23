@@ -29,6 +29,11 @@ pub async fn update_purchase(state: State<'_, AppState>, purchase_id: i64, paylo
     super::run_blocking(move || svc.update_purchase(purchase_id, payload)).await
 }
 #[tauri::command]
+pub async fn update_lot_purchase_price(state: State<'_, AppState>, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
+    let svc = state.purchase_service.clone();
+    super::run_blocking(move || svc.update_lot_purchase_price(payload)).await
+}
+#[tauri::command]
 pub async fn delete_purchase(state: State<'_, AppState>, purchase_id: i64) -> Result<DeleteBillResult, AppError> {
     let svc = state.purchase_service.clone();
     super::run_blocking(move || svc.delete_purchase(purchase_id)).await

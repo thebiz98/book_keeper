@@ -1,0 +1,13 @@
+[
+  { "name": "cash bill, price up (stays PAID, upfront follows)", "newTotal": 120, "applied": 0, "upfrontOld": 100, "oldBalanceDue": 0, "upfrontNew": 120 },
+  { "name": "cash bill, price down", "newTotal": 80, "applied": 0, "upfrontOld": 100, "oldBalanceDue": 0, "upfrontNew": 80 },
+  { "name": "partial bill, total up: balance grows", "newTotal": 150, "applied": 0, "upfrontOld": 40, "oldBalanceDue": 60, "upfrontNew": 40 },
+  { "name": "partial bill, total down below upfront: becomes PAID", "newTotal": 30, "applied": 0, "upfrontOld": 40, "oldBalanceDue": 60, "upfrontNew": 30 },
+  { "name": "settled later in full, total up: no invented upfront", "newTotal": 120, "applied": 100, "upfrontOld": 0, "oldBalanceDue": 0, "upfrontNew": 0 },
+  { "name": "settled later partly, total up", "newTotal": 80, "applied": 50, "upfrontOld": 0, "oldBalanceDue": 50, "upfrontNew": 0 },
+  { "name": "upfront plus settlement, total down: upfront capped at open", "newTotal": 90, "applied": 70, "upfrontOld": 30, "oldBalanceDue": 0, "upfrontNew": 20 },
+  { "name": "unpaid bill", "newTotal": 60, "applied": 0, "upfrontOld": 0, "oldBalanceDue": 100, "upfrontNew": 0 },
+  { "name": "new total equals applied", "newTotal": 50, "applied": 50, "upfrontOld": 0, "oldBalanceDue": 0, "upfrontNew": 0 },
+  { "name": "new total below applied", "newTotal": 40, "applied": 50, "upfrontOld": 0, "oldBalanceDue": 0, "error": "TOTAL_BELOW_APPLIED" },
+  { "name": "paid by return credit only, total up", "newTotal": 70, "applied": 50, "upfrontOld": 0, "oldBalanceDue": 0, "upfrontNew": 0 }
+]

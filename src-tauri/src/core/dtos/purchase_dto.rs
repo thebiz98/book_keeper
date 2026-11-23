@@ -75,3 +75,31 @@ pub struct PurchaseDetailView {
     pub settlements: Vec<PaymentSettlement>,
     pub charges: Vec<BillCharge>,
 }
+
+/// FR-25: new Purchase Price for one lot, per pack when the lot has a pack label, else per base unit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateLotPricePayload {
+    pub purchase_item_id: i64,
+    pub unit_price: f64,
+}
+
+/// Bill-side effect of a lot price edit (PURCHASE-source lots only).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LotPriceBillEffect {
+    pub purchase_id: i64,
+    pub transaction_code: String,
+    pub old_total: f64,
+    pub new_total: f64,
+    pub old_paid: f64,
+    pub new_paid: f64,
+    pub balance_due: f64,
+    pub payment_status: PaymentStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LotPriceUpdateResult {
+    pub purchase_item_id: i64,
+    pub old_unit_cost: f64,
+    pub new_unit_cost: f64,
+    pub bill: Option<LotPriceBillEffect>,
+}
