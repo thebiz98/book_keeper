@@ -46,6 +46,8 @@ export class TauriClient implements ApiClient {
   updateSale: ApiClient['updateSale'] = (saleId, payload) =>
     invokeCmd('update_sale', { saleId, payload });
   deleteSale: ApiClient['deleteSale'] = (saleId) => invokeCmd('delete_sale', { saleId });
+  previewSale: ApiClient['previewSale'] = (payload, saleId) =>
+    invokeCmd('preview_sale', { payload, saleId: saleId ?? null });
 
   // --- Purchases ---
   getNextPurchaseCode: ApiClient['getNextPurchaseCode'] = () =>
@@ -60,6 +62,10 @@ export class TauriClient implements ApiClient {
     invokeCmd('update_purchase', { purchaseId, payload });
   updateLotPurchasePrice: ApiClient['updateLotPurchasePrice'] = (payload) =>
     invokeCmd('update_lot_purchase_price', { payload });
+  previewPurchase: ApiClient['previewPurchase'] = (payload, purchaseId) =>
+    invokeCmd('preview_purchase', { payload, purchaseId: purchaseId ?? null });
+  previewLotPurchasePrice: ApiClient['previewLotPurchasePrice'] = (payload) =>
+    invokeCmd('preview_lot_purchase_price', { payload });
   deletePurchase: ApiClient['deletePurchase'] = (purchaseId) =>
     invokeCmd('delete_purchase', { purchaseId });
 
@@ -94,6 +100,8 @@ export class TauriClient implements ApiClient {
     invokeCmd('get_party_dues_summary', { partyType });
   settleBillPayment: ApiClient['settleBillPayment'] = (payload) =>
     invokeCmd('settle_bill_payment', { payload });
+  previewSettlementAllocation: ApiClient['previewSettlementAllocation'] = (partyId, transactionType, amount) =>
+    invokeCmd('preview_settlement_allocation', { partyId, transactionType, amount });
   settleBillsBatch: ApiClient['settleBillsBatch'] = (payload) =>
     invokeCmd('settle_bills_batch', { payload });
   updateSettlement: ApiClient['updateSettlement'] = (settlementId, payload) =>
@@ -139,6 +147,10 @@ export class TauriClient implements ApiClient {
     invokeCmd('create_customer_return', { payload });
   createVendorReturn: ApiClient['createVendorReturn'] = (payload) =>
     invokeCmd('create_vendor_return', { payload });
+  previewCustomerReturn: ApiClient['previewCustomerReturn'] = (payload) =>
+    invokeCmd('preview_customer_return', { payload });
+  previewVendorReturn: ApiClient['previewVendorReturn'] = (payload) =>
+    invokeCmd('preview_vendor_return', { payload });
   getReturnDetails: ApiClient['getReturnDetails'] = (returnId) =>
     invokeCmd('get_return_details', { returnId });
   deleteReturn: ApiClient['deleteReturn'] = (returnId) => invokeCmd('delete_return', { returnId });
@@ -149,6 +161,10 @@ export class TauriClient implements ApiClient {
   createStockAdjustment: ApiClient['createStockAdjustment'] = (payload) =>
     invokeCmd('create_stock_adjustment', { payload });
   setItemStock: ApiClient['setItemStock'] = (payload) => invokeCmd('set_item_stock', { payload });
+  previewStockAdjustment: ApiClient['previewStockAdjustment'] = (payload) =>
+    invokeCmd('preview_stock_adjustment', { payload });
+  previewSetItemStock: ApiClient['previewSetItemStock'] = (payload) =>
+    invokeCmd('preview_set_item_stock', { payload });
   getItemLots: ApiClient['getItemLots'] = (itemId) => invokeCmd('get_item_lots', { itemId });
   getItemSales: ApiClient['getItemSales'] = (itemId, page, limit) =>
     invokeCmd('get_item_sales', { itemId, page: page ?? null, limit: limit ?? null });

@@ -349,6 +349,58 @@ export interface ReturnResult {
   returnCode: string;
   creditedAmount: number;
   cashRefunded: number;
+  /** Value of the returned lines (customer: qty x refund rate; vendor: the lot cost removed). */
+  totalAmount: number;
+  /** Replacement only: value of the issued items at their sale price; 0 otherwise. */
+  issuedValue: number;
+}
+
+/** DD-56: one problem a preview found; the same field and message the real command would raise. */
+export interface PreviewError {
+  field: string;
+  message: string;
+}
+
+export interface BillPaymentPreview {
+  paidAmount: number;
+  balanceDue: number;
+  changeAmount: number;
+  paymentStatus: PaymentStatus;
+}
+
+/** DD-56: what a sale/purchase would look like when saved. Every figure comes from the backend. */
+export interface BillPreview {
+  lineTotals: number[];
+  itemsSubtotal: number;
+  chargesTotal: number;
+  discountsTotal: number;
+  totalAmount: number;
+  /** Settlements and return credits already applied to the bill (edit only). */
+  appliedAmount: number;
+  /** What the payment must cover: total - applied. */
+  openAmount: number;
+  /** null when the payload carried no payment status. */
+  payment: BillPaymentPreview | null;
+  errors: PreviewError[];
+}
+
+/** Bill payload for a preview: the payment is optional (totals and stock checks only without it). */
+export type PreviewSalePayload = Omit<CreateSalePayload, 'paymentStatus' | 'paidAmount'> & {
+  paymentStatus?: PaymentStatus | null;
+  paidAmount?: number | null;
+};
+export type PreviewPurchasePayload = Omit<CreatePurchasePayload, 'paymentStatus' | 'paidAmount'> & {
+  paymentStatus?: PaymentStatus | null;
+  paidAmount?: number | null;
+};
+
+export interface StockAdjustmentPreview {
+  previousStock: number;
+  newStock: number;
+  /** Lot cost a positive adjustment would use (explicit or the latest-lot default); null for a write-off. */
+  unitCost: number | null;
+  lossValue: number;
+  valueChange: number;
 }
 
 export interface StockAdjustmentPayload {
@@ -503,6 +555,8 @@ export interface ApiClient {
   /** FR-20: replaces the bill (same id and code). Rejects with `BillLocked` when guarded. */
   updateSale(saleId: number, payload: CreateSalePayload): Promise<SaleSummaryResponse>;
   deleteSale(saleId: number): Promise<DeleteBillResult>;
+  /** DD-56: dry run of create/update (`saleId` = edit). Business errors come back in `errors`. */
+  previewSale(payload: PreviewSalePayload, saleId?: number | null): Promise<BillPreview>;
 
   // Purchases
   getNextPurchaseCode(): Promise<string>;
@@ -513,6 +567,10 @@ export interface ApiClient {
   deletePurchase(purchaseId: number): Promise<DeleteBillResult>;
   /** FR-25: re-price one lot (bill + payment rule for PURCHASE lots; re-cost only otherwise). */
   updateLotPurchasePrice(payload: UpdateLotPricePayload): Promise<LotPriceUpdateResult>;
+  /** DD-56: dry run of `updatePurchase` (`purchaseId` = edit). Business errors come back in `errors`. */
+  previewPurchase(payload: PreviewPurchasePayload, purchaseId?: number | null): Promise<BillPreview>;
+  /** DD-56: dry run of `updateLotPurchasePrice`; rejects with the error the command would give. */
+  previewLotPurchasePrice(payload: UpdateLotPricePayload): Promise<LotPriceUpdateResult>;
 
   // Items & Catalog
   searchItemsFts(query: string, limit?: number): Promise<ItemSearchResult[]>;
@@ -530,6 +588,12 @@ export interface ApiClient {
   // Dues & Ledger
   getPartyDuesSummary(partyType: PartyType): Promise<PartyDueSummary[]>;
   settleBillPayment(payload: SettlePaymentPayload): Promise<SettlementResult>;
+  /** DD-56: the oldest-first split a lump-sum settlement of `amount` would book (rejects like the command). */
+  previewSettlementAllocation(
+    partyId: number,
+    transactionType: TransactionType,
+    amount: number
+  ): Promise<SettleAllocation[]>;
   /** The single settlement core: all allocations commit together or none do. */
   settleBillsBatch(payload: SettleBatchPayload): Promise<SettlementResult>;
   /** SETTLEMENT rows only; other kinds are a ValidationError(kind). */
@@ -567,6 +631,9 @@ export interface ApiClient {
   getNextReturnCode(): Promise<string>;
   createCustomerReturn(payload: CustomerReturnPayload): Promise<ReturnResult>;
   createVendorReturn(payload: VendorReturnPayload): Promise<ReturnResult>;
+  /** DD-56: dry runs of the return commands (same result and errors, nothing saved). */
+  previewCustomerReturn(payload: CustomerReturnPayload): Promise<ReturnResult>;
+  previewVendorReturn(payload: VendorReturnPayload): Promise<ReturnResult>;
   getReturnDetails(returnId: number): Promise<ReturnDetailView>;
   /** FR-20: newest return of a bill first; rejects with `BillLocked` otherwise. */
   deleteReturn(returnId: number): Promise<DeleteReturnResult>;
@@ -576,6 +643,9 @@ export interface ApiClient {
   createStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentResult>;
   /** Set counted stock on hand; delta>0 = unrecorded stock lot, <0 = count-correction write-off, 0 = no-op. */
   setItemStock(payload: SetItemStockPayload): Promise<SetItemStockResult>;
+  /** DD-56: dry runs of the stock commands: the unit cost used, the FIFO loss and the value change. */
+  previewStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentPreview>;
+  previewSetItemStock(payload: SetItemStockPayload): Promise<SetItemStockResult>;
   /**
    * NOTE: get_item_lots is implemented in adjustment_controller.rs but is NOT yet in
    * main.rs generate_handler!. It will reject until the backend registers it.
