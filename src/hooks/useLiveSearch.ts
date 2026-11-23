@@ -72,7 +72,7 @@ export function useLiveSearch<T>(opts: UseLiveSearchOptions<T>): UseLiveSearchRe
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const committedRef = useRef('');
   const resultsRef = useRef<T>(initial);
-  const inflight = useRef<{ query: string; deps: ReadonlyArray<unknown>; promise: Promise<T> } | null>(null);
+  const inflight = useRef<{ id: number; query: string; deps: ReadonlyArray<unknown>; promise: Promise<T> } | null>(null);
   const waiters = useRef<Array<(r: T) => void>>([]);
 
   const settleWaiters = (r: T) => {
@@ -100,7 +100,12 @@ export function useLiveSearch<T>(opts: UseLiveSearchOptions<T>): UseLiveSearchRe
       const effective = short ? '' : q;
       const currentDeps = o.deps ?? [];
       const cur = inflight.current;
-      if (!force && cur && cur.query === effective && sameDeps(cur.deps, currentDeps)) return cur.promise;
+      // Reuse only a request that is still current: a superseded one (e.g. invalidated by an unmount,
+      // which React StrictMode does on every mount in dev) never applies its result, so waiting on it
+      // would leave isLoading stuck.
+      if (!force && cur && cur.id === requestId.current && cur.query === effective && sameDeps(cur.deps, currentDeps)) {
+        return cur.promise;
+      }
 
       const id = ++requestId.current;
       setIsLoading(true);
@@ -127,7 +132,7 @@ export function useLiveSearch<T>(opts: UseLiveSearchOptions<T>): UseLiveSearchRe
           return resultsRef.current;
         }
       );
-      inflight.current = { query: effective, deps: currentDeps, promise };
+      inflight.current = { id, query: effective, deps: currentDeps, promise };
       return promise;
     },
     []
@@ -217,6 +222,7 @@ export function useLiveSearch<T>(opts: UseLiveSearchOptions<T>): UseLiveSearchRe
     return () => {
       mounted.current = false;
       requestId.current++;
+      inflight.current = null;
       if (timer.current) clearTimeout(timer.current);
     };
   }, []);
