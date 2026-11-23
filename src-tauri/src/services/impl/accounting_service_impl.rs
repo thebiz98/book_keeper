@@ -46,6 +46,19 @@ pub fn ledger_cash_summary(
     Ok(s)
 }
 
+/// The one cash-drawer formula: `(ledger summary, expenses, net)` over `[from, to]` where
+/// `net = ledger net - expenses` (DD-37: expenses are cash out of the drawer on their date).
+pub fn cash_position(
+    tx: &mut dyn TransactionContext,
+    from: &str,
+    to: &str,
+) -> Result<(LedgerCashSummary, f64, f64), AppError> {
+    let s = ledger_cash_summary(tx, from, to)?;
+    let expenses = round2(tx.expenses().sum_between(from, to)?);
+    let net = round2(s.net - expenses);
+    Ok((s, expenses, net))
+}
+
 #[derive(Clone)]
 pub struct AccountingServiceImpl<
     P: PaymentService = Arc<dyn PaymentService>,
@@ -71,7 +84,8 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
 
     /// Net cash in the drawer for one day, derived purely from the ledger (DD-01).
     pub fn calculate_live_cash_drawer(&self, today: &str) -> Result<f64, AppError> {
-        Ok(self.ledger_cash_summary(today, today)?.net)
+        let mut tx = self.uow.begin_read()?;
+        Ok(cash_position(&mut *tx, today, today)?.2)
     }
 
     /// Open bills `(id, balance_due)` of a party, oldest first (`transaction_date, id`).

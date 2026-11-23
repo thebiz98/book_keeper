@@ -313,3 +313,25 @@ pub fn ensure_lot(tx: &mut dyn TransactionContext, lot_id: i64, item_id: i64) {
     let lot = create_test_purchase_lot(lot_id, pur_id, item_id, None, 0.0, 0.0, 0.0, 0.0);
     tx.purchases().create_purchase_item(&lot).expect("seed lot");
 }
+
+/// Inserts an expense (and its type `type_id` named `Type {type_id}` when missing); `id` doubles
+/// as the code number (`EXP-{id}`).
+pub fn create_test_expense(tx: &mut dyn TransactionContext, id: i64, date: &str, type_id: i64, amount: f64) {
+    if tx.expenses().find_type_by_id(type_id).expect("find type").is_none() {
+        let t = ExpenseType { id: type_id, name: format!("Type {type_id}"), is_active: true, created_at: "2026-01-01T00:00:00Z".into() };
+        tx.expenses().create_type(&t).expect("seed expense type");
+    }
+    let name = tx.expenses().find_type_by_id(type_id).unwrap().unwrap().name;
+    let e = Expense {
+        id,
+        expense_code: format!("EXP-{id}"),
+        expense_date: date.to_string(),
+        expense_type_id: type_id,
+        expense_type_name: name,
+        amount,
+        notes: None,
+        created_at: format!("{date}T09:00:00Z"),
+        updated_at: None,
+    };
+    tx.expenses().create(&e).expect("seed expense");
+}

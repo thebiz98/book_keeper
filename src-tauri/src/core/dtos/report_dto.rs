@@ -13,7 +13,8 @@ pub struct DashboardMetrics {
     pub total_stock_valuation: f64, // Sum of (remaining_qty * unit_cost), all lots
     pub customer_receivables: f64,  // Outstanding customer dues
     pub vendor_payables: f64,       // Outstanding vendor dues (PURCHASE source)
-    pub live_cash_in_drawer: f64,   // Today's ledger cash in - cash out
+    pub live_cash_in_drawer: f64,   // Today's ledger cash in - cash out - today's expenses
+    pub today_expenses_amount: f64, // Σ expenses dated today (FR-18)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +67,14 @@ pub struct PnLReport {
     pub inventory_losses: f64,
     pub net_profit: f64,
     pub total_purchases: f64,
+    /// Placeholder until v7 (FR-19): 0.
+    pub sales_discounts: f64,
+    /// Placeholder until v7 (FR-19): 0.
+    pub other_income: f64,
+    /// Σ expenses by `expense_date` in range (v7 adds purchase charges).
+    pub operating_expenses: f64,
+    /// Per expense type, `amount DESC, name`; filled by the service from the expense repository.
+    pub expenses_by_type: Vec<crate::core::dtos::ExpenseTypeTotal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -90,5 +99,6 @@ pub struct CashFlowReport {
     pub purchase_cash_outflow: f64,        // PURCHASE·UPFRONT
     pub vendor_settlements_outflow: f64,   // PURCHASE·SETTLEMENT
     pub refunds_cash_outflow: f64,         // SALE·REFUND_OUT
-    pub net_cash_balance: f64,             // inflows - outflows
+    pub expenses_cash_outflow: f64,        // Σ expenses by date (FR-18)
+    pub net_cash_balance: f64,             // inflows - outflows - expenses
 }

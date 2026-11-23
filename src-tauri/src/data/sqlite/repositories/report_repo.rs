@@ -47,24 +47,27 @@ const PNL_SQL: &str = "SELECT
   (SELECT COALESCE(SUM(total_amount), 0.0) FROM purchase_transactions
      WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(total_amount), 0.0) FROM return_transactions
-     WHERE return_type = 'VENDOR' AND return_date BETWEEN ?1 AND ?2)";
+     WHERE return_type = 'VENDOR' AND return_date BETWEEN ?1 AND ?2),
+  (SELECT COALESCE(SUM(amount), 0.0) FROM expenses WHERE expense_date BETWEEN ?1 AND ?2)";
 
 impl ReportRepository for SqliteReportRepository {
     fn pnl(&self, from: &str, to: &str) -> Result<PnLReport, AppError> {
-        let v: [f64; 8] = self.conn.query_row(PNL_SQL, params![from, to], |r| {
-            let mut a = [0.0; 8];
+        let v: [f64; 9] = self.conn.query_row(PNL_SQL, params![from, to], |r| {
+            let mut a = [0.0; 9];
             for (i, slot) in a.iter_mut().enumerate() {
                 *slot = r.get(i)?;
             }
             Ok(a)
         })?;
-        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns] = v;
+        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses] = v;
         let gross_sales = round2(gross);
         let sales_returns = round2(returns);
         let net_sales = round2(gross_sales - sales_returns);
         let cogs = round2(cogs_sales + cogs_repl);
         let gross_profit = round2(net_sales - cogs);
         let inventory_losses = round2(loss_adj + loss_scrap);
+        let operating_expenses = round2(expenses);
+        let (sales_discounts, other_income) = (0.0, 0.0); // v7 fills these
         Ok(PnLReport {
             gross_sales,
             sales_returns,
@@ -72,8 +75,12 @@ impl ReportRepository for SqliteReportRepository {
             cogs,
             gross_profit,
             inventory_losses,
-            net_profit: round2(gross_profit - inventory_losses),
+            net_profit: round2(gross_profit + other_income - inventory_losses - operating_expenses),
             total_purchases: round2(purchases - vendor_returns),
+            sales_discounts,
+            other_income,
+            operating_expenses,
+            expenses_by_type: Vec::new(),
         })
     }
 

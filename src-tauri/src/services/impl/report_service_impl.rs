@@ -1,6 +1,6 @@
 //! Dashboard & reports (LLD §6.10). Every figure is computed by SQL aggregates in
 //! `ReportRepository` inside one read snapshot; cash comes from the single
-//! `accounting_service_impl::ledger_cash_summary`.
+//! `accounting_service_impl::cash_position` (ledger cash minus expenses).
 use std::sync::Arc;
 
 use chrono::{Datelike, Duration, NaiveDate};
@@ -13,7 +13,7 @@ use crate::core::error::AppError;
 use crate::core::money::{check_date, round2};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::report_service::ReportService;
-use crate::services::r#impl::accounting_service_impl::ledger_cash_summary;
+use crate::services::r#impl::accounting_service_impl::cash_position;
 
 const MAX_RECENT: usize = 100;
 
@@ -66,7 +66,7 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
         let (today_purchase_amount, today_purchase_count) = tx.reports().purchase_totals(&today, &today)?;
         let (customer_receivables, vendor_payables) = tx.reports().dues_totals()?;
         let total_stock_valuation = tx.reports().stock_valuation()?.total_valuation;
-        let live_cash_in_drawer = ledger_cash_summary(&mut *tx, &today, &today)?.net;
+        let (_, today_expenses_amount, live_cash_in_drawer) = cash_position(&mut *tx, &today, &today)?;
         Ok(DashboardMetrics {
             today_sales_amount,
             today_sales_count,
@@ -77,6 +77,7 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
             customer_receivables,
             vendor_payables,
             live_cash_in_drawer,
+            today_expenses_amount,
         })
     }
 
@@ -135,7 +136,9 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     fn get_pnl_report(&self, from_date: &str, to_date: &str) -> Result<PnLReport, AppError> {
         check_range(from_date, to_date)?;
         let mut tx = self.uow.begin_read()?;
-        tx.reports().pnl(from_date, to_date)
+        let mut r = tx.reports().pnl(from_date, to_date)?;
+        r.expenses_by_type = tx.expenses().totals_by_type_between(from_date, to_date)?;
+        Ok(r)
     }
 
     fn get_stock_valuation_report(&self) -> Result<StockValuationReport, AppError> {
@@ -146,7 +149,7 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError> {
         check_range(from_date, to_date)?;
         let mut tx = self.uow.begin_read()?;
-        let s = ledger_cash_summary(&mut *tx, from_date, to_date)?;
+        let (s, expenses, net) = cash_position(&mut *tx, from_date, to_date)?;
         Ok(CashFlowReport {
             sales_cash_inflow: round2(s.sale_upfront),
             customer_settlements_inflow: round2(s.sale_settlement),
@@ -154,7 +157,8 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
             purchase_cash_outflow: round2(s.purchase_upfront),
             vendor_settlements_outflow: round2(s.purchase_settlement),
             refunds_cash_outflow: round2(s.customer_refund_out),
-            net_cash_balance: s.net,
+            expenses_cash_outflow: expenses,
+            net_cash_balance: net,
         })
     }
 

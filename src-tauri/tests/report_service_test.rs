@@ -191,6 +191,8 @@ fn test_tc_rep_004_full_pnl_statement() {
     assert_eq!(p.inventory_losses, 50.0);
     assert_eq!(p.net_profit, 288.0);
     assert_eq!(p.total_purchases, 500.0);
+    assert_eq!((p.operating_expenses, p.sales_discounts, p.other_income), (0.0, 0.0, 0.0));
+    assert!(p.expenses_by_type.is_empty());
     // Dashboard "today" is the same formula.
     assert_eq!(svc(&uow).get_dashboard_metrics().unwrap().today_net_profit, 288.0);
     // Invalid ranges are rejected.
@@ -493,4 +495,62 @@ fn test_dashboard_today_excludes_prior_days() {
     assert_eq!(m.today_sales_amount, 300.0);
     assert_eq!(m.today_sales_count, 1);
     assert_eq!(m.customer_receivables, 200.0);
+}
+
+#[test]
+fn tc_exp_011_live_cash_drawer_subtracts_todays_expenses() {
+    use PaymentKind::*;
+    use TransactionType::*;
+    let uow = TestDb::new();
+    let mut tx = uow.begin_transaction().unwrap();
+    ledger(&mut *tx, 1, Sale, Upfront, 1000.0, TODAY);
+    ledger(&mut *tx, 2, Purchase, Upfront, 300.0, TODAY);
+    ledger(&mut *tx, 3, Sale, RefundOut, 50.0, TODAY);
+    create_test_expense(&mut *tx, 1001, TODAY, 1, 120.0);
+    create_test_expense(&mut *tx, 1002, "2026-11-19", 1, 80.0);
+    tx.commit().unwrap();
+
+    let m = svc(&uow).get_dashboard_metrics().unwrap();
+    assert_eq!(m.live_cash_in_drawer, 530.0); // 650 - 120
+    assert_eq!(m.today_expenses_amount, 120.0);
+    let acc = AccountingServiceImpl::new(PaymentServiceImpl, uow.clone());
+    assert_eq!(acc.calculate_live_cash_drawer(TODAY).unwrap(), 530.0);
+}
+
+#[test]
+fn tc_exp_012_cash_flow_report_has_expenses_outflow() {
+    use PaymentKind::*;
+    use TransactionType::*;
+    let uow = TestDb::new();
+    let mut tx = uow.begin_transaction().unwrap();
+    ledger(&mut *tx, 1, Sale, Upfront, 500.0, "2026-11-10");
+    ledger(&mut *tx, 2, Sale, ReturnCredit, 70.0, "2026-11-10");
+    create_test_expense(&mut *tx, 1001, "2026-11-10", 1, 120.0);
+    create_test_expense(&mut *tx, 1002, "2026-11-11", 1, 80.0);
+    create_test_expense(&mut *tx, 1003, "2026-12-01", 1, 999.0); // outside
+    tx.commit().unwrap();
+    let c = svc(&uow).get_cash_flow_report("2026-11-10", "2026-11-11").unwrap();
+    assert_eq!(c.expenses_cash_outflow, 200.0);
+    assert_eq!(c.net_cash_balance, 300.0); // 500 - 200, RETURN_CREDIT excluded
+}
+
+#[test]
+fn tc_exp_013_pnl_operating_expenses_and_breakdown() {
+    let uow = TestDb::new();
+    let mut tx = uow.begin_transaction().unwrap();
+    ensure_lot(&mut *tx, 1, 1);
+    tx.sales().create_transaction(&create_test_sale_tx(1, "SAL-1001", None, 1000.0, 1000.0, TODAY)).unwrap();
+    tx.sales().create_sale_item(&create_test_sale_item(1, 1, 1, None, 100.0, 100.0, 10.0)).unwrap();
+    tx.allocations().create_allocation(&create_test_allocation(1, 1, 1, 100.0, 6.0)).unwrap(); // cogs 600
+    create_test_expense(&mut *tx, 1001, TODAY, 1, 40.0); // "Type 1"
+    create_test_expense(&mut *tx, 1002, TODAY, 2, 60.0); // "Type 2"
+    create_test_expense(&mut *tx, 1003, "2026-12-30", 1, 999.0); // outside
+    tx.commit().unwrap();
+    let p = svc(&uow).get_pnl_report(TODAY, TODAY).unwrap();
+    assert_eq!(p.gross_profit, 400.0);
+    assert_eq!(p.operating_expenses, 100.0);
+    assert_eq!(p.net_profit, 300.0);
+    let by: Vec<_> = p.expenses_by_type.iter().map(|t| (t.expense_type_name.as_str(), t.amount)).collect();
+    assert_eq!(by, vec![("Type 2", 60.0), ("Type 1", 40.0)]);
+    assert_eq!(svc(&uow).get_dashboard_metrics().unwrap().today_net_profit, 300.0);
 }
