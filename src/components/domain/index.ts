@@ -6,4 +6,5 @@ export * from './ItemSearchTypeahead';
 export * from './PartySelector';
 export * from './SettlementModal';
 export * from './StockAdjustmentModal';
+export * from './SetStockDialog';
 export * from './DataTable';
