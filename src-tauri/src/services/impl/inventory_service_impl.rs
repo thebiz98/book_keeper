@@ -2,7 +2,7 @@ use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{
     ItemBillRef, ItemLot, PageRequest, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
-    StockAdjustmentResult,
+    StockAdjustmentPreview, StockAdjustmentResult,
 };
 use crate::core::money::round2;
 use crate::core::entities::{
@@ -204,6 +204,107 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
             )?;
             Ok((adj_id, 0.0, Some(cost)))
         }
+    }
+
+    /// Body of `create_adjustment` inside the caller's transaction; shared with the preview (DD-56).
+    fn adjustment_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        payload: &StockAdjustmentPayload,
+    ) -> Result<(StockAdjustmentResult, StockAdjustmentPreview), AppError> {
+        if !payload.quantity.is_finite() || payload.quantity == 0.0 {
+            return Err(validation("quantity", "Adjustment quantity must be finite and non-zero"));
+        }
+        require_date("adjustment_date", &payload.adjustment_date)?;
+        if let Some(c) = payload.unit_cost {
+            if !c.is_finite() || c < 0.0 {
+                return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {c})")));
+            }
+        }
+
+        if payload.reason == AdjustmentReason::UnrecordedStock && payload.quantity < 0.0 {
+            return Err(validation("quantity", "Unrecorded stock can only add stock; use Count correction to reduce it"));
+        }
+
+        let item = find_item(tx, payload.item_id)?;
+        require_stockable(&item)?;
+        let (adjustment_id, loss_value, cost_used) = self.post_adjustment(
+            tx,
+            &item,
+            &payload.adjustment_date,
+            payload.quantity,
+            payload.reason,
+            payload.unit_cost,
+            payload.notes.clone(),
+        )?;
+        let new_stock = tx.items().find_by_id(item.id)?.map(|i| i.current_stock).unwrap_or(item.current_stock + payload.quantity);
+        let value_change = if payload.quantity > 0.0 {
+            round2(payload.quantity * cost_used.unwrap_or(0.0))
+        } else {
+            -round2(loss_value)
+        };
+        Ok((
+            StockAdjustmentResult { adjustment_id, loss_value },
+            StockAdjustmentPreview {
+                previous_stock: item.current_stock,
+                new_stock,
+                unit_cost: cost_used,
+                loss_value,
+                value_change,
+            },
+        ))
+    }
+
+    /// Body of `set_item_stock` inside the caller's transaction; shared with the preview (DD-56).
+    fn set_item_stock_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        p: &SetItemStockPayload,
+    ) -> Result<SetItemStockResult, AppError> {
+        if !p.counted_quantity.is_finite() || p.counted_quantity < 0.0 {
+            return Err(validation("counted_quantity", "Counted stock must be a finite number, 0 or more"));
+        }
+        require_date("adjustment_date", &p.adjustment_date)?;
+        if let Some(c) = p.unit_cost {
+            if !c.is_finite() || c < 0.0 {
+                return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {c})")));
+            }
+        }
+
+        let item = find_item(tx, p.item_id)?;
+        require_stockable(&item)?;
+        let previous = item.current_stock;
+        let delta = ((p.counted_quantity - previous) * 1e6).round() / 1e6;
+        if delta.abs() <= EPS {
+            // Nothing written.
+            return Ok(SetItemStockResult {
+                adjustment_id: None,
+                delta: 0.0,
+                reason: None,
+                previous_stock: previous,
+                new_stock: previous,
+                unit_cost: None,
+                value_change: 0.0,
+            });
+        }
+        let (reason, cost_in) = if delta > 0.0 {
+            (AdjustmentReason::UnrecordedStock, p.unit_cost)
+        } else {
+            (AdjustmentReason::CountCorrection, None)
+        };
+        let (id, loss, cost_used) =
+            self.post_adjustment(tx, &item, &p.adjustment_date, delta, reason, cost_in, p.notes.clone())?;
+        let new_stock = tx.items().find_by_id(item.id)?.map(|i| i.current_stock).unwrap_or(previous + delta);
+        let value_change = if delta > 0.0 { round2(delta * cost_used.unwrap_or(0.0)) } else { -round2(loss) };
+        Ok(SetItemStockResult {
+            adjustment_id: Some(id),
+            delta,
+            reason: Some(reason),
+            previous_stock: previous,
+            new_stock,
+            unit_cost: cost_used,
+            value_change,
+        })
     }
 }
 
@@ -432,83 +533,31 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         &self,
         payload: StockAdjustmentPayload,
     ) -> Result<StockAdjustmentResult, AppError> {
-        if !payload.quantity.is_finite() || payload.quantity == 0.0 {
-            return Err(validation("quantity", "Adjustment quantity must be finite and non-zero"));
-        }
-        require_date("adjustment_date", &payload.adjustment_date)?;
-        if let Some(c) = payload.unit_cost {
-            if !c.is_finite() || c < 0.0 {
-                return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {c})")));
-            }
-        }
-
-        if payload.reason == AdjustmentReason::UnrecordedStock && payload.quantity < 0.0 {
-            return Err(validation("quantity", "Unrecorded stock can only add stock; use Count correction to reduce it"));
-        }
-
         let mut tx = self.uow.begin_transaction()?;
-        let item = find_item(&mut *tx, payload.item_id)?;
-        require_stockable(&item)?;
-        let (adjustment_id, loss_value, _) = self.post_adjustment(
-            &mut *tx,
-            &item,
-            &payload.adjustment_date,
-            payload.quantity,
-            payload.reason,
-            payload.unit_cost,
-            payload.notes.clone(),
-        )?;
+        let (result, _) = self.adjustment_in_tx(&mut *tx, &payload)?;
         tx.commit()?;
-        Ok(StockAdjustmentResult { adjustment_id, loss_value })
+        Ok(result)
+    }
+
+    fn preview_adjustment(&self, payload: StockAdjustmentPayload) -> Result<StockAdjustmentPreview, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.adjustment_in_tx(&mut *tx, &payload).map(|(_, preview)| preview);
+        tx.rollback()?; // never committed
+        result
     }
 
     fn set_item_stock(&self, p: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
-        if !p.counted_quantity.is_finite() || p.counted_quantity < 0.0 {
-            return Err(validation("counted_quantity", "Counted stock must be a finite number, 0 or more"));
-        }
-        require_date("adjustment_date", &p.adjustment_date)?;
-        if let Some(c) = p.unit_cost {
-            if !c.is_finite() || c < 0.0 {
-                return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {c})")));
-            }
-        }
-
         let mut tx = self.uow.begin_transaction()?;
-        let item = find_item(&mut *tx, p.item_id)?;
-        require_stockable(&item)?;
-        let previous = item.current_stock;
-        let delta = ((p.counted_quantity - previous) * 1e6).round() / 1e6;
-        if delta.abs() <= EPS {
-            // Nothing written; dropping the context rolls back.
-            return Ok(SetItemStockResult {
-                adjustment_id: None,
-                delta: 0.0,
-                reason: None,
-                previous_stock: previous,
-                new_stock: previous,
-                unit_cost: None,
-                value_change: 0.0,
-            });
-        }
-        let (reason, cost_in) = if delta > 0.0 {
-            (AdjustmentReason::UnrecordedStock, p.unit_cost)
-        } else {
-            (AdjustmentReason::CountCorrection, None)
-        };
-        let (id, loss, cost_used) =
-            self.post_adjustment(&mut *tx, &item, &p.adjustment_date, delta, reason, cost_in, p.notes.clone())?;
-        let new_stock = tx.items().find_by_id(item.id)?.map(|i| i.current_stock).unwrap_or(previous + delta);
+        let result = self.set_item_stock_in_tx(&mut *tx, &p)?;
         tx.commit()?;
-        let value_change = if delta > 0.0 { round2(delta * cost_used.unwrap_or(0.0)) } else { -round2(loss) };
-        Ok(SetItemStockResult {
-            adjustment_id: Some(id),
-            delta,
-            reason: Some(reason),
-            previous_stock: previous,
-            new_stock,
-            unit_cost: cost_used,
-            value_change,
-        })
+        Ok(result)
+    }
+
+    fn preview_set_item_stock(&self, p: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.set_item_stock_in_tx(&mut *tx, &p);
+        tx.rollback()?; // never committed
+        result
     }
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {

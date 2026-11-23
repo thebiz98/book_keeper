@@ -1,5 +1,6 @@
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload, StockAdjustmentResult,
+    ItemBillRef, ItemLot, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
+    StockAdjustmentPreview, StockAdjustmentResult,
 };
 use crate::core::entities::{PurchaseItem, StockAdjustment};
 use crate::core::error::AppError;
@@ -136,6 +137,13 @@ pub trait InventoryService: Send + Sync {
     /// Set stock on hand: own BEGIN IMMEDIATE; delta = counted - current_stock. delta>0 records an
     /// UNRECORDED_STOCK lot, delta<0 a COUNT_CORRECTION FIFO write-off, 0 is a no-op.
     fn set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError>;
+
+    /// DD-56: dry run of `create_adjustment` in a transaction that is dropped: the unit cost used
+    /// (the latest-lot default), the FIFO loss and the value change. Same errors as the command.
+    fn preview_adjustment(&self, payload: StockAdjustmentPayload) -> Result<StockAdjustmentPreview, AppError>;
+
+    /// DD-56: dry run of `set_item_stock` in a transaction that is dropped. Same errors as the command.
+    fn preview_set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError>;
 
     /// Lot inspector (all sources, oldest first).
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;
@@ -282,6 +290,14 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
 
     fn set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
         (**self).set_item_stock(payload)
+    }
+
+    fn preview_adjustment(&self, payload: StockAdjustmentPayload) -> Result<StockAdjustmentPreview, AppError> {
+        (**self).preview_adjustment(payload)
+    }
+
+    fn preview_set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
+        (**self).preview_set_item_stock(payload)
     }
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {

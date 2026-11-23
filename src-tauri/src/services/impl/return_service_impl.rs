@@ -6,7 +6,7 @@ use crate::core::dtos::{validate_date_range, BillEditGuard, DeleteReturnResult,
     CustomerReturnPayload, PageRequest, Paginated, RecordRefundPayload, ReturnDetailView, ReturnItemDetail,
     ReturnResult, ReturnsFilter, VendorReturnPayload,
 };
-use crate::core::entities::{ReturnItem, ReturnTransaction};
+use crate::core::entities::{Item, ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
 use crate::core::money::{check_date, round2, MONEY_EPS};
 use crate::core::value_objects::{
@@ -130,7 +130,7 @@ fn resolve_party(
     Ok((party_id, party_name))
 }
 
-fn active_item_name(tx: &mut dyn TransactionContext, item_id: i64) -> Result<String, AppError> {
+fn active_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Item, AppError> {
     let item = tx
         .items()
         .find_by_id(item_id)?
@@ -138,19 +138,17 @@ fn active_item_name(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Str
     if !item.is_active {
         return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
     }
-    Ok(item.name)
+    Ok(item)
 }
 
-impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork> ReturnService
-    for ReturnServiceImpl<I, P, A, U>
-{
-    fn get_next_return_code(&self) -> Result<String, AppError> {
-        // Display-only preview: the code is assigned for real inside the create_* write transaction.
-        let mut tx = self.uow.begin_read()?;
-        tx.returns().get_next_return_code()
-    }
+fn active_item_name(tx: &mut dyn TransactionContext, item_id: i64) -> Result<String, AppError> {
+    Ok(active_item(tx, item_id)?.name)
+}
 
-    fn create_customer_return(&self, payload: CustomerReturnPayload) -> Result<ReturnResult, AppError> {
+impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork>
+    ReturnServiceImpl<I, P, A, U>
+{
+    fn create_customer_return_in_tx(&self, tx: &mut dyn TransactionContext, payload: &CustomerReturnPayload) -> Result<ReturnResult, AppError> {
         // ---- Payload-only validation -------------------------------------------------------
         check_date("return_date", &payload.return_date)?;
         if payload.items.is_empty() {
@@ -193,7 +191,6 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         }
 
         // ---- Validation against stored data (read-only, before any write) -------------------
-        let mut tx = self.uow.begin_transaction()?;
         let sale = match payload.original_sale_id {
             Some(sid) => Some(
                 tx.sales()
@@ -203,7 +200,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             None => None,
         };
         let (party_id, party_name) = resolve_party(
-            &mut *tx,
+            tx,
             payload.party_id,
             sale.as_ref().and_then(|s| s.party_id),
             sale.is_some(),
@@ -236,7 +233,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                     *per_line_qty.entry(sid).or_insert(0.0) += it.quantity;
                     item_names.push(line.item_name);
                 }
-                None => item_names.push(active_item_name(&mut *tx, it.item_id)?),
+                None => item_names.push(active_item_name(tx, it.item_id)?),
             }
         }
         for (sid, qty) in &per_line_qty {
@@ -250,8 +247,11 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             }
         }
         let mut issue_names: Vec<String> = Vec::new();
+        let mut issued_value = 0.0;
         for r in &payload.replacement_items {
-            issue_names.push(active_item_name(&mut *tx, r.item_id)?);
+            let item = active_item(tx, r.item_id)?;
+            issued_value += r.quantity * item.default_sale_price;
+            issue_names.push(item.name);
         }
 
         // ---- Writes -----------------------------------------------------------------------
@@ -281,13 +281,13 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             let cost = match it.sale_item_id {
                 Some(sid) => {
                     linked_value += line_totals[idx];
-                    self.inventory_service.reverse_sale_line(&mut *tx, sid, it.item_id, it.quantity, restock)?
+                    self.inventory_service.reverse_sale_line(tx, sid, it.item_id, it.quantity, restock)?
                 }
                 None => {
                     unlinked_value += line_totals[idx];
                     if restock {
                         let lot_id = self.inventory_service.create_source_lot(
-                            &mut *tx,
+                            tx,
                             LotSource::Return,
                             &payload.return_date,
                             it.item_id,
@@ -326,7 +326,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         match payload.settlement_type {
             SettlementType::Refund => {
                 (credited, cash) = self.settle(
-                    &mut *tx,
+                    tx,
                     TransactionType::Sale,
                     party_id,
                     payload.original_sale_id,
@@ -347,10 +347,10 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                         None => reqs.push((r.item_id, r.quantity)),
                     }
                 }
-                self.inventory_service.validate_stock_availability(&mut *tx, &reqs)?;
+                self.inventory_service.validate_stock_availability(tx, &reqs)?;
                 for (idx, r) in payload.replacement_items.iter().enumerate() {
                     let cost = self.inventory_service.issue_stock_outflow(
-                        &mut *tx,
+                        tx,
                         OutflowSourceType::Replacement,
                         return_id,
                         r.item_id,
@@ -373,11 +373,10 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                 }
             }
         }
-        tx.commit()?;
-        Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash })
+        Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash, total_amount, issued_value: round2(issued_value) })
     }
 
-    fn create_vendor_return(&self, payload: VendorReturnPayload) -> Result<ReturnResult, AppError> {
+    fn create_vendor_return_in_tx(&self, tx: &mut dyn TransactionContext, payload: &VendorReturnPayload) -> Result<ReturnResult, AppError> {
         check_date("return_date", &payload.return_date)?;
         if payload.settlement_type == SettlementType::Replacement {
             return Err(validation("settlement_type", "Replacement is customer-only; vendor returns are always Refund"));
@@ -389,7 +388,6 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             check_qty("quantity", it.quantity)?;
         }
 
-        let mut tx = self.uow.begin_transaction()?;
         let purchase = match payload.original_purchase_id {
             Some(pid) => {
                 let p = tx
@@ -404,7 +402,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             None => None,
         };
         let (party_id, party_name) = resolve_party(
-            &mut *tx,
+            tx,
             payload.party_id,
             purchase.as_ref().and_then(|p| p.party_id),
             purchase.is_some(),
@@ -459,7 +457,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             }
         }
         if !fifo_reqs.is_empty() {
-            self.inventory_service.validate_stock_availability(&mut *tx, &fifo_reqs)?;
+            self.inventory_service.validate_stock_availability(tx, &fifo_reqs)?;
         }
 
         // ---- Writes -----------------------------------------------------------------------
@@ -482,7 +480,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         for (idx, it) in payload.items.iter().enumerate() {
             // DD-11: the lot cost removed (named lot or FIFO) is the line's value and cost.
             let value = self.inventory_service.remove_stock_for_vendor_return(
-                &mut *tx,
+                tx,
                 return_id,
                 it.item_id,
                 it.purchase_item_id,
@@ -507,7 +505,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         let total = round2(total);
         tx.returns().update_return_total(return_id, total)?;
         let (credited, cash) = self.settle(
-            &mut *tx,
+            tx,
             TransactionType::Purchase,
             party_id,
             payload.original_purchase_id,
@@ -517,8 +515,45 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             0.0,
             "Vendor return refund",
         )?;
+        Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash, total_amount: total, issued_value: 0.0 })
+    }
+}
+
+impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork> ReturnService
+    for ReturnServiceImpl<I, P, A, U>
+{
+    fn get_next_return_code(&self) -> Result<String, AppError> {
+        // Display-only preview: the code is assigned for real inside the create_* write transaction.
+        let mut tx = self.uow.begin_read()?;
+        tx.returns().get_next_return_code()
+    }
+
+    fn create_customer_return(&self, payload: CustomerReturnPayload) -> Result<ReturnResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.create_customer_return_in_tx(&mut *tx, &payload)?;
         tx.commit()?;
-        Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash })
+        Ok(result)
+    }
+
+    fn preview_customer_return(&self, payload: CustomerReturnPayload) -> Result<ReturnResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.create_customer_return_in_tx(&mut *tx, &payload);
+        tx.rollback()?; // never committed
+        result
+    }
+
+    fn create_vendor_return(&self, payload: VendorReturnPayload) -> Result<ReturnResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.create_vendor_return_in_tx(&mut *tx, &payload)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    fn preview_vendor_return(&self, payload: VendorReturnPayload) -> Result<ReturnResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.create_vendor_return_in_tx(&mut *tx, &payload);
+        tx.rollback()?; // never committed
+        result
     }
 
     fn list_returns(&self, filter: ReturnsFilter) -> Result<Paginated<ReturnTransaction>, AppError> {

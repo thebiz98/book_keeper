@@ -59,6 +59,10 @@ pub struct ReturnResult {
     pub return_code: String,
     pub credited_amount: f64, // applied to dues as RETURN_CREDIT
     pub cash_refunded: f64,   // REFUND_OUT (customer) / REFUND_IN (vendor)
+    /// Value of the returned lines (customer: qty x refund rate; vendor: the lot cost removed).
+    pub total_amount: f64,
+    /// Replacement only: Σ qty x the issued item's default sale price (display of the value gap); else 0.
+    pub issued_value: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

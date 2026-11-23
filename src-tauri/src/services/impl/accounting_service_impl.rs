@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::core::dtos::{
     LedgerCashSummary, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
-    DeleteSettlementResult, RecordPaymentPayload, SettleBatchPayload, SettlePaymentPayload, SettlementResult,
+    DeleteSettlementResult, RecordPaymentPayload, SettleAllocation, SettleBatchPayload, SettlePaymentPayload, SettlementResult,
     UpdateSettlementPayload,
 };
 use crate::core::entities::PaymentSettlement;
@@ -13,6 +13,18 @@ use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::payment_service::PaymentService;
 
 const MAX_BATCH_ALLOCATIONS: usize = 200;
+
+/// A settlement amount: finite and positive after rounding.
+fn settle_amount(raw: f64) -> Result<f64, AppError> {
+    if !raw.is_finite() {
+        return Err(validation("amount_paid", "Settlement amount must be a finite number"));
+    }
+    let amount = round2(raw);
+    if amount <= 0.0 {
+        return Err(validation("amount_paid", "Settlement amount must be positive"));
+    }
+    Ok(amount)
+}
 
 fn validation(field: &str, message: impl Into<String>) -> AppError {
     AppError::ValidationError { field: field.to_string(), message: message.into() }
@@ -161,6 +173,32 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
             remaining = round2(remaining - apply);
         }
         Ok(out)
+    }
+
+    /// Lump-sum settlement allocation: the party must match the side and the amount must not
+    /// exceed the outstanding dues (rejected before any write), then FIFO. Shared by
+    /// `settle_bill_payment` and `preview_settlement_allocation`.
+    fn lump_sum_allocations(
+        tx: &mut dyn TransactionContext,
+        tx_type: TransactionType,
+        party_id: i64,
+        amount: f64,
+    ) -> Result<Vec<(i64, f64)>, AppError> {
+        let party = tx.parties().find_by_id(party_id)?.ok_or_else(|| AppError::NotFound {
+            entity: "Party".to_string(),
+            id: party_id.to_string(),
+        })?;
+        if party.party_type != expected_party_type(tx_type) {
+            return Err(validation(
+                "transaction_type",
+                format!("{:?} settlements need a {:?} party", tx_type, expected_party_type(tx_type)),
+            ));
+        }
+        let outstanding: f64 = Self::open_bills(tx, tx_type, party_id)?.iter().map(|(_, b)| b).sum();
+        if amount > round2(outstanding) + MONEY_EPS {
+            return Err(validation("amount_paid", "Settlement amount exceeds total outstanding dues"));
+        }
+        Self::fifo_allocations(tx, tx_type, party_id, amount)
     }
 
     /// Spreads `amount` over the party's open bills oldest-first as ledger rows of `kind`.
@@ -337,14 +375,23 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
         Ok(result)
     }
 
+    fn preview_settlement_allocation(
+        &self,
+        party_id: i64,
+        transaction_type: TransactionType,
+        amount: f64,
+    ) -> Result<Vec<SettleAllocation>, AppError> {
+        // Same code as the lump-sum `settle_bill_payment`; it writes nothing, so a read context is enough.
+        let amount = settle_amount(amount)?;
+        let mut tx = self.uow.begin_read()?;
+        Ok(Self::lump_sum_allocations(&mut *tx, transaction_type, party_id, amount)?
+            .into_iter()
+            .map(|(transaction_id, amount_paid)| SettleAllocation { transaction_id, amount_paid })
+            .collect())
+    }
+
     fn settle_bill_payment(&self, payload: SettlePaymentPayload) -> Result<SettlementResult, AppError> {
-        if !payload.amount_paid.is_finite() {
-            return Err(validation("amount_paid", "Settlement amount must be a finite number"));
-        }
-        let amount = round2(payload.amount_paid);
-        if amount <= 0.0 {
-            return Err(validation("amount_paid", "Settlement amount must be positive"));
-        }
+        let amount = settle_amount(payload.amount_paid)?;
         check_date("settlement_date", &payload.settlement_date)?;
 
         let tx_type = payload.transaction_type;
@@ -352,27 +399,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
         let allocations = match payload.transaction_id {
             // A bill id is a batch of one.
             Some(bill_id) => vec![(bill_id, amount)],
-            None => {
-                // Lump sum: reject over-settlement before any write, then FIFO-allocate.
-                let party = tx.parties().find_by_id(payload.party_id)?.ok_or_else(|| AppError::NotFound {
-                    entity: "Party".to_string(),
-                    id: payload.party_id.to_string(),
-                })?;
-                if party.party_type != expected_party_type(tx_type) {
-                    return Err(validation(
-                        "transaction_type",
-                        format!("{:?} settlements need a {:?} party", tx_type, expected_party_type(tx_type)),
-                    ));
-                }
-                let outstanding: f64 = Self::open_bills(&mut *tx, tx_type, payload.party_id)?
-                    .iter()
-                    .map(|(_, b)| b)
-                    .sum();
-                if amount > round2(outstanding) + MONEY_EPS {
-                    return Err(validation("amount_paid", "Settlement amount exceeds total outstanding dues"));
-                }
-                Self::fifo_allocations(&mut *tx, tx_type, payload.party_id, amount)?
-            }
+            None => Self::lump_sum_allocations(&mut *tx, tx_type, payload.party_id, amount)?,
         };
         let result = self.settle_allocations_in_tx(
             &mut *tx,

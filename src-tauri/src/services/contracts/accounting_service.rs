@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    DeleteSettlementResult, PartyDueSummary, PartyLedgerView, SettleBatchPayload, SettlePaymentPayload,
+    DeleteSettlementResult, PartyDueSummary, PartyLedgerView, SettleAllocation, SettleBatchPayload, SettlePaymentPayload,
     SettlementResult, UpdateSettlementPayload,
 };
 use crate::core::entities::PaymentSettlement;
@@ -22,6 +22,15 @@ pub trait AccountingService: Send + Sync {
         &self,
         payload: SettlePaymentPayload,
     ) -> Result<SettlementResult, AppError>;
+
+    /// DD-56: the FIFO split a lump-sum `settle_bill_payment` of `amount` would book, oldest bill
+    /// first. Same validation and allocation code as the command; writes nothing.
+    fn preview_settlement_allocation(
+        &self,
+        party_id: i64,
+        transaction_type: TransactionType,
+        amount: f64,
+    ) -> Result<Vec<SettleAllocation>, AppError>;
 
     /// D9: the one SETTLEMENT core. Several bills in one transaction, all or nothing.
     fn settle_bills_batch(&self, payload: SettleBatchPayload) -> Result<SettlementResult, AppError>;
@@ -72,6 +81,15 @@ impl<T: AccountingService + ?Sized> AccountingService for std::sync::Arc<T> {
         payload: SettlePaymentPayload,
     ) -> Result<SettlementResult, AppError> {
         (**self).settle_bill_payment(payload)
+    }
+
+    fn preview_settlement_allocation(
+        &self,
+        party_id: i64,
+        transaction_type: TransactionType,
+        amount: f64,
+    ) -> Result<Vec<SettleAllocation>, AppError> {
+        (**self).preview_settlement_allocation(party_id, transaction_type, amount)
     }
 
     fn settle_bills_batch(&self, payload: SettleBatchPayload) -> Result<SettlementResult, AppError> {
