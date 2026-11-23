@@ -393,12 +393,26 @@ fn db_path_defaults_to_shop_db_and_env_override_wins() {
     assert_eq!(resolve_db_path(dir, Some("/tmp/x/custom.db")), PathBuf::from("/tmp/x/custom.db"));
 }
 
+// ---------------------------------------------------------------- frozen fixtures (DD-29)
+
+/// Exact DDL delta of each shipped migration (v1 = the whole aligned schema). Never edited.
+const V1: &str = include_str!("fixtures/schema/v1.sql");
+const V2: &str = include_str!("fixtures/schema/v2.sql");
+
+/// Builds a database at the version reached by replaying `steps` (fixtures 1..N).
+fn db_from_fixtures(tag: &str, steps: &[&str]) -> (PathBuf, Connection) {
+    let path = temp_path(tag);
+    let conn = Connection::open(&path).expect("open");
+    for step in steps {
+        conn.execute_batch(step).expect("fixture");
+    }
+    (path, conn)
+}
+
 #[test]
-fn fresh_db_is_at_v2_with_nullable_backup_directory_column() {
+fn fresh_db_has_nullable_backup_directory_column() {
     let (path, pool) = fresh();
     let conn = pool.get().unwrap();
-    assert_eq!(latest_version(), 2);
-    assert_eq!(current_version(&conn).unwrap(), 2);
     let notnull: i64 = conn
         .query_row("SELECT \"notnull\" FROM pragma_table_info('shop_settings') WHERE name = 'backup_directory'", [], |r| r.get(0))
         .unwrap();
@@ -410,19 +424,9 @@ fn fresh_db_is_at_v2_with_nullable_backup_directory_column() {
 
 #[test]
 fn v1_database_upgrades_to_add_backup_directory() {
-    let path = temp_path("v1up");
-    let conn = Connection::open(&path).unwrap();
-    // Replay only migration 1, as an app built before v2 would have.
-    conn.execute_batch(
-        "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-         CREATE TABLE shop_settings (id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id = 1), shop_name TEXT NOT NULL, phone TEXT, address TEXT, tax_id TEXT);
-         INSERT INTO shop_settings (id, shop_name) VALUES (1, 'My Shop');
-         INSERT INTO schema_version (version, name) VALUES (1, 'aligned_schema');
-         PRAGMA user_version = 1;",
-    )
-    .unwrap();
+    let (path, conn) = db_from_fixtures("v1up", &[V1]);
     run_migrations(&conn).expect("upgrade");
-    assert_eq!(current_version(&conn).unwrap(), 2);
+    assert_eq!(current_version(&conn).unwrap(), latest_version());
     let v: Option<String> = conn.query_row("SELECT backup_directory FROM shop_settings WHERE id = 1", [], |r| r.get(0)).unwrap();
     assert!(v.is_none());
     drop(conn);
