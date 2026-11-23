@@ -1,4 +1,6 @@
-use crate::core::dtos::{ItemLot, Paginated, StockAdjustmentPayload, StockAdjustmentResult};
+use crate::core::dtos::{
+    ItemLot, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload, StockAdjustmentResult,
+};
 use crate::core::entities::{PurchaseItem, StockAdjustment};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, OutflowSourceType};
@@ -100,6 +102,10 @@ pub trait InventoryService: Send + Sync {
         &self,
         payload: StockAdjustmentPayload,
     ) -> Result<StockAdjustmentResult, AppError>;
+
+    /// Set stock on hand: own BEGIN IMMEDIATE; delta = counted - current_stock. delta>0 records an
+    /// UNRECORDED_STOCK lot, delta<0 a COUNT_CORRECTION FIFO write-off, 0 is a no-op.
+    fn set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError>;
 
     /// Lot inspector (all sources, oldest first).
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;
@@ -217,6 +223,10 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
         payload: StockAdjustmentPayload,
     ) -> Result<StockAdjustmentResult, AppError> {
         (**self).create_adjustment(payload)
+    }
+
+    fn set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
+        (**self).set_item_stock(payload)
     }
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {

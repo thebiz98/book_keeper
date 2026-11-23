@@ -9,7 +9,9 @@ pub mod report_dto;
 pub mod return_dto;
 pub mod sale_dto;
 
-pub use adjustment_dto::{AdjustmentItemPayload, StockAdjustmentPayload, StockAdjustmentResult};
+pub use adjustment_dto::{
+    AdjustmentItemPayload, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload, StockAdjustmentResult,
+};
 pub use dues_dto::{
     PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView, SettlePaymentPayload,
     SettlementResult,

@@ -244,6 +244,113 @@ fn test_tc_inv_013_unrecorded_stock_must_be_positive() {
     assert_eq!(stock(&db, 1).0, 10.0);
 }
 
+fn set(item_id: i64, counted: f64, cost: Option<f64>) -> SetItemStockPayload {
+    SetItemStockPayload {
+        item_id, counted_quantity: counted, unit_cost: cost, adjustment_date: "2026-11-21".into(), notes: None,
+    }
+}
+
+fn lot_count(db: &TestDb, item: i64) -> usize {
+    let mut r = db.begin_read().unwrap();
+    r.purchases().list_lots_for_item(item).unwrap().len()
+}
+
+#[test]
+fn test_tc_inv_014_set_stock_up_records_unrecorded_stock() {
+    let (db, inv) = setup(&[(1, 1, 10.0, 5.0)]);
+    let res = inv.set_item_stock(set(1, 25.0, Some(6.0))).unwrap();
+    assert_eq!(res.delta, 15.0);
+    assert_eq!(res.reason, Some(AdjustmentReason::UnrecordedStock));
+    assert_eq!((res.previous_stock, res.new_stock, res.unit_cost, res.value_change), (10.0, 25.0, Some(6.0), 90.0));
+    let lots = inv.get_item_lots(1).unwrap();
+    assert_eq!((lots[1].source, lots[1].unit_cost, lots[1].quantity), (LotSource::Adjustment, 6.0, 15.0));
+    let mut r = db.begin_read().unwrap();
+    assert_stock_invariant(&mut *r);
+}
+
+#[test]
+fn test_tc_inv_015_set_stock_down_is_a_fifo_count_correction() {
+    let (db, inv) = setup(&[(1, 1, 4.0, 5.0), (2, 1, 10.0, 7.0)]);
+    let res = inv.set_item_stock(set(1, 8.0, Some(99.0))).unwrap();
+    assert_eq!((res.delta, res.reason), (-6.0, Some(AdjustmentReason::CountCorrection)));
+    assert_eq!(res.value_change, -34.0);
+    let id = res.adjustment_id.unwrap();
+    let mut r = db.begin_read().unwrap();
+    let rows = r.outflow_allocations().find_by_source(OutflowSourceType::Adjustment, id).unwrap();
+    let got: Vec<(i64, f64, f64)> = rows.iter().map(|a| (a.purchase_item_id, a.quantity_depleted, a.unit_cost)).collect();
+    assert_eq!(got, vec![(1, 4.0, 5.0), (2, 2.0, 7.0)]);
+    assert_eq!(adjustment_rows(&inv, 1)[0].unit_cost, None);
+    assert_eq!(inv.get_item_lots(1).unwrap().len(), 2, "no new lot");
+    assert_eq!(stock(&db, 1).0, 8.0);
+}
+
+#[test]
+fn test_tc_inv_016_set_stock_equal_is_a_noop() {
+    let (db, inv) = setup(&[(1, 1, 10.0, 5.0)]);
+    for counted in [10.0, 10.0 + 1e-12] {
+        let res = inv.set_item_stock(set(1, counted, Some(5.0))).unwrap();
+        assert_eq!((res.adjustment_id, res.delta, res.reason, res.new_stock), (None, 0.0, None, 10.0));
+    }
+    assert!(adjustment_rows(&inv, 1).is_empty());
+    assert_eq!(lot_count(&db, 1), 1);
+    inv.create_adjustment(adj(1, 1.0, AdjustmentReason::CountCorrection, None)).unwrap();
+    assert_eq!(inv.get_item_lots(1).unwrap()[1].transaction_code, "ADJ-0001");
+}
+
+#[test]
+fn test_tc_inv_017_set_stock_validation_writes_nothing() {
+    let (db, inv) = setup(&[(1, 1, 10.0, 5.0)]);
+    let field = |r: Result<SetItemStockResult, AppError>| match r {
+        Err(AppError::ValidationError { field, .. }) => field,
+        other => panic!("expected ValidationError, got {other:?}"),
+    };
+    assert_eq!(field(inv.set_item_stock(set(1, -1.0, None))), "counted_quantity");
+    assert_eq!(field(inv.set_item_stock(set(1, f64::NAN, None))), "counted_quantity");
+    let mut bad_date = set(1, 12.0, Some(1.0));
+    bad_date.adjustment_date = "bad".into();
+    assert_eq!(field(inv.set_item_stock(bad_date)), "adjustment_date");
+    assert_eq!(field(inv.set_item_stock(set(1, 12.0, Some(-1.0)))), "unit_cost");
+    assert!(matches!(inv.set_item_stock(set(404, 1.0, Some(1.0))), Err(AppError::NotFound { .. })));
+    db.pool.get().unwrap().execute("UPDATE items SET is_active = 0 WHERE id = 1", []).unwrap();
+    assert_eq!(field(inv.set_item_stock(set(1, 12.0, Some(1.0)))), "item_id");
+    db.pool.get().unwrap().execute("UPDATE items SET is_active = 1, item_type = 'SERVICE' WHERE id = 1", []).unwrap();
+    assert_eq!(field(inv.set_item_stock(set(1, 12.0, Some(1.0)))), "item_id");
+    assert!(adjustment_rows(&inv, 1).is_empty());
+    assert_eq!(lot_count(&db, 1), 1);
+    assert_eq!(stock(&db, 1).0, 10.0);
+
+    let db2 = TestDb::new();
+    let inv2 = InventoryServiceImpl::new(FifoStrategy, db2.clone());
+    let mut tx = db2.begin_transaction().unwrap();
+    seed_empty_item(&mut *tx, 1);
+    tx.commit().unwrap();
+    assert_eq!(field(inv2.set_item_stock(set(1, 5.0, None))), "unit_cost");
+    assert_eq!(stock(&db2, 1).0, 0.0);
+}
+
+#[test]
+fn test_tc_inv_018_set_stock_recomputes_low_stock_flag() {
+    let (db, inv) = setup(&[(1, 1, 3.0, 2.0)]);
+    assert_eq!(stock(&db, 1), (3.0, true));
+    inv.set_item_stock(set(1, 12.0, Some(2.0))).unwrap();
+    assert_eq!(stock(&db, 1), (12.0, false));
+    inv.set_item_stock(set(1, 2.0, None)).unwrap();
+    assert_eq!(stock(&db, 1), (2.0, true));
+    db.pool.get().unwrap().execute("UPDATE items SET low_stock_threshold = 20 WHERE id = 1", []).unwrap();
+    inv.set_item_stock(set(1, 15.0, Some(2.0))).unwrap();
+    assert_eq!(stock(&db, 1), (15.0, true), "still below its own threshold");
+}
+
+#[test]
+fn test_tc_inv_019_set_stock_fractional() {
+    let (db, inv) = setup(&[(1, 1, 9.7, 1.0)]);
+    let res = inv.set_item_stock(set(1, 10.0, Some(1.0))).unwrap();
+    assert!((res.new_stock - 10.0).abs() < 1e-9);
+    assert!((stock(&db, 1).0 - 10.0).abs() < 1e-9);
+    let mut r = db.begin_read().unwrap();
+    assert_stock_invariant(&mut *r);
+}
+
 #[test]
 fn adjustments_on_service_items_are_rejected() {
     let (db, inv) = setup(&[(1, 1, 10.0, 5.0)]);
