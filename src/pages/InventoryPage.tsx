@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search,
   Plus,
@@ -15,11 +15,13 @@ import { errorMessage } from '@/api/errors';
 import { totalPages } from '@/lib/pagination';
 import type { ItemSearchResult } from '@/types';
 import type { Paginated } from '@/types/api';
+import { useGridKeyboardNav } from '@/hooks/useGridKeyboardNav';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { LowStockLevelCell } from '@/components/domain/LowStockLevelCell';
 import { StockAdjustmentModal } from '@/components/domain/StockAdjustmentModal';
 import { SetStockDialog } from '@/components/domain/SetStockDialog';
 import { ItemEditDrawer } from '@/components/domain/ItemEditDrawer';
+import { ItemDetailsDrawer } from '@/components/domain/ItemDetailsDrawer';
 import { LotInspector } from '@/components/domain/LotInspector';
 import { ImportItemsDialog } from '@/components/domain/ImportItemsDialog';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
@@ -44,6 +46,8 @@ export const InventoryPage: React.FC = () => {
   const [adjustItem, setAdjustItem] = useState<ItemSearchResult | null>(null);
   const [setStockItem, setSetStockItem] = useState<ItemSearchResult | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [detailsItem, setDetailsItem] = useState<ItemSearchResult | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const live = useLiveSearch<Paginated<ItemSearchResult>>({
     initial: EMPTY_PAGE,
@@ -90,6 +94,34 @@ export const InventoryPage: React.FC = () => {
 
   const pages = totalPages(total, PAGE_SIZE);
 
+  const anyOverlayOpen =
+    drawerOpen || detailsItem !== null || adjustItem !== null || setStockItem !== null || importOpen;
+  const nav = useGridKeyboardNav<ItemSearchResult>({
+    items,
+    getId: (i) => i.itemId,
+    enabled: !anyOverlayOpen && !isLoading && !loadError,
+    onOpen: setDetailsItem,
+    onExpand: (item, open) =>
+      setExpanded((prev) => {
+        if (prev.has(item.itemId) === open) return prev;
+        const next = new Set(prev);
+        if (open) next.add(item.itemId);
+        else next.delete(item.itemId);
+        return next;
+      }),
+    onPage: (dir) => setPage((p) => Math.min(pages, Math.max(1, p + dir))),
+    onLeaveTop: () => searchRef.current?.focus(),
+    letters: {
+      e: (item) => {
+        setEditingItem(item);
+        setDrawerOpen(true);
+      },
+      s: (item) => {
+        if (item.itemType !== 'SERVICE') setSetStockItem(item);
+      },
+    },
+  });
+
   // The drawer shows the freshest catalog row for the item being edited.
   const drawerItem = editingItem
     ? (items.find((i) => i.itemId === editingItem.itemId) ?? editingItem)
@@ -104,6 +136,7 @@ export const InventoryPage: React.FC = () => {
           <input
             type="text"
             aria-label="Search items"
+            ref={searchRef}
             placeholder="Search items by name…"
             value={live.query}
             onChange={(e) => live.setQuery(e.target.value)}
@@ -111,6 +144,10 @@ export const InventoryPage: React.FC = () => {
               if (e.key === 'Enter') {
                 e.preventDefault();
                 void live.flush();
+              } else if (e.key === 'ArrowDown' && items.length > 0) {
+                e.preventDefault();
+                searchRef.current?.blur();
+                nav.enterGrid();
               }
             }}
             className="w-full text-xs pl-8 pr-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -206,7 +243,18 @@ export const InventoryPage: React.FC = () => {
                 const isOpen = expanded.has(item.itemId);
                 return (
                   <React.Fragment key={item.itemId}>
-                    <TableRow data-testid="item-row">
+                    <TableRow
+                      data-testid="item-row"
+                      data-row-id={item.itemId}
+                      selected={nav.activeId === item.itemId}
+                      aria-selected={nav.activeId === item.itemId}
+                      className="cursor-pointer"
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest('button, input, select, textarea, a')) return;
+                        nav.setActiveId(item.itemId);
+                        setDetailsItem(item);
+                      }}
+                    >
                       <TableCell className="text-center">
                         <button
                           type="button"
@@ -331,6 +379,16 @@ export const InventoryPage: React.FC = () => {
         onClose={() => setDrawerOpen(false)}
         item={drawerItem}
         onSaved={refreshAll}
+      />
+
+      <ItemDetailsDrawer
+        item={detailsItem ? (items.find((i) => i.itemId === detailsItem.itemId) ?? detailsItem) : null}
+        onClose={() => setDetailsItem(null)}
+        onEdit={(item) => {
+          setDetailsItem(null);
+          setEditingItem(item);
+          setDrawerOpen(true);
+        }}
       />
 
       <ImportItemsDialog isOpen={importOpen} onClose={() => setImportOpen(false)} onImported={refreshAll} />
