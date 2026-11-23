@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ShoppingCart, Truck, BookOpen, SlidersHorizontal, AlertTriangle, ArrowUpRight } from 'lucide-react';
+import { ShoppingCart, Truck, BookOpen, Wallet, SlidersHorizontal, AlertTriangle, ArrowUpRight } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import type { DashboardMetrics, LowStockItem, RecentTransaction, TrendDataPoint } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
@@ -148,6 +148,9 @@ export const DashboardPage: React.FC = () => {
           <Button variant="outline" size="sm" onClick={() => setActiveRoute('dues')} hotkey="F5" leftIcon={<BookOpen className="h-3.5 w-3.5" />}>
             Settle Due
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setActiveRoute('expenses')} hotkey="F7" leftIcon={<Wallet className="h-3.5 w-3.5" />}>
+            Expense
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setAdjustOpen(true)} leftIcon={<SlidersHorizontal className="h-3.5 w-3.5" />}>
             Stock Adjustment
           </Button>
@@ -155,14 +158,15 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {base?.metrics.error && <Err msg={`Could not load metrics: ${base.metrics.error}`} onRetry={loadBase} />}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
         <Kpi testId="kpi-sales" label="Today's Gross Sales" value={m?.todaySalesAmount ?? null} sub={m ? `${m.todaySalesCount} bills` : undefined} />
         <Kpi testId="kpi-purchases" label="Today's Purchases" value={m?.todayPurchaseAmount ?? null} sub={m ? `${m.todayPurchaseCount} batches` : undefined} />
         <Kpi testId="kpi-profit" label="Today's Net Profit" value={m?.todayNetProfit ?? null} colored />
         <Kpi testId="kpi-valuation" label="Inventory Valuation" value={m?.totalStockValuation ?? null} />
         <Kpi testId="kpi-receivables" label="Customer Receivables" value={m?.customerReceivables ?? null} />
         <Kpi testId="kpi-payables" label="Vendor Payables" value={m?.vendorPayables ?? null} />
-        <Kpi testId="kpi-cash" label="Cash in Drawer" value={m?.liveCashInDrawer ?? null} colored sub="Live physical cash" />
+        <Kpi testId="kpi-expenses" label="Today's Expenses" value={m?.todayExpensesAmount ?? null} />
+        <Kpi testId="kpi-cash" label="Cash in Drawer" value={m?.liveCashInDrawer ?? null} colored sub="After today's expenses" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

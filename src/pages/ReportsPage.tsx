@@ -84,7 +84,7 @@ export const ReportsPage: React.FC = () => {
   const p = pnl.data;
   const c = cash.data;
   const inflow = c ? round2(c.salesCashInflow + c.customerSettlementsInflow + c.vendorRefundsInflow) : 0;
-  const outflow = c ? round2(c.purchaseCashOutflow + c.vendorSettlementsOutflow + c.refundsCashOutflow) : 0;
+  const outflow = c ? round2(c.purchaseCashOutflow + c.vendorSettlementsOutflow + c.refundsCashOutflow + c.expensesCashOutflow) : 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -106,6 +106,19 @@ export const ReportsPage: React.FC = () => {
               <Line testId="pnl-cogs" label="Less: FIFO COGS (net of returns)" amount={p.cogs} negative />
               <Line testId="pnl-gross-profit" label="Gross Profit" amount={p.grossProfit} strong />
               <Line testId="pnl-losses" label="Less: Inventory Losses" amount={p.inventoryLosses} negative />
+              <Line testId="pnl-opex" label="Less: Operating Expenses" amount={p.operatingExpenses} negative />
+              {p.expensesByType.length > 0 && (
+                <ul data-opex-breakdown className="ml-4 mb-1 text-xs text-slate-500">
+                  {p.expensesByType.map((t) => (
+                    <li key={t.expenseTypeId} data-breakdown className="flex items-center justify-between py-0.5">
+                      <span>{t.expenseTypeName}</span>
+                      <span className="font-mono">
+                        <CurrencyDisplay amount={t.amount} size="sm" />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <Line testId="pnl-net-profit" label="Net Profit" amount={p.netProfit} strong />
               <div className="mt-2 pt-2 border-t border-dashed border-slate-200 dark:border-slate-700">
                 <Line testId="pnl-purchases" label="Total Purchases (net of vendor returns)" amount={p.totalPurchases} />
@@ -126,6 +139,7 @@ export const ReportsPage: React.FC = () => {
               <Line testId="cf-purch" label="Purchase upfront cash" amount={c.purchaseCashOutflow} />
               <Line testId="cf-vset" label="Vendor settlements" amount={c.vendorSettlementsOutflow} />
               <Line testId="cf-refunds" label="Customer refunds paid" amount={c.refundsCashOutflow} />
+              <Line testId="cf-expenses" label="Store expenses" amount={c.expensesCashOutflow} />
               <Line label="Total outflow" amount={outflow} strong />
               <Line testId="cf-net" label="Net Cash Balance" amount={c.netCashBalance} strong />
             </div>

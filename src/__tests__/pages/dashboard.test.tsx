@@ -42,6 +42,7 @@ describe('DashboardPage', () => {
     for (const v of ['₹500.00', '₹321.00', '₹9,999.00', '₹777.00', '₹444.00', '₹888.00', '7 bills', '2 batches']) {
       expect(bodyText()).toContain(v);
     }
+    expect(document.querySelector('[data-testid="kpi-expenses"]')!.textContent).toContain('₹350.00');
     expect(api.getRecentTransactions.mock.calls[0][0]).toBe(10);
     expect(document.querySelector('[data-testid="low-count"]')!.textContent).toBe('2');
     expect(bodyText()).toContain('1 / 10 PCS');
