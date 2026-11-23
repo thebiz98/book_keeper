@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, CheckCircle2 } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import { round2 } from '@/lib/money';
 import { todayLocal } from '@/lib/dates';
@@ -9,7 +9,7 @@ import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
-import { allocateFifo, fetchOpenBills, type OpenBill } from './openBills';
+import { BatchSettlementForm } from './BatchSettlementForm';
 
 export interface SettlementModalProps {
   isOpen: boolean;
@@ -27,7 +27,7 @@ export interface SettlementModalProps {
   onSettled?: (amount: number) => void;
 }
 
-export const SettlementModal: React.FC<SettlementModalProps> = ({
+const SingleBillSettlement: React.FC<SettlementModalProps> = ({
   isOpen,
   onClose,
   partyId,
@@ -38,7 +38,6 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   billCode,
   onSettled,
 }) => {
-  const singleBill = transactionId !== null;
   const isCustomer = transactionType === 'SALE';
   const [amount, setAmount] = useState<number>(totalDue);
   const [date, setDate] = useState<string>(todayLocal());
@@ -46,8 +45,6 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   const [notes, setNotes] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [bills, setBills] = useState<OpenBill[]>([]);
-  const [billsError, setBillsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -58,23 +55,6 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
       setError(null);
     }
   }, [isOpen, totalDue, transactionId]);
-
-  useEffect(() => {
-    if (!isOpen || singleBill) return;
-    let live = true;
-    setBillsError(null);
-    fetchOpenBills(transactionType, partyId)
-      .then((b) => live && setBills(b))
-      .catch((e) => {
-        if (live) {
-          setBills([]);
-          setBillsError(errorMessage(e));
-        }
-      });
-    return () => {
-      live = false;
-    };
-  }, [isOpen, singleBill, transactionType, partyId]);
 
   const validation = (): string | null => {
     if (!(amount > 0)) return 'Settlement amount must be greater than 0';
@@ -113,19 +93,13 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
   };
 
   const remainingBalance = Math.max(0, round2(totalDue - amount));
-  const split = singleBill ? [] : allocateFifo(bills, amount);
-  const verb = isCustomer ? 'Receive' : 'Pay';
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={
-        singleBill
-          ? `${isCustomer ? 'Record Settlement' : 'Record Vendor Payment'}${billCode ? ` - ${billCode}` : ''}`
-          : `${verb} on account`
-      }
-      description={singleBill ? `Settles this bill only - ${partyName}` : `Oldest bills first - ${partyName}`}
+      title={`${isCustomer ? 'Record Settlement' : 'Record Vendor Payment'}${billCode ? ` - ${billCode}` : ''}`}
+      description={`Settles this bill only - ${partyName}`}
       size="md"
       footer={
         <>
@@ -148,7 +122,7 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
         <div className="flex items-center justify-between p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800">
           <div>
             <span className="text-xs text-slate-500 dark:text-slate-400">
-              {singleBill ? 'Bill Balance Due' : 'Total Outstanding'}
+              Bill Balance Due
             </span>
             <div className="text-xl font-bold font-mono">
               <CurrencyDisplay amount={totalDue} size="xl" colored />
@@ -210,42 +184,38 @@ export const SettlementModal: React.FC<SettlementModalProps> = ({
           </div>
         </div>
 
-        {!singleBill && (
-          <div data-testid="fifo-preview" className="rounded border border-slate-200 dark:border-slate-800 text-xs">
-            <div className="px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800/60 font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
-              <CreditCard className="h-3.5 w-3.5" /> Split preview (oldest bill first)
-            </div>
-            {billsError ? (
-              <p role="alert" className="p-2.5 text-rose-600 dark:text-rose-400">
-                Could not load open bills: {billsError}
-              </p>
-            ) : split.length === 0 ? (
-              <p className="p-2.5 text-slate-500">Enter an amount to see how it is applied.</p>
-            ) : (
-              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                {split.map((r) => (
-                  <li key={r.bill.id} className="px-2.5 py-1.5 flex items-center justify-between font-mono">
-                    <span>
-                      {r.bill.transactionCode} <span className="text-slate-400">({r.bill.transactionDate})</span>
-                    </span>
-                    <span>
-                      <CurrencyDisplay amount={r.applied} size="sm" /> of{' '}
-                      <CurrencyDisplay amount={r.bill.balanceDue} size="sm" />
-                      {r.remainingAfter === 0 ? ' - settled' : ''}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
         {error && (
           <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
             {error}
           </p>
         )}
       </div>
+    </Modal>
+  );
+};
+
+/**
+ * Per-bill settle (transactionId set) keeps the single-amount form; the lump sum is the
+ * "Settle bills" batch form (D9).
+ */
+export const SettlementModal: React.FC<SettlementModalProps> = (props) => {
+  if (props.transactionId != null) return <SingleBillSettlement {...props} />;
+  const verb = props.transactionType === 'SALE' ? 'Receive' : 'Pay';
+  return (
+    <Modal
+      isOpen={props.isOpen}
+      onClose={props.onClose}
+      title={`Settle bills - ${verb.toLowerCase()} on account`}
+      description={`Oldest bills first - ${props.partyName}`}
+      size="lg"
+    >
+      <BatchSettlementForm
+        transactionType={props.transactionType}
+        partyId={props.partyId}
+        partyName={props.partyName}
+        onClose={props.onClose}
+        onSettled={props.onSettled}
+      />
     </Modal>
   );
 };
