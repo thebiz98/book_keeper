@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useMemo } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { api } from '@/api';
@@ -54,12 +54,29 @@ export async function printBillDocument(
   window.print();
 }
 
-/** Returns `printBill(kind, id)`: loads the bill and the Shop Profile, then prints. Rejects on load errors. */
-export function usePrintBill(): (kind: TransactionType, billId: number) => Promise<void> {
-  return useCallback(async (kind: TransactionType, billId: number) => {
-    const store = useAppStore.getState();
-    if (!store.shopLoaded) await store.loadShopSettings();
-    const detail = kind === 'SALE' ? await api.getSaleDetails(billId) : await api.getPurchaseDetails(billId);
-    await printBillDocument(kind, useAppStore.getState().shopProfile, detail);
-  }, []);
+/** Prints an already loaded bill with the Shop Profile from the store (loaded on demand). */
+export async function printLoadedBill(kind: TransactionType, detail: SaleDetailView | PurchaseDetailView): Promise<void> {
+  const store = useAppStore.getState();
+  if (!store.shopLoaded) await store.loadShopSettings();
+  await printBillDocument(kind, useAppStore.getState().shopProfile, detail);
+}
+
+export interface PrintBillApi {
+  /** Prints a bill that is already loaded. */
+  printDetail: typeof printLoadedBill;
+  /** Loads the bill by id, then prints it. Rejects on load errors. */
+  printById: (kind: TransactionType, billId: number) => Promise<void>;
+}
+
+export function usePrintBill(): PrintBillApi {
+  return useMemo<PrintBillApi>(
+    () => ({
+      printDetail: printLoadedBill,
+      printById: async (kind, billId) => {
+        const detail = kind === 'SALE' ? await api.getSaleDetails(billId) : await api.getPurchaseDetails(billId);
+        await printLoadedBill(kind, detail);
+      },
+    }),
+    []
+  );
 }

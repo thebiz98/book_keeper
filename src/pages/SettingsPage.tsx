@@ -212,6 +212,7 @@ export const SettingsPage: React.FC = () => {
           <CardTitle>Shop Profile</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
+          <p className="text-xs text-slate-500">Printed at the top of bills</p>
           <TextInput label="Shop Name" value={shopName} onChange={(e) => setShopName(e.target.value)} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <TextInput label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} />

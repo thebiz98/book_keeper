@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api, errorMessage } from '@/api';
 import type {
   BillEditGuard,
@@ -16,7 +16,8 @@ import { Button } from '../ui/Button';
 import { useAppStore } from '@/store/useAppStore';
 import { useCartStore } from '@/store/useCartStore';
 import { queueBillEdit } from '@/pages/billEditHandoff';
-import { Pencil, Trash2, DollarSign } from 'lucide-react';
+import { Pencil, Trash2, DollarSign, Printer } from 'lucide-react';
+import { usePrintBill } from '../print/usePrintBill';
 import { SettlementModal } from './SettlementModal';
 import { SettlementEditModal } from './SettlementEditModal';
 import { refreshAppMetrics } from './navParams';
@@ -210,6 +211,28 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   const charges = sale?.charges ?? purchase?.charges ?? [];
   const supplierRef = purchase?.purchase.supplierInvoiceRef ?? null;
 
+  const { printDetail } = usePrintBill();
+  const doPrint = () => {
+    const detail = kind === 'SALE' ? sale : purchase;
+    if (!detail) return;
+    setActionError(null);
+    printDetail(kind, detail).catch((e) => setActionError(errorMessage(e)));
+  };
+  const printRef = useRef(doPrint);
+  printRef.current = doPrint;
+  const printable = billId !== null && head !== null;
+  useEffect(() => {
+    if (!printable) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        if (!e.repeat) printRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [printable]);
+
   return (
     <Drawer
       isOpen={billId !== null}
@@ -228,6 +251,16 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
               </ul>
             )}
             <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="bill-print"
+                leftIcon={<Printer size={12} />}
+                onClick={doPrint}
+                title="Print (Ctrl+P)"
+              >
+                Print
+              </Button>
               {canSettle && (
                 <Button
                   variant="secondary"

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { CheckCircle2, ArrowRight, Banknote } from 'lucide-react';
+import { CheckCircle2, ArrowRight, Banknote, Printer } from 'lucide-react';
+import { usePrintBill } from '../print/usePrintBill';
 import { errorMessage } from '@/api';
 import { round2 } from '@/lib/money';
 import type { BillChargeLine } from '@/lib/billMath';
@@ -166,6 +167,29 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
       setSubmitting(false);
     }
   };
+
+  const [printError, setPrintError] = useState<string | null>(null);
+  const { printById } = usePrintBill();
+  const doPrint = () => {
+    if (!result) return;
+    setPrintError(null);
+    printById('SALE', result.saleId).catch((e) => setPrintError(errorMessage(e)));
+  };
+  const printRef = useRef(doPrint);
+  printRef.current = doPrint;
+  const showingResult = result !== null;
+  useEffect(() => {
+    if (!showingResult) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || e.key.toLowerCase() !== 'p') return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      e.preventDefault();
+      printRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showingResult]);
 
   const finish = () => {
     if (result) onDone(result);
@@ -403,6 +427,23 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
               <dt className="text-slate-500">Change</dt>
               <dd data-testid="result-change" className="text-right"><CurrencyDisplay amount={result?.changeAmount ?? 0} size="sm" /></dd>
             </dl>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="print-bill-btn"
+                leftIcon={<Printer className="h-3.5 w-3.5" />}
+                onClick={doPrint}
+                hotkey="P"
+              >
+                Print bill
+              </Button>
+              {printError && (
+                <span role="alert" className="text-xs text-rose-600 dark:text-rose-400">
+                  {printError}
+                </span>
+              )}
+            </div>
           </div>
         )}
       </div>
