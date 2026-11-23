@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { api, errorMessage } from '@/api';
 import { round2 } from '@/lib/money';
 import type { PartyType, PurchaseHistoryRow, ReturnResult, SaleHistoryRow, TransactionType } from '@/types';
@@ -71,34 +72,21 @@ export const BillPicker: React.FC<{
   kind: TransactionType;
   onPick: (id: number) => void;
 }> = ({ kind, onPick }) => {
-  const [query, setQuery] = useState('');
-  const [rows, setRows] = useState<BillRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setRows([]);
-      setError(null);
-      return;
-    }
-    let live = true;
-    const t = setTimeout(() => {
-      setLoading(true);
-      setError(null);
+  const live = useLiveSearch<BillRow[]>({
+    initial: [],
+    minChars: 2,
+    debounceMs: LIST_SEARCH_DEBOUNCE_MS,
+    deps: [kind],
+    fetcher: (q) => {
       const filter = { searchQuery: q, paymentStatus: 'ALL' as const, limit: 8 };
       const req = kind === 'SALE' ? api.getSalesHistory(filter) : api.getPurchasesHistory(filter);
-      req
-        .then((r) => live && setRows(r.items))
-        .catch((e) => live && setError(errorMessage(e)))
-        .finally(() => live && setLoading(false));
-    }, 250);
-    return () => {
-      live = false;
-      clearTimeout(t);
-    };
-  }, [query, kind]);
+      return req.then((r) => r.items);
+    },
+  });
+  const { query, setQuery } = live;
+  const rows = live.error ? [] : live.results;
+  const loading = live.isLoading;
+  const error = live.error ? errorMessage(live.error) : null;
 
   return (
     <div className="flex flex-col gap-1">

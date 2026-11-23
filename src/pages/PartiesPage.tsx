@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { Users, Plus, Search, Pencil, User, Truck, BookOpen } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import type { PartyListRow, PartyType } from '@/types';
@@ -30,11 +31,7 @@ const emptyForm = (partyType: PartyType): PartyForm => ({
 
 export const PartiesPage: React.FC = () => {
   const [tab, setTab] = useState<PartyType>('CUSTOMER');
-  const [query, setQuery] = useState('');
-  const [parties, setParties] = useState<PartyListRow[]>([]);
   const [ledgerId, setLedgerId] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState<PartyForm | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -46,24 +43,17 @@ export const PartiesPage: React.FC = () => {
     setFormError(null);
   }, [formOpen, form?.id]);
 
-  const load = useCallback(() => {
-    setIsLoading(true);
-    setError(null);
-    const trimmed = query.trim();
-    const req = trimmed ? api.searchParties(trimmed, tab) : api.listParties(tab, true);
-    req
-      .then((data) => setParties(data))
-      .catch((err) => {
-        setParties([]);
-        setError(`Failed to load parties: ${errorMessage(err)}`);
-      })
-      .finally(() => setIsLoading(false));
-  }, [tab, query]);
-
-  useEffect(() => {
-    const timer = setTimeout(load, 200);
-    return () => clearTimeout(timer);
-  }, [load]);
+  const live = useLiveSearch<PartyListRow[]>({
+    initial: [],
+    emptyBehavior: 'fetch',
+    debounceMs: LIST_SEARCH_DEBOUNCE_MS,
+    deps: [tab],
+    fetcher: (q) => (q ? api.searchParties(q, tab) : api.listParties(tab, true)),
+  });
+  const { query, setQuery, isLoading: fetching, refresh: load } = live;
+  const parties = live.error ? [] : live.results;
+  const isLoading = fetching && live.resultsFor === null;
+  const error = live.error ? `Failed to load parties: ${errorMessage(live.error)}` : null;
 
   const handleSave = async () => {
     if (!form || savingRef.current) return;

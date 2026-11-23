@@ -43,12 +43,17 @@ describe('PartySelector', () => {
   });
 
   it('filters by name or phone', async () => {
-    installApi({ listParties: vi.fn(async () => parties) });
+    const searchParties = vi.fn(async (q: string) =>
+      parties.filter((p) => p.name.toLowerCase().includes(q.toLowerCase()) || (p.phone ?? '').includes(q))
+    );
+    installApi({ listParties: vi.fn(async () => parties), searchParties });
     render(<PartySelector partyType="CUSTOMER" onSelectParty={vi.fn()} />);
     await settle();
     trigger().click();
     await settle();
     typeInto(search(), '222');
+    await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+    expect(searchParties).toHaveBeenCalledWith('222', 'CUSTOMER');
     expect(optionTexts().some((t) => t.includes('Bharat'))).toBe(true);
     expect(optionTexts().some((t) => t.includes('Anil'))).toBe(false);
   });

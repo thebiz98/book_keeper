@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
+import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { Search, Eye, DollarSign, Undo2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import type {
@@ -31,56 +32,35 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
   const isSale = kind === 'SALE';
   const [range, setRange] = useState({ startDate: '', endDate: '' });
   const [status, setStatus] = useState<PaymentStatusFilter>('ALL');
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [rows, setRows] = useState<Row[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [settling, setSettling] = useState<Row | null>(null);
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setSearch(searchInput.trim());
-      setPage(1);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  const load = useCallback(() => {
-    let live = true;
-    setLoading(true);
-    setError(null);
-    const filter: HistoryFilter = {
-      startDate: range.startDate || null,
-      endDate: range.endDate || null,
-      paymentStatus: status,
-      searchQuery: search || null,
-      page,
-      limit: HISTORY_PAGE_SIZE,
-    };
-    const req = isSale ? api.getSalesHistory(filter) : api.getPurchasesHistory(filter);
-    req
-      .then((res) => {
-        if (!live) return;
-        setRows(res.items);
-        setTotal(res.total);
-      })
-      .catch((e) => {
-        if (!live) return;
-        setRows([]);
-        setTotal(0);
-        setError(errorMessage(e));
-      })
-      .finally(() => live && setLoading(false));
-    return () => {
-      live = false;
-    };
-  }, [isSale, range.startDate, range.endDate, status, search, page]);
-
-  useEffect(() => load(), [load]);
+  const live = useLiveSearch<{ items: Row[]; total: number }>({
+    initial: { items: [], total: 0 },
+    emptyBehavior: 'fetch',
+    debounceMs: LIST_SEARCH_DEBOUNCE_MS,
+    deps: [range.startDate, range.endDate, status, page, isSale],
+    onQueryCommit: () => setPage(1),
+    fetcher: (q) => {
+      const filter: HistoryFilter = {
+        startDate: range.startDate || null,
+        endDate: range.endDate || null,
+        paymentStatus: status,
+        searchQuery: q || null,
+        page,
+        limit: HISTORY_PAGE_SIZE,
+      };
+      return isSale ? api.getSalesHistory(filter) : api.getPurchasesHistory(filter);
+    },
+  });
+  const loading = live.isLoading;
+  const error = live.error ? errorMessage(live.error) : null;
+  const rows: Row[] = live.error ? [] : live.results.items;
+  const total = live.error ? 0 : live.results.total;
+  const searchInput = live.query;
+  const setSearchInput = live.setQuery;
+  const load = useCallback(() => void live.refresh(), [live.refresh]);
 
   const partyLabel = isSale ? 'Customer' : 'Vendor';
   const columns: DataTableColumn<Row>[] = [

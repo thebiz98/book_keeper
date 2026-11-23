@@ -57,6 +57,7 @@ export function installApi(over: Partial<Record<keyof ApiClient, unknown>> = {})
     createSale: vi.fn(async () => saleResponse()),
     searchItemsFts: vi.fn(async () => [] as ItemSearchResult[]),
     listParties: vi.fn(async () => [] as PartyListRow[]),
+    searchParties: vi.fn(async () => [] as PartyListRow[]),
     createParty: vi.fn(async () => 99),
     getDashboardMetrics: vi.fn(async () => ({ liveCashInDrawer: 123 })),
     getShopSettings: vi.fn(async () => ({

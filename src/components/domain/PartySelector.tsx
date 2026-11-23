@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useId, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useId } from 'react';
+import { useLiveSearch, TYPEAHEAD_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { User, Truck, Search, Check, ChevronDown, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, errorMessage } from '@/api';
@@ -37,7 +38,14 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
   onCreated,
 }) => {
   const [parties, setParties] = useState<PartyListRow[]>([]);
-  const [search, setSearch] = useState('');
+  const live = useLiveSearch<PartyListRow[]>({
+    initial: [],
+    debounceMs: TYPEAHEAD_DEBOUNCE_MS,
+    deps: [partyType],
+    fetcher: (q) => api.searchParties(q, partyType),
+  });
+  const search = live.query;
+  const setSearch = live.setQuery;
   const [mode, setMode] = useState<Mode>('closed');
   const [highlighted, setHighlighted] = useState(0);
   const [newName, setNewName] = useState('');
@@ -83,7 +91,7 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
 
   const close = (refocus = true) => {
     setMode('closed');
-    setSearch('');
+    live.reset();
     setCreateError(null);
     if (refocus) triggerRef.current?.focus();
   };
@@ -114,13 +122,16 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
 
   const selectedParty = parties.find((p) => p.id === selectedPartyId);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return parties;
-    return parties.filter(
-      (p) => (p.name || '').toLowerCase().includes(q) || (p.phone || '').toLowerCase().includes(q)
-    );
-  }, [parties, search]);
+  // Blank query: the full list. Otherwise the indexed search; while a new query is in flight the
+  // previous rows stay on screen so the list does not flicker.
+  const trimmedSearch = search.trim();
+  const lastShown = useRef<PartyListRow[]>([]);
+  const filtered = !trimmedSearch
+    ? parties
+    : live.resultsFor === trimmedSearch
+      ? live.results
+      : lastShown.current;
+  lastShown.current = filtered;
 
   type Row =
     | { kind: 'walkin' }
@@ -159,6 +170,19 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
     } else if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
+      if (trimmedSearch && live.resultsFor !== trimmedSearch) {
+        // Debounce still pending: run the search now, then choose from its rows.
+        const hi = highlighted;
+        void live.flush().then((list) => {
+          const fresh: Row[] = [
+            ...(allowWalkIn ? [{ kind: 'walkin' } as Row] : []),
+            ...list.map((party) => ({ kind: 'party', party }) as Row),
+            ...(enableCreate ? [{ kind: 'create' } as Row] : []),
+          ];
+          choose(fresh[Math.min(hi, fresh.length - 1)]);
+        });
+        return;
+      }
       choose(rows[highlighted]);
     }
   };
