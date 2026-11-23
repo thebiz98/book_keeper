@@ -2438,5 +2438,29 @@ The test `item_history_queries_use_the_v9_indexes_without_a_temp_btree` runs EXP
    - `delete_bill_ledger([Upfront])`, `record_payment(Upfront)` on the bill date when `> 0`, `recompute`.
 5. Sale bills are never touched; only allocation / outflow costs (COGS) change through `recost_lot`.
 
-### 16.3 UI mirror
-`src/lib/lotPriceEffect.ts` implements step 4 with the same table of cases as the Rust unit test of `lot_price_payment_rule`.
+### 16.3 UI
+No TypeScript mirror (DD-56): `LotPriceEditModal` shows `preview_lot_purchase_price` (section 17).
+
+
+## 17. Previews (DD-56, no schema, `refactor/backend-previews`)
+
+The UI never computes money, payment status, settlement or refund split, FIFO or stock. Every figure shown before Save comes from a `preview_*` command: the SAME service code as the real command, run in a transaction that is rolled back (never committed, no FTS sync).
+
+### 17.1 Pattern
+Each command is split into `<cmd>_in_tx(&self, tx, ...)` (all the work), `<cmd>` (begin, `_in_tx`, commit, post-commit work) and `preview_<cmd>` (begin, `_in_tx`, `tx.rollback()`). `code_sequences` and ids are rolled back with the transaction.
+Bill commands pass a `BillFigures` recorder into `_in_tx` (`price_*` fills it right after the totals) so a preview returns the totals even when a later check (stock, payment, `TOTAL_BELOW_APPLIED`) fails. The totals now run before the stock check, and both before the payment check, on create and edit.
+`bill_preview(fig, outcome)` turns the outcome into a `BillPreview`; `PreviewError::from_app_error` maps `ValidationError` (field, message), `BillLocked` (code, message), `InsufficientStockError` (`items`) and `NotFound` (`id`) to `{field, message}`. Other errors stay failures.
+
+### 17.2 Commands
+| Command | Wraps | Returns |
+|---|---|---|
+| `preview_sale { payload: PreviewSalePayload, sale_id? }` | `create_sale` / `update_sale` | `BillPreview` (errors as data; payment optional, `payment: null` when no status) |
+| `preview_purchase { payload: PreviewPurchasePayload, purchase_id? }` | `create_purchase` / `update_purchase` | `BillPreview` |
+| `preview_lot_purchase_price { payload }` | `update_lot_purchase_price` | `LotPriceUpdateResult`, or the command's error |
+| `preview_settlement_allocation { party_id, transaction_type, amount }` | the lump-sum branch of `settle_bill_payment` (`lump_sum_allocations`: validation + `fifo_allocations`) | `[{transaction_id, amount_paid}]`, or the command's error |
+| `preview_customer_return` / `preview_vendor_return { payload }` | `create_customer_return` / `create_vendor_return` | `ReturnResult` (now also `total_amount`, and `issued_value` for a replacement) |
+| `preview_stock_adjustment { payload }` | `create_adjustment` | `StockAdjustmentPreview` (unit cost used, loss, value change) |
+| `preview_set_item_stock { payload }` | `set_item_stock` | `SetItemStockResult` |
+
+### 17.3 Tests (`tests/preview_test.rs`)
+Equivalence (preview equals the command, field by field), no side effects (row counts, `code_sequences`, `current_stock` unchanged) and same errors (preview `errors` equal the command's error mapped to `{field, message}`).
