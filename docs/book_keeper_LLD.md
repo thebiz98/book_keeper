@@ -2247,3 +2247,29 @@ Blank search query returns active types (capped), otherwise `search_keys` order.
 
 ### 12.10 Tests
 `expense_service_test.rs` (TC-EXP-001..010), report tests TC-EXP-011..013, reset TC-EXP-014, startup repair TC-EXP-015, schema v6 upgrade/CHECK tests, code_sequences no-reuse and reset tests.
+
+---
+
+## 13. Bill Charges & Discounts (FR-19, schema v7, `feat/bill-charges`)
+
+### 13.1 Entities, value objects, DTOs
+`ChargeEffect { Charge, Discount }`, `ChargeAppliesTo { Sale, Purchase, Both }` (`covers(side)`); both SCREAMING_SNAKE_CASE. `ChargeType { id, name, effect, applies_to, default_amount: Option<f64>, is_active, created_at }`; `BillCharge { id, transaction_type, transaction_id, charge_type_id, charge_name, effect, amount }` (name/effect are snapshots). `SaleTransaction` and `PurchaseTransaction` gain `items_subtotal`, `charges_total`, `discounts_total` (last fields). DTOs: `BillChargeInput { charge_type_id, amount }`, `CreateChargeTypePayload { name, effect, applies_to, default_amount }`; `CreateSalePayload`/`CreatePurchasePayload` gain `#[serde(default)] charges`; history rows gain the three totals; detail views gain `charges`; `SaleItemDetail` gains `net_unit_price`.
+
+### 13.2 Schema v7 (rules)
+`charge_types` (`name UNIQUE COLLATE NOCASE`, CHECK on effect/applies_to, `default_amount IS NULL OR > 0`), `bill_charges` (`amount > 0`, index `(transaction_type, transaction_id)`, FK to `charge_types`), `charge_type_search_fts`. Existing bills migrate with `items_subtotal = total_amount` (non-PURCHASE-source purchase headers: 0), charges and discounts 0. No seed charge types (a reset-All would otherwise differ from a fresh install). Fixture `tests/fixtures/schema/v7.sql`.
+
+### 13.3 Search (R1)
+`CHARGE_TYPE_FTS` in `fts_specs.rs` over `SqliteFtsIndex`, pushed into `fts_indexes` (reset rebuild automatic), `ensure_fts_index` at startup, `sync_after_commit` after commits (failures logged).
+
+### 13.4 `bill_math` (`services/impl/bill_math.rs`; reused by FR-20 edit/delete)
+`validate_charge_inputs` (<= 50 lines, amount finite and `round2 > 0`, field `charges.amount`), `resolve_bill_charges` (type exists, active, `applies_to.covers(side)`, field `charge_type_id`), `compute_bill_totals` (`items_subtotal = round2(sum line totals)`, `total = round2(items + charges - discounts)`; discounts above the bill: `ValidationError(charges)`), `insert_bill_charges` (purchase side rejects non-PURCHASE source), `delete_bill_charges`, `net_unit_price(unit, items_subtotal, discounts_total)` = unit * clamp(1 - discounts/items, 0, 1), `sale_payment_split`, `purchase_upfront` (moved verbatim from the services). Purchase lot `unit_cost` is unaffected by charges (DD-38).
+
+### 13.5 `ChargeTypeService`
+`search_charge_types(query, side, limit)` (blank query: applicable types by name; limit 1..=50, default 8; otherwise FTS keys filtered by `applies_to IN (side,'BOTH')` and active, rank kept), `create_charge_type`. **R5:** an existing name (case-insensitive) is `ValidationError(name)` (effect/applies_to would be ambiguous). Other fields: `name`, `default_amount`.
+
+### 13.6 Returns, reports, reset
+Linked return unit price <= `net_unit_price` of the sale line; charges are never auto-refunded. P&L: `gross_sales = sum(items_subtotal)`, `sales_discounts`, `net_sales = gross - discounts - returns`, `sale_charges_income`, `purchase_discounts_income`, `other_income = sale_charges_income + purchase_discounts_income`, `purchase_charges_expense`, `operating_expenses = expenses + purchase_charges_expense`. Dashboard today sales/purchases and trend use `items_subtotal`; dues, ledger and cash keep `total_amount`. Reset: `Transactions` deletes `bill_charges`; `All` also deletes `charge_types`.
+
+### 13.7 Commands & tests
+`search_charge_types { query, applies_to, limit? }`, `create_charge_type { payload }`. Suite `bill_charges_test.rs`, `bill_math` unit tests, schema v7 upgrade test.
+

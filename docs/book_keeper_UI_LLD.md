@@ -589,3 +589,10 @@ gantt
 * **`ExpenseForm`:** Date (default today), Type, Amount (> 0), Notes; code preview from `getNextExpenseCode`; edit mode "Edit EXP-xxxx".
 * **`ExpenseList`:** `DateRangePicker` (month default), type `Select`, `useLiveSearch` list search at 150 ms, shared `DataTable` with `scroll="fill"`, footer `expense-period-total`, delete via danger `ConfirmDialog`.
 * **ApiClient:** `searchExpenseTypes`, `listExpenseTypes`, `createExpenseType`, `updateExpenseType`, `getNextExpenseCode`, `createExpense`, `updateExpense`, `deleteExpense`, `listExpenses`. Mock seed: 3 types, 5 expenses.
+
+## Bill charges (FR-19, `feat/bill-charges`)
+* **Hotkey:** `Alt+X` (`addCharge`, sale and purchase screens) opens the charge row and focuses Charge Type; Enter selects the top match, prefills Amount with the default and focuses it; Enter on Amount adds the line and returns focus to item search; Esc/empty Enter closes the row.
+* **Components:** `ChargeTypeTypeahead` (on `LiveSearchTypeahead`, `onCreate`), `ChargeTypeQuickCreateModal` (`FormActions` + `enterToSubmit`, R6), `BillChargesPanel`, `BillTotalsSummary`; `lib/billMath.ts`. `SaleSummaryModal` shows the breakdown above Grand Total. Cart store holds `charges`, `chargesTotal`, `discountsTotal`, `grandTotal`.
+* **Bills:** drawer "Charges & discounts" table + totals block; history column "Chg / Disc"; customer-return default rate = `netUnitPrice`; P&L lines for sales discounts, other income and purchase charges.
+* **ApiClient:** `searchChargeTypes`, `createChargeType`; payloads gain `charges`. Mock seeds 4 types.
+

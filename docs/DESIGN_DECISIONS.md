@@ -1,4 +1,4 @@
-# Design Decisions Record (v1 alignment, 2026-11-21)
+﻿# Design Decisions Record (v1 alignment, 2026-11-21)
 
 This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagree. All five docs have been updated to match it. `D-xx` refers to `docs/reviews/00_DOC_ALIGNMENT.md`.
 
@@ -248,6 +248,7 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 **DD-37 — Expenses join cash flow outside the ledger (amends DD-01).** DD-01 still governs every *bill* money event. An `EXPENSE` row is itself a cash-out event and writes no `PAYMENT_SETTLEMENT` row. Cash out = ledger cash out + Σ expenses by date; the live cash drawer is today's cash in − today's cash out.
 
 **DD-38 — Bill charges and discounts are bill-level lines from a reusable type master (FR-19).** `CHARGE_TYPE` (name, `effect` ∈ `CHARGE | DISCOUNT`, `applies_to` ∈ `SALE | PURCHASE | BOTH`, optional default amount) and `BILL_CHARGE` (polymorphic `transaction_type` + `transaction_id`, name and effect snapshots, amount > 0). Headers cache `items_subtotal`, `charges_total`, `discounts_total`; `total_amount = subtotal + charges − discounts ≥ 0`. Fixed amounts only.
+  - v7 decisions: no seed charge types; several lines of one type allowed (max 50); duplicate type name is ValidationError(name); dashboard/trend use items_subtotal; refund cap applies to every linked return line via net_unit_price.
 - **Chosen (user, 2026-11-22):** purchase charges are **Operating Expenses** and purchase discounts are **Other Income**; lot costs are not changed. *Rejected:* landed-cost allocation into lot `unit_cost`.
 
 **DD-39 — P&L v1.1 (amends DD-13).** Gross Sales = Σ sale `items_subtotal`. Net Sales = Gross − Sales Discounts − Sales Returns. Gross Profit = Net Sales − COGS. Net Profit = Gross Profit + Other Income (sale charges + purchase discounts) − Inventory Losses − Operating Expenses (expenses + purchase charges). Purchases report = Σ purchase `items_subtotal` − vendor returns. Linked-return refund cap on a discounted sale = line rate × (1 − discounts_total / items_subtotal).
