@@ -5,6 +5,7 @@ import { api, errorMessage } from '@/api';
 import type { Party, PartyListRow, PartyType } from '@/types';
 import { useEscapeLayer, useHotkey, type HotkeyScope } from '@/hooks/useHotkeys';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
+import { FormActions } from '../ui/FormActions';
 
 export interface PartySelectorProps {
   partyType: PartyType;
@@ -355,7 +356,7 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
           className="absolute z-50 mt-1 w-full rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-3 flex flex-col gap-2"
         >
           <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-            New {noun} <span className="text-slate-400 font-normal">(Enter to save, Esc to cancel)</span>
+            New {noun}
           </span>
           <input
             ref={nameRef}
@@ -384,6 +385,14 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
               {createError}
             </p>
           )}
+          <FormActions
+            size="xs"
+            saveLabel="Save"
+            onSave={() => void submitCreate()}
+            onCancel={() => close()}
+            isSubmitting={isCreating}
+            canSave={newName.trim().length > 0}
+          />
         </div>
       )}
     </div>

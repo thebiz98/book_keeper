@@ -118,4 +118,60 @@ describe('PartySelector', () => {
     expect(api.createParty).toHaveBeenCalledTimes(1);
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('Name already exists');
   });
+
+  describe('inline create buttons (FR-22)', () => {
+    const groupBtn = (re: RegExp) =>
+      Array.from(document.querySelectorAll<HTMLButtonElement>('[role="group"] button')).find((b) =>
+        re.test(b.textContent ?? ''),
+      )!;
+    const nameInput = () =>
+      document.querySelector<HTMLInputElement>('input[aria-label="New customer name"]');
+
+    it('clicking Save creates the party and selects it', async () => {
+      const created = makeParty({ id: 99, name: 'New Guy' });
+      const listParties = vi.fn().mockResolvedValueOnce(parties).mockResolvedValue([...parties, created]);
+      const api = installApi({ listParties, createParty: vi.fn(async () => 99) });
+      const onSelect = vi.fn();
+      render(<PartySelector partyType="CUSTOMER" onSelectParty={onSelect} />);
+      await settle();
+      press(window, 'c', { altKey: true, code: 'KeyC' });
+      typeInto(nameInput()!, 'New Guy');
+      act(() => { groupBtn(/^Save/).click(); });
+      await settle();
+      await settle();
+      expect(api.createParty).toHaveBeenCalledTimes(1);
+      expect(onSelect.mock.calls[0][0].id).toBe(99);
+    });
+
+    it('Save is disabled while the name is empty', async () => {
+      installApi({ listParties: vi.fn(async () => parties) });
+      render(<PartySelector partyType="CUSTOMER" onSelectParty={vi.fn()} />);
+      await settle();
+      press(window, 'c', { altKey: true, code: 'KeyC' });
+      expect(groupBtn(/^Save/).disabled).toBe(true);
+      typeInto(nameInput()!, 'X');
+      expect(groupBtn(/^Save/).disabled).toBe(false);
+    });
+
+    it('Cancel closes the form and refocuses the trigger', async () => {
+      installApi({ listParties: vi.fn(async () => parties) });
+      render(<PartySelector partyType="CUSTOMER" onSelectParty={vi.fn()} />);
+      await settle();
+      press(window, 'c', { altKey: true, code: 'KeyC' });
+      expect(nameInput()).not.toBeNull();
+      act(() => { groupBtn(/^Cancel/).click(); });
+      expect(nameInput()).toBeNull();
+      expect(document.activeElement).toBe(trigger());
+    });
+
+    it('Esc closes the create form', async () => {
+      installApi({ listParties: vi.fn(async () => parties) });
+      render(<PartySelector partyType="CUSTOMER" onSelectParty={vi.fn()} />);
+      await settle();
+      press(window, 'c', { altKey: true, code: 'KeyC' });
+      expect(nameInput()).not.toBeNull();
+      press(window, 'Escape');
+      expect(nameInput()).toBeNull();
+    });
+  });
 });
