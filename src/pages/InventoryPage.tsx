@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search,
   Plus,
@@ -14,6 +14,9 @@ import { api } from '@/api';
 import { errorMessage } from '@/api/errors';
 import { totalPages } from '@/lib/pagination';
 import type { ItemSearchResult } from '@/types';
+import type { Paginated } from '@/types/api';
+import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
+import { LowStockLevelCell } from '@/components/domain/LowStockLevelCell';
 import { StockAdjustmentModal } from '@/components/domain/StockAdjustmentModal';
 import { ItemEditDrawer } from '@/components/domain/ItemEditDrawer';
 import { LotInspector } from '@/components/domain/LotInspector';
@@ -26,57 +29,51 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 const PAGE_SIZE = 50;
 const COLS = 11;
 
+const EMPTY_PAGE: Paginated<ItemSearchResult> = { items: [], total: 0, page: 1, limit: PAGE_SIZE };
+
 export const InventoryPage: React.FC = () => {
-  const [items, setItems] = useState<ItemSearchResult[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>('ALL');
   const [categories, setCategories] = useState<string[]>([]);
   const [lowStockOnly, setLowStockOnly] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  /** Rows saved inline since the last fetch (server response wins over the stale list row). */
+  const [patched, setPatched] = useState<Map<number, ItemSearchResult>>(new Map());
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ItemSearchResult | null>(null);
   const [adjustItem, setAdjustItem] = useState<ItemSearchResult | null>(null);
   const [importOpen, setImportOpen] = useState(false);
 
-  const reqId = useRef(0);
-
-  const fetchItems = useCallback(() => {
-    const id = ++reqId.current;
-    setIsLoading(true);
-    setLoadError(null);
-    api
-      .getItemsCatalog({
+  const live = useLiveSearch<Paginated<ItemSearchResult>>({
+    initial: EMPTY_PAGE,
+    emptyBehavior: 'fetch',
+    debounceMs: LIST_SEARCH_DEBOUNCE_MS,
+    deps: [category, lowStockOnly, page],
+    onQueryCommit: () => setPage(1),
+    fetcher: (q) =>
+      api.getItemsCatalog({
         category: category === 'ALL' ? null : category,
         lowStockOnly: lowStockOnly || null,
-        search: search.trim() || null,
+        search: q || null,
         page,
         limit: PAGE_SIZE,
-      })
-      .then((res) => {
-        if (id !== reqId.current) return;
-        setItems(res.items);
-        setTotal(res.total);
-      })
-      .catch((e) => {
-        if (id !== reqId.current) return;
-        setItems([]);
-        setTotal(0);
-        setLoadError(errorMessage(e));
-      })
-      .finally(() => {
-        if (id === reqId.current) setIsLoading(false);
-      });
-  }, [category, lowStockOnly, search, page]);
+      }),
+  });
+  const { results, isLoading: fetching, resultsFor } = live;
+  const loadError = live.error ? errorMessage(live.error) : null;
+  const total = loadError ? 0 : results.total;
+  // Initial load only: later refetches keep the current rows on screen.
+  const isLoading = resultsFor === null && !live.error && fetching;
+  const items = loadError ? [] : results.items.map((i) => patched.get(i.itemId) ?? i);
 
   useEffect(() => {
-    fetchItems();
-  }, [fetchItems]);
+    setPatched(new Map());
+  }, [results]);
+
+  const patchRow = useCallback((row: ItemSearchResult) => {
+    setPatched((prev) => new Map(prev).set(row.itemId, row));
+  }, []);
 
   const fetchCategories = useCallback(() => {
     api
@@ -89,16 +86,11 @@ export const InventoryPage: React.FC = () => {
     fetchCategories();
   }, [fetchCategories]);
 
+  const refresh = live.refresh;
   const refreshAll = useCallback(() => {
-    fetchItems();
+    void refresh();
     fetchCategories();
-  }, [fetchItems, fetchCategories]);
-
-  const applySearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    setSearch(searchInput);
-  };
+  }, [refresh, fetchCategories]);
 
   const toggleExpanded = (itemId: number) =>
     setExpanded((prev) => {
@@ -119,22 +111,23 @@ export const InventoryPage: React.FC = () => {
     <div className="flex flex-col gap-4 h-full min-h-0">
       {/* Top Filter & Toolbar */}
       <div className="shrink-0 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
-        <form onSubmit={applySearch} className="flex items-center gap-2 flex-1 max-w-md">
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              aria-label="Search items"
-              placeholder="Search items by name, barcode, category..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              className="w-full text-xs pl-8 pr-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <Button type="submit" variant="secondary" size="sm">
-            Search
-          </Button>
-        </form>
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            aria-label="Search items"
+            placeholder="Search items by name, barcode, category..."
+            value={live.query}
+            onChange={(e) => live.setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void live.flush();
+              }
+            }}
+            className="w-full text-xs pl-8 pr-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -168,7 +161,7 @@ export const InventoryPage: React.FC = () => {
               }}
               className="rounded text-amber-600 focus:ring-amber-500"
             />
-            <span>Show Only Low Stock</span>
+            <span>Show Only Low Stock (below each item&apos;s level)</span>
           </label>
 
           <Button
@@ -210,12 +203,12 @@ export const InventoryPage: React.FC = () => {
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead>Barcode</TableHead>
               <TableHead>Item Name</TableHead>
               <TableHead>Category</TableHead>
               <TableHead>Base Unit</TableHead>
               <TableHead align="right">Current Stock</TableHead>
               <TableHead className="text-center">Status</TableHead>
+              <TableHead align="right">Low Stock Level</TableHead>
               <TableHead align="right">MRP</TableHead>
               <TableHead align="right">Sale Price</TableHead>
               <TableHead className="text-center">Bundles</TableHead>
@@ -258,9 +251,6 @@ export const InventoryPage: React.FC = () => {
                           {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                         </button>
                       </TableCell>
-                      <TableCell mono className="text-xs text-slate-500">
-                        {item.barcode || '—'}
-                      </TableCell>
                       <TableCell className="font-semibold text-slate-900 dark:text-slate-100">
                         {item.name}
                       </TableCell>
@@ -273,7 +263,17 @@ export const InventoryPage: React.FC = () => {
                         <StockStatusBadge
                           currentStock={item.currentStock}
                           isLowStock={item.isLowStock}
+                          lowStockThreshold={item.lowStockThreshold}
                           baseUnit={item.baseUnit}
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <LowStockLevelCell
+                          itemId={item.itemId}
+                          itemName={item.name}
+                          value={item.lowStockThreshold}
+                          baseUnit={item.baseUnit}
+                          onSaved={patchRow}
                         />
                       </TableCell>
                       <TableCell align="right" mono className="text-slate-400 text-xs">

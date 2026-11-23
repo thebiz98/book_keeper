@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from '../testUtils';
-import { byText, click, flush, inputByLabel, installApi, makeItem, typeInto } from './testHelpers';
+import { act } from 'react';
+import { byText, click, flush, inputByLabel, installApi, key, makeItem, typeInto } from './testHelpers';
 import { InventoryPage } from '@/pages/InventoryPage';
 
 const dozen = { bundleId: 7, bundleName: 'Dozen', unitsPerBundle: 12, bundlePrice: 500, barcode: 'B-1' };
@@ -40,9 +41,10 @@ describe('InventoryPage catalog', () => {
       limit: 50,
     });
     const head = container.querySelector('thead')?.textContent ?? '';
-    for (const h of ['Barcode', 'Item Name', 'Category', 'Base Unit', 'Current Stock', 'MRP', 'Sale Price', 'Bundles']) {
+    for (const h of ['Item Name', 'Category', 'Base Unit', 'Current Stock', 'Low Stock Level', 'MRP', 'Sale Price', 'Bundles']) {
       expect(head).toContain(h);
     }
+    expect(head).not.toContain('Barcode');
     const trs = container.querySelectorAll('[data-testid="item-row"]');
     expect(trs.length).toBe(2);
     expect(trs[0].textContent).toContain('Low Stock: 3 PCS');
@@ -72,12 +74,14 @@ describe('InventoryPage catalog', () => {
     );
   });
 
-  it('passes the search text to the catalog (FTS) on submit', async () => {
+  it('searches live (150 ms after typing, no Search button)', async () => {
     const { api, container } = mount();
     await flush();
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Search')).toBe(false);
     typeInto(container.querySelector('input[aria-label="Search items"]') as HTMLInputElement, ' note ');
-    click(byText(container, 'button', 'Search'));
-    await flush();
+    await flush(40);
+    expect(api.getItemsCatalog).not.toHaveBeenLastCalledWith(expect.objectContaining({ search: 'note' }));
+    await flush(200);
     expect(api.getItemsCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'note', page: 1 }));
   });
 
@@ -105,6 +109,83 @@ describe('InventoryPage catalog', () => {
     expect(lotRows[0].textContent).toContain('Acme');
     expect(lotRows[1].textContent).toContain('Adjustment');
     expect(lotRows[1].textContent).toContain('—');
+  });
+});
+
+describe('Low Stock Level inline edit', () => {
+  const lsl = (c: HTMLElement, name: string) =>
+    c.querySelector(`input[aria-label="Low stock level for ${name}"]`) as HTMLInputElement;
+  const saved = (over = {}) => ({ ...rows[0], lowStockThreshold: 8, isLowStock: true, ...over });
+
+  it('Enter saves, shows the returned row and focuses the next row input', async () => {
+    const fn = vi.fn().mockResolvedValue(saved({ isLowStock: false, currentStock: 3 }));
+    const { container } = mount({ updateItemLowStockThreshold: fn });
+    await flush();
+    const first = lsl(container, 'Classmate Notebook');
+    expect(first.value).toBe('5');
+    act(() => first.focus());
+    typeInto(first, '8');
+    key(first, { key: 'Enter' });
+    await flush();
+    expect(fn).toHaveBeenCalledWith(1, 8);
+    expect(first.value).toBe('8');
+    expect(document.activeElement).toBe(lsl(container, 'Gel Pen'));
+    expect(container.querySelectorAll('[data-testid="item-row"]')[0].textContent).not.toContain('Low Stock:');
+  });
+
+  it('Esc reverts without a call', async () => {
+    const fn = vi.fn();
+    const { container } = mount({ updateItemLowStockThreshold: fn });
+    await flush();
+    const first = lsl(container, 'Classmate Notebook');
+    act(() => first.focus());
+    typeInto(first, '9');
+    key(first, { key: 'Escape' });
+    await flush();
+    expect(first.value).toBe('5');
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('negative input shows an alert and is not saved', async () => {
+    const fn = vi.fn();
+    const { container } = mount({ updateItemLowStockThreshold: fn });
+    await flush();
+    const first = lsl(container, 'Classmate Notebook');
+    act(() => first.focus());
+    typeInto(first, '-2');
+    key(first, { key: 'Enter' });
+    await flush();
+    expect(fn).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Enter 0 or more');
+  });
+
+  it('blur saves; an unchanged value makes no call', async () => {
+    const fn = vi.fn().mockResolvedValue(saved());
+    const { container } = mount({ updateItemLowStockThreshold: fn });
+    await flush();
+    const first = lsl(container, 'Classmate Notebook');
+    act(() => first.focus());
+    act(() => first.blur());
+    await flush();
+    expect(fn).not.toHaveBeenCalled();
+    act(() => first.focus());
+    typeInto(first, '8');
+    act(() => first.blur());
+    await flush();
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledWith(1, 8);
+  });
+
+  it('a rejected call shows the error message', async () => {
+    const fn = vi.fn().mockRejectedValue({ type: 'ValidationError', details: { field: 'low_stock_threshold', message: 'Nope' } });
+    const { container } = mount({ updateItemLowStockThreshold: fn });
+    await flush();
+    const first = lsl(container, 'Classmate Notebook');
+    act(() => first.focus());
+    typeInto(first, '8');
+    key(first, { key: 'Enter' });
+    await flush();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Nope');
   });
 });
 
