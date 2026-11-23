@@ -11,7 +11,7 @@ const ITEM: ItemSearchResult = {
   name: 'Gel Pen',
   category: null,
   barcode: null,
-  baseUnit: 'PCS',
+  baseUnit: 'PCS', itemType: 'PHYSICAL',
   mrp: null,
   defaultSalePrice: 10,
   currentStock: 5,

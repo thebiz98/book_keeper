@@ -238,6 +238,13 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           />
         </div>
 
+        <div className="flex items-center justify-between rounded-md bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs">
+          <span className="text-slate-500">Type</span>
+          <span data-testid="item-type" className="font-medium">
+            {item?.itemType === 'SERVICE' ? 'Service' : 'Physical (stocked item)'}
+          </span>
+        </div>
+
         {isEdit ? (
           <div className="flex items-center justify-between rounded-md bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs">
             <span className="text-slate-500">Current stock (read-only)</span>

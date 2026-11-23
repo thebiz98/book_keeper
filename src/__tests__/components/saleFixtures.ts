@@ -10,7 +10,7 @@ export function makeItem(over: Partial<ItemSearchResult> = {}): ItemSearchResult
     name: 'Apsara Pencil',
     category: 'Stationery',
     barcode: '111',
-    baseUnit: 'PCS',
+    baseUnit: 'PCS', itemType: 'PHYSICAL',
     mrp: 12,
     defaultSalePrice: 10,
     currentStock: 100,

@@ -61,6 +61,7 @@ function toSearchResult(i: MockItem, matchedBundleId: number | null = null): Ite
     category: i.category,
     barcode: i.barcode,
     baseUnit: i.baseUnit,
+    itemType: i.itemType,
     mrp: i.mrp,
     defaultSalePrice: i.defaultSalePrice,
     currentStock: i.currentStock,
@@ -319,6 +320,7 @@ export class MockApiClient implements ApiClient {
       category: payload.category,
       barcode: payload.barcode,
       baseUnit: payload.baseUnit,
+      itemType: payload.itemType ?? 'PHYSICAL',
       mrp: payload.mrp,
       defaultSalePrice: payload.defaultSalePrice,
       currentStock: payload.initialStock ?? 0,
@@ -334,7 +336,8 @@ export class MockApiClient implements ApiClient {
   async updateItem(itemId: number, payload: Parameters<ApiClient['updateItem']>[1]) {
     const item = this.items.find((i) => i.id === itemId);
     if (!item) throw notFound('Item', itemId);
-    Object.assign(item, payload, { updatedAt: nowIso() });
+    const { itemType, ...rest } = payload;
+    Object.assign(item, rest, itemType ? { itemType } : {}, { updatedAt: nowIso() });
   }
   async getBundleSuggestions() {
     return structuredClone(initialBundleSuggestions);

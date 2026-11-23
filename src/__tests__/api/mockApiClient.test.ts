@@ -35,10 +35,20 @@ describe('MockApiClient contract shapes', () => {
   it('catalog and search return the catalog shape', async () => {
     const page = await c.getItemsCatalog({ limit: 5 });
     expect(keys(page)).toEqual(['items', 'limit', 'page', 'total']);
-    has(page.items[0], ['itemId', 'name', 'bundles', 'matchedBundleId', 'isLowStock']);
+    has(page.items[0], ['itemId', 'name', 'bundles', 'matchedBundleId', 'isLowStock', 'itemType']);
     const hits = await c.searchItemsFts('pen');
     has(hits[0], ['itemId', 'bundles', 'matchedBundleId']);
     expect(Array.isArray(await c.listCategories())).toBe(true);
+  });
+
+  it('createItem without itemType defaults to PHYSICAL (FR-21)', async () => {
+    const id = await c.createItem({
+      name: 'Type Probe', category: null, barcode: null, baseUnit: 'PCS', mrp: null,
+      defaultSalePrice: 1, initialStock: null, initialCost: null, bundles: null,
+    });
+    const page = await c.getItemsCatalog({ search: 'Type Probe' });
+    const row = page.items.find((i) => i.itemId === id);
+    expect(row?.itemType).toBe('PHYSICAL');
   });
 
   it('simulates one typed error path', async () => {

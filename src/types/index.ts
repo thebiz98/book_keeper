@@ -11,6 +11,7 @@ export * from './api';
 // Enum string literals are SCREAMING_SNAKE_CASE, identical to the Rust serde names and the
 // SQLite TEXT values (DD-23). Do not change one side without the others.
 export type PartyType = 'CUSTOMER' | 'VENDOR';
+export type ItemType = 'PHYSICAL' | 'SERVICE';
 export type PaymentStatus = 'PAID' | 'PARTIAL' | 'UNPAID';
 export type AdjustmentReason = 'DAMAGED' | 'EXPIRED' | 'COUNT_CORRECTION' | 'THEFT_LOST';
 /** Refund = value applied to dues first, remainder as cash. Replacement = customer-only no-money swap. */
@@ -48,6 +49,7 @@ export interface ItemSearchResult {
   category: string | null;
   barcode: string | null;
   baseUnit: string;
+  itemType: ItemType;
   mrp: number | null;
   defaultSalePrice: number;
   currentStock: number;

@@ -1,6 +1,7 @@
 import type {
   BundleSuggestion,
   ItemBundle,
+  ItemType,
   Party,
   ShopSettings,
 } from '@/types';
@@ -17,6 +18,7 @@ export interface MockItem {
   category: string | null;
   barcode: string | null;
   baseUnit: string;
+  itemType: ItemType;
   mrp: number | null;
   defaultSalePrice: number;
   currentStock: number;
@@ -72,6 +74,7 @@ function makeItem(
     category,
     barcode,
     baseUnit,
+    itemType: 'PHYSICAL',
     costPrice,
     defaultSalePrice: salePrice,
     mrp,

@@ -10,6 +10,7 @@ import type {
   ItemBundle,
   ItemLot,
   ItemSearchResult,
+  ItemType,
   LowStockItem,
   Party,
   PartyDueSummary,
@@ -167,6 +168,8 @@ export interface CreateItemPayload {
   initialStock: number | null;
   initialCost: number | null;
   bundles: CreateBundlePayload[] | null;
+  /** Optional; omitted => PHYSICAL. SERVICE is rejected by the backend in v1.1. */
+  itemType?: ItemType | null;
 }
 
 export interface UpdateItemPayload {
@@ -176,6 +179,7 @@ export interface UpdateItemPayload {
   baseUnit: string;
   mrp: number | null;
   defaultSalePrice: number;
+  itemType?: ItemType | null;
 }
 
 export interface BundleSuggestion {

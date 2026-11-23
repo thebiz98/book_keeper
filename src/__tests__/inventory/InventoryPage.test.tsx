@@ -165,6 +165,14 @@ describe('Item edit drawer', () => {
     expect(err?.parentElement?.querySelector('input')?.value).toBe('8901');
   });
 
+  it('shows a read-only Physical type line in the item drawer (FR-21)', async () => {
+    const { container } = mount();
+    await flush();
+    click(byText(container, 'button', /Add Item/));
+    await flush();
+    expect(container.querySelector('[data-testid="item-type"]')?.textContent).toContain('Physical');
+  });
+
   it('creates an item with MRP null when empty', async () => {
     const { api, container } = mount();
     await flush();

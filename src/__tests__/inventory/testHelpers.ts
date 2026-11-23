@@ -60,7 +60,7 @@ export function makeItem(over: Partial<ItemSearchResult> = {}): ItemSearchResult
     name: 'Classmate Notebook',
     category: 'Notebooks',
     barcode: '8901',
-    baseUnit: 'PCS',
+    baseUnit: 'PCS', itemType: 'PHYSICAL',
     mrp: 50,
     defaultSalePrice: 45,
     currentStock: 20,
