@@ -141,16 +141,23 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **FR-20: Bill Correction — Edit & Delete** *(added 2026-11-22, DD-41; replaces the v1 immutability rule NFR-03)*
   * Manual entry causes mistakes, and the app must reflect the real store. The owner can **edit** or **delete** any sale or purchase bill: date, party, lines (item, quantity, pack, rate), charges/discounts, notes, and the upfront paid amount. A bill may end up very different from what was first entered; that is accepted.
   * An edit keeps the bill's id and code. It is applied atomically as **reverse-then-repost**: all stock, allocation and ledger effects of the old version are reversed, and the new version is validated and posted through the normal create rules (stock check, FIFO, status cross-check, party rules). Either the whole edit succeeds or nothing changes.
-  * **Guards** (the edit/delete is rejected with a clear reason):
-    * A bill with any linked return cannot be edited or deleted. The user deletes the return(s) first.
-    * Purchase: a lot's quantity cannot drop below what has already left it (`quantity − remaining_quantity`: sold, adjusted, issued). A line whose lot has been consumed cannot change item or be removed. A purchase with any consumed lot cannot be deleted.
-    * Purchase **cost change** on a consumed lot is allowed: the new cost flows into the allocation rows that consumed it, so past COGS and losses are re-costed.
-    * Sale: the edited lines must pass the stock check against stock *after* the old version is reversed.
-    * The new `total_amount` cannot be less than the money already applied to the bill by later settlements (`Σ SETTLEMENT` + `Σ RETURN_CREDIT`). The user removes or reduces those first.
-  * **Payments:** the edit replaces the bill's `UPFRONT` ledger row with the new paid amount. Later `SETTLEMENT` rows are kept (and re-pointed to the new party if the party changed). Delete removes all of the bill's ledger rows, so recorded cash for that bill leaves the cash drawer and reports; the confirm dialog states the amount.
-  * **Returns** can be deleted (not edited). Deleting a return reverses its stock and ledger effects. It is rejected if units it restocked have since been consumed, or if its `RETURN`-source lot has been used.
+  * **Guards** (the edit/delete is rejected with `BillLocked { code, message }`; DD-48 has the reasons):
+    * **Linked returns.** A bill with any linked return (`original_transaction_id` = bill and a matching `return_type`) cannot be edited or deleted. The user deletes the return(s) first.
+    * **Return credits from unlinked returns.** A bill carrying `RETURN_CREDIT` rows from an *unlinked* return cannot be deleted and its party cannot change. Other edits are allowed and keep those credits; they count toward the total floor.
+    * **Referenced lots.** A purchase lot is *referenced* when any sale allocation, outflow allocation (adjustment, replacement, vendor return) or return line points at it. A referenced lot's line cannot change item or be removed, and a purchase with any referenced lot cannot be deleted.
+    * **Lot quantity floor.** A lot's new base quantity must be at least `quantity - remaining_quantity` (what already left it).
+    * **Cost change on a referenced lot** is allowed: the new cost flows into `SALE_STOCK_ALLOCATION.unit_cost` and `STOCK_OUTFLOW_ALLOCATION.unit_cost` (adjustment, replacement), so past COGS and losses are re-costed, and the stored `RETURN_ITEM.cost_amount` of linked customer lines and replacement lines is recomputed. It is **rejected** when the lot has a `VENDOR_RETURN` outflow (that money was already settled at the old cost): delete the vendor return first.
+    * **Source.** Only `source = PURCHASE` headers can be edited or deleted. `ADJ-`, `OPN-` and `RTL-` headers cannot.
+    * **Sale stock check** runs against stock *after* the old version is reversed.
+    * **Total floor.** The new `total_amount` must be at least the money already applied to the bill (`Σ SETTLEMENT + Σ RETURN_CREDIT`).
+  * **Payment in edit mode.** `payment_status` and `paid_amount` describe the new *upfront* payment against `open = new_total - applied`, where `applied` is the later settlements and credits that stay:
+    * `PAID`: sale paid >= open (the excess is change); purchase paid = open. `PARTIAL`: 0 < paid < open. `UNPAID`: paid = 0 and open > 0. If `open = 0` only `PAID` with paid 0 is accepted.
+    * The stored status is recomputed from the ledger (DD-01).
+    * The party is required unless the status is `PAID`, and also whenever `applied > 0` (later payments came from that party, so it cannot become walk-in).
+  * **Payments:** the edit replaces the bill's `UPFRONT` row (re-created on the new `transaction_date`). Later `SETTLEMENT` rows are kept; if the party changed they are re-pointed to the new party, including the bill's share of an earlier lump-sum payment. Delete removes all the bill's ledger rows, so recorded cash for that bill leaves the cash drawer and reports; the confirm dialog states the amount.
+  * **Returns** can be deleted (not edited). Returns on the same original bill are deleted **newest first** (the cost replay depends on it). Deleting a return reverses its stock and ledger effects. It is rejected if units it restocked into a lot are no longer there (lot `remaining` < the units to remove), or if its `RETURN` lot has any allocation or `remaining < quantity`. Deleting a vendor return puts its units back on their lots.
   * **Expenses** can be edited and deleted freely.
-  * No revision history is kept in v1; headers record `updated_at`. Codes of deleted bills are not reused.
+  * No revision history is kept in v1; headers record `updated_at`. Codes of deleted records are not reused (`code_sequences` high-water mark, schema v6; no new table in v8).
   * Entry points: Edit / Delete actions in the bill detail drawer (Sales History, Purchase History, party ledger). Edit opens the bill in the normal sale/purchase entry screen in edit mode, prefilled.
 * **FR-21: Item Type — Physical vs Service** *(added 2026-11-22, DD-42; entity only in v1.1)*
   * Every item has an `item_type`: `PHYSICAL` (stocked goods, the default) or `SERVICE` (e.g. photo printing, lamination).
@@ -253,7 +260,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 16. **Expenses are standalone cash-out events** *(2026-11-22)*: An `EXPENSE` row is itself the money event (always cash, paid on `expense_date`); it does not create `PAYMENT_SETTLEMENT` rows, because it has no bill, no party and no due. Assumption 8 still holds for every bill. Cash out for any period = ledger cash out + Σ `EXPENSE.amount` by `expense_date`.
 17. **Bill totals include charges and discounts** *(2026-11-22)*: `total_amount = items_subtotal + charges_total − discounts_total`. Everything that used `total_amount` (status cross-check, dues, ledger caps, receivables/payables) keeps using it unchanged. Reports that need item revenue or item purchase cost use `items_subtotal`. Dashboard today's sales/purchases and the trend chart use `items_subtotal`.
 18. **Purchase charges are expenses, not cost** *(2026-11-22)*: Purchase charges/discounts never change lot `unit_cost`, FIFO costs or stock valuation. They are P&L lines (Operating Expenses / Other Income) on the purchase's `transaction_date`.
-19. **Edit = reverse then repost** *(2026-11-22)*: A bill edit reverses the old version's effects and posts the new version through the same service code used for creation, inside one transaction, keeping id and code. Back-dated or edited bills follow DD-09: FIFO order is entry order, so re-posted sale lines take the oldest lots available at edit time.
+19. **Edit = reverse then repost** *(2026-11-22)*: A bill edit reverses the old version's effects and posts the new version through the same service code used for creation, inside one transaction, keeping id and code. Back-dated or edited bills follow DD-09: FIFO order is entry order, so re-posted sale lines take the oldest lots available at edit time. Purchase edits update existing lots in place (ids kept, because allocations reference them); new lines create new lots, which are newest in FIFO; removed lines must be unreferenced. The `UPFRONT` row is re-created on the new `transaction_date`.
 20. **Unrecorded stock is valued at entered cost** *(2026-11-22)*: `UNRECORDED_STOCK` adjustments create lots at a user-entered cost (prefilled from the latest lot), unlike other positive adjustments (DD-08), because this stock never had a purchase to take a cost from.
 
 ---
@@ -719,7 +726,7 @@ erDiagram
 *Handles Customer Returns, Defective Swaps, and Vendor Returns.*
 * Both carry name snapshots (DD-30): `RETURN_TRANSACTION.party_name`, `RETURN_ITEM.item_name`.
 * `RETURN_TRANSACTION`: Contains `return_code` (`RET-`), `return_date`, `return_type` (`CUSTOMER`, `VENDOR`), `settlement_type` (`REFUND`, `REPLACEMENT` — `REPLACEMENT` is customer-only), `total_amount` (value of `RETURNED` lines), and optional links to the party and original bill (`original_transaction_id` → sale for customer, purchase for vendor).
-* `RETURN_ITEM`: `line_type` (`RETURNED` or `REPLACEMENT_ISSUED`), item, quantity (base units), unit price, total, `cost_amount` (FIFO cost of reversed or issued units), `condition` (`RESTOCKABLE` or `DAMAGED_SCRAP`, for `RETURNED` customer lines), optional `sale_item_id` (customer) or `purchase_item_id` (vendor lot).
+* `RETURN_ITEM`: `line_type` (`RETURNED` or `REPLACEMENT_ISSUED`), item, quantity (base units), unit price, total, `cost_amount` (FIFO cost of reversed or issued units), `condition` (`RESTOCKABLE` or `DAMAGED_SCRAP`, for `RETURNED` customer lines), optional `sale_item_id` (customer) or `purchase_item_id` (vendor lot; since v1.1 also the `RETURN` lot created by an unlinked restockable customer line).
   * **Customer reversal:** see Assumption 10. Linked lines are capped at sold − already returned. Unlinked `RESTOCKABLE` lines create a `RETURN`-source lot at the latest lot cost (or a user-entered cost).
   * **Replacement / exchange:** `RETURNED` lines must be linked and are reversed like refund lines (restocked or scrapped). `REPLACEMENT_ISSUED` lines (any active item, any qty, `unit_price` 0) are FIFO-depleted with `STOCK_OUTFLOW_ALLOCATION(source_type = REPLACEMENT)`; their cost is replacement COGS. Revenue is not reversed and no money moves.
   * **Vendor return:** depletes the named lot (qty ≤ its remaining) or FIFO across the item's lots, logging `STOCK_OUTFLOW_ALLOCATION(source_type = VENDOR_RETURN)`.
@@ -791,6 +798,15 @@ erDiagram
 | `charge_name` | TEXT | NOT NULL | Name snapshot (DD-30). |
 | `effect` | TEXT | NOT NULL, CHECK IN ('CHARGE','DISCOUNT') | Effect snapshot, so editing a type never changes old bills. |
 | `amount` | REAL | NOT NULL, CHECK (> 0) | ₹, rounded to 2 decimals. |
+
+#### 18. `CODE_SEQUENCE` *(v1.1, schema v6, FR-20)*
+*High-water mark per code prefix so a deleted record's code is never reissued.*
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `prefix` | TEXT | PRIMARY KEY | e.g. `SAL-`, `PUR-`, `RET-`, `EXP-`. |
+| `last_value` | INTEGER | NOT NULL, CHECK (>= 0) | Highest number ever issued for the prefix. |
+
+`next_code = max(MAX(code number in the table), last_value) + 1`, upserted inside the caller's write transaction, so deletes (FR-20) need no extra bookkeeping. DD-34's `Transactions` reset clears the transaction prefixes' rows.
 
 ---
 
@@ -1306,13 +1322,19 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 //   charges: Array<{ charge_type_id: number; amount: number }>   // [] when none
 // Sale/purchase detail + history rows gain items_subtotal, charges_total, discounts_total, charges[]
 
-// --- Bill correction (FR-20) — sale_api / purchase_api / returns_api
+// --- Bill correction (FR-20) — sale_api / purchase_api / returns_api / correction_api
 // update_sale { sale_id, payload: CreateSalePayload } -> SaleSummaryResponse
 // delete_sale { sale_id } -> { removed_cash_amount }
-// update_purchase { purchase_id, payload: CreatePurchasePayload } -> purchase summary
+// update_purchase { purchase_id, payload: CreatePurchasePayload } -> PurchaseSummaryResponse
+//   items[] gain purchase_item_id?: number|null   (existing lot; null = new line; create_purchase rejects non-null)
 // delete_purchase { purchase_id } -> { removed_cash_amount }
-// delete_return { return_id }
-// get_bill_edit_guard { transaction_type, id } -> { can_edit, can_delete, reasons[] }  (UI pre-check)
+// delete_return { return_id } -> { removed_cash_amount, removed_credit_amount }
+// get_bill_edit_guard { target: "SALE"|"PURCHASE"|"RETURN", id } -> BillEditGuard {
+//   target, id, code, can_edit, can_delete, can_change_party,
+//   reasons: [{code, message, blocks_edit, blocks_delete}],
+//   upfront_amount, applied_amount, removed_cash_amount, removed_credit_amount,
+//   lot_limits: [{purchase_item_id, consumed_quantity, referenced, vendor_returned}] }
+// Rejections: AppError::BillLocked { code, message }
 
 // --- Items (FR-05 rev., FR-08 rev., FR-21)
 // CreateItemPayload / UpdateItemPayload gain low_stock_threshold?: number (default 5), item_type?: "PHYSICAL"
@@ -1349,7 +1371,7 @@ Each feature is delivered on its own branch as small, phased commits (docs → s
 | 5 | `feat/unrecorded-stock` | Set/add stock on hand without a purchase (#4) | FR-08 rev. | **v5** `stock_adjustments.reason` + `UNRECORDED_STOCK` (table rebuild) | 4 |
 | 6 | `feat/expenses` | Store expenses, cash in hand, P&L (#1) | FR-18, FR-09 rev. | **v6** `expense_types`, `expenses`, `expense_type_search_fts` | 4 |
 | 7 | `feat/bill-charges` | Bill charges & discounts (#3) | FR-19, FR-09 rev. | **v7** `charge_types`, `bill_charges`, header subtotal/charges/discounts columns (backfill `items_subtotal = total_amount`), `charge_type_search_fts` | 4, 6 |
-| 8 | `feat/bill-edit-delete` | Edit/delete sales & purchases, delete returns (#5) | FR-20, NFR-03 rev. | **v8** `updated_at` on headers | 7 |
+| 8 | `feat/bill-edit-delete` | Edit/delete sales & purchases, delete returns (#5) | FR-20, NFR-03 rev. | **v8** `updated_at` on headers, index `return_transactions(return_type, original_transaction_id)` (`code_sequences` already exists since v6) | 7 |
 
 Rules for every branch:
 * The first commit(s) update the LLD (`book_keeper_LLD.md`), UI LLD and UI/UX spec for that feature, consistent with this HLD. If the LLD work finds that this HLD is wrong or incomplete, the HLD is amended in the same branch and the change is called out in the review.
