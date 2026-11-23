@@ -269,3 +269,6 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 **DD-45 — Per-item low stock level (FR-05 rev.; amends HLD Assumption 6).** `ITEM.low_stock_threshold` (default 5, ≥ 0, 0 = never low); `is_low_stock = PHYSICAL AND current_stock < threshold`. Editable inline in the Item List (replaces the Barcode column) and in the item drawer. `constants::LOW_STOCK_THRESHOLD` becomes only the default for new items.
 
 **DD-46 — Delivery order and migration numbers.** See HLD §10. Branches merge to `main` in that order; migrations v3 – v8 are pre-assigned per branch.
+
+
+**DD-47 - Expense type create is idempotent; expense codes and reset scope.** `create_expense_type` returns the existing row on a case-insensitive name match (inline create races with search; there is no 409 in `AppError`). Rename (`update_expense_type`) clashing with another type is a `ValidationError` on `name`; `list_expense_types` feeds the list filter. Codes never reuse (migration v6 `code_sequences`, all prefixes). `Transactions` reset deletes `expenses` and restarts `EXP-`; `All` also deletes `expense_types`; the FTS index is rebuilt after `All`.

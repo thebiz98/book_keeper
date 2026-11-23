@@ -579,3 +579,13 @@ gantt
 * New shared pieces: `useLiveSearch` (`src/hooks/useLiveSearch.ts`), `LiveSearchTypeahead` (`src/components/common/LiveSearchTypeahead.tsx`, optional `onCreate`), `LowStockLevelCell` (`src/components/domain/LowStockLevelCell.tsx`). `ItemSearchTypeahead` wraps `LiveSearchTypeahead`. `StockStatusBadge` takes optional `lowStockThreshold` (tooltip/aria); the flag is the server flag.
 * ApiClient: `updateItemLowStockThreshold(itemId, threshold)`; `lowStockThreshold` on `ItemSearchResult`, `LowStockItem`, create/update payloads.
 * Convention: every search field uses `useLiveSearch`; debounce 50 ms for typeaheads (`TYPEAHEAD_DEBOUNCE_MS`), 150 ms for lists (`LIST_SEARCH_DEBOUNCE_MS`); the hook owns the stale-response guard; pages never hand-roll `setTimeout`; Enter = `flush()`.
+
+
+---
+
+## 9. Store Expenses UI (FR-18, `feat/expenses`)
+* **Hotkey:** `F7` navigates to Expenses and focuses the Type field (`HOTKEYS.expenses`).
+* **`ExpenseTypeField`** (`components/domain`): built on `LiveSearchTypeahead` (v4) with `onCreate`/`createLabel`; props `{ value, onChange, autoFocus?, inputRef? }`. Inline create panel (name prefilled/editable) uses `FormActions` + `enterToSubmit` (primary Save, outline Cancel); Save calls `createExpenseType`, selects the result and moves focus to Amount. test-ids: `expense-type-input`, `expense-type-option`, `expense-type-create`, `expense-type-save`, `expense-type-cancel`.
+* **`ExpenseForm`:** Date (default today), Type, Amount (> 0), Notes; code preview from `getNextExpenseCode`; edit mode "Edit EXP-xxxx".
+* **`ExpenseList`:** `DateRangePicker` (month default), type `Select`, `useLiveSearch` list search at 150 ms, shared `DataTable` with `scroll="fill"`, footer `expense-period-total`, delete via danger `ConfirmDialog`.
+* **ApiClient:** `searchExpenseTypes`, `listExpenseTypes`, `createExpenseType`, `updateExpenseType`, `getNextExpenseCode`, `createExpense`, `updateExpense`, `deleteExpense`, `listExpenses`. Mock seed: 3 types, 5 expenses.

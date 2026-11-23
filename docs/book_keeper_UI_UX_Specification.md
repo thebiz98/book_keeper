@@ -350,3 +350,13 @@ The application maintains a persistent desktop shell across all views.
 * Inline cell: always an input; focus selects text; Enter saves and moves to next row's cell; blur saves; Esc reverts; empty/negative/non-numeric shows an inline error and is not saved; unchanged = no save; Status badge updates from the server response; with "Low Stock only" on, a row that stops being low stays until refresh.
 * Drawer: "Low Stock Level (base units)", default 5, help "Marked Low Stock when stock falls below this. 0 = never".
 * Dashboard low-stock widget shows `stock / level unit`. Pages 7, 8, 11, party selector and bill picker use live search (see FR-14 rev.). Traceability: FR-05 rev., FR-14 rev.
+
+
+---
+
+## Page 13: Store Expenses (`F7`) - FR-18 (v1.1)
+Sidebar item `[F7] Expenses` after Inventory; HotkeyBar `F7 Expenses`; header cash drawer formula appends `- Today's Expenses`.
+Layout: left "New Expense" form (Code preview EXP-xxxx, Date, Type typeahead with `[+ Create "..."]`, Amount, Notes, `[Save Expense (Enter)] [Clear (Esc)]`), right Expenses list (date range, type filter, live search, Code/Date/Type/Notes/Amount/Actions, period total, pager).
+Keyboard: F7 focuses Type; Enter selects or opens inline create (Save/Cancel buttons; Enter saves, Esc cancels); focus then moves to Amount; Enter to Notes; Enter on Notes or Ctrl+Enter saves; after save toast "EXP-xxxx saved", form resets (date kept), focus returns to Type, list and header cash refresh.
+Edit loads the row into the form ("Editing EXP-xxxx", `Update` / `Cancel edit`). Delete: danger ConfirmDialog. Default list range: current month.
+Dashboard: KPI tile "Today's Expenses" (`kpi-expenses`), cash sub-text "After today's expenses", action `[+ Expense (F7)]`. Reports: P&L "Less: Operating Expenses" with per-type breakdown before Net Profit; Cash Flow outflow line "Store expenses" after "Customer refunds paid". Traceability: FR-18 -> Page 13, Page 1, Page 10.

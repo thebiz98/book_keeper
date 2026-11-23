@@ -124,7 +124,8 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * An expense is always paid in cash from the drawer on its date (credit or unpaid expenses are out of scope).
   * **Cash in hand:** expenses are cash out. The live cash drawer becomes *today's ledger cash in − today's ledger cash out − today's expenses* (DD-37). Cash Flow reports show expenses as their own outflow line.
   * **Profit:** expenses are Operating Expenses in the P&L and reduce Net Profit (FR-09).
-  * Expenses can be edited and deleted (they are manual entries; FR-20 applies).
+  * Expenses can be edited and deleted (they are manual entries; FR-20 applies). Expense codes follow the same no-reuse rule (code high-water marks, DD-47).
+  * Expense type create is **idempotent**: a name that already exists (case-insensitive, after whitespace cleanup) returns the existing type, it is not an error. Types can be renamed (`update_expense_type`; a clash is a validation error; expense rows keep their snapshot name) and listed (`list_expense_types`).
   * An Expenses screen lists expenses with date range, type filter and live search, plus the period total.
 * **FR-19: Bill Charges & Discounts** *(added 2026-11-22, DD-38)*
   * Both sale and purchase bills can carry any number of bill-level **charge lines** (an extra amount: transport, carrier fee, delivery, packing) and **discount lines** (an amount off: cash discount, round-off, scheme).

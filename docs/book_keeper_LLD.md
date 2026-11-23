@@ -2200,3 +2200,50 @@ flowchart TD
   * After Step 3: Stock = 30, Lot #1 = 0, Lot #2 = 30, `cogs = 620`, `gross_profit = 580`; `SALE_STOCK_ALLOCATION` has exactly 2 rows (100 from Lot #1, 20 from Lot #2); exactly 3 UPFRONT ledger rows.
   * After Step 4: Stock = 40, Lot #1 = 0, Lot #2 = 40; allocation (Lot #2) `returned_quantity = 10`, allocation (Lot #1) `returned_quantity = 0`; `RETURN_ITEM.cost_amount = 60`; one `REFUND_OUT` of 100 and no `RETURN_CREDIT`.
   * After Step 5: `total_stock_valuation == 240.0`, `is_low_stock == false`; P&L for the day: `gross_sales 1200`, `sales_returns 100`, `net_sales 1100`, `cogs 560`, `gross_profit 540`, `inventory_losses 0`, `net_profit 540`; `live_cash_in_drawer == 300`; `STOCK_OUTFLOW_ALLOCATION` empty.
+
+
+---
+
+## 12. Store Expenses (FR-18, schema v6, `feat/expenses`)
+
+### 12.1 Entities (`core/entities/expense.rs`)
+```rust
+pub struct ExpenseType { pub id: i64, pub name: String, pub is_active: bool, pub created_at: String }
+pub struct Expense { pub id: i64, pub expense_code: String, pub expense_date: String, pub expense_type_id: i64,
+    pub expense_type_name: String, pub amount: f64, pub notes: Option<String>, pub created_at: String,
+    pub updated_at: Option<String> }
+```
+
+### 12.2 DTOs (`core/dtos/expense_dto.rs`)
+`CreateExpenseTypePayload { name }`, `ExpensePayload { expense_date, expense_type_id, amount, notes }`,
+`ExpenseFilter { start_date, end_date, expense_type_id, search_query, page, limit }` with `validate() -> PageRequest`,
+`ExpenseListResponse { items, total, page, limit, period_total }` (flat; `period_total` = sum over ALL rows matching the filter),
+`ExpenseTypeTotal { expense_type_id, expense_type_name, amount }`.
+
+### 12.3 Search
+`EXPENSE_TYPE_FTS` (`data/sqlite/fts_specs.rs`, table `expense_type_search_fts(expense_type_id UNINDEXED, name)`) is a plain `FtsSpec` served by the shared `SqliteFtsIndex`; it is pushed into `AppState.fts_indexes` (so `data_reset(All)` rebuilds it) and checked at startup with `ensure_fts_index`. Sync is `sync_after_commit`; failures are logged and never fail the command (deliberate difference from `ItemService`: the cash entry is already committed and startup repairs the index).
+
+### 12.4 Code sequences (FR-20 no-reuse, R3)
+v6 adds `code_sequences(prefix PRIMARY KEY, last_value)` seeded from the existing maxima of SAL-, PUR-, ADJ-, OPN-, RTL-, RET-, EXP-. `code_gen::next_code` = `MAX(last_value, MAX(code number)) + 1` and upserts `last_value` in the caller's transaction (for all prefixes), so deleting the newest bill/expense never frees its code. Previews (`get_next_*_code`, read context) do not write. `data_reset(Transactions)` deletes the sequence rows of transaction prefixes (SAL, PUR, ADJ, RTL, RET, EXP) so codes restart; `All` clears the table.
+
+### 12.5 `ExpenseRepository` (`tx.expenses()`)
+Type ops: `create_type`, `update_type_name`, `find_type_by_id`, `find_type_by_name` (`COLLATE NOCASE`), `list_types`, `find_types_by_ids`, `count_types`. Expense ops: `get_next_expense_code`, `create`, `update`, `delete` (NotFound on 0 rows), `find_by_id`, `list(filter, offset, limit) -> (rows, total, period_total)` (search on code/type name/notes with `LIKE ... ESCAPE`; order `expense_date DESC, id DESC`), `sum_between`, `totals_by_type_between` (grouped by type id, label = `MAX(expense_type_name)` of the snapshot, so a period may show the last name the type was recorded under, DD-30).
+
+### 12.6 Schema rules
+`amount > 0`; type name unique NOCASE and non-blank; FK `expenses.expense_type_id -> expense_types(id)` (no type-delete command exists).
+
+### 12.7 `ExpenseService`
+Commands: `search_expense_types`, `list_expense_types`, `create_expense_type`, `update_expense_type`, `get_next_expense_code`, `create_expense`, `update_expense`, `delete_expense`, `list_expenses`.
+Validation (ValidationError on field): `name` non-empty after cleanup, <= 80; `expense_date` valid; `amount` finite, > 0 after `round2`; `notes` <= 500; `expense_type_id` must exist and be active (NotFound).
+**Type create is idempotent (R5):** an existing name (NOCASE, after whitespace cleanup) returns the existing row; a UNIQUE race re-reads. **Rename clash** with another id is `ValidationError(name)`; a case-only change of the same id is allowed. Expense rows keep their snapshot name until the expense itself is edited (edit refreshes it).
+Create expense: validate, begin tx, resolve type, `next_code`, insert with snapshot, commit. Update keeps code and `created_at`, sets `updated_at`. Delete is a hard delete.
+Blank search query returns active types (capped), otherwise `search_keys` order.
+
+### 12.8 Metric definitions
+`operating_expenses` = sum of expenses by `expense_date` in range (v7 adds purchase charges); `expenses_by_type`; `net_profit = gross_profit + other_income - inventory_losses - operating_expenses` (`other_income`, `sales_discounts` are 0 placeholders until v7); `expenses_cash_outflow`; `net_cash_balance` = ledger net - expenses; `live_cash_in_drawer` = today's net cash balance; `today_expenses_amount` = sum where `expense_date = today`. One drawer formula: `accounting_service_impl::cash_position`.
+
+### 12.9 Reset
+`Transactions` deletes `expenses`; `All` also deletes `expense_types`; FTS rebuilt after `All`.
+
+### 12.10 Tests
+`expense_service_test.rs` (TC-EXP-001..010), report tests TC-EXP-011..013, reset TC-EXP-014, startup repair TC-EXP-015, schema v6 upgrade/CHECK tests, code_sequences no-reuse and reset tests.
