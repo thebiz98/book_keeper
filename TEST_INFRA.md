@@ -23,7 +23,7 @@
 Shared fixtures live in `tests/common/fixtures.rs`. Low-level strategy and repository tests use `seed_sale_line` / `ensure_item` / `ensure_purchase` / `ensure_lot` / `seed_adjustment` to create the parent rows that foreign keys require.
 
 ## Frontend suites (`src/__tests__/`, Vitest + happy-dom)
-Stores (cart, app, theme), components (RapidBillingRow, SaleSummaryModal, StockStatusBadge, CurrencyDisplay), the API mock client, and the case conversion at the IPC boundary. The environment is configured in `vite.config.ts` (`test.environment = happy-dom`, `setupFiles`).
+Stores (cart, app, theme), components (RapidBillingRow, SaleSummaryModal, StockStatusBadge, CurrencyDisplay), the API mock client, and the case conversion at the IPC boundary. New suites: `components/FormActions.test.tsx` (Save/Cancel primitive and `enterToSubmit`), `pages/parties.test.tsx` (Add Party dialog: Enter, Save, Cancel, in-dialog errors); `PartySelector` and `BundleCreationModal` suites also cover the FR-22 buttons and Enter rules. The environment is configured in `vite.config.ts` (`test.environment = happy-dom`, `setupFiles`).
 
 ## Gate
 `bash run_e2e_tests.sh` runs, in order: `cargo test`, `cargo clippy -- -D warnings` (lib), `tsc --noEmit`, `vitest run`, `vite build`. Run it once per milestone. While iterating, run only the affected `cargo test --test <suite>` or vitest file.

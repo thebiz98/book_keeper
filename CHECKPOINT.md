@@ -32,6 +32,11 @@ Windows 11 ARM64 (verified 2026-11-22): requires VS Build Tools 2022 with the **
 - Docs: `install.txt` section 11 (config, backups, restore), `docs/DEPENDENCY_VULNERABILITIES.md` (npm audit, dev-only, vitest 4 upgrade planned).
 - **Manual `tauri dev` checklist (not done yet):** (1) Settings -> Choose folder opens the native picker and the choice survives a restart; Use default works. (2) Startup creates an auto backup when none is recent; Backup Now writes a manual file. (3) Closing after a change writes an auto backup. (4) Old auto/pre-reset files are rotated, manual ones kept. (5) With testingMode true: Clear transactions and Clear all data need the exact phrase, write a prereset backup, and other pages show the cleared data; next sale is SAL-1001. (6) With testingMode false the card is gone and `reset_data` is refused. (7) Restore a backup over shop.db (delete -wal/-shm) and check data.
 
+## Branch feat/quick-create-submit (2026-11-23, pending review and manual check)
+- FR-22 / DD-44: shared `FormActions` + `enterToSubmit` (`src/components/ui/FormActions.tsx`). Inline new customer/vendor (PartySelector), Add/Edit Party dialog, Bundle modal and Item drawer now show explicit Save/Cancel. No schema or Rust changes.
+- Party dialog: Enter saves, validation/backend errors render inside the dialog, double-submit guarded. Bundle modal: Enter saves except in Bundle Name with suggestions open and in Outer Barcode (scanner-safe); Ctrl+Enter saves anywhere.
+- **Manual check list:** (1) Alt+C on New Sale shows Save/Cancel; click Save selects the new customer. (2) Alt+V on New Purchase works the same way. (3) Alt+B: Enter saves; scanning a barcode into Outer Barcode does not submit. (4) Parties dialog: Enter saves, a duplicate-name error shows inside the dialog. (5) Payment dialog (SaleSummaryModal) with inline party create: Enter in the create form must not also complete the sale. (6) Check light and dark themes.
+
 ## Next (not started)
 - Package and run with `tauri build` on a desktop machine, then do a manual UI pass in Tauri mode (so far only the mock client and IPC contracts have been checked).
 - Optional: tighten the remaining `as any` tab-ID casts in ReportsPage and ReturnsAdjustmentsPage.
