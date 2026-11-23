@@ -411,3 +411,84 @@ fn backup_directory_roundtrips_and_survives_shop_setting_upsert() {
     tx.commit().unwrap();
     assert_eq!(db.begin_read().unwrap().settings().get_backup_directory().unwrap(), None);
 }
+
+// ---------------------------------------------------------------- FR-20 repository methods
+
+#[test]
+fn deleted_codes_stay_retired_in_the_high_water_mark() {
+    let db = TestDb::new();
+    insert_sale_code(&db, "SAL-1001");
+    insert_sale_code(&db, "SAL-1002");
+    {
+        let mut tx = db.begin_transaction().unwrap();
+        assert_eq!(tx.sales().get_next_transaction_code().unwrap(), "SAL-1003");
+        tx.commit().unwrap();
+    }
+    exec(&db, "DELETE FROM sale_transactions WHERE transaction_code IN ('SAL-1002')");
+    assert_eq!(next_sale_code(&db), "SAL-1004", "1003 was issued; deleting 1002 frees nothing");
+}
+
+#[test]
+fn lot_reference_checks_and_edit_constraints() {
+    let db = TestDb::new();
+    {
+        let mut tx = db.begin_transaction().unwrap();
+        tx.items().create(&create_test_item(1, "Pen", None, None, 0.0, 10.0)).unwrap();
+        tx.purchases().create_transaction(&create_test_purchase_tx(1, "PUR-1001", None, 50.0, 0.0, "2026-11-20")).unwrap();
+        tx.purchases().create_purchase_item(&create_test_purchase_lot(1, 1, 1, None, 10.0, 10.0, 5.0, 10.0)).unwrap();
+        assert!(!tx.purchases().is_lot_referenced(1).unwrap());
+        // remaining above quantity violates the table CHECK
+        let mut lot = tx.purchases().find_purchase_item_by_id(1).unwrap().unwrap();
+        lot.remaining_quantity = 11.0;
+        assert!(tx.purchases().update_purchase_item(&lot).is_err());
+        lot.remaining_quantity = 4.0;
+        lot.unit_cost = 6.0;
+        tx.purchases().update_purchase_item(&lot).unwrap();
+        assert_eq!(tx.purchases().find_purchase_item_by_id(1).unwrap().unwrap().unit_cost, 6.0);
+        tx.commit().unwrap();
+    }
+    exec(
+        &db,
+        "INSERT INTO stock_outflow_allocations (source_type, source_id, purchase_item_id, quantity_depleted, unit_cost) \
+         VALUES ('ADJUSTMENT', 1, 1, 1, 5)",
+    );
+    let mut tx = db.begin_read().unwrap();
+    assert!(tx.purchases().is_lot_referenced(1).unwrap());
+    assert!(tx.outflow_allocations().exists_for_lot(1, OutflowSourceType::Adjustment).unwrap());
+    assert!(!tx.outflow_allocations().exists_for_lot(1, OutflowSourceType::VendorReturn).unwrap());
+}
+
+#[test]
+fn linked_return_lookup_filters_return_type_and_orders_newest_last() {
+    let db = TestDb::new();
+    {
+        let mut tx = db.begin_transaction().unwrap();
+        let mk = |id: i64, rt: ReturnType| ReturnTransaction {
+            id,
+            return_code: format!("RET-{}", 1000 + id),
+            return_date: "2026-11-20".into(),
+            return_type: rt,
+            party_id: None,
+            party_name: None,
+            original_transaction_id: Some(7),
+            settlement_type: SettlementType::Refund,
+            total_amount: 0.0,
+            reason: None,
+            notes: None,
+            created_at: "2026-11-20T10:00:00Z".into(),
+        };
+        for (id, rt) in [(1, ReturnType::Customer), (2, ReturnType::Vendor), (3, ReturnType::Customer)] {
+            tx.returns().create_return_transaction(&mk(id, rt)).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    let mut tx = db.begin_read().unwrap();
+    let linked = tx.returns().list_linked(ReturnType::Customer, 7).unwrap();
+    assert_eq!(linked.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 3]);
+    let first = tx.returns().find_return_by_id(1).unwrap().unwrap();
+    assert_eq!(tx.returns().newer_linked_return(&first).unwrap().as_deref(), Some("RET-1003"));
+    let last = tx.returns().find_return_by_id(3).unwrap().unwrap();
+    assert_eq!(tx.returns().newer_linked_return(&last).unwrap(), None);
+    let vendor = tx.returns().find_return_by_id(2).unwrap().unwrap();
+    assert_eq!(tx.returns().newer_linked_return(&vendor).unwrap(), None, "no newer vendor return on id 7");
+}

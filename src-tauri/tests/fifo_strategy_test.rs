@@ -166,3 +166,27 @@ fn fifo_order_is_by_lot_id_regardless_of_repository_order() {
     assert_eq!(ids, vec![1, 2]);
     assert_eq!(res.total_cogs, 3.0 * 1.0 + 1.0 * 2.0);
 }
+
+#[test]
+fn replay_reversals_matches_the_real_reversal_walk_across_three_partial_returns() {
+    let (_db, mut tx) = setup(&[(1, 3.0, 4.0), (2, 4.0, 6.0), (3, 5.0, 8.0)]);
+    seed_sale(&mut *tx, 100, 1);
+    FifoStrategy.deplete_lots_for_sale(&mut *tx, 100, 1, 10.0).expect("deplete"); // 3 + 4 + 3
+    let allocs = tx.allocations().find_by_sale_item_id(100).unwrap();
+    let qtys = [2.0, 4.0, 3.0];
+    let mut real: Vec<Vec<(i64, f64)>> = Vec::new();
+    for q in qtys {
+        let before = tx.allocations().find_by_sale_item_id(100).unwrap();
+        FifoStrategy.reverse_sale_allocations(&mut *tx, 100, q, q == 4.0).expect("reverse");
+        let after = tx.allocations().find_by_sale_item_id(100).unwrap();
+        let mut takes: Vec<(i64, f64)> = before
+            .iter()
+            .zip(&after)
+            .filter(|(b, a)| a.returned_quantity > b.returned_quantity)
+            .map(|(b, a)| (b.id, a.returned_quantity - b.returned_quantity))
+            .collect();
+        takes.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+        real.push(takes);
+    }
+    assert_eq!(FifoStrategy.replay_reversals(&allocs, &qtys), real);
+}
