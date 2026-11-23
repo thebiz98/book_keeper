@@ -209,6 +209,8 @@ pub enum AdjustmentReason {
     Expired,
     CountCorrection,
     TheftLost,
+    /// Positive only; lot at user-entered cost (DD-40).
+    UnrecordedStock,
 }
 
 // core/value_objects/settlement_type.rs
@@ -450,7 +452,7 @@ pub struct StockAdjustment {
     pub adjustment_date: String,       // "YYYY-MM-DD"
     pub item_id: i64,
     pub quantity: f64,                 // Non-zero. Positive (+) to add, negative (-) to write off
-    pub unit_cost: Option<f64>,        // Positive only: lot cost actually used
+    pub unit_cost: Option<f64>,        // Positive adjustments only; always Some for UnrecordedStock
     pub reason: AdjustmentReason,
     pub notes: Option<String>,
     pub created_at: String,
@@ -784,14 +786,15 @@ pub trait ReportRepository: Send + Sync {
 * `PURCHASE_ITEM`: `CHECK (remaining_quantity >= 0 AND remaining_quantity <= quantity)`.
 * `SALE_STOCK_ALLOCATION`: `CHECK (returned_quantity >= 0 AND returned_quantity <= quantity_depleted)`.
 * `ITEM_BUNDLE`: `CHECK (units_per_bundle > 1)`.
-* `STOCK_ADJUSTMENT`: `CHECK (quantity <> 0)`.
+* `STOCK_ADJUSTMENT`: `CHECK (quantity <> 0)`, reason enum incl. `UNRECORDED_STOCK` (v5), `CHECK (reason <> 'UNRECORDED_STOCK' OR (quantity > 0 AND unit_cost IS NOT NULL))`.
 * Indexes: `purchase_item(item_id, remaining_quantity)`, `sale_stock_allocation(sale_item_id)`, `stock_outflow_allocation(source_type, source_id)`, `payment_settlement(settlement_date)`, `payment_settlement(transaction_type, transaction_id)`, `sale_transaction(transaction_date)`, `purchase_transaction(source, transaction_date)`, `item(barcode)`, `item_bundle(barcode)`, `return_item(sale_item_id)`, `return_item(purchase_item_id)`.
 * Name snapshots (DD-30): `party_name` on sale/purchase/return headers, `item_name` on sale/purchase/return lines, written by the creating service; history/detail queries read snapshots.
 * `ITEM.item_type TEXT NOT NULL DEFAULT 'PHYSICAL' CHECK (item_type IN ('PHYSICAL','SERVICE'))`, added by migration **v3** `item_type` (`ALTER TABLE ADD COLUMN`; existing rows become PHYSICAL).
 * Every migration has a frozen-fixture upgrade test: `src-tauri/tests/fixtures/schema/vN.sql` holds the exact DDL delta of migration N as shipped (v1 = full aligned schema) plus its `schema_version` row and `PRAGMA user_version`. Tests build a vN-1 database from fixtures 1..N-1, seed rows, run `run_migrations`, and assert the data survived. Fixture files are never edited after the migration ships.
 * Pre-migration backup (DD-29): when `applied > 0` and a migration is pending, `run_migrations` snapshots the database with `VACUUM INTO` (same connection, path from `PRAGMA database_list`) to `<db dir>/backups/book_keeper_premigration_v{applied}_to_v{latest}_YYYYMMDD_HHMM.db` before applying any step. Failure returns `MigrationError` and applies nothing; in-memory databases skip it. `BackupKind::PreMigration` makes DD-33 rotation delete such files after `retentionDays`.
 * Schema strategy (DD-29): v1 is the aligned schema itself (pre-release rewrite); a legacy pre-alignment DB is detected and rejected.
-* Migrations are numbered, forward-only, recorded in a `schema_version` table, each applied in one transaction; `ALTER TABLE ADD COLUMN` / new tables only (NFR-04). No JSON blob columns.
+* Migrations are numbered, forward-only, recorded in a `schema_version` table, each applied in one transaction; `ALTER TABLE ADD COLUMN` / new tables for additive changes (NFR-04). Changing a CHECK constraint uses a table rebuild (create new, copy rows with ids, carry `sqlite_sequence`, drop, rename, recreate indexes) with foreign keys off, inside the migration's transaction (DD-29). No JSON blob columns.
+* Migration log: v1 `aligned_schema`, v2 `backup_directory`, v3 `item_type`, v4 `low_stock_threshold_party_fts`, v5 `unrecorded_stock_reason`.
 
 ---
 
@@ -1056,6 +1059,9 @@ pub trait InventoryService: Send + Sync {
         payload: StockAdjustmentPayload,
     ) -> Result<StockAdjustmentResult /* { adjustment_id, loss_value } */, AppError>;
 
+    /// Set stock on hand (FR-08 rev.). Own BEGIN IMMEDIATE; delta = counted - current_stock.
+    fn set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError>;
+
     /// Lot inspector (all sources).
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;
 
@@ -1079,7 +1085,7 @@ Invariant (checked in tests): ITEM.current_stock == Σ PURCHASE_ITEM.remaining_q
 ```
 
 #### Physical Stock Adjustment Execution Logic:
-0. Validate: item exists and is active; `quantity != 0`; `adjustment_date` is a valid date.
+0. Validate: item exists, is active and PHYSICAL (FR-21); `quantity != 0`; `adjustment_date` is a valid date; `UNRECORDED_STOCK` requires `quantity > 0` else `ValidationError{field:"quantity"}`. Both `create_adjustment` and `set_item_stock` share the private `post_adjustment` helper.
 
 **Negative Adjustment (`quantity < 0`) — Write-Off / Loss:**
 1. `uow.begin_transaction()`
@@ -1094,6 +1100,20 @@ Invariant (checked in tests): ITEM.current_stock == Σ PURCHASE_ITEM.remaining_q
 3. Persist `StockAdjustment` (with resolved `unit_cost`) → `adjustment_id`.
 4. `create_source_lot(uow, Adjustment, adjustment_date, item_id, quantity, Some(cost), notes = "Stock adjustment #<id>: <reason>")` (code `ADJ-XXXX`).
 5. `uow.commit()`; return `{ adjustment_id, loss_value: 0 }`.
+
+#### Set Stock On Hand (`set_item_stock`):
+```rust
+pub struct SetItemStockPayload { item_id: i64, counted_quantity: f64, unit_cost: Option<f64>, adjustment_date: String, notes: Option<String> }
+pub struct SetItemStockResult { adjustment_id: Option<i64>, delta: f64, reason: Option<AdjustmentReason>,
+                                previous_stock: f64, new_stock: f64, unit_cost: Option<f64>, value_change: f64 }
+```
+0. Validate: `counted_quantity` finite and >= 0 (`field "counted_quantity"`); date valid; `unit_cost`, if given, finite and >= 0.
+1. `begin_transaction()`.
+2. Load the item: NotFound if missing; must be active and PHYSICAL.
+3. `delta = round_qty(counted - current_stock)` (1e-6).
+4. If `|delta| <= EPS`: rollback, return no-op (nothing written).
+5. `delta > 0`: `post_adjustment(UnrecordedStock, delta, unit_cost)`; `delta < 0`: `post_adjustment(CountCorrection, delta, None)` (a given `unit_cost` is ignored).
+6. Commit; `value_change = +delta x cost` (unrecorded) or `-loss` (count correction).
 
 > **Design Rationale — Source-tagged lots:** every unit of stock must live in a depletable `PURCHASE_ITEM` lot so `current_stock` always equals Σ lot remainders. Non-purchase lots hang off a zero-value `PURCHASE_TRANSACTION` whose `source` ≠ `PURCHASE`; every purchase-facing query filters `source = 'PURCHASE'`, so these never appear as supplier bills, in purchase totals/counts, payables, or vendor-return lot pickers.
 
@@ -1909,6 +1929,29 @@ sequenceDiagram
 
 ---
 
+### 9.5 Set Stock On Hand (Unrecorded Stock)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI
+    participant IS as InventoryService
+    participant DB
+    UI->>IS: set_item_stock(item, counted, unit_cost?)
+    IS->>DB: BEGIN IMMEDIATE; read item
+    IS->>IS: delta = counted - current_stock
+    alt delta > 0
+        IS->>DB: insert adjustment row (UNRECORDED_STOCK) + create_source_lot(ADJUSTMENT)
+    else delta < 0
+        IS->>DB: insert adjustment row (COUNT_CORRECTION) + issue_stock_outflow
+    end
+    IS->>DB: apply_stock_delta (recomputes is_low_stock)
+    IS->>DB: COMMIT
+    IS-->>UI: SetItemStockResult
+```
+
+---
+
 ## 10. Error Handling & Concurrency Matrix
 
 ### 10.1 Structured AppError Hierarchy
@@ -1948,7 +1991,7 @@ pub enum AppError {
 
 ### 10.2 Concurrency & Atomic Locking (SQLite WAL + `BEGIN IMMEDIATE`)
 1. **WAL Mode**: SQLite runs with `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = NORMAL`. This ensures readers never block writers and writers never block readers.
-2. **Immediate Lock Escalation**: Every state-mutating service method (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_adjustment`, item/bundle/party/settings writes, `execute_items_import`) calls `uow.begin_transaction()` exactly once, at the top, and passes the open context down (never nested), which executes:
+2. **Immediate Lock Escalation**: Every state-mutating service method (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_adjustment`, `set_item_stock`, item/bundle/party/settings writes, `execute_items_import`) calls `uow.begin_transaction()` exactly once, at the top, and passes the open context down (never nested), which executes:
    ```sql
    BEGIN IMMEDIATE TRANSACTION;
    ```
@@ -2012,6 +2055,16 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 | **TC-INV-007** | Positive adjustment without prior lot needs cost | Item never stocked | `create_adjustment(+5, unit_cost = None)` then with `unit_cost = 4.0` | • First: `ValidationError(field = unit_cost)`.<br>• Second: lot at 4.0. |
 | **TC-INV-008** | Stock cache invariant | After any mix of sale, purchase, return, adjustment, replacement, vendor return | Compare | • `ITEM.current_stock == Σ lot.remaining_quantity` for every item. |
 | **TC-INV-009** | Vendor return named lot | Lot L of 10 remaining | `remove_stock_for_vendor_return(lot = L, qty = 4)`; then qty = 7 | • First: L = 6, outflow row `VENDOR_RETURN`, value = 4 × cost.<br>• Second: rejected (> remaining). |
+| **TC-INV-010** | Unrecorded stock at entered cost | Lot 10@7.5 | `create_adjustment(+4, UnrecordedStock, cost 9.0)` | • loss 0; stock 14; ADJ lot 4@9.0; row `unit_cost = 9.0`; not a purchase; no ledger rows. |
+| **TC-INV-011** | Unrecorded stock defaults to latest lot cost | Lot 10@7.5 | same, `unit_cost = None` | • Lot and stored cost 7.5. |
+| **TC-INV-012** | Unrecorded stock, no lot, no cost | Item never stocked | `UnrecordedStock`, `None` | • `ValidationError(unit_cost)`; nothing written. |
+| **TC-INV-013** | Unrecorded stock must be positive | Any | `UnrecordedStock`, qty -2 | • `ValidationError(quantity)`; nothing written. |
+| **TC-INV-014** | Set stock up | Lot 10@5 | `set_item_stock(25, cost 6)` | • delta 15, UnrecordedStock, new 25, value_change 90; lot ADJ@6. |
+| **TC-INV-015** | Set stock down | Lots 4@5, 10@7 | `set_item_stock(8, cost 99)` | • delta -6, CountCorrection FIFO (4@5, 2@7), value_change -34, cost ignored, no new lot. |
+| **TC-INV-016** | Set stock equal | Any | counted == current (+1e-12) | • No-op; nothing written; next ADJ code unchanged. |
+| **TC-INV-017** | Set stock validation | Any | negative/NaN count, bad date, unknown/inactive/SERVICE item, no cost | • Each rejected; nothing written. |
+| **TC-INV-018** | Low-stock recompute on set | Stock 3 | set 12, set 2, custom threshold | • Flag follows the item's threshold. |
+| **TC-INV-019** | Fractional set | Lot 9.7@1 | set 10 | • new stock 10 within 1e-9; invariant holds. |
 | **TC-INV-006** | Low stock flag transition | Item `current_stock = 6.0` | `deplete_stock_for_sale` depletes 2 units | • `current_stock` transitions `6.0` → `4.0`.<br>• `is_low_stock` transitions `false` → `true`. |
 
 ---
@@ -2064,7 +2117,7 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 | **TC-TYP-03** | SERVICE rejected on create | `item_type = Some(Service)` | `create_item` | • `ValidationError(field = "item_type")`; nothing written. |
 | **TC-TYP-04** | SERVICE rejected on update | Existing PHYSICAL item | `update_item` with `Some(Service)` / `None` | • Rejected and unchanged / keeps `PHYSICAL`. |
 
-Schema upgrade cases (`schema_test.rs`): fresh DB has `items.item_type` NOT NULL default `'PHYSICAL'` with CHECK; a frozen v2 database upgrades to v3 with all existing items `PHYSICAL`, stock and settings intact.
+Schema upgrade cases (`schema_test.rs`): a frozen v4 database upgrades to v5 (`stock_adjustments` rebuilt; ids, `sqlite_sequence`, outflow joins, indexes preserved; CHECK accepts `UNRECORDED_STOCK` only with qty > 0 and a cost); fresh DB has `items.item_type` NOT NULL default `'PHYSICAL'` with CHECK; a frozen v2 database upgrades to v3 with all existing items `PHYSICAL`, stock and settings intact.
 
 ---
 
@@ -2094,6 +2147,8 @@ Schema upgrade cases (`schema_test.rs`): fresh DB has `items.item_type` NOT NULL
 | **TC-REP-004** | Full P&L statement | Sales 1,000 (COGS 600); restockable REFUND return of value 100 (cost 60); scrap REFUND return value 50 (cost 30); write-off cost 20; REPLACEMENT returning 1 restockable unit (cost 10) and issuing 1 unit of another item (cost 12) | `get_pnl_report` | • `gross_sales 1000`, `sales_returns 150`, `net_sales 850`, `cogs 600 − 60 − 30 − 10 + 12 = 512`, `gross_profit 338`, `inventory_losses 20 + 30 = 50`, `net_profit 288`. |
 | **TC-REP-005** | Cash flow buckets from ledger | Sale UPFRONT 500, SETTLEMENT 200, REFUND_OUT 50; purchase UPFRONT 300, SETTLEMENT 100, REFUND_IN 40; RETURN_CREDIT 70 | `get_cash_flow_report` | • In = 740, out = 450, net = 290; RETURN_CREDIT excluded. |
 | **TC-REP-006** | Non-purchase lots excluded | ADJ and OPN lots exist | dashboard + purchases + payables | • Not counted; valuation includes them. |
+| **TC-REP-UNREC-1** | Unrecorded stock adds valuation only | Purchase lot 10@5 | `set_item_stock(30, cost 3)` | • Valuation +60, active lots +1; P&L purchases/losses/net/gross, cash flow, dashboard purchases/payables, recent transactions and purchase history unchanged. |
+| **TC-REP-UNREC-2** | Later sale and write-off use entered cost | After UNREC-1 | sell 35; set stock 5 to 0 | • COGS 125; inventory_losses 15. |
 
 ---
 
