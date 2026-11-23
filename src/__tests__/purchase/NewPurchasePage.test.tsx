@@ -204,4 +204,44 @@ describe('NewPurchasePage', () => {
     expect(api.createBundle).toHaveBeenCalledWith(expect.objectContaining({ itemId: 1, bundleName: 'Dozen', unitsPerBundle: 12 }));
     expect((container.querySelector('select') as HTMLSelectElement).value).toBe('9');
   });
+
+  it('Alt+X adds a charge and a discount: grand total, PAID follows it, payload carries charges', async () => {
+    const carrier = { id: 4, name: 'Carrier Fee', effect: 'CHARGE', appliesTo: 'PURCHASE', defaultAmount: 100, isActive: true, createdAt: '' };
+    const disc = { id: 3, name: 'Cash Discount', effect: 'DISCOUNT', appliesTo: 'BOTH', defaultAmount: null, isActive: true, createdAt: '' };
+    const { container, api } = mount({
+      searchChargeTypes: vi.fn(async (q: string) =>
+        [carrier, disc].filter((t) => t.name.toLowerCase().startsWith(q.toLowerCase()))
+      ),
+    });
+    await flush();
+    await addBoxLine(container, '100'); // 400
+    const tid = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLInputElement;
+    const addOne = async (prefix: string, amount?: string) => {
+      key(window, { key: 'x', altKey: true });
+      await flush(10);
+      const input = tid('charge-type-input');
+      typeInto(input, prefix);
+      await flush(120);
+      key(input, { key: 'Enter' });
+      await flush(10);
+      const amt = tid('charge-amount');
+      if (amount) typeInto(amt, amount);
+      key(amt, { key: 'Enter' });
+      await flush(10);
+    };
+    await addOne('car');
+    expect(tid('purchase-total').textContent).toContain('500.00');
+    await addOne('cash', '30');
+    expect(tid('purchase-total').textContent).toContain('470.00');
+    expect(tid('purchase-items-subtotal').textContent).toBe('400');
+
+    click(byText(container, 'button', /Record Inward Stock/));
+    await flush();
+    const payload = api.createPurchase.mock.calls[0][0];
+    expect(payload.paidAmount).toBe(470);
+    expect(payload.charges).toEqual([
+      { chargeTypeId: 4, amount: 100 },
+      { chargeTypeId: 3, amount: 30 },
+    ]);
+  });
 });

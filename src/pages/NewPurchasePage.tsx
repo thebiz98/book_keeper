@@ -7,6 +7,9 @@ import type { CreatePurchasePayload, ItemBundle, ItemSearchResult, PaymentStatus
 import { PartySelector } from '@/components/domain/PartySelector';
 import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
+import { BillChargesPanel, type BillChargesPanelHandle } from '@/components/domain/BillChargesPanel';
+import { BillTotalsSummary } from '@/components/domain/BillTotalsSummary';
+import { billTotals, toChargeInputs, type BillChargeLine } from '@/lib/billMath';
 import {
   effectivePaid,
   lineBaseQuantity,
@@ -75,6 +78,11 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
   const [lines, setLines] = useState<PurchaseLine[]>([]);
   const lineKey = useRef(1);
+  // Bill-level charges and discounts (FR-19).
+  const [charges, setCharges] = useState<BillChargeLine[]>([]);
+  const chargeKey = useRef(1);
+  const [chargeModalOpen, setChargeModalOpen] = useState(false);
+  const chargesRef = useRef<BillChargesPanelHandle>(null);
 
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('PAID');
   const [paidInput, setPaidInput] = useState<number>(0);
@@ -212,7 +220,21 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
   const handleRemoveLine = (key: number) => setLines((prev) => prev.filter((l) => l.key !== key));
 
-  const total = purchaseTotal(lines);
+  const itemsSubtotal = purchaseTotal(lines);
+  const totals = billTotals(itemsSubtotal, charges);
+  const total = totals.grandTotal;
+
+  const addCharge = (line: Omit<BillChargeLine, 'key'>): boolean => {
+    if (!(line.amount > 0)) return false;
+    setCharges((prev) => [...prev, { ...line, key: chargeKey.current++ }]);
+    return true;
+  };
+  const updateChargeAmount = (key: number, amount: number): boolean => {
+    if (!(amount > 0)) return false;
+    setCharges((prev) => prev.map((c) => (c.key === key ? { ...c, amount } : c)));
+    return true;
+  };
+  const removeCharge = (key: number) => setCharges((prev) => prev.filter((c) => c.key !== key));
   const paid = effectivePaid(paymentStatus, total, paidInput);
   const balanceDue = Math.max(0, total - paid);
   const paymentError = lines.length > 0 ? validatePayment(paymentStatus, total, paid, vendorId) : null;
@@ -222,6 +244,10 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     if (submitting.current) return;
     if (lines.length === 0) {
       setError('Add at least one line before recording the purchase');
+      return;
+    }
+    if (total < 0) {
+      setError('Discounts exceed the bill amount');
       return;
     }
     const pe = validatePayment(paymentStatus, total, paid, vendorId);
@@ -242,7 +268,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       paymentStatus,
       paidAmount: paid,
       paymentMode: 'CASH',
-      charges: [],
+      charges: toChargeInputs(charges),
       notes: notes.trim() || null,
       items: lines.map((l) => ({
         itemId: l.itemId,
@@ -256,6 +282,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       const res = await api.createPurchase(payload);
       setSuccessCode(res.transactionCode);
       setLines([]);
+      setCharges([]);
       setSupplierInvoiceRef('');
       setNotes('');
       setVendorId(null);
@@ -276,10 +303,11 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
   // Hotkeys: Ctrl+Enter records, Alt+B opens the bundle modal. Own listener so the page works
   // regardless of the shell's registry; always calls the latest handler.
-  const latest = useRef({ record: handleRecordInward, bundle: () => {}, modalOpen: false });
+  const latest = useRef({ record: handleRecordInward, bundle: () => {}, charges: () => {}, modalOpen: false });
   latest.current = {
-    modalOpen: isBundleModalOpen,
+    modalOpen: isBundleModalOpen || chargeModalOpen,
     record: handleRecordInward,
+    charges: () => chargesRef.current?.open(),
     bundle: () => {
       if (selectedItem) setIsBundleModalOpen(true);
       else setDraftError('Select an item before creating a bundle (Alt+B)');
@@ -294,6 +322,9 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       } else if (e.altKey && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         latest.current.bundle();
+      } else if (e.altKey && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        latest.current.charges();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -525,15 +556,36 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
         </Table>
       </div>
 
+      <BillChargesPanel
+        ref={chargesRef}
+        side="PURCHASE"
+        lines={charges}
+        onAdd={addCharge}
+        onUpdateAmount={updateChargeAmount}
+        onRemove={removeCharge}
+        onDone={focusSearch}
+        onModalOpenChange={setChargeModalOpen}
+      />
+
       {/* Footer Settlement & Commit Bar */}
       <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-6">
           <div className="flex flex-col">
-            <span className="text-xs text-slate-500 font-medium">Total Purchase Value</span>
+            <span className="text-xs text-slate-500 font-medium">
+              {charges.length > 0 ? 'Grand Total (payable)' : 'Total Purchase Value'}
+            </span>
             <div data-testid="purchase-total" className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
               <CurrencyDisplay amount={total} size="xl" />
             </div>
           </div>
+          {charges.length > 0 && (
+            <div className="w-56" data-testid="purchase-breakdown">
+              <span data-testid="purchase-items-subtotal" className="sr-only">
+                {itemsSubtotal}
+              </span>
+              <BillTotalsSummary compact itemsSubtotal={itemsSubtotal} lines={charges} grandTotal={total} />
+            </div>
+          )}
           <div className="h-8 w-px bg-slate-200 dark:bg-slate-800" />
           <div className="flex flex-col text-xs text-slate-500 font-mono">
             <span>Lines: {lines.length}</span>
