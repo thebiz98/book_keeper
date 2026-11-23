@@ -334,3 +334,6 @@ When beginning the Low-Level Design (LLD) and implementation:
   - `<ImportDialog />` with dry-run preview table and conflict selectors.
   - `<ExportButton />` dropdown component with format selection.
   - `<VedBillMigrationCard />` in the Settings page with step-by-step progress indicator.
+
+### v1.1 addendum: Low Stock Level column (v4)
+Template A gains an optional last column `Low Stock Level | Decimal | No (Def: 5) | 10 | Low-stock alert level in base units; 0 = never`. New items: blank = 5. OVERWRITE updates the level only when the cell is non-blank. ADD_STOCK ignores it. VedBill has no source field, so 5 is used. `expected_columns` now has 11 entries.

@@ -337,3 +337,10 @@ The application maintains a persistent desktop shell across all views.
 | **FR-21** | Item type (entity only) | Page 5 (read-only type line) |
 | **FR-22** | Explicit Save/Cancel on quick-create | Page 2/4 (Alt+C/V, Alt+B), Page 11, §4 |
 | **NFR-06** | Keyboard Ergonomics | Global shell hotkey registry, **Page 2/3/4** |
+
+### v1.1 Inventory (Page 5) live search and Low Stock Level (v4)
+* Search is live (about 150 ms after typing stops, no Search button, Enter runs immediately, page resets to 1). Toggle: "Show Only Low Stock (below each item's level)".
+* Columns: expander, Item Name, Category, Base Unit, Current Stock, Status, Low Stock Level (inline), MRP, Sale Price, Bundles, Actions. Barcode column removed (still searchable, still in the drawer).
+* Inline cell: always an input; focus selects text; Enter saves and moves to next row's cell; blur saves; Esc reverts; empty/negative/non-numeric shows an inline error and is not saved; unchanged = no save; Status badge updates from the server response; with "Low Stock only" on, a row that stops being low stays until refresh.
+* Drawer: "Low Stock Level (base units)", default 5, help "Marked Low Stock when stock falls below this. 0 = never".
+* Dashboard low-stock widget shows `stock / level unit`. Pages 7, 8, 11, party selector and bill picker use live search (see FR-14 rev.). Traceability: FR-05 rev., FR-14 rev.

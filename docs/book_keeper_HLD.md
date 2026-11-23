@@ -1344,3 +1344,5 @@ Rules for every branch:
 * Each migration ships with a frozen-fixture upgrade test (DD-29).
 * The integrator gate (`bash run_e2e_tests.sh`: cargo test, clippy, tsc, vitest, vite build) passes before merge.
 * The mock client stays a thin fixture client (DD-27): new IPC methods get typed stub data, no business rules.
+
+> **v4 amendments (feat/live-search-low-stock):** (1) FR-11: optional Low Stock Level import column (blank = 5); `validate_items_import` lists it. (2) FR-14 rev.: a blank query lists everything; a query with no letters or digits matches nothing; party search also matches 3+ consecutive phone digits; client-side filtering of an already-loaded small list (Credit & Dues) counts as live. (3) `PARTY_SEARCH_FTS` also indexes `phone_digits`. (4) `get_items_catalog` input is `{ category?, low_stock_only?, search?, page, limit }`. (5) `update_item_low_stock_threshold` validates `threshold >= 0` and finite; response `is_low_stock` is recomputed.

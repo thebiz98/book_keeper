@@ -587,6 +587,20 @@ ORDER BY rank LIMIT ?;
 
 ---
 
+### 4.2 Generic FTS index, party index and low-stock rule (v1.1, schema v4)
+
+* `trait FtsIndex` (`data/contracts/search_indexer.rs`): `table`, `reindex(key)`, `reindex_many`, `remove`, `rebuild`, `indexed_count`, `source_count`, `search_keys(query, limit)`. Blanket impl for `Arc<T>`.
+* `FtsSpec { table, key_column, columns, source_all_sql, source_one_sql, source_count_sql }` and `SqliteFtsIndex` (`data/sqlite/fts.rs`), specs `ITEM_FTS`, `PARTY_FTS` in `data/sqlite/fts_specs.rs`. `fts_prefix_query` turns alphanumeric tokens into `"tok"*` (ANDed); `None` when there is none.
+* `ItemSearchIndexer` stays the item read facade; its `rebuild_index`, `indexed_item_count`, `remove_item` delegate to `SqliteFtsIndex(ITEM_FTS)`.
+* `party_search_fts(party_id UNINDEXED, name, phone, phone_digits)` (v4). Sync rule: write after commit via `sync_after_commit` (failures logged, never fail the command); startup `ensure_fts_index` repairs count mismatches; `data_reset(All)` rebuilds every index in `fts_indexes`.
+* Query rules: blank query = no filter; non-blank query with no alphanumeric token matches nothing. `PartyRepository::list_rows` uses FTS; a digits-only query of 3+ digits also matches `phone_digits LIKE %q%`; results ordered by name.
+* Low stock rule: `core::stock_rules::is_low_stock(item_type, stock, threshold) = Physical && stock < threshold`; SQL twin `LOW_STOCK_SQL`; `DEFAULT_LOW_STOCK_THRESHOLD = 5.0` replaces `LOW_STOCK_THRESHOLD`. `items.low_stock_threshold REAL NOT NULL DEFAULT 5 CHECK (>= 0)`; 0 = never low.
+* `ItemRepository::update_stock_cache(item_id, new_stock)` (flag derived in SQL), `update_low_stock_threshold`, `recompute_low_stock_flags` (also run by the startup stock audit).
+* `ItemService::update_low_stock_threshold(item_id, threshold) -> ItemSearchResult`; validation field `low_stock_threshold`, message "Low stock level must be a number that is 0 or more". `PartyService` takes `Arc<dyn FtsIndex>`. `LowStockItem` carries `low_stock_threshold`.
+* IPC: `update_item_low_stock_threshold(item_id, threshold)`. `AppState.party_index`, `AppState.fts_indexes`, `DataResetServiceImpl::with_fts_indexes`.
+* Import: optional "Low Stock Level" column (blank = 5).
+* Tests: TC-LOW-01..08, TC-PSRCH-01..08, TC-FTS-01..05, TC-MIG-V4, TC-IMP-LSL-01..04.
+
 ## 5. Storage Repositories & Transaction Boundary (`data/contracts`)
 
 ### 5.1 Unit of Work & Transaction Abstraction
