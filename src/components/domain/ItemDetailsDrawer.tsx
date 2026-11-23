@@ -177,7 +177,7 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({ item, onCl
               onChange={(id) => setTab(id as TabId)}
             />
 
-            {tab === 'lots' && <LotInspector key={item.currentStock} itemId={item.itemId} baseUnit={item.baseUnit} />}
+            {tab === 'lots' && <LotInspector key={item.currentStock} itemId={item.itemId} baseUnit={item.baseUnit} editable />}
             {tab === 'sales' && (
               <BillsTab itemId={item.itemId} kind="SALE" onView={(id) => setViewBill({ kind: 'SALE', id })} />
             )}
