@@ -54,7 +54,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Replacement / Exchange (no-money swap)**: against a bill, one or more sold units come back — Restockable (e.g. a colour/size swap; goes back to its original lot) or Scrap (defective) — and one or more units of **any** item are issued from stock (FIFO). No money moves and revenue is not reversed; a value difference is shown as a warning only (use a refund + new sale when prices must be settled). Returned units are reversed exactly as in a refund return; issued units' cost becomes replacement COGS on the return date. The original sale is not altered.
   * **Vendor Purchase Return**: Returning stock to suppliers from a specific lot (qty ≤ lot remaining) or FIFO across the item's lots; settled per the refund rule above (payables first, then cash received).
 * **FR-08: Standalone Stock Adjustments with FIFO Depletion**
-  * The user can adjust stock quantities directly via item search (name or barcode) without referencing a sale or invoice ID, with an adjustment date and a reason: `DAMAGED`, `EXPIRED`, `THEFT_LOST`, or `COUNT_CORRECTION`.
+  * The user can adjust stock quantities directly via item search (name or barcode) without referencing a sale or invoice ID, with an adjustment date and a reason: `DAMAGED`, `EXPIRED`, `THEFT_LOST`, `COUNT_CORRECTION`, or `UNRECORDED_STOCK` (positive only; see the unrecorded stock bullet below).
   * **FIFO Depletion Linkage**: When an adjustment is negative (e.g. -5 damaged units), the system automatically triggers the FIFO allocation engine to deduct `remaining_quantity` from the oldest available lots, preventing phantom inventory lots and logging inventory write-off losses accurately.
   * **Positive adjustments** (found stock) create a new `ADJUSTMENT`-source lot at the item's most recent lot cost; if the item has never had a lot, the user must enter the unit cost. The selling price is never used as cost.
   * **Unrecorded / ad-hoc stock entry** *(added 2026-11-22, DD-40)*: an existing shop holds stock that has no purchase history. From the Item List / Item edit drawer, the user can **set the stock on hand** directly (enter the counted quantity) or add a quantity, without a purchase bill:
@@ -171,6 +171,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * Returns, settlements and stock adjustments remain the normal way to record real-world reversals (a customer bringing goods back is a return, not a bill edit).
 * **NFR-04: Clean Schema Evolution**
   * Future schema enhancements are introduced via explicit, typed migrations (`ALTER TABLE ADD COLUMN`) rather than untyped JSON blobs, preserving clean 1-to-1 Excel/CSV mappings.
+  * Changing a CHECK constraint uses a table rebuild (create new, copy rows with ids, carry `sqlite_sequence`, drop, rename, recreate indexes) with foreign keys off, inside the migration's transaction (DD-29).
 * **NFR-05: Modularity & Pluggable Stock Strategy**
   * The inventory allocation engine is decoupled such that the depletion strategy (currently FIFO) can be swapped for LIFO or Weighted Average without database restructuring.
 * **NFR-06: Heads-Down Keyboard Ergonomics**
@@ -732,6 +733,7 @@ erDiagram
 *Direct physical stock count corrections (in base units).*
 * Stores `adjustment_date`, `item_id` (via direct search/barcode), `quantity` (+/- base units, non-zero), `unit_cost` (positive adjustments only), `reason` (`DAMAGED`, `EXPIRED`, `COUNT_CORRECTION`, `THEFT_LOST`, `UNRECORDED_STOCK`), `notes`, and `created_at`.
 * *(v1.1)* `UNRECORDED_STOCK` is positive-only and always stores the user-entered `unit_cost` used for its lot (Assumption 20).
+* Schema v5: CHECK `reason <> 'UNRECORDED_STOCK' OR (quantity > 0 AND unit_cost IS NOT NULL)`.
 * **Negative:** FIFO depletion against the oldest lots, logged in `STOCK_OUTFLOW_ALLOCATION(source_type = ADJUSTMENT)`; the consumed cost is an inventory loss.
 * **Positive (found stock):** creates an `ADJUSTMENT`-source lot at the item's most recent lot cost; if the item never had a lot, the user-supplied `unit_cost` is required.
 
@@ -1205,7 +1207,8 @@ interface StockAdjustmentPayload {
   adjustment_date: string;            // "YYYY-MM-DD"
   quantity: number;                   // non-zero; positive (+) to add, negative (-) to write off
   unit_cost: number | null;           // positive only; required if item has no prior lot
-  reason: "DAMAGED" | "EXPIRED" | "COUNT_CORRECTION" | "THEFT_LOST";
+  reason: "DAMAGED" | "EXPIRED" | "COUNT_CORRECTION" | "THEFT_LOST" | "UNRECORDED_STOCK";
+  // UNRECORDED_STOCK: quantity > 0 only; unit_cost = user-entered cost, null => latest lot cost, else ValidationError(unit_cost)
   notes: string | null;
 }
 
@@ -1309,8 +1312,12 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // --- Items (FR-05 rev., FR-08 rev., FR-21)
 // CreateItemPayload / UpdateItemPayload gain low_stock_threshold?: number (default 5), item_type?: "PHYSICAL"
 // update_item_low_stock_threshold { item_id, threshold } -> ItemSearchResult   (inline list edit)
-// set_item_stock { item_id, counted_quantity, unit_cost?, adjustment_date, notes }
-//   -> { adjustment_id | null, delta }   (delta > 0 => UNRECORDED_STOCK lot; < 0 => COUNT_CORRECTION)
+// set_item_stock { payload: { item_id, counted_quantity (>= 0), unit_cost?, adjustment_date, notes? } }
+//   -> { adjustment_id: number | null, delta, reason: "UNRECORDED_STOCK" | "COUNT_CORRECTION" | null,
+//        previous_stock, new_stock, unit_cost: number | null, value_change }
+//   delta computed in the BEGIN IMMEDIATE tx from current_stock; |delta| <= 1e-9 => no-op (nothing written).
+//   value_change = +delta x unit_cost (UNRECORDED_STOCK) or -FIFO loss (COUNT_CORRECTION). Item must be PHYSICAL and active.
+// "Add quantity" mode uses create_stock_adjustment { quantity > 0, reason: UNRECORDED_STOCK, unit_cost }.
 // ItemSearchResult gains low_stock_threshold, item_type; get_items_catalog gains search (live, FTS)
 
 // --- Parties (FR-14 rev.)

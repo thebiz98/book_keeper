@@ -90,7 +90,7 @@ This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagre
 
 **DD-11 — One outflow allocation table.** `ADJUSTMENT_STOCK_ALLOCATION` becomes `STOCK_OUTFLOW_ALLOCATION (source_type ∈ ADJUSTMENT | REPLACEMENT | VENDOR_RETURN, source_id, purchase_item_id, quantity_depleted, unit_cost)`. Sale depletion stays in `SALE_STOCK_ALLOCATION`.
 
-**DD-12 — Stock adjustment payload.** Adds `adjustment_date` and an optional `unit_cost` (see DD-08). The reasons are `DAMAGED | EXPIRED | THEFT_LOST | COUNT_CORRECTION`.
+**DD-12 — Stock adjustment payload.** Adds `adjustment_date` and an optional `unit_cost` (see DD-08). The reasons are `DAMAGED | EXPIRED | THEFT_LOST | COUNT_CORRECTION` (v1.1, DD-40: + `UNRECORDED_STOCK`).
 
 ## Reporting
 
@@ -253,7 +253,7 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 **DD-39 — P&L v1.1 (amends DD-13).** Gross Sales = Σ sale `items_subtotal`. Net Sales = Gross − Sales Discounts − Sales Returns. Gross Profit = Net Sales − COGS. Net Profit = Gross Profit + Other Income (sale charges + purchase discounts) − Inventory Losses − Operating Expenses (expenses + purchase charges). Purchases report = Σ purchase `items_subtotal` − vendor returns. Linked-return refund cap on a discounted sale = line rate × (1 − discounts_total / items_subtotal).
 - **Chosen (user, 2026-11-22):** expenses reduce Net Profit, not just cash.
 
-**DD-40 — Unrecorded stock entry (FR-08 rev.).** New adjustment reason `UNRECORDED_STOCK` (positive only) creates an `ADJUSTMENT`-source lot at a user-entered cost (prefilled from the latest lot; amends DD-08 for this reason only). "Set stock on hand" computes the delta: positive → `UNRECORDED_STOCK`, negative → `COUNT_CORRECTION`. Never a purchase, never income.
+**DD-40 — Unrecorded stock entry (FR-08 rev.).** New adjustment reason `UNRECORDED_STOCK` (positive only) creates an `ADJUSTMENT`-source lot at a user-entered cost (prefilled from the latest lot; amends DD-08 for this reason only). "Set stock on hand" computes the delta: positive → `UNRECORDED_STOCK`, negative → `COUNT_CORRECTION`. Never a purchase, never income. Add mode = `create_stock_adjustment(UNRECORDED_STOCK)`; Set mode = `set_item_stock`, which computes the delta server-side. A `Transactions` testing reset (DD-34) removes unrecorded-stock lots like any adjustment. Schema v5 rebuilds `stock_adjustments`.
 
 **DD-41 — Bills are correctable (FR-20; supersedes v1 NFR-03 immutability).** Sales and purchases can be edited (reverse-then-repost in one transaction, same id/code) or deleted; returns can be deleted; expenses edited/deleted. No revision history in v1.1 (`updated_at` only).
 - **Chosen (user, 2026-11-22):** *guard, and allow return delete.* A bill with linked returns is locked until the returns are deleted. A purchase lot cannot shrink below its consumed quantity, and a consumed line cannot change item or be removed; a cost change re-costs dependent allocations. A bill's new total cannot fall below its later settlements + return credits. *Rejected:* cascading re-allocation; immutable returns.
