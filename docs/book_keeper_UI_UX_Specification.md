@@ -170,6 +170,7 @@ The application maintains a persistent desktop shell across all views.
 * Header row is fixed; the table fills the page height and scrolls inside itself; the pager stays visible below.
 * **Item Details / Edit Drawer:**
   - General Info: Name, Category, Barcode, Base Unit, MRP (₹, optional), Default Selling Price.
+  - Read-only line *Type: Physical (stocked item)*. No type selector in v1.1; service items are designed later (FR-21).
   - **Packaging Bundles Sub-table:**
     - List of bundles (e.g. "Dozen" = 12 PCS, "Box" = 50 PCS).
     - `[+ Add Bundle]` opens the bundle modal with **dynamic suggestions from existing bundles** (no hard-coded presets) + custom names, Multiplier (> 1), Bundle MRP, Bundle Sale Price, Outer Barcode.
@@ -333,5 +334,6 @@ The application maintains a persistent desktop shell across all views.
 | **FR-15** | Keyboard Checkout & Payment Dialog | **Page 2** (Enter flow) & **Page 3** (Payment / Summary Dialog) |
 | **FR-16** | Optional MRP | **Page 2** (indicator & cart), **Page 5** (item & bundle fields) |
 | **FR-17** | Soft-Deletion | *Deferred to v2 — no UI in v1* |
+| **FR-21** | Item type (entity only) | Page 5 (read-only type line) |
 | **FR-22** | Explicit Save/Cancel on quick-create | Page 2/4 (Alt+C/V, Alt+B), Page 11, §4 |
 | **NFR-06** | Keyboard Ergonomics | Global shell hotkey registry, **Page 2/3/4** |

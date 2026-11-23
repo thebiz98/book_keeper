@@ -167,6 +167,11 @@ src-tauri/src/
 ### 3.1 Value Objects & Enums
 
 ```rust
+// core/value_objects/item_type.rs  (FR-21, DD-42)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ItemType { #[default] Physical, Service }
+
 // core/value_objects/allocation_method.rs
 /// Enum selecting the inventory allocation strategy at DI wiring time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,6 +286,7 @@ pub enum OutflowSourceType {
 pub struct Item {
     pub id: i64,
     pub name: String,
+    pub item_type: ItemType,      // PHYSICAL (default) | SERVICE; v1.1 services accept PHYSICAL only
     pub category: Option<String>,
     pub barcode: Option<String>,
     pub base_unit: String,
@@ -525,6 +531,7 @@ pub struct ItemSearchResult {
     pub default_sale_price: f64,
     pub current_stock: f64,
     pub is_low_stock: bool,
+    pub item_type: ItemType,      // FR-21; after base_unit in the real struct
     pub bundles: Vec<ItemBundleSearchResult>,
 }
 
@@ -766,6 +773,8 @@ pub trait ReportRepository: Send + Sync {
 * `STOCK_ADJUSTMENT`: `CHECK (quantity <> 0)`.
 * Indexes: `purchase_item(item_id, remaining_quantity)`, `sale_stock_allocation(sale_item_id)`, `stock_outflow_allocation(source_type, source_id)`, `payment_settlement(settlement_date)`, `payment_settlement(transaction_type, transaction_id)`, `sale_transaction(transaction_date)`, `purchase_transaction(source, transaction_date)`, `item(barcode)`, `item_bundle(barcode)`, `return_item(sale_item_id)`, `return_item(purchase_item_id)`.
 * Name snapshots (DD-30): `party_name` on sale/purchase/return headers, `item_name` on sale/purchase/return lines, written by the creating service; history/detail queries read snapshots.
+* `ITEM.item_type TEXT NOT NULL DEFAULT 'PHYSICAL' CHECK (item_type IN ('PHYSICAL','SERVICE'))`, added by migration **v3** `item_type` (`ALTER TABLE ADD COLUMN`; existing rows become PHYSICAL).
+* Every migration has a frozen-fixture upgrade test: `src-tauri/tests/fixtures/schema/vN.sql` holds the exact DDL delta of migration N as shipped (v1 = full aligned schema) plus its `schema_version` row and `PRAGMA user_version`. Tests build a vN-1 database from fixtures 1..N-1, seed rows, run `run_migrations`, and assert the data survived. Fixture files are never edited after the migration ships.
 * Schema strategy (DD-29): v1 is the aligned schema itself (pre-release rewrite); a legacy pre-alignment DB is detected and rejected.
 * Migrations are numbered, forward-only, recorded in a `schema_version` table, each applied in one transaction; `ALTER TABLE ADD COLUMN` / new tables only (NFR-04). No JSON blob columns.
 
@@ -1202,6 +1211,8 @@ pub trait ItemService: Send + Sync {
 
 * **Validation**: item `name` non-empty, trimmed, unique (case-insensitive); `barcode` unique across items and bundles when present; `default_sale_price >= 0`; `mrp` null or `> 0`. Bundle: `bundle_name` non-empty, `units_per_bundle > 1`, prices null or `>= 0`, unique `(item_id, bundle_name)`.
 * **Bundles are freely editable (DD-28)**: any field, including `units_per_bundle`, may change and bundles may be deleted at any time. Bill lines store base `quantity` plus a display snapshot (`pack_label`, `pack_quantity`) and never reference `ITEM_BUNDLE`. Reindex the item after bundle changes (bundle barcodes are FTS rows).
+* **Item type (FR-21, DD-42)**: `item_type` is optional in create/update payloads (`None` => create: `PHYSICAL`, update: keep). `SERVICE` is rejected in v1.1 with `ValidationError { field: "item_type", message: "Service items are not supported yet. Only physical (stocked) items can be saved in this version." }`. The import always creates `PHYSICAL`.
+* **DTO note**: `ItemSearchResult` (catalog and FTS rows) carries `item_type`. `CreateItemPayload` and `UpdateItemPayload` carry `#[serde(default)] item_type: Option<ItemType>`.
 
 * **Used by**:
   * `InventoryService` — to validate items are active and resolve bundle multipliers.
@@ -2032,6 +2043,13 @@ This section establishes the authoritative test suites, test cases, inputs, and 
 | **TC-SRCH-002** | Barcode Exact & Prefix Scanner Lookup | Item has barcode `"8901030381023"` | `search_items_fts(query = "8901030381023")` | • Exact match returned as first result. |
 | **TC-SRCH-003** | Soft-Deleted / Archived Item Exclusion | Item archived (`is_active = 0`) | `search_items_fts(query = "<archived item name>")` | • Returns 0 results (hidden from active search). |
 | **TC-SRCH-004** | Dynamic Bundle Suggestion Aggregation | 10 items have bundle "Box" (10 units), 2 have "Dozen" (12 units) | `get_bundle_suggestions()` | • Top suggestion: `("Box", 10, usage_count = 10)`.<br>• Second: `("Dozen", 12, usage_count = 2)`. |
+
+| **TC-TYP-01** | Default item type | `create_item` without `item_type` | Read item, catalog, FTS result | • All report `PHYSICAL`. |
+| **TC-TYP-02** | Explicit PHYSICAL accepted | `item_type = Some(Physical)` | `create_item` | • Succeeds. |
+| **TC-TYP-03** | SERVICE rejected on create | `item_type = Some(Service)` | `create_item` | • `ValidationError(field = "item_type")`; nothing written. |
+| **TC-TYP-04** | SERVICE rejected on update | Existing PHYSICAL item | `update_item` with `Some(Service)` / `None` | • Rejected and unchanged / keeps `PHYSICAL`. |
+
+Schema upgrade cases (`schema_test.rs`): fresh DB has `items.item_type` NOT NULL default `'PHYSICAL'` with CHECK; a frozen v2 database upgrades to v3 with all existing items `PHYSICAL`, stock and settings intact.
 
 ---
 

@@ -436,6 +436,7 @@ export interface ApiClient {
   getPurchaseDetails(purchaseId: number): Promise<PurchaseDetailResponse>;
 
   // Inventory & Typeahead
+  // ItemSearchResult.itemType: 'PHYSICAL' | 'SERVICE'; CreateItemPayload/UpdateItemPayload.itemType?: optional (omitted => PHYSICAL)
   searchItemsFts(query: string, limit?: number): Promise<ItemSearchResult[]>;
   getItemsCatalog(filter: ItemCatalogFilter): Promise<PaginatedResponse<ItemSearchResult>>;
   createItem(payload: CreateItemPayload): Promise<number>;            // item id
@@ -489,6 +490,7 @@ The `MockApiClient` provides realistic stationery shop data matching forensic fi
 * Items with pre-configured packaging bundles (e.g., *Classmate Notebook: Pack of 6*, *Apsara Pencils: Box of 10*).
 * Customer credit accounts with active dues for Khata settlement testing.
 * Simulates network latency (30ms–50ms) to verify loading states.
+* All seed items are `PHYSICAL`. The mock does not validate `itemType` (DD-27).
 
 ---
 

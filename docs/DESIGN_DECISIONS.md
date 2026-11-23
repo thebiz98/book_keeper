@@ -259,6 +259,8 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - **Chosen (user, 2026-11-22):** *guard, and allow return delete.* A bill with linked returns is locked until the returns are deleted. A purchase lot cannot shrink below its consumed quantity, and a consumed line cannot change item or be removed; a cost change re-costs dependent allocations. A bill's new total cannot fall below its later settlements + return credits. *Rejected:* cascading re-allocation; immutable returns.
 
 **DD-42 — Item type (FR-21).** `ITEM.item_type` ∈ `PHYSICAL | SERVICE`, default `PHYSICAL`. Entity only in v1.1; services reject `SERVICE` until service billing is designed.
+- Added by migration v3. The UI shows a read-only type line and never sends `itemType` (the backend defaults it).
+- Later service billing must bypass the `cartStore.addItem` rule that rejects `currentStock <= 0` (out of scope now).
 
 **DD-43 — Sticky table headers (FR-10 rev.).** Implemented once in the shared `Table`/`DataTable` primitives (scroll container + `position: sticky` header), so every list gets it.
 
