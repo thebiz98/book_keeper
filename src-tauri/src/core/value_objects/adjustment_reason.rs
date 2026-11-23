@@ -7,4 +7,6 @@ pub enum AdjustmentReason {
     Expired,
     CountCorrection,
     TheftLost,
+    /// Positive only; lot at user-entered cost (DD-40).
+    UnrecordedStock,
 }

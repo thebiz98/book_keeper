@@ -276,6 +276,15 @@ fn lot_return_adjustment_and_enum_checks() {
     assert!(adj(0.0, "DAMAGED").is_err());
     assert!(adj(-1.0, "DamageWriteOff").is_err(), "legacy PascalCase reason rejected");
     assert!(adj(-1.0, "DAMAGED").is_ok());
+    assert!(adj(2.0, "UNRECORDED_STOCK").is_err(), "needs unit_cost");
+    let adj_cost = |qty: f64, reason: &str| {
+        c.execute(
+            "INSERT INTO stock_adjustments (adjustment_date, item_id, quantity, unit_cost, reason) VALUES ('2026-11-21', 1, ?1, 3, ?2)",
+            rusqlite::params![qty, reason],
+        )
+    };
+    assert!(adj_cost(2.0, "UNRECORDED_STOCK").is_ok());
+    assert!(adj_cost(-2.0, "UNRECORDED_STOCK").is_err(), "positive only");
 
     // sale allocation returned_quantity bounds
     c.execute(
@@ -362,6 +371,7 @@ fn enum_literals_are_screaming_snake_case_and_round_trip() {
     assert_eq!(lit(StockCondition::DamagedScrap), "DAMAGED_SCRAP");
     assert_eq!(lit(AdjustmentReason::CountCorrection), "COUNT_CORRECTION");
     assert_eq!(lit(AdjustmentReason::TheftLost), "THEFT_LOST");
+    assert_eq!(lit(AdjustmentReason::UnrecordedStock), "UNRECORDED_STOCK");
     assert_eq!(lit(SettlementType::Replacement), "REPLACEMENT");
     assert_eq!(lit(ReturnType::Vendor), "VENDOR");
     assert_eq!(lit(PaymentKind::ReturnCredit), "RETURN_CREDIT");
@@ -411,6 +421,7 @@ fn db_path_defaults_to_shop_db_and_env_override_wins() {
 const V1: &str = include_str!("fixtures/schema/v1.sql");
 const V2: &str = include_str!("fixtures/schema/v2.sql");
 const V3: &str = include_str!("fixtures/schema/v3.sql");
+const V4: &str = include_str!("fixtures/schema/v4.sql");
 
 /// Builds a database at the version reached by replaying `steps` (fixtures 1..N).
 fn db_from_fixtures(tag: &str, steps: &[&str]) -> (PathBuf, Connection) {
@@ -622,6 +633,76 @@ fn v3_database_upgrades_to_v4_recomputes_flag_and_indexes_parties() {
     let id: i64 = conn.query_row("SELECT party_id FROM party_search_fts WHERE party_search_fts MATCH '\"9199\"*'", [], |r| r.get(0)).unwrap();
     assert_eq!(id, 3);
     run_migrations(&conn).expect("second run is a no-op");
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn v4_database_upgrades_stock_adjustments_to_accept_unrecorded_stock() {
+    let (path, conn) = db_from_fixtures("v4up", &[V1, V2, V3, V4]);
+    conn.execute_batch(
+        "INSERT INTO items (id, name) VALUES (1, 'Pen');
+         INSERT INTO purchase_transactions (id, transaction_code, transaction_date, payment_status, total_amount)
+           VALUES (1, 'PUR-1001', '2026-11-01', 'PAID', 0);
+         INSERT INTO purchase_items (id, purchase_transaction_id, item_id, item_name, pack_quantity, quantity, unit_cost, total_amount, remaining_quantity)
+           VALUES (1, 1, 1, 'Pen', 10, 10, 5, 50, 7);
+         INSERT INTO stock_adjustments (id, adjustment_date, item_id, quantity, unit_cost, reason, notes, created_at)
+           VALUES (7, '2026-11-01', 1, -3, NULL, 'DAMAGED', 'broken', '2026-11-01T10:00:00Z');
+         INSERT INTO stock_adjustments (id, adjustment_date, item_id, quantity, unit_cost, reason, notes, created_at)
+           VALUES (9, '2026-11-02', 1, 2, 5.0, 'COUNT_CORRECTION', NULL, '2026-11-02T10:00:00Z');
+         INSERT INTO stock_outflow_allocations (source_type, source_id, purchase_item_id, quantity_depleted, unit_cost)
+           VALUES ('ADJUSTMENT', 7, 1, 3, 5);
+         UPDATE sqlite_sequence SET seq = 20 WHERE name = 'stock_adjustments';",
+    )
+    .unwrap();
+    type Row = (i64, String, i64, f64, Option<f64>, String, Option<String>, String);
+    let read = |c: &Connection| -> Vec<Row> {
+        c.prepare("SELECT id, adjustment_date, item_id, quantity, unit_cost, reason, notes, created_at FROM stock_adjustments ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    let before = read(&conn);
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 5);
+    let uv: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(uv, latest_version());
+    assert_eq!(read(&conn), before, "rows identical");
+    let joined: i64 = conn
+        .query_row("SELECT COUNT(*) FROM stock_outflow_allocations o JOIN stock_adjustments j ON j.id = o.source_id", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(joined, 1);
+    let seq: i64 = conn.query_row("SELECT seq FROM sqlite_sequence WHERE name = 'stock_adjustments'", [], |r| r.get(0)).unwrap();
+    assert_eq!(seq, 20);
+    let stray: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_sequence WHERE name = 'stock_adjustments_v5'", [], |r| r.get(0)).unwrap();
+    assert_eq!(stray, 0);
+    conn.execute("INSERT INTO stock_adjustments (adjustment_date, item_id, quantity, reason) VALUES ('2026-11-03', 1, -1, 'DAMAGED')", []).unwrap();
+    let new_id: i64 = conn.query_row("SELECT MAX(id) FROM stock_adjustments", [], |r| r.get(0)).unwrap();
+    assert_eq!(new_id, 21);
+    let idx: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name='stock_adjustments' AND name IN ('idx_adjustments_item','idx_adjustments_date')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(idx, 2);
+    let ins = |qty: f64, cost: Option<f64>, reason: &str| {
+        conn.execute(
+            "INSERT INTO stock_adjustments (adjustment_date, item_id, quantity, unit_cost, reason) VALUES ('2026-11-03', 1, ?1, ?2, ?3)",
+            rusqlite::params![qty, cost, reason],
+        )
+    };
+    assert!(ins(4.0, Some(6.0), "UNRECORDED_STOCK").is_ok());
+    assert!(ins(-1.0, Some(6.0), "UNRECORDED_STOCK").is_err());
+    assert!(ins(4.0, None, "UNRECORDED_STOCK").is_err());
+    assert!(ins(4.0, Some(6.0), "BOGUS").is_err());
+    let fk: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(fk, 0);
+    let ic: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(ic, "ok");
     drop(conn);
     cleanup(&path);
 }

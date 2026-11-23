@@ -255,6 +255,31 @@ INSERT INTO party_search_fts (party_id, name, phone, phone_digits)
   FROM parties WHERE is_active = 1;
 "#;
 
+// Table rebuild (NFR-04 rev.): FK off by runner; ids and AUTOINCREMENT sequence preserved;
+// nothing references stock_adjustments by FK.
+const SCHEMA_V5_UNRECORDED_STOCK: &str = r#"
+CREATE TABLE stock_adjustments_v5 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    adjustment_date TEXT NOT NULL,
+    item_id INTEGER NOT NULL REFERENCES items(id),
+    quantity REAL NOT NULL CHECK (quantity <> 0),
+    unit_cost REAL,
+    reason TEXT NOT NULL CHECK (reason IN ('DAMAGED', 'EXPIRED', 'THEFT_LOST', 'COUNT_CORRECTION', 'UNRECORDED_STOCK')),
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+    CHECK (reason <> 'UNRECORDED_STOCK' OR (quantity > 0 AND unit_cost IS NOT NULL))
+);
+INSERT INTO stock_adjustments_v5 (id, adjustment_date, item_id, quantity, unit_cost, reason, notes, created_at)
+    SELECT id, adjustment_date, item_id, quantity, unit_cost, reason, notes, created_at FROM stock_adjustments;
+DELETE FROM sqlite_sequence WHERE name = 'stock_adjustments_v5';
+INSERT INTO sqlite_sequence (name, seq)
+    SELECT 'stock_adjustments_v5', seq FROM sqlite_sequence WHERE name = 'stock_adjustments';
+DROP TABLE stock_adjustments;
+ALTER TABLE stock_adjustments_v5 RENAME TO stock_adjustments;
+CREATE INDEX idx_adjustments_item ON stock_adjustments(item_id);
+CREATE INDEX idx_adjustments_date ON stock_adjustments(adjustment_date);
+"#;
+
 /// All known migrations, ascending and gap-free. Append only; never edit a shipped step.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 },
@@ -269,6 +294,7 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: "ALTER TABLE items ADD COLUMN item_type TEXT NOT NULL DEFAULT 'PHYSICAL' CHECK (item_type IN ('PHYSICAL', 'SERVICE'));",
     },
     Migration { version: 4, name: "low_stock_threshold_party_fts", sql: SCHEMA_V4 },
+    Migration { version: 5, name: "unrecorded_stock_reason", sql: SCHEMA_V5_UNRECORDED_STOCK },
 ];
 
 /// Highest schema version this build knows.
