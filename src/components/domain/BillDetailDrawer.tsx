@@ -210,7 +210,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
               <TableRow className="text-left text-slate-400">
                 <TableHead className="py-1">Item</TableHead>
                 <TableHead>Pack / Qty</TableHead>
-                <TableHead className="text-right">{kind === 'SALE' ? 'Rate/unit' : 'Cost/unit'}</TableHead>
+                <TableHead className="text-right">{kind === 'SALE' ? 'Rate/unit' : 'Purchase price/unit'}</TableHead>
                 <TableHead className="text-right">Total</TableHead>
                 <TableHead className="text-right">{kind === 'SALE' ? 'Returned' : 'Remaining'}</TableHead>
               </TableRow>

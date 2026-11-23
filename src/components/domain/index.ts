@@ -13,5 +13,6 @@ export * from './ExpenseForm';
 export * from './ExpenseList';
 export * from './ChargeTypeTypeahead';
 export * from './ChargeTypeQuickCreateModal';
+export * from './ItemQuickCreateModal';
 export * from './BillChargesPanel';
 export * from './BillTotalsSummary';

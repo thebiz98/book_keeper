@@ -40,7 +40,7 @@ async function addBoxLine(container: HTMLElement, cost = '100') {
   const qty = container.querySelector('input[type="number"][step="any"]') as HTMLInputElement;
   typeInto(qty, '4');
   const costInput = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="number"]')).find((i) =>
-    (i.id && container.querySelector(`label[for="${i.id}"]`)?.textContent?.includes('Unit Cost'))
+    (i.id && container.querySelector(`label[for="${i.id}"]`)?.textContent?.includes('Purchase Price'))
   ) as HTMLInputElement;
   typeInto(costInput, cost);
   click(byText(container, 'button', /Add Line/));
@@ -179,7 +179,7 @@ describe('NewPurchasePage', () => {
     const { act } = await import('react');
     act(() => pickItem(makeItem()));
     const cost = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="number"]')).find((i) =>
-      container.querySelector(`label[for="${i.id}"]`)?.textContent?.includes('Unit Cost')
+      container.querySelector(`label[for="${i.id}"]`)?.textContent?.includes('Purchase Price')
     ) as HTMLInputElement;
     typeInto(cost, '12.5');
     key(cost, { key: 'Enter' });

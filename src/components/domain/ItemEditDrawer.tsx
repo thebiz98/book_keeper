@@ -8,40 +8,17 @@ import { FormActions } from '../ui/FormActions';
 import { SetStockDialog } from './SetStockDialog';
 import { TextInput } from '../ui/TextInput';
 import { BundleTable } from './BundleTable';
-import { parseOptional, validationField } from './formUtils';
+import { validationField } from './formUtils';
+import { FIELD_MAP, validateItemForm, type ItemFormErrors } from './itemForm';
 
 export interface ItemEditDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   /** null = create a new item. */
   item: ItemSearchResult | null;
-  categories: string[];
   /** Called after a successful save or any bundle change. */
   onSaved: () => void;
 }
-
-type Field =
-  | 'name'
-  | 'category'
-  | 'barcode'
-  | 'baseUnit'
-  | 'mrp'
-  | 'defaultSalePrice'
-  | 'initialStock'
-  | 'initialCost'
-  | 'lowStockThreshold';
-
-const FIELD_MAP: Record<string, Field> = {
-  name: 'name',
-  category: 'category',
-  barcode: 'barcode',
-  base_unit: 'baseUnit',
-  mrp: 'mrp',
-  default_sale_price: 'defaultSalePrice',
-  initial_stock: 'initialStock',
-  initial_cost: 'initialCost',
-  low_stock_threshold: 'lowStockThreshold',
-};
 
 const numText = (n: number | null | undefined) => (n === null || n === undefined ? '' : String(n));
 
@@ -50,22 +27,19 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   isOpen,
   onClose,
   item,
-  categories,
   onSaved,
 }) => {
   const isEdit = item !== null;
   const itemId = item?.itemId;
 
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('');
-  const [barcode, setBarcode] = useState('');
   const [baseUnit, setBaseUnit] = useState('PCS');
   const [mrp, setMrp] = useState('');
   const [price, setPrice] = useState('');
   const [initialStock, setInitialStock] = useState('');
   const [initialCost, setInitialCost] = useState('');
   const [lowStock, setLowStock] = useState('5');
-  const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
+  const [errors, setErrors] = useState<ItemFormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
@@ -79,8 +53,6 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     setName(item?.name ?? '');
-    setCategory(item?.category ?? '');
-    setBarcode(item?.barcode ?? '');
     setBaseUnit(item?.baseUnit ?? 'PCS');
     setMrp(numText(item?.mrp));
     setPrice(item ? String(item.defaultSalePrice) : '');
@@ -95,45 +67,22 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
 
   const handleSave = async () => {
     if (busy.current) return;
-    const errs: Partial<Record<Field, string>> = {};
-    const mrpVal = parseOptional(mrp);
-    const priceVal = parseOptional(price);
-    const stockVal = parseOptional(initialStock);
-    const costVal = parseOptional(initialCost);
-
-    if (!name.trim()) errs.name = 'Item name is required';
-    if (!baseUnit.trim()) errs.baseUnit = 'Base unit is required';
-    if (priceVal === null || !Number.isFinite(priceVal) || priceVal < 0) {
-      errs.defaultSalePrice = 'Enter a sale price (0 or more)';
-    }
-    const lowVal = parseOptional(lowStock);
-    if (lowVal === null || !Number.isFinite(lowVal) || lowVal < 0) {
-      errs.lowStockThreshold = 'Low stock level must be 0 or more';
-    }
-    if (mrpVal !== null && (!Number.isFinite(mrpVal) || mrpVal <= 0)) {
-      errs.mrp = 'MRP must be greater than 0 (leave empty for none)';
-    }
-    if (!isEdit) {
-      if (stockVal !== null && (!Number.isFinite(stockVal) || stockVal < 0)) {
-        errs.initialStock = 'Initial stock cannot be negative';
-      }
-      if (costVal !== null && (!Number.isFinite(costVal) || costVal < 0)) {
-        errs.initialCost = 'Cost cannot be negative';
-      }
-      if (stockVal !== null && stockVal > 0 && costVal === null) {
-        errs.initialCost = 'Enter the cost of the opening stock';
-      }
-    }
+    const { errors: errs, values } = validateItemForm(
+      { name, baseUnit, mrp, price, lowStock, initialStock, initialCost },
+      isEdit ? 'edit' : 'create'
+    );
     setErrors(errs);
-    if (Object.keys(errs).length > 0) return;
+    if (!values) return;
+    const { mrp: mrpVal, price: priceVal, lowStock: lowVal, stock: stockVal, cost: costVal } = values;
 
     busy.current = true;
     setSaving(true);
     setFormError(null);
     const base = {
       name: name.trim(),
-      category: category.trim() || null,
-      barcode: barcode.trim() || null,
+      // Category/barcode are not editable in the UI (D5): edit re-sends the stored values, create sends null.
+      category: item?.category ?? null,
+      barcode: item?.barcode ?? null,
       baseUnit: baseUnit.trim().toUpperCase(),
       mrp: mrpVal, // empty => null, never 0
       defaultSalePrice: priceVal as number,
@@ -201,29 +150,6 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           autoFocus
         />
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <TextInput
-              label="Category"
-              list="inventory-categories"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              error={errors.category}
-            />
-            <datalist id="inventory-categories">
-              {categories.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-          </div>
-          <TextInput
-            label="Barcode / SKU"
-            value={barcode}
-            onChange={(e) => setBarcode(e.target.value)}
-            error={errors.barcode}
-          />
-        </div>
-
         <div className="grid grid-cols-3 gap-3">
           <TextInput
             label="Base Unit *"
@@ -243,7 +169,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
             className="text-right font-mono"
           />
           <TextInput
-            label="Default Sale Price (₹) *"
+            label="Sale Price (₹) *"
             type="number"
             min={0}
             step="any"
@@ -308,7 +234,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
               className="text-right font-mono"
             />
             <TextInput
-              label="Opening Cost / base unit (₹)"
+              label="Purchase Price / base unit (₹)"
               type="number"
               min={0}
               step="any"

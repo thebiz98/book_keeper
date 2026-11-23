@@ -26,6 +26,7 @@ function hintsFor(route: string): Hint[] {
         { action: 'completeBill', label: 'Complete Bill' },
         { action: 'addCharge' },
         { action: 'newBundle' },
+        { action: 'newItem' },
         { action: 'newCustomer' },
         { action: 'back' },
       ];
@@ -36,6 +37,7 @@ function hintsFor(route: string): Hint[] {
         { action: 'completeBill', label: 'Record Inward' },
         { action: 'addCharge' },
         { action: 'newBundle' },
+        { action: 'newItem' },
         { action: 'newVendor' },
       ];
     case 'dues':
