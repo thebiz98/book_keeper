@@ -425,6 +425,8 @@ const V4: &str = include_str!("fixtures/schema/v4.sql");
 const V5: &str = include_str!("fixtures/schema/v5.sql");
 #[allow(dead_code)]
 const V6: &str = include_str!("fixtures/schema/v6.sql");
+#[allow(dead_code)]
+const V7: &str = include_str!("fixtures/schema/v7.sql");
 
 /// Builds a database at the version reached by replaying `steps` (fixtures 1..N).
 fn db_from_fixtures(tag: &str, steps: &[&str]) -> (PathBuf, Connection) {
@@ -769,6 +771,68 @@ fn expense_checks() {
     assert!(ins("EXP-1001", 99, 5.0).is_err(), "dangling type (FK)");
     assert!(ins("EXP-1001", 1, 5.0).is_ok());
     assert!(ins("EXP-1001", 1, 6.0).is_err(), "duplicate code");
+    drop(conn);
+    drop(pool);
+    cleanup(&path);
+}
+
+#[test]
+fn v6_database_upgrades_to_v7_with_items_subtotal_backfill() {
+    let (path, conn) = db_from_fixtures("v6up", &[V1, V2, V3, V4, V5, V6]);
+    conn.execute_batch(
+        "INSERT INTO sale_transactions (id, transaction_code, transaction_date, payment_status, total_amount, paid_amount)
+           VALUES (1, 'SAL-1001', '2026-11-01', 'PAID', 150, 150);
+         INSERT INTO purchase_transactions (id, transaction_code, transaction_date, payment_status, total_amount, source)
+           VALUES (1, 'PUR-1001', '2026-11-01', 'UNPAID', 200, 'PURCHASE'), (2, 'OPN-0001', '2026-11-01', 'PAID', 0, 'OPENING');",
+    )
+    .unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 7);
+    let sale: (f64, f64, f64) = conn
+        .query_row("SELECT items_subtotal, charges_total, discounts_total FROM sale_transactions WHERE id=1", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .unwrap();
+    assert_eq!(sale, (150.0, 0.0, 0.0));
+    let sub = |id: i64| -> f64 {
+        conn.query_row("SELECT items_subtotal FROM purchase_transactions WHERE id=?1", [id], |r| r.get(0)).unwrap()
+    };
+    assert_eq!(sub(1), 200.0);
+    assert_eq!(sub(2), 0.0);
+    for t in ["charge_types", "bill_charges", "charge_type_search_fts"] {
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name = ?1", [t], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "{t}");
+    }
+    let before = current_version(&conn).unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(current_version(&conn).unwrap(), before);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn charge_tables_enforce_checks() {
+    let (path, pool) = fresh();
+    let conn = pool.get().unwrap();
+    assert!(latest_version() >= 7);
+    assert!(conn.execute("INSERT INTO charge_types (name, effect) VALUES ('X', 'BAD')", []).is_err(), "effect");
+    assert!(
+        conn.execute("INSERT INTO charge_types (name, effect, applies_to) VALUES ('X', 'CHARGE', 'NOPE')", []).is_err()
+    );
+    assert!(
+        conn.execute("INSERT INTO charge_types (name, effect, default_amount) VALUES ('X', 'CHARGE', 0)", []).is_err()
+    );
+    conn.execute("INSERT INTO charge_types (id, name, effect) VALUES (1, 'Transport', 'CHARGE')", []).unwrap();
+    assert!(conn.execute("INSERT INTO charge_types (name, effect) VALUES ('transport', 'CHARGE')", []).is_err());
+    let ins = |amount: f64| {
+        conn.execute(
+            "INSERT INTO bill_charges (transaction_type, transaction_id, charge_type_id, charge_name, effect, amount)
+             VALUES ('SALE', 1, 1, 'Transport', 'CHARGE', ?1)",
+            [amount],
+        )
+    };
+    assert!(ins(0.0).is_err());
+    assert!(ins(5.0).is_ok());
     drop(conn);
     drop(pool);
     cleanup(&path);
