@@ -311,6 +311,8 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 
 ## 5. System Architecture Overview
 
+> **Rule: business logic lives only in the backend** *(2026-11-24, DD-56)*. The UI never computes money, payment-status, settlement, refund, FIFO or stock rules, and never copies them. It collects input, does format checks only (empty field, not a number), and shows what the backend returns. Anything the user must see **before** saving is a **preview**: a backend dry run of the *same* service code the real command uses. The command's work runs inside a transaction that is rolled back, and the result or validation error is returned. Tests assert that `preview == result of the real command` for the same input. Display-only work is allowed in the UI: formatting, sorting a page, and mapping stored rows into form rows.
+
 ```mermaid
 flowchart TD
     subgraph UI ["Windows Desktop UI (Keyboard-First Flow)"]
@@ -1421,6 +1423,17 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // settle_bill_payment: unchanged contract; implemented on top of the batch path
 // update_settlement { settlement_id, payload: { amount_paid, settlement_date, payment_mode?, notes? } } -> PaymentSettlement
 // delete_settlement { settlement_id } -> { removed_amount, transaction_id }   // kind = SETTLEMENT only
+
+// --- Previews (DD-56): dry runs of the real command (transaction rolled back); never write.
+// preview_sale { payload: CreateSalePayload (payment optional), sale_id?: number (edit) } -> BillPreview
+// preview_purchase { payload: CreatePurchasePayload (payment optional), purchase_id?: number } -> BillPreview
+//   BillPreview { line_totals[], items_subtotal, charges_total, discounts_total, total_amount,
+//                 applied_amount, open_amount, payment: { paid_amount, balance_due, change_amount, payment_status } | null,
+//                 errors: [{ field, message }] }   // the same messages the real command would return
+// preview_lot_purchase_price { payload } -> LotPriceUpdateResult          (dry run of update_lot_purchase_price)
+// preview_settlement_allocation { party_id, transaction_type, amount } -> [{ transaction_id, amount_paid }]  (oldest first)
+// preview_customer_return / preview_vendor_return { payload } -> ReturnResult  (credited vs cash, values, cost)
+// preview_stock_adjustment { payload } / preview_set_item_stock { payload } -> result incl. unit cost used and value change
 ```
 
 ### 9.4. Atomic Transaction & Concurrency Controls
@@ -1468,3 +1481,5 @@ Same rules as §10 (own branch, phased commits, LLD/UI LLD first, frozen-fixture
 | 5 | `feat/bill-print` | A4 print of sale and purchase bills | FR-27 | — | 4 |
 
 Integer paise (DD-55) is a separate later feature with its own plan.
+
+**Follow-up (2026-11-24):** `refactor/backend-previews`, no schema change. It applies the §5 business-logic rule (DD-56) across the sale, purchase, return, settlement, lot-price and stock screens.

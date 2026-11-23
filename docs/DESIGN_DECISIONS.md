@@ -325,3 +325,11 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - **Quantities:** stay `REAL`; milli-units are an option.
 - **Migration:** money columns are rebuilt with `CAST(ROUND(x*100) AS INTEGER)`, checked against sum invariants, and the invariant suite moves to exact equality.
 - *Why deferred:* it touches every money field. It should be done mechanically in its own branch set, not mixed with v1.2 features.
+
+**DD-56 — Business rules only in the backend; previews are dry runs (2026-11-24).**
+- **Rule:** the frontend must not compute or copy money, payment-status, settlement-split, refund-split, FIFO-cost or stock rules (owner decision). Copies drift as the codebase grows.
+- **How previews work:** each screen that shows a figure before Save calls a `preview_*` command. It runs the same service code as the real command inside `BEGIN IMMEDIATE`, then drops the transaction (rollback on drop). It returns the outcome and the same `{field, message}` errors.
+- **Totals while typing:** bill totals on screen come from a debounced `preview_sale` / `preview_purchase`. Calls inside the app are local, a few ms.
+- **Tests:** Rust tests assert `preview(x) == command(x)` and that a preview leaves no rows behind. The TS rule copies and their tests are deleted (`lotPriceEffect.ts`, `allocateFifo`, `validatePayment` / `effectivePaid`, the return credit/cash split, `estimateFifoCost`, `latestLotCost`, `billTotals`).
+- **Mock client:** stays a thin fixture client (DD-27). It returns canned previews, with no rules.
+- *Amends* DD-51's shared TS/Rust case table (Rust only now).
