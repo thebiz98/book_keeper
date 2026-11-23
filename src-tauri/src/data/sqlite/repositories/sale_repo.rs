@@ -1,7 +1,7 @@
 //! SQLite implementation of `SaleRepository`.
 use rusqlite::{params, types::Value, OptionalExtension, Row};
 
-use crate::core::dtos::{SaleHistoryRow, SalesHistoryFilter};
+use crate::core::dtos::{ItemBillRef, SaleHistoryRow, SalesHistoryFilter};
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
@@ -99,7 +99,28 @@ impl SqliteSaleRepository {
     }
 }
 
+/// FR-23 page query (a const so the query-plan test runs the exact production SQL).
+pub const ITEM_SALES_PAGE_SQL: &str = "SELECT st.id, st.transaction_code, st.transaction_date, st.party_name \
+     FROM (SELECT DISTINCT sale_transaction_id AS tid, transaction_date AS d FROM sale_items \
+           WHERE item_id = ?1 ORDER BY transaction_date DESC, sale_transaction_id DESC LIMIT ?2 OFFSET ?3) x \
+     JOIN sale_transactions st ON st.id = x.tid";
+pub const ITEM_SALES_COUNT_SQL: &str = "SELECT COUNT(*) FROM (SELECT 1 FROM sale_items WHERE item_id = ?1 \n     GROUP BY transaction_date, sale_transaction_id)";
+
 impl SaleRepository for SqliteSaleRepository {
+    fn list_bills_for_item(&self, item_id: i64, offset: usize, limit: usize) -> Result<(Vec<ItemBillRef>, usize), AppError> {
+        let total: i64 = self.conn.query_row(ITEM_SALES_COUNT_SQL, params![item_id], |r| r.get(0))?;
+        let mut stmt = self.conn.prepare(ITEM_SALES_PAGE_SQL)?;
+        let mut rows = stmt
+            .query_map(params![item_id, lim(limit), lim(offset)], |r| {
+                Ok(ItemBillRef { bill_id: r.get(0)?, transaction_code: r.get(1)?, transaction_date: r.get(2)?, party_name: r.get(3)? })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        // The sub-select page is already in index order; the join may not keep it, so fix the order here
+        // (at most 50 rows) instead of paying a TEMP B-TREE in SQL.
+        rows.sort_by(|a, b| b.transaction_date.cmp(&a.transaction_date).then(b.bill_id.cmp(&a.bill_id)));
+        Ok((rows, total.max(0) as usize))
+    }
+
     fn update_header_for_edit(&mut self, h: &SaleTransaction) -> Result<(), AppError> {
         let n = self.conn.execute(
             "UPDATE sale_transactions SET transaction_date = ?2, party_id = ?3, party_name = ?4, payment_mode = ?5, \
@@ -113,6 +134,11 @@ impl SaleRepository for SqliteSaleRepository {
         if n == 0 {
             return Err(AppError::not_found("SaleTransaction", h.id.to_string()));
         }
+        // Keep the denormalized line date equal to the header date (schema v9 invariant).
+        self.conn.execute(
+            "UPDATE sale_items SET transaction_date = ?2 WHERE sale_transaction_id = ?1",
+            params![h.id, h.transaction_date],
+        )?;
         Ok(())
     }
 
@@ -139,7 +165,9 @@ impl SaleRepository for SqliteSaleRepository {
 
     fn create_sale_item(&mut self, l: &SaleItem) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO sale_items ({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
+            &format!(
+                "INSERT INTO sale_items ({ITEM_COLS}, transaction_date) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,                  (SELECT transaction_date FROM sale_transactions WHERE id = ?2))"
+            ),
             params![
                 opt_id(l.id), l.sale_transaction_id, l.item_id, l.item_name, l.pack_label, l.pack_quantity,
                 l.quantity, l.unit_price, l.total_amount

@@ -12,6 +12,7 @@ use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 /// `balance = total - paid - Σ RETURN_CREDIT >= 0`, the status follows the DD-01 rule and
 /// `total = subtotal + charges - discounts`.
 pub fn assert_ledger_invariant(db: &TestDb) {
+    assert_line_date_invariant(db);
     let mut tx = db.begin_read().expect("read");
     #[allow(clippy::type_complexity)]
     let mut bills: Vec<(TransactionType, i64, String, f64, f64, f64, PaymentStatus, f64, f64, f64)> = Vec::new();
@@ -46,7 +47,28 @@ pub fn assert_ledger_invariant(db: &TestDb) {
 
 /// Per item: Σ(lot quantity - remaining) = Σ sale depleted + Σ outflow depleted - Σ linked
 /// RESTOCKABLE returned quantity; `0 <= returned <= depleted`; no orphan allocations.
+/// Schema v9: every `sale_items` / `purchase_items` row carries its header's `transaction_date`.
+pub fn assert_line_date_invariant(db: &TestDb) {
+    let c = db.pool.get().unwrap();
+    for (lines, fk, header) in [
+        ("sale_items", "sale_transaction_id", "sale_transactions"),
+        ("purchase_items", "purchase_transaction_id", "purchase_transactions"),
+    ] {
+        let bad: i64 = c
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM {lines} l JOIN {header} h ON h.id = l.{fk} WHERE l.transaction_date <> h.transaction_date"
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(bad, 0, "{lines}: line date differs from header date");
+    }
+}
+
 pub fn assert_lot_flow_invariant(db: &TestDb) {
+    assert_line_date_invariant(db);
     let c = db.pool.get().unwrap();
     let rows: Vec<(i64, f64, f64)> = {
         let mut st = c

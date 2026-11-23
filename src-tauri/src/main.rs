@@ -50,6 +50,8 @@ fn main() {
             adjustment_controller::create_stock_adjustment,
             adjustment_controller::set_item_stock,
             adjustment_controller::get_item_lots,
+            adjustment_controller::get_item_sales,
+            adjustment_controller::get_item_purchases,
             return_controller::create_vendor_return,
             item_controller::get_bundle_suggestions,
             report_controller::get_cash_flow_report,

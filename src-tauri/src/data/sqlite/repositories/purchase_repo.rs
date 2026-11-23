@@ -1,7 +1,7 @@
 //! SQLite implementation of `PurchaseRepository`.
 use rusqlite::{params, types::Value, OptionalExtension, Row};
 
-use crate::core::dtos::{ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow};
+use crate::core::dtos::{ItemBillRef, ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
@@ -103,7 +103,31 @@ impl SqlitePurchaseRepository {
     }
 }
 
+/// FR-23 page query (a const so the query-plan test runs the exact production SQL).
+pub const ITEM_PURCHASES_PAGE_SQL: &str = "SELECT pt.id, pt.transaction_code, pt.transaction_date, pt.party_name \
+     FROM (SELECT DISTINCT pi.purchase_transaction_id AS tid, pi.transaction_date AS d FROM purchase_items pi \
+           JOIN purchase_transactions h ON h.id = pi.purchase_transaction_id AND h.source = 'PURCHASE' \
+           WHERE pi.item_id = ?1 ORDER BY pi.transaction_date DESC, pi.purchase_transaction_id DESC LIMIT ?2 OFFSET ?3) x \
+     JOIN purchase_transactions pt ON pt.id = x.tid";
+pub const ITEM_PURCHASES_COUNT_SQL: &str = "SELECT COUNT(*) FROM (SELECT 1 FROM purchase_items pi \
+     JOIN purchase_transactions h ON h.id = pi.purchase_transaction_id AND h.source = 'PURCHASE' \
+     WHERE pi.item_id = ?1 GROUP BY pi.transaction_date, pi.purchase_transaction_id)";
+
 impl PurchaseRepository for SqlitePurchaseRepository {
+    fn list_bills_for_item(&self, item_id: i64, offset: usize, limit: usize) -> Result<(Vec<ItemBillRef>, usize), AppError> {
+        let total: i64 = self.conn.query_row(ITEM_PURCHASES_COUNT_SQL, params![item_id], |r| r.get(0))?;
+        let mut stmt = self.conn.prepare(ITEM_PURCHASES_PAGE_SQL)?;
+        let mut rows = stmt
+            .query_map(params![item_id, lim(limit), lim(offset)], |r| {
+                Ok(ItemBillRef { bill_id: r.get(0)?, transaction_code: r.get(1)?, transaction_date: r.get(2)?, party_name: r.get(3)? })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        // The sub-select page is already in index order; the join may not keep it, so fix the order here
+        // (at most 50 rows) instead of paying a TEMP B-TREE in SQL.
+        rows.sort_by(|a, b| b.transaction_date.cmp(&a.transaction_date).then(b.bill_id.cmp(&a.bill_id)));
+        Ok((rows, total.max(0) as usize))
+    }
+
     fn update_header_for_edit(&mut self, h: &PurchaseTransaction) -> Result<(), AppError> {
         let n = self.conn.execute(
             "UPDATE purchase_transactions SET supplier_invoice_ref = ?2, transaction_date = ?3, party_id = ?4, \
@@ -117,6 +141,11 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         if n == 0 {
             return Err(AppError::not_found("PurchaseTransaction", h.id.to_string()));
         }
+        // Keep the denormalized line date equal to the header date (schema v9 invariant).
+        self.conn.execute(
+            "UPDATE purchase_items SET transaction_date = ?2 WHERE purchase_transaction_id = ?1",
+            params![h.id, h.transaction_date],
+        )?;
         Ok(())
     }
 
@@ -191,7 +220,9 @@ impl PurchaseRepository for SqlitePurchaseRepository {
 
     fn create_purchase_item(&mut self, l: &PurchaseItem) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO purchase_items ({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
+            &format!(
+                "INSERT INTO purchase_items ({ITEM_COLS}, transaction_date) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,                  (SELECT transaction_date FROM purchase_transactions WHERE id = ?2))"
+            ),
             params![
                 opt_id(l.id), l.purchase_transaction_id, l.item_id, l.item_name, l.pack_label, l.pack_quantity,
                 l.quantity, l.unit_cost, l.total_amount, l.remaining_quantity

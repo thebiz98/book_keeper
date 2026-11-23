@@ -111,6 +111,15 @@ pub struct ItemLot {
     pub unit_cost: f64,
 }
 
+/// One bill that contains an item (Item details drawer, FR-23). Each bill appears once per item.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemBillRef {
+    pub bill_id: i64,
+    pub transaction_code: String,
+    pub transaction_date: String,
+    pub party_name: Option<String>,
+}
+
 /// Inventory catalog query. `search` goes through the FTS indexer; `category` and
 /// `low_stock_only` still apply while searching. Defaults: page 1, limit 50 (max 200),
 /// `low_stock_only = false`. Blank `category` / `search` mean no filter.

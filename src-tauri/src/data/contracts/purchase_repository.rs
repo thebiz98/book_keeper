@@ -1,4 +1,4 @@
-use crate::core::dtos::{ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow};
+use crate::core::dtos::{ItemBillRef, ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
@@ -61,6 +61,10 @@ pub trait PurchaseRepository {
     fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<PurchaseItem>, AppError>;
     /// Σ quantity of vendor `RETURNED` return lines referencing this lot.
     fn get_returned_quantity_for_lot(&self, purchase_item_id: i64) -> Result<f64, AppError>;
+
+    /// FR-23: distinct `source = PURCHASE` bills containing the item, `transaction_date DESC, id DESC`,
+    /// paged in SQL, plus the distinct bill count. Served by `idx_purchase_items_item_date`.
+    fn list_bills_for_item(&self, item_id: i64, offset: usize, limit: usize) -> Result<(Vec<ItemBillRef>, usize), AppError>;
 
     /// FR-20: rewrites date, party (+ name snapshot), invoice ref, mode, notes, subtotal/charges/
     /// discounts, total and `updated_at`. Never touches the code, source, `created_at` or the

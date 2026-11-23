@@ -24,3 +24,13 @@ pub async fn list_stock_adjustments(state: State<'_, AppState>, item_id: Option<
     let svc = state.inventory_service.clone();
     super::run_blocking(move || svc.list_adjustments(item_id, page, limit)).await
 }
+#[tauri::command]
+pub async fn get_item_sales(state: State<'_, AppState>, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError> {
+    let svc = state.inventory_service.clone();
+    super::run_blocking(move || svc.get_item_sales(item_id, page, limit)).await
+}
+#[tauri::command]
+pub async fn get_item_purchases(state: State<'_, AppState>, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError> {
+    let svc = state.inventory_service.clone();
+    super::run_blocking(move || svc.get_item_purchases(item_id, page, limit)).await
+}
