@@ -15,7 +15,7 @@ interface Hint {
   label?: string;
 }
 
-const GLOBAL_ACTIONS: HotkeyAction[] = ['dashboard', 'sale', 'purchase', 'lookup', 'dues', 'inventory'];
+const GLOBAL_ACTIONS: HotkeyAction[] = ['dashboard', 'sale', 'purchase', 'lookup', 'dues', 'inventory', 'expenses'];
 
 function hintsFor(route: string): Hint[] {
   switch (route) {
@@ -42,6 +42,8 @@ function hintsFor(route: string): Hint[] {
     case 'inventory':
     case 'items':
       return [{ action: 'newBundle' }, { action: 'lookup', label: 'Barcode Lookup' }];
+    case 'expenses':
+      return [{ action: 'completeBill', label: 'Save Expense' }, { action: 'back' }];
     case 'settings':
       return [{ action: 'backup', label: 'Backup Database' }];
     default:

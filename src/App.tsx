@@ -12,6 +12,7 @@ import { NewSalePage } from '@/pages/NewSalePage';
 import { NewPurchasePage } from '@/pages/NewPurchasePage';
 import { CreditDuesPage } from '@/pages/CreditDuesPage';
 import { InventoryPage } from '@/pages/InventoryPage';
+import { ExpensesPage } from '@/pages/ExpensesPage';
 import { SalesHistoryPage } from '@/pages/SalesHistoryPage';
 import { PurchaseHistoryPage } from '@/pages/PurchaseHistoryPage';
 import { ReturnsAdjustmentsPage } from '@/pages/ReturnsAdjustmentsPage';
@@ -31,6 +32,7 @@ const ROUTES: Record<string, React.FC> = {
   'credit-dues': CreditDuesPage,
   inventory: InventoryPage,
   items: InventoryPage,
+  expenses: ExpensesPage,
   'sales-history': SalesHistoryPage,
   'purchase-history': PurchaseHistoryPage,
   returns: ReturnsAdjustmentsPage,

@@ -11,6 +11,7 @@ import {
   Users,
   BarChart3,
   Settings,
+  Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/useAppStore';
@@ -61,6 +62,13 @@ const MAIN_ITEMS: NavItem[] = [
     label: 'Inventory Master',
     icon: Package,
     hotkey: 'inventory',
+  },
+  {
+    id: 'expenses',
+    aliases: ['expenses'],
+    label: 'Store Expenses',
+    icon: Wallet,
+    hotkey: 'expenses',
   },
 ];
 

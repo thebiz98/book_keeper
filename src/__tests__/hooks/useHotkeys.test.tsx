@@ -55,6 +55,8 @@ describe('hotkey registry', () => {
     expect(hotkeyBadge('back')).toBe('Esc');
     expect(HOTKEYS.newCustomer.combos).toEqual(['Alt+C']);
     expect(HOTKEYS.newVendor.combos).toEqual(['Alt+V']);
+    expect(HOTKEYS.expenses.combos).toEqual(['F7']);
+    expect(hotkeyBadge('expenses')).toBe('F7');
   });
 
   it('fires a registered global hotkey and ignores e.repeat', () => {
