@@ -249,6 +249,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "backup_directory",
         sql: "ALTER TABLE shop_settings ADD COLUMN backup_directory TEXT;",
     },
+    Migration {
+        version: 3,
+        name: "item_type",
+        sql: "ALTER TABLE items ADD COLUMN item_type TEXT NOT NULL DEFAULT 'PHYSICAL' CHECK (item_type IN ('PHYSICAL', 'SERVICE'));",
+    },
 ];
 
 /// Highest schema version this build knows.

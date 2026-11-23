@@ -429,6 +429,71 @@ fn v1_database_upgrades_to_add_backup_directory() {
     assert_eq!(current_version(&conn).unwrap(), latest_version());
     let v: Option<String> = conn.query_row("SELECT backup_directory FROM shop_settings WHERE id = 1", [], |r| r.get(0)).unwrap();
     assert!(v.is_none());
+    let cols: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pragma_table_info('items') WHERE name = 'item_type'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(cols, 1);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn fresh_db_items_have_item_type_physical_default() {
+    let (path, pool) = fresh();
+    let conn = pool.get().unwrap();
+    assert!(latest_version() >= 3);
+    let (notnull, dflt): (i64, String) = conn
+        .query_row(
+            "SELECT \"notnull\", dflt_value FROM pragma_table_info('items') WHERE name = 'item_type'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(notnull, 1);
+    assert_eq!(dflt, "'PHYSICAL'");
+    conn.execute("INSERT INTO items (name) VALUES ('A')", []).unwrap();
+    let t: String = conn.query_row("SELECT item_type FROM items WHERE name = 'A'", [], |r| r.get(0)).unwrap();
+    assert_eq!(t, "PHYSICAL");
+    conn.execute("INSERT INTO items (name, item_type) VALUES ('B', 'SERVICE')", []).unwrap();
+    let bad = conn.execute("INSERT INTO items (name, item_type) VALUES ('C', 'GOODS')", []);
+    assert!(bad.is_err(), "CHECK must reject unknown item types");
+    drop(conn);
+    drop(pool);
+    cleanup(&path);
+}
+
+#[test]
+fn v2_database_upgrades_to_v3_and_existing_items_become_physical() {
+    let (path, conn) = db_from_fixtures("v2up", &[V1, V2]);
+    conn.execute_batch(
+        "INSERT INTO items (name, category, base_unit, default_sale_price, current_stock) VALUES ('Pen','Pens','PCS',10,7),('Paper',NULL,'SHEET',1,0);
+         UPDATE shop_settings SET backup_directory = 'D:\\bk';",
+    )
+    .unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 3);
+    let types: Vec<String> = conn
+        .prepare("SELECT item_type FROM items ORDER BY id")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(types, vec!["PHYSICAL", "PHYSICAL"]);
+    let stock: Vec<f64> = conn
+        .prepare("SELECT current_stock FROM items ORDER BY id")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(stock, vec![7.0, 0.0]);
+    let dir: Option<String> = conn.query_row("SELECT backup_directory FROM shop_settings WHERE id = 1", [], |r| r.get(0)).unwrap();
+    assert_eq!(dir.as_deref(), Some("D:\\bk"));
+    let name: String = conn.query_row("SELECT name FROM schema_version WHERE version = 3", [], |r| r.get(0)).unwrap();
+    assert_eq!(name, "item_type");
+    let fk: i64 = conn.prepare("PRAGMA foreign_key_check").unwrap().query_map([], |_| Ok(())).unwrap().count() as i64;
+    assert_eq!(fk, 0);
     drop(conn);
     cleanup(&path);
 }
