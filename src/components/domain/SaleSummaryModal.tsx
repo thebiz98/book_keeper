@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { CheckCircle2, ArrowRight, Banknote, Printer } from 'lucide-react';
 import { usePrintBill } from '../print/usePrintBill';
-import { errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
+import { api, errorMessage } from '@/api';
 import type { BillChargeLine } from '@/lib/billMath';
-import type { PaymentStatus, SaleSummaryResponse } from '@/types';
+import type { BillPreview, PaymentStatus, PreviewSalePayload, SaleSummaryResponse } from '@/types';
 import type { CustomerInput } from '@/types/store';
 import { useBusyLock } from '@/hooks/useHotkeys';
+import { usePreview } from '@/hooks/usePreview';
 import { cn } from '@/lib/utils';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { Button } from '../ui/Button';
@@ -24,12 +24,20 @@ export interface SaleSummaryModalProps {
   isOpen: boolean;
   /** Payment mode: Esc / Back returns to the cart without saving. */
   onClose: () => void;
-  grandTotal: number;
-  /** Items subtotal and charge lines (FR-19); the breakdown shows above the Grand Total when lines exist. */
-  itemsSubtotal?: number;
+  /**
+   * The bill being paid, as the preview input without a payment (customer included); null while
+   * the cart is empty. The dialog adds the chosen status and cash and asks `preview_sale` (DD-56):
+   * totals, change, balance and every error come from the backend.
+   */
+  bill: PreviewSalePayload | null;
+  /** The no-payment preview of the same bill (totals, open amount); null while it is pending. */
+  totals: BillPreview | null;
+  /** FR-20: the sale being replaced; the preview then runs the edit rules. */
+  saleId?: number | null;
+  /** Charge/discount lines (names only; amounts shown are the backend's) for the breakdown. */
   charges?: BillChargeLine[];
   customer: CustomerInput | null;
-  /** Lets the dialog pick / create a customer when PARTIAL or UNPAID needs one. */
+  /** Lets the dialog pick / create a customer when the backend asks for one. */
   onCustomerChange?: (customer: CustomerInput | null) => void;
   /** Performs the sale. Rejections are shown inside the dialog. */
   onSubmit: (values: SalePaymentValues) => Promise<SaleSummaryResponse>;
@@ -37,42 +45,21 @@ export interface SaleSummaryModalProps {
   onDone: (result: SaleSummaryResponse) => void;
   /** Display-only code preview shown while paying. */
   invoiceCode?: string;
-  /** FR-20: 'edit' pays against `grandTotal - appliedAmount` and reads "Update bill". */
+  /** FR-20: 'edit' reads "Update bill" and pays against what is still open. */
   mode?: 'create' | 'edit';
-  /** Edit: money already applied to the bill by later settlements / return credits. */
-  appliedAmount?: number;
-  /** Edit: the bill's old upfront amount, prefilled as the cash received. */
+  /** Edit: the bill's stored status and old upfront amount, prefilled in the dialog. */
+  initialStatus?: PaymentStatus;
   initialCash?: number;
 }
 
 const STATUSES: PaymentStatus[] = ['PAID', 'PARTIAL', 'UNPAID'];
 
-export function validatePayment(
-  status: PaymentStatus,
-  total: number,
-  cash: number,
-  hasCustomer: boolean
-): string | null {
-  const t = round2(total);
-  if (status !== 'PAID' && !hasCustomer) {
-    return `Select a customer for a ${status} sale (Alt+C to create one)`;
-  }
-  if (status === 'UNPAID') return null;
-  if (!Number.isFinite(cash) || cash < 0) return 'Enter the cash received';
-  const c = round2(cash);
-  if (status === 'PAID' && c < t) return 'Cash received must cover the total for a PAID sale';
-  if (status === 'PARTIAL') {
-    if (c <= 0) return 'Enter the amount received for a PARTIAL sale';
-    if (c >= t) return 'PARTIAL requires cash less than the total; use PAID instead';
-  }
-  return null;
-}
-
 export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   isOpen,
   onClose,
-  grandTotal,
-  itemsSubtotal,
+  bill,
+  totals,
+  saleId = null,
   charges,
   customer,
   onCustomerChange,
@@ -80,14 +67,14 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   onDone,
   invoiceCode,
   mode: billMode = 'create',
-  appliedAmount = 0,
+  initialStatus,
   initialCash = 0,
 }) => {
   const editing = billMode === 'edit';
-  /** Amount this dialog collects: the whole total, or what is still open on an edited bill. */
-  const due = editing ? round2(Math.max(grandTotal - appliedAmount, 0)) : grandTotal;
   const [status, setStatus] = useState<PaymentStatus>('PAID');
-  const [cashStr, setCashStr] = useState(String(due));
+  const [cashStr, setCashStr] = useState('');
+  /** True once the cashier typed in the cash box: the PAID prefill then stops following the total. */
+  const [cashTouched, setCashTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SaleSummaryResponse | null>(null);
@@ -95,26 +82,20 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   const cashRef = useRef<HTMLInputElement>(null);
   const doneBtnRef = useRef<HTMLButtonElement>(null);
   const submittingRef = useRef(false);
-  const totalRef = useRef(due);
-  totalRef.current = due;
-  const initialCashRef = useRef(initialCash);
-  initialCashRef.current = initialCash;
+  const initialRef = useRef({ status: initialStatus, cash: initialCash });
+  initialRef.current = { status: initialStatus, cash: initialCash };
+  const openAmountRef = useRef(totals?.openAmount ?? 0);
+  openAmountRef.current = totals?.openAmount ?? 0;
 
   useBusyLock(submitting);
 
   // Reset only when the dialog opens: never while the cashier is typing.
   useEffect(() => {
     if (!isOpen) return;
-    if (editing && totalRef.current > 0) {
-      // Prefill from the old upfront payment: enough = PAID, some = PARTIAL, none = UNPAID.
-      const c = initialCashRef.current;
-      const st: PaymentStatus = c >= totalRef.current ? 'PAID' : c > 0 ? 'PARTIAL' : 'UNPAID';
-      setStatus(st);
-      setCashStr(st === 'PAID' ? String(Math.max(c, totalRef.current)) : String(c));
-    } else {
-      setStatus('PAID');
-      setCashStr(editing ? '0' : String(totalRef.current));
-    }
+    const st = (editing && initialRef.current.status) || 'PAID';
+    setStatus(st);
+    setCashTouched(st === 'PARTIAL');
+    setCashStr(st === 'PAID' ? String(openAmountRef.current) : st === 'PARTIAL' ? String(initialRef.current.cash) : '0');
     setError(null);
     setResult(null);
     setSubmitting(false);
@@ -123,23 +104,44 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
     cashRef.current?.select();
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A PAID sale prefills the cash with the amount due, which the backend reports (it can still be pending at open).
+  const openAmount = totals?.openAmount;
+  useEffect(() => {
+    if (isOpen && status === 'PAID' && !cashTouched && openAmount != null) setCashStr(String(openAmount));
+  }, [isOpen, status, cashTouched, openAmount]);
+
   useEffect(() => {
     if (result) doneBtnRef.current?.focus();
   }, [result]);
 
-  const cash = cashStr.trim() === '' ? NaN : parseFloat(cashStr);
-  const validation =
-    editing && due <= 0
-      ? customer == null && appliedAmount > 0
-        ? 'Select a customer: later payments were recorded for this bill'
-        : null
-      : validatePayment(status, due, cash, customer != null);
   const mode = result ? 'result' : 'payment';
+  const cash = cashStr.trim() === '' ? NaN : parseFloat(cashStr);
+  /** Format check only; every other rule is the backend's. */
+  const formatError = status !== 'UNPAID' && !Number.isFinite(cash) ? 'Enter the cash received' : null;
+
+  const payInput = useMemo<PreviewSalePayload | null>(
+    () =>
+      bill && isOpen && mode === 'payment' && !formatError
+        ? { ...bill, paymentStatus: status, paidAmount: status === 'UNPAID' ? 0 : cash }
+        : null,
+    [bill, isOpen, mode, formatError, status, cash]
+  );
+  const preview = usePreview<PreviewSalePayload, BillPreview>({
+    input: payInput,
+    fetcher: (p) => api.previewSale(p, saleId),
+  });
+  const payment = preview.data?.payment ?? null;
+  const previewErrors = preview.errors;
+  const validation = formatError ?? previewErrors[0]?.message ?? null;
+  /** Saving waits for the preview of exactly what is on screen and needs it to be clean. */
+  const canSubmit = !formatError && !preview.isLoading && previewErrors.length === 0 && payment != null;
+  const needsCustomer = previewErrors.some((e) => e.field === 'party_id' || e.field === 'PARTY_REQUIRED_WITH_PAYMENTS');
 
   const pickStatus = (next: PaymentStatus) => {
     setStatus(next);
     setError(null);
-    if (next === 'PAID') setCashStr(String(totalRef.current));
+    setCashTouched(false);
+    if (next === 'PAID') setCashStr(String(openAmountRef.current));
     else if (next === 'UNPAID') setCashStr('0');
     else setCashStr('');
     if (next !== 'UNPAID') setTimeout(() => cashRef.current?.focus(), 0);
@@ -147,7 +149,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
 
   const submit = async () => {
     if (mode !== 'payment' || submittingRef.current) return;
-    if (validation) {
+    if (!canSubmit) {
       setError(validation);
       return;
     }
@@ -156,8 +158,8 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
     setError(null);
     try {
       const res = await onSubmit({
-        paymentStatus: editing && due <= 0 ? 'PAID' : status,
-        cashReceived: editing && due <= 0 ? 0 : status === 'UNPAID' ? 0 : round2(cash),
+        paymentStatus: status,
+        cashReceived: status === 'UNPAID' ? 0 : cash,
       });
       setResult(res);
     } catch (e) {
@@ -167,7 +169,6 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
       setSubmitting(false);
     }
   };
-
   const [printError, setPrintError] = useState<string | null>(null);
   const { printById } = usePrintBill();
   const doPrint = () => {
@@ -195,8 +196,9 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
     if (result) onDone(result);
   };
 
-  const changeAmount = round2(cash - due);
-  const balance = status === 'UNPAID' ? round2(due) : round2(Math.max(due - (Number.isFinite(cash) ? cash : 0), 0));
+
+  const changeAmount = payment?.changeAmount;
+  const balance = payment?.balanceDue;
   const message = error ?? validation;
 
   const onStatusKeyDown = (e: React.KeyboardEvent) => {
@@ -242,7 +244,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
               variant="primary"
               size="sm"
               onClick={() => void submit()}
-              disabled={submitting || validation != null}
+              disabled={submitting || !canSubmit}
               isLoading={submitting}
               hotkey="Enter"
             >
@@ -283,7 +285,12 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
 
         {mode === 'payment' && charges && charges.length > 0 && (
           <div data-testid="payment-breakdown" className="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
-            <BillTotalsSummary compact itemsSubtotal={itemsSubtotal ?? 0} lines={charges} grandTotal={grandTotal} />
+            <BillTotalsSummary
+              compact
+              itemsSubtotal={totals?.itemsSubtotal ?? 0}
+              lines={charges}
+              grandTotal={totals?.totalAmount ?? 0}
+            />
           </div>
         )}
 
@@ -292,17 +299,17 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
             Grand Total
           </span>
           <div data-testid="grand-total" className="text-4xl font-bold font-mono text-slate-900 dark:text-slate-50">
-            <CurrencyDisplay amount={result?.totalAmount ?? grandTotal} size="hero" />
+            <CurrencyDisplay amount={result?.totalAmount ?? totals?.totalAmount ?? 0} size="hero" />
           </div>
         </div>
 
         {mode === 'payment' && editing && (
           <div data-testid="edit-payment-info" className="flex items-center justify-between text-xs font-mono rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
             <span>
-              Already received later: <CurrencyDisplay amount={appliedAmount} size="sm" />
+              Already received later: <CurrencyDisplay amount={totals?.appliedAmount ?? 0} size="sm" />
             </span>
             <span>
-              Due now: <CurrencyDisplay amount={due} size="sm" />
+              Due now: <CurrencyDisplay amount={totals?.openAmount ?? 0} size="sm" />
             </span>
           </div>
         )}
@@ -337,10 +344,10 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
               ))}
             </div>
 
-            {status !== 'PAID' && !customer && (
+            {needsCustomer && !customer && (
               <div className="flex flex-col gap-1.5" data-testid="customer-prompt">
                 <span className="text-xs text-amber-700 dark:text-amber-400 font-medium">
-                  A customer is required for {status} sales. Select one or press Alt+C to create a new customer.
+                  {previewErrors[0]?.message} Select a customer or press Alt+C to create a new one.
                 </span>
                 <PartySelector
                   partyType="CUSTOMER"
@@ -373,6 +380,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
                 onChange={(e) => {
                   if (/^\d*\.?\d*$/.test(e.target.value)) {
                     setCashStr(e.target.value);
+                    setCashTouched(true);
                     setError(null);
                   }
                 }}
@@ -396,14 +404,14 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
                   data-testid="change-badge"
                   className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 px-3 py-1 rounded-md text-base font-bold font-mono tabular-nums"
                 >
-                  ₹{Number.isFinite(changeAmount) ? Math.max(changeAmount, 0).toFixed(2) : '0.00'}
+                  {changeAmount != null ? `₹${changeAmount.toFixed(2)}` : '—'}
                 </div>
               ) : (
                 <div
                   data-testid="balance-badge"
                   className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 px-3 py-1 rounded-md text-base font-bold font-mono tabular-nums"
                 >
-                  ₹{balance.toFixed(2)}
+                  {balance != null ? `₹${balance.toFixed(2)}` : '—'}
                 </div>
               )}
             </div>

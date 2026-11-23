@@ -8,7 +8,6 @@
 import type { ItemBundleSearchResult, ItemSearchResult, PurchaseItem, SaleItem } from '@/types';
 import type { CartLine } from '@/store/useCartStore';
 import type { PurchaseLine } from '@/components/domain/purchaseMath';
-import { round2 } from '@/lib/money';
 
 type StoredLine = Pick<SaleItem, 'itemId' | 'itemName' | 'packLabel' | 'packQuantity' | 'quantity' | 'totalAmount'>;
 
@@ -38,11 +37,10 @@ function unitView(line: StoredLine, item: ItemSearchResult | null) {
   return { bundle: null, quantity: line.quantity, unitsPerBundle: 1, rate: line.totalAmount / line.quantity };
 }
 
-/** A sale line as a cart line. `availableStock` is current stock plus the bill's own units. */
+/** A sale line as a cart line (the form row only; totals and stock come from the preview). */
 export function saleLineToCart(
   line: SaleItem,
-  item: ItemSearchResult | null,
-  availableStock: number
+  item: ItemSearchResult | null
 ): Omit<CartLine, 'lineId'> {
   const v = unitView(line, item);
   return {
@@ -54,11 +52,8 @@ export function saleLineToCart(
     bundleId: v.bundle?.bundleId,
     bundleName: v.bundle?.bundleName,
     quantity: v.quantity,
-    baseQuantity: line.quantity,
     rate: v.rate,
     mrp: item?.mrp ?? null,
-    lineTotal: round2(v.quantity * v.rate),
-    availableStock,
     defaultSalePrice: item?.defaultSalePrice,
   };
 }
@@ -89,9 +84,3 @@ export function purchaseLineToDraft(lot: PurchaseItem, item: ItemSearchResult | 
   };
 }
 
-/** Base units per item that a bill already holds (they are available again once it is reversed). */
-export function editStockCredit(lines: { itemId: number; quantity: number }[]): Record<number, number> {
-  const credit: Record<number, number> = {};
-  for (const l of lines) credit[l.itemId] = (credit[l.itemId] ?? 0) + l.quantity;
-  return credit;
-}

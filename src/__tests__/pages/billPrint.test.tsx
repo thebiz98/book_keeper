@@ -7,7 +7,7 @@ import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { SaleSummaryModal } from '@/components/domain/SaleSummaryModal';
 import { useAppStore } from '@/store/useAppStore';
 import type { PurchaseDetailView, SaleDetailView } from '@/types';
-import { installApi, flush, waitFor, click, buttonByText, bodyText } from './helpers';
+import { installApi, flush, waitFor, click, buttonByText, bodyText, fakeBillPreview } from './helpers';
 
 const sale = {
   sale: {
@@ -193,18 +193,23 @@ describe('SaleSummaryModal result screen', () => {
   const result = { saleId: 5, transactionCode: 'SAL-1005', totalAmount: 100, paidAmount: 100, balanceDue: 0, changeAmount: 0, paymentStatus: 'PAID' as const };
 
   async function toResult() {
-    const api = installApi({ getSaleDetails: sale });
+    const api = installApi({ getSaleDetails: sale, previewSale: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p) });
+    const bill = {
+      transactionDate: '2026-11-20', partyId: null, paymentMode: 'CASH', notes: null, charges: [],
+      items: [{ itemId: 1, bundleId: null, bundleQuantity: 1, unitPrice: 100 }],
+    };
     render(
       <SaleSummaryModal
         isOpen
         onClose={() => {}}
-        grandTotal={100}
+        bill={bill}
+        totals={fakeBillPreview(bill)}
         customer={null}
         onSubmit={async () => result}
         onDone={() => {}}
       />
     );
-    await flush();
+    await waitFor(() => !(document.querySelector('[data-testid="confirm-btn"]') as HTMLButtonElement).disabled);
     click(document.querySelector('[data-testid="confirm-btn"]')!);
     await waitFor(() => !!document.querySelector('[data-testid="sale-result"]'));
     return api;

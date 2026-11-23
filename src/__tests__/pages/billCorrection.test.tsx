@@ -8,7 +8,7 @@ import { useCartStore } from '@/store/useCartStore';
 import { peekBillEdit, queueBillEdit, takeBillEdit } from '@/pages/billEditHandoff';
 import { __resetHotkeys } from '@/hooks/useHotkeys';
 import type { BillEditGuard, SaleDetailView } from '@/types';
-import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText } from './helpers';
+import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText, fakeBillPreview } from './helpers';
 
 const guard = (over: Partial<BillEditGuard> = {}): BillEditGuard => ({
   target: 'SALE', id: 5, code: 'SAL-1005', canEdit: true, canDelete: true, canChangeParty: true, reasons: [],
@@ -73,7 +73,7 @@ describe('BillDetailDrawer actions (FR-20)', () => {
 
   it('asks before replacing a cart in progress', async () => {
     installApi({ getSaleDetails: saleDetail(), getBillEditGuard: guard() });
-    useCartStore.getState().addItem({ id: 1, name: 'Pen', baseUnit: 'PCS', defaultSalePrice: 5, currentStock: 9 });
+    useCartStore.getState().addItem({ id: 1, name: 'Pen', baseUnit: 'PCS', defaultSalePrice: 5 });
     render(<BillDetailDrawer kind="SALE" billId={5} onClose={() => {}} />);
     await waitFor(() => !!document.querySelector('[data-testid="bill-edit"]:not([disabled])'));
     click(document.querySelector('[data-testid="bill-edit"]')!);
@@ -165,6 +165,7 @@ describe('NewSalePage edit mode (FR-20)', () => {
       searchParties: [],
       searchChargeTypes: [],
       getDashboardMetrics: { liveCashInDrawer: 0 },
+      previewSale: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p),
       updateSale: { saleId: 5, transactionCode: 'SAL-1005', totalAmount: 100, paidAmount: 100, balanceDue: 0, changeAmount: 0, paymentStatus: 'PAID' },
     });
     queueBillEdit({ kind: 'SALE', id: 5 });
@@ -172,10 +173,13 @@ describe('NewSalePage edit mode (FR-20)', () => {
     await waitFor(() => !!document.querySelector('[data-testid="edit-banner"]'));
     expect(bodyText()).toContain('Editing SAL-1005');
     expect(document.querySelector('[data-testid="invoice-preview"]')?.textContent).toBe('SAL-1005');
-    expect(useCartStore.getState().items[0]).toMatchObject({ itemId: 1, baseQuantity: 2, availableStock: 2 });
+    expect(useCartStore.getState().items[0]).toMatchObject({ itemId: 1, quantity: 2, rate: 50 });
     expect(api.getNextSaleCode).not.toHaveBeenCalled();
     click(document.querySelector('[data-testid="complete-sale-btn"]')!);
     await waitFor(() => bodyText().includes('Update bill'));
+    // The edit previews carry the sale id so the backend runs the edit rules.
+    await waitFor(() => !(document.querySelector('[data-testid="confirm-btn"]') as HTMLButtonElement).disabled);
+    expect(api.previewSale.mock.calls.at(-1)![1]).toBe(5);
     click(document.querySelector('[data-testid="confirm-btn"]')!);
     await flush();
     expect(api.updateSale).toHaveBeenCalledTimes(1);

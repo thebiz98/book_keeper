@@ -14,11 +14,8 @@ export interface CartItem {
   bundleId?: number;
   bundleName?: string;
   quantity: number;
-  baseQuantity: number;
   rate: number;
   mrp?: number | null;
-  lineTotal: number;
-  availableStock: number;
   defaultSalePrice?: number;
 }
 
@@ -29,7 +26,6 @@ export interface ItemInput {
   baseUnit: string;
   defaultSalePrice: number;
   mrp?: number | null;
-  currentStock: number;
 }
 
 export interface BundleInput {
@@ -49,7 +45,6 @@ export interface CustomerInput {
 
 export interface CartState {
   items: CartItem[];
-  subtotal: number;
   totalBaseUnits: number;
   totalItems: number;
   selectedCustomer: CustomerInput | null;

@@ -144,7 +144,7 @@ describe('MockApiClient contract shapes', () => {
         items: [], replacementItems: [],
       })
     );
-    expect(keys(r)).toEqual(['cashRefunded', 'creditedAmount', 'returnCode', 'returnId']);
+    expect(keys(r)).toEqual(['cashRefunded', 'creditedAmount', 'issuedValue', 'returnCode', 'returnId', 'totalAmount']);
     has(await c.getReturnDetails(r.returnId), ['returnTx', 'party', 'items', 'allocations', 'ledger']);
     expect(keys(await c.listReturns())).toEqual(['items', 'limit', 'page', 'total']);
     const adj = await c.createStockAdjustment(
