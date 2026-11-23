@@ -34,3 +34,13 @@ pub async fn delete_return(state: State<'_, AppState>, return_id: i64) -> Result
     let svc = state.return_service.clone();
     super::run_blocking(move || svc.delete_return(return_id)).await
 }
+#[tauri::command]
+pub async fn preview_customer_return(state: State<'_, AppState>, payload: CustomerReturnPayload) -> Result<ReturnResult, AppError> {
+    let svc = state.return_service.clone();
+    super::run_blocking(move || svc.preview_customer_return(payload)).await
+}
+#[tauri::command]
+pub async fn preview_vendor_return(state: State<'_, AppState>, payload: VendorReturnPayload) -> Result<ReturnResult, AppError> {
+    let svc = state.return_service.clone();
+    super::run_blocking(move || svc.preview_vendor_return(payload)).await
+}

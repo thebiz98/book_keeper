@@ -38,3 +38,14 @@ pub async fn delete_purchase(state: State<'_, AppState>, purchase_id: i64) -> Re
     let svc = state.purchase_service.clone();
     super::run_blocking(move || svc.delete_purchase(purchase_id)).await
 }
+/// DD-56: dry run of create/update purchase (transaction dropped); errors come back as data.
+#[tauri::command]
+pub async fn preview_purchase(state: State<'_, AppState>, payload: PreviewPurchasePayload, purchase_id: Option<i64>) -> Result<BillPreview, AppError> {
+    let svc = state.purchase_service.clone();
+    super::run_blocking(move || svc.preview_purchase(purchase_id, payload)).await
+}
+#[tauri::command]
+pub async fn preview_lot_purchase_price(state: State<'_, AppState>, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
+    let svc = state.purchase_service.clone();
+    super::run_blocking(move || svc.preview_lot_purchase_price(payload)).await
+}
