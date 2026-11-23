@@ -10,6 +10,11 @@ pub async fn create_stock_adjustment(state: State<'_, AppState>, payload: StockA
     super::run_blocking(move || svc.create_adjustment(payload)).await
 }
 #[tauri::command]
+pub async fn set_item_stock(state: State<'_, AppState>, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
+    let svc = state.inventory_service.clone();
+    super::run_blocking(move || svc.set_item_stock(payload)).await
+}
+#[tauri::command]
 pub async fn get_item_lots(state: State<'_, AppState>, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
     let svc = state.inventory_service.clone();
     super::run_blocking(move || svc.get_item_lots(item_id)).await
