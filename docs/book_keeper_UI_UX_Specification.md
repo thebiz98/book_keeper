@@ -213,7 +213,7 @@ The application maintains a persistent desktop shell across all views.
   - `[View Invoice / Line Items]` — lines with returned qty, FIFO cost breakdown, ledger rows.
   - `[Record Settlement]` (active if balance due > 0; single-bill mode)
   - `[Initiate Return / Replacement]` (opens Page 9 Customer tab pre-linked to this bill)
-* Bills are never edited or deleted (NFR-03).
+* **Edit / delete (FR-20, DD-41; replaces NFR-03):** the bill drawer has `[Edit]` and `[Delete]`. Buttons are disabled with the blocking reasons listed (from `get_bill_edit_guard`) when the bill has linked returns, return credits (delete) and so on. `[Edit]` opens Page 2 in edit mode; `[Delete]` opens the delete confirmation (§4). The drawer header shows "Edited <date>" for an edited bill.
 
 ---
 
@@ -226,6 +226,7 @@ The application maintains a persistent desktop shell across all views.
   - `[View Batch Lines & Remaining FIFO Quantities]`
   - `[Record Vendor Payment]` (active if balance due > 0; single-bill mode)
   - `[Initiate Vendor Return]` (opens Page 9 Vendor tab pre-linked to this bill)
+  - `[Edit]` / `[Delete]` in the drawer (as Page 7; edit opens Page 4 in edit mode)
 
 ---
 
@@ -360,3 +361,13 @@ Layout: left "New Expense" form (Code preview EXP-xxxx, Date, Type typeahead wit
 Keyboard: F7 focuses Type; Enter selects or opens inline create (Save/Cancel buttons; Enter saves, Esc cancels); focus then moves to Amount; Enter to Notes; Enter on Notes or Ctrl+Enter saves; after save toast "EXP-xxxx saved", form resets (date kept), focus returns to Type, list and header cash refresh.
 Edit loads the row into the form ("Editing EXP-xxxx", `Update` / `Cancel edit`). Delete: danger ConfirmDialog. Default list range: current month.
 Dashboard: KPI tile "Today's Expenses" (`kpi-expenses`), cash sub-text "After today's expenses", action `[+ Expense (F7)]`. Reports: P&L "Less: Operating Expenses" with per-type breakdown before Net Profit; Cash Flow outflow line "Store expenses" after "Customer refunds paid". Traceability: FR-18 -> Page 13, Page 1, Page 10.
+
+
+## Bill correction (FR-20, `feat/bill-edit-delete`)
+* **Page 2 (Sale) edit mode.** Amber banner "Editing SAL-1001 — saving replaces the original bill" with `[Cancel edit]`. The invoice code shows the original code. Date, customer, notes, lines and charges are prefilled. The cart allows the bill's own original quantities on top of current stock. `Esc` / Cancel edit asks "Discard changes?" and returns to Sales History.
+* **Page 3 (Payment dialog) in edit mode.** Title and confirm button read "Update bill". Shows "Already received later: ₹applied" and "Due now: ₹open". Cash Received is prefilled with the old upfront amount. The result screen reads "Bill updated". If the date changed, the dialog notes that the cash moves to the new day; if the customer changed it warns "Later payments ₹X will move to <new customer>".
+* **Page 4 (Purchase) edit mode.** Same banner. Each line shows "Used: N" when consumed and its quantity cannot go below N ("At least N already used"). Item and Remove are disabled on referenced lines with a tooltip. The cost field of a vendor-returned line is read-only with a tooltip.
+* **Pages 6, 7, 8.** A party-ledger row opens the bill drawer. Drawer actions `[Edit]`, `[Delete]` with reasons when blocked.
+* **Page 9.** A return row opens the Return Details drawer with `[Delete return]` (typed confirmation of the return code). Disabled with reasons when a newer return exists on the same bill, restocked units were consumed, or the return's lot was used.
+* **§4 delete confirmation.** Title "Delete SAL-1001?". Body: line count, total, "₹X cash received for this bill will be removed from cash records" (purchase: "paid ... removed from cash out"), and "Settlements on other bills are unaffected". Typed field: type the bill code. Buttons: Cancel / Delete (danger).
+* **Traceability.** FR-20 -> Pages 2, 3, 4, 6, 7, 8, 9.
