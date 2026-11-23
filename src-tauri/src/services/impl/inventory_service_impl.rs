@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{
-    ItemLot, PageRequest, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
+    ItemBillRef, ItemLot, PageRequest, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentResult,
 };
 use crate::core::money::round2;
@@ -57,6 +57,15 @@ fn find_item(uow: &mut dyn TransactionContext, item_id: i64) -> Result<Item, App
     uow.items()
         .find_by_id(item_id)?
         .ok_or_else(|| AppError::not_found("Item", item_id.to_string()))
+}
+
+/// Item-history paging (FR-23): default limit 10, max 50.
+fn item_history_page(page: Option<usize>, limit: Option<usize>) -> Result<PageRequest, AppError> {
+    let limit = limit.unwrap_or(10);
+    if limit > 50 {
+        return Err(validation("limit", "limit must be between 1 and 50"));
+    }
+    PageRequest::new(page, Some(limit))
 }
 
 /// Active and PHYSICAL (FR-21): the only items whose stock may be adjusted.
@@ -505,6 +514,22 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
         let mut tx = self.uow.begin_read()?;
         tx.purchases().list_lots_for_item(item_id)
+    }
+
+    fn get_item_sales(&self, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError> {
+        let req = item_history_page(page, limit)?;
+        let mut tx = self.uow.begin_read()?;
+        find_item(&mut *tx, item_id)?;
+        let (rows, total) = tx.sales().list_bills_for_item(item_id, req.offset(), req.limit)?;
+        Ok(Paginated::new(rows, total, req.page, req.limit))
+    }
+
+    fn get_item_purchases(&self, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError> {
+        let req = item_history_page(page, limit)?;
+        let mut tx = self.uow.begin_read()?;
+        find_item(&mut *tx, item_id)?;
+        let (rows, total) = tx.purchases().list_bills_for_item(item_id, req.offset(), req.limit)?;
+        Ok(Paginated::new(rows, total, req.page, req.limit))
     }
 
     fn list_adjustments(

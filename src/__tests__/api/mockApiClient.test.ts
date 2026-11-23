@@ -24,7 +24,7 @@ describe('MockApiClient contract shapes', () => {
       'createParty', 'updateParty', 'getParty', 'listParties', 'searchParties',
       'updateSale', 'deleteSale', 'updatePurchase', 'deletePurchase', 'deleteReturn', 'getBillEditGuard',
       'getNextReturnCode', 'createCustomerReturn', 'createVendorReturn', 'getReturnDetails',
-      'listReturns', 'createStockAdjustment', 'setItemStock', 'getItemLots', 'listStockAdjustments',
+      'listReturns', 'createStockAdjustment', 'setItemStock', 'getItemLots', 'getItemSales', 'getItemPurchases', 'listStockAdjustments',
       'getDashboardMetrics', 'getLowStockAlerts', 'getSalesPurchaseTrend', 'getRecentTransactions',
       'getPnLReport', 'getStockValuationReport', 'getCashFlowReport',
       'getShopSettings', 'updateShopSettings', 'backupDatabase', 'verifyDatabaseIntegrity',

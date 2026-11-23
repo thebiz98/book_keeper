@@ -8,6 +8,7 @@
  * which rejects with a ValidationError-shaped AppError for UI error testing.
  */
 import type {
+  ItemBillRef,
   ApiClient,
   BillCharge,
   CashFlowReport,
@@ -826,6 +827,12 @@ export class MockApiClient implements ApiClient {
         unitCost: 5,
       },
     ];
+  }
+  async getItemSales(_itemId: number, page?: number, limit?: number) {
+    return paginate([] as ItemBillRef[], page, limit ?? 10);
+  }
+  async getItemPurchases(_itemId: number, page?: number, limit?: number) {
+    return paginate([] as ItemBillRef[], page, limit ?? 10);
   }
   async listStockAdjustments(itemId?: number, page?: number, limit?: number) {
     const rows = itemId ? this.adjustments.filter((a) => a.itemId === itemId) : this.adjustments;

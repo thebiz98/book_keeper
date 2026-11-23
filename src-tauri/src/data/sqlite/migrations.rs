@@ -373,6 +373,16 @@ ALTER TABLE purchase_transactions ADD COLUMN updated_at TEXT;
 CREATE INDEX idx_return_tx_original ON return_transactions(return_type, original_transaction_id);
 "#;
 
+// v9: line date denormalized from the header (FR-23); back-filled, kept equal on every write path.
+const SCHEMA_V9: &str = r#"
+ALTER TABLE sale_items ADD COLUMN transaction_date TEXT NOT NULL DEFAULT '';
+UPDATE sale_items SET transaction_date = (SELECT transaction_date FROM sale_transactions s WHERE s.id = sale_items.sale_transaction_id);
+ALTER TABLE purchase_items ADD COLUMN transaction_date TEXT NOT NULL DEFAULT '';
+UPDATE purchase_items SET transaction_date = (SELECT transaction_date FROM purchase_transactions p WHERE p.id = purchase_items.purchase_transaction_id);
+CREATE INDEX idx_sale_items_item_date ON sale_items(item_id, transaction_date DESC, sale_transaction_id DESC);
+CREATE INDEX idx_purchase_items_item_date ON purchase_items(item_id, transaction_date DESC, purchase_transaction_id DESC);
+"#;
+
 /// All known migrations, ascending and gap-free. Append only; never edit a shipped step.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 },
@@ -391,6 +401,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 6, name: "expenses_code_sequences", sql: SCHEMA_V6 },
     Migration { version: 7, name: "bill_charges", sql: SCHEMA_V7 },
     Migration { version: 8, name: "bill_correction", sql: SCHEMA_V8 },
+    Migration { version: 9, name: "line_transaction_date", sql: SCHEMA_V9 },
 ];
 
 /// Highest schema version this build knows.

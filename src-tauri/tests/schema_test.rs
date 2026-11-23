@@ -429,6 +429,11 @@ const V6: &str = include_str!("fixtures/schema/v6.sql");
 const V7: &str = include_str!("fixtures/schema/v7.sql");
 #[allow(dead_code)]
 const V8: &str = include_str!("fixtures/schema/v8.sql");
+#[allow(dead_code)]
+const V9: &str = include_str!("fixtures/schema/v9.sql");
+/// The shipped v8 fixture is a DDL delta without its `schema_version` row (never edited); chains that
+/// go past v8 record it with this step.
+const V8_RECORD: &str = "INSERT INTO schema_version (version, name) VALUES (8, 'bill_correction'); PRAGMA user_version = 8;";
 
 /// Builds a database at the version reached by replaying `steps` (fixtures 1..N).
 fn db_from_fixtures(tag: &str, steps: &[&str]) -> (PathBuf, Connection) {
@@ -867,4 +872,61 @@ fn v7_database_upgrades_to_v8_keeping_bills() {
     assert_eq!(current_version(&conn).unwrap(), before);
     drop(conn);
     cleanup(&path);
+}
+
+#[test]
+fn v8_database_upgrades_to_v9_backfilling_line_dates_and_adding_indexes() {
+    let (path, conn) = db_from_fixtures("v8up", &[V1, V2, V3, V4, V5, V6, V7, V8, V8_RECORD]);
+    conn.execute_batch(
+        "INSERT INTO items (id, name, base_unit, mrp, default_sale_price) VALUES (1, 'Rice', 'kg', 0, 10);
+         INSERT INTO sale_transactions (id, transaction_code, transaction_date, payment_status, total_amount, paid_amount)
+           VALUES (1, 'SAL-1001', '2026-11-01', 'PAID', 20, 20), (2, 'SAL-1002', '2026-11-05', 'PAID', 10, 10);
+         INSERT INTO sale_items (id, sale_transaction_id, item_id, item_name, pack_quantity, quantity, unit_price, total_amount)
+           VALUES (1, 1, 1, 'Rice', 1, 1, 10, 10), (2, 1, 1, 'Rice', 1, 1, 10, 10), (3, 2, 1, 'Rice', 1, 1, 10, 10);
+         INSERT INTO purchase_transactions (id, transaction_code, transaction_date, payment_status, total_amount, source)
+           VALUES (1, 'PUR-1001', '2026-10-01', 'PAID', 50, 'PURCHASE'), (2, 'OPN-1001', '2026-10-02', 'PAID', 0, 'OPENING');
+         INSERT INTO purchase_items (id, purchase_transaction_id, item_id, item_name, pack_quantity, quantity, unit_cost, total_amount, remaining_quantity)
+           VALUES (1, 1, 1, 'Rice', 1, 10, 5, 50, 10), (2, 2, 1, 'Rice', 1, 4, 5, 20, 4);",
+    )
+    .unwrap();
+    // Pre-migration backup (file DB) is taken by run_migrations; it must not break the upgrade.
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 9);
+    let dates = |sql: &str| -> Vec<String> {
+        let mut st = conn.prepare(sql).unwrap();
+        st.query_map([], |r| r.get::<_, String>(0)).unwrap().map(|x| x.unwrap()).collect()
+    };
+    assert_eq!(dates("SELECT transaction_date FROM sale_items ORDER BY id"), ["2026-11-01", "2026-11-01", "2026-11-05"]);
+    assert_eq!(dates("SELECT transaction_date FROM purchase_items ORDER BY id"), ["2026-10-01", "2026-10-02"]);
+    for (t, idx) in [("sale_items", "idx_sale_items_item_date"), ("purchase_items", "idx_purchase_items_item_date")] {
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1 AND tbl_name=?2", [idx, t], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "{idx}");
+    }
+    let fk: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(fk, 0);
+    let before = current_version(&conn).unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(current_version(&conn).unwrap(), before);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn frozen_v9_fixture_matches_the_migrated_schema() {
+    let (p1, from_fixtures) = db_from_fixtures("v9fx", &[V1, V2, V3, V4, V5, V6, V7, V8, V8_RECORD, V9]);
+    let (p2, migrated) = db_from_fixtures("v9mig", &[V1]);
+    run_migrations(&migrated).unwrap();
+    let shape = |c: &Connection| -> Vec<String> {
+        let mut st = c
+            .prepare("SELECT name FROM pragma_table_info('sale_items') UNION ALL SELECT name FROM pragma_table_info('purchase_items') UNION ALL SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%_items_item_date' ORDER BY 1")
+            .unwrap();
+        st.query_map([], |r| r.get::<_, String>(0)).unwrap().map(|x| x.unwrap()).collect()
+    };
+    assert_eq!(shape(&from_fixtures), shape(&migrated));
+    drop(from_fixtures);
+    drop(migrated);
+    cleanup(&p1);
+    cleanup(&p2);
 }

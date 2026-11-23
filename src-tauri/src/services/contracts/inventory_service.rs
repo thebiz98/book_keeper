@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    ItemLot, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload, StockAdjustmentResult,
+    ItemBillRef, ItemLot, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload, StockAdjustmentResult,
 };
 use crate::core::entities::{PurchaseItem, StockAdjustment};
 use crate::core::error::AppError;
@@ -140,6 +140,13 @@ pub trait InventoryService: Send + Sync {
     /// Lot inspector (all sources, oldest first).
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;
 
+    /// FR-23: bills (sales) containing the item, newest first, each bill once. Defaults: page 1,
+    /// limit 10 (max 50). Unknown item -> NotFound.
+    fn get_item_sales(&self, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError>;
+
+    /// FR-23: `source = PURCHASE` bills containing the item; same paging as `get_item_sales`.
+    fn get_item_purchases(&self, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError>;
+
     /// Historical stock adjustments, newest first (`adjustment_date DESC, id DESC`), paged in SQL.
     /// Defaults: page 1, limit 50; out-of-range values are rejected.
     fn list_adjustments(
@@ -279,6 +286,14 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
         (**self).get_item_lots(item_id)
+    }
+
+    fn get_item_sales(&self, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError> {
+        (**self).get_item_sales(item_id, page, limit)
+    }
+
+    fn get_item_purchases(&self, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError> {
+        (**self).get_item_purchases(item_id, page, limit)
     }
 
     fn list_adjustments(

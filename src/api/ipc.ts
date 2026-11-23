@@ -142,6 +142,10 @@ export class TauriClient implements ApiClient {
     invokeCmd('create_stock_adjustment', { payload });
   setItemStock: ApiClient['setItemStock'] = (payload) => invokeCmd('set_item_stock', { payload });
   getItemLots: ApiClient['getItemLots'] = (itemId) => invokeCmd('get_item_lots', { itemId });
+  getItemSales: ApiClient['getItemSales'] = (itemId, page, limit) =>
+    invokeCmd('get_item_sales', { itemId, page: page ?? null, limit: limit ?? null });
+  getItemPurchases: ApiClient['getItemPurchases'] = (itemId, page, limit) =>
+    invokeCmd('get_item_purchases', { itemId, page: page ?? null, limit: limit ?? null });
   listStockAdjustments: ApiClient['listStockAdjustments'] = (itemId, page, limit) =>
     invokeCmd('list_stock_adjustments', {
       itemId: itemId ?? null,
