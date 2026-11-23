@@ -3,7 +3,7 @@ use crate::core::constants::EPS;
 use crate::core::dtos::{ItemLot, PageRequest, Paginated, StockAdjustmentPayload, StockAdjustmentResult};
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction, StockAdjustment, StockOutflowAllocation};
 use crate::core::error::AppError;
-use crate::core::value_objects::{LotSource, OutflowSourceType, PaymentStatus};
+use crate::core::value_objects::{AdjustmentReason, ItemType, LotSource, OutflowSourceType, PaymentStatus};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_allocation_strategy::{
     DepletionResult, InventoryAllocationStrategy,
@@ -46,6 +46,70 @@ fn find_item(uow: &mut dyn TransactionContext, item_id: i64) -> Result<Item, App
     uow.items()
         .find_by_id(item_id)?
         .ok_or_else(|| AppError::not_found("Item", item_id.to_string()))
+}
+
+/// Active and PHYSICAL (FR-21): the only items whose stock may be adjusted.
+fn require_stockable(item: &Item) -> Result<(), AppError> {
+    if !item.is_active {
+        return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+    }
+    if item.item_type != ItemType::Physical {
+        return Err(validation("item_id", format!("'{}' is a service item and has no stock", item.name)));
+    }
+    Ok(())
+}
+
+impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
+    /// Writes one adjustment row and its stock effect inside the caller's transaction.
+    /// Returns `(adjustment_id, loss_value, unit_cost_used)`.
+    #[allow(clippy::too_many_arguments)]
+    fn post_adjustment(
+        &self,
+        tx: &mut dyn TransactionContext,
+        item: &Item,
+        date: &str,
+        quantity: f64,
+        reason: AdjustmentReason,
+        unit_cost: Option<f64>,
+        notes: Option<String>,
+    ) -> Result<(i64, f64, Option<f64>), AppError> {
+        let mut adj = StockAdjustment {
+            id: 0,
+            adjustment_date: date.to_string(),
+            item_id: item.id,
+            quantity,
+            unit_cost: None,
+            reason,
+            notes,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        if quantity < 0.0 {
+            let qty = -quantity;
+            self.validate_stock_availability(tx, &[(item.id, qty)])?;
+            let adj_id = tx.adjustments().create_adjustment(&adj)?;
+            let loss = self.issue_stock_outflow(tx, OutflowSourceType::Adjustment, adj_id, item.id, qty)?;
+            Ok((adj_id, loss, None))
+        } else {
+            let cost = match unit_cost {
+                Some(c) => c,
+                None => tx.purchases().get_latest_lot_cost(item.id)?.ok_or_else(|| {
+                    validation("unit_cost", "unit cost required: item has no prior lot")
+                })?,
+            };
+            adj.unit_cost = Some(cost);
+            let adj_id = tx.adjustments().create_adjustment(&adj)?;
+            self.create_source_lot(
+                tx,
+                LotSource::Adjustment,
+                date,
+                item.id,
+                quantity,
+                Some(cost),
+                Some(format!("Stock adjustment #{adj_id}: {reason:?}")),
+            )?;
+            Ok((adj_id, 0.0, Some(cost)))
+        }
+    }
 }
 
 impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for InventoryServiceImpl<S, U> {
@@ -278,52 +342,24 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             }
         }
 
+        if payload.reason == AdjustmentReason::UnrecordedStock && payload.quantity < 0.0 {
+            return Err(validation("quantity", "Unrecorded stock can only add stock; use Count correction to reduce it"));
+        }
+
         let mut tx = self.uow.begin_transaction()?;
         let item = find_item(&mut *tx, payload.item_id)?;
-        if !item.is_active {
-            return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
-        }
-        let created_at = chrono::Utc::now().to_rfc3339();
-        let mut adj = StockAdjustment {
-            id: 0,
-            adjustment_date: payload.adjustment_date.clone(),
-            item_id: payload.item_id,
-            quantity: payload.quantity,
-            unit_cost: None,
-            reason: payload.reason,
-            notes: payload.notes.clone(),
-            created_at,
-        };
-
-        let loss_value = if payload.quantity < 0.0 {
-            let qty = -payload.quantity;
-            self.validate_stock_availability(&mut *tx, &[(payload.item_id, qty)])?;
-            let adj_id = tx.adjustments().create_adjustment(&adj)?;
-            adj.id = adj_id;
-            self.issue_stock_outflow(&mut *tx, OutflowSourceType::Adjustment, adj_id, payload.item_id, qty)?
-        } else {
-            let cost = match payload.unit_cost {
-                Some(c) => c,
-                None => tx.purchases().get_latest_lot_cost(payload.item_id)?.ok_or_else(|| {
-                    validation("unit_cost", "unit cost required: item has no prior lot")
-                })?,
-            };
-            adj.unit_cost = Some(cost);
-            let adj_id = tx.adjustments().create_adjustment(&adj)?;
-            adj.id = adj_id;
-            self.create_source_lot(
-                &mut *tx,
-                LotSource::Adjustment,
-                &payload.adjustment_date,
-                payload.item_id,
-                payload.quantity,
-                Some(cost),
-                Some(format!("Stock adjustment #{adj_id}: {:?}", payload.reason)),
-            )?;
-            0.0
-        };
+        require_stockable(&item)?;
+        let (adjustment_id, loss_value, _) = self.post_adjustment(
+            &mut *tx,
+            &item,
+            &payload.adjustment_date,
+            payload.quantity,
+            payload.reason,
+            payload.unit_cost,
+            payload.notes.clone(),
+        )?;
         tx.commit()?;
-        Ok(StockAdjustmentResult { adjustment_id: adj.id, loss_value })
+        Ok(StockAdjustmentResult { adjustment_id, loss_value })
     }
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use common::stock::*;
 use common::{FifoStrategy, InventoryServiceImpl, ItemServiceImpl, TestDb};
 use book_keeper::core::dtos::*;
+use book_keeper::core::entities::StockAdjustment;
 use book_keeper::core::error::AppError;
 use book_keeper::core::value_objects::*;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
@@ -183,6 +184,74 @@ fn test_tc_inv_009_vendor_return_named_lot() {
     ));
     assert_eq!(lot_remaining(&mut *tx, 9), 6.0);
     assert_stock_invariant(&mut *tx);
+}
+
+fn adjustment_rows(inv: &Inv, item: i64) -> Vec<StockAdjustment> {
+    inv.list_adjustments(Some(item), Some(1), Some(50)).unwrap().items
+}
+
+#[test]
+fn test_tc_inv_010_unrecorded_stock_at_entered_cost() {
+    let (db, inv) = setup(&[(1, 1, 10.0, 7.5)]);
+    let res = inv.create_adjustment(adj(1, 4.0, AdjustmentReason::UnrecordedStock, Some(9.0))).unwrap();
+    assert_eq!(res.loss_value, 0.0);
+    assert_eq!(stock(&db, 1).0, 14.0);
+    let lots = inv.get_item_lots(1).unwrap();
+    assert_eq!(lots.len(), 2);
+    assert_eq!((lots[1].source, lots[1].unit_cost, lots[1].quantity), (LotSource::Adjustment, 9.0, 4.0));
+    let rows = adjustment_rows(&inv, 1);
+    assert_eq!((rows[0].reason, rows[0].unit_cost), (AdjustmentReason::UnrecordedStock, Some(9.0)));
+    let mut r = db.begin_read().unwrap();
+    assert_eq!(r.purchases().list_purchases(None, None, None, None, 0, 50).unwrap().len(), 1, "not a purchase");
+    let h = r.purchases().find_transaction_by_id(lots[1].purchase_transaction_id).unwrap().unwrap();
+    assert!(r.settlements().list_by_transaction(TransactionType::Purchase, h.id).unwrap().is_empty());
+    assert_eq!(h.notes.as_deref(), Some(format!("Stock adjustment #{}: UnrecordedStock", res.adjustment_id).as_str()));
+    assert_stock_invariant(&mut *r);
+}
+
+#[test]
+fn test_tc_inv_011_unrecorded_stock_defaults_to_latest_lot_cost() {
+    let (_db, inv) = setup(&[(1, 1, 10.0, 7.5)]);
+    inv.create_adjustment(adj(1, 4.0, AdjustmentReason::UnrecordedStock, None)).unwrap();
+    assert_eq!(inv.get_item_lots(1).unwrap()[1].unit_cost, 7.5);
+    assert_eq!(adjustment_rows(&inv, 1)[0].unit_cost, Some(7.5));
+}
+
+#[test]
+fn test_tc_inv_012_unrecorded_stock_without_lot_or_cost_is_rejected() {
+    let db = TestDb::new();
+    let inv = InventoryServiceImpl::new(FifoStrategy, db.clone());
+    let mut tx = db.begin_transaction().unwrap();
+    seed_empty_item(&mut *tx, 1);
+    tx.commit().unwrap();
+    match inv.create_adjustment(adj(1, 3.0, AdjustmentReason::UnrecordedStock, None)) {
+        Err(AppError::ValidationError { field, .. }) => assert_eq!(field, "unit_cost"),
+        other => panic!("expected unit_cost ValidationError, got {other:?}"),
+    }
+    assert!(adjustment_rows(&inv, 1).is_empty());
+    assert!(inv.get_item_lots(1).unwrap().is_empty());
+    assert_eq!(stock(&db, 1).0, 0.0);
+}
+
+#[test]
+fn test_tc_inv_013_unrecorded_stock_must_be_positive() {
+    let (db, inv) = setup(&[(1, 1, 10.0, 5.0)]);
+    match inv.create_adjustment(adj(1, -2.0, AdjustmentReason::UnrecordedStock, Some(5.0))) {
+        Err(AppError::ValidationError { field, .. }) => assert_eq!(field, "quantity"),
+        other => panic!("expected quantity ValidationError, got {other:?}"),
+    }
+    assert!(adjustment_rows(&inv, 1).is_empty());
+    assert_eq!(stock(&db, 1).0, 10.0);
+}
+
+#[test]
+fn adjustments_on_service_items_are_rejected() {
+    let (db, inv) = setup(&[(1, 1, 10.0, 5.0)]);
+    db.pool.get().unwrap().execute("UPDATE items SET item_type = 'SERVICE' WHERE id = 1", []).unwrap();
+    match inv.create_adjustment(adj(1, 1.0, AdjustmentReason::UnrecordedStock, Some(5.0))) {
+        Err(AppError::ValidationError { field, .. }) => assert_eq!(field, "item_id"),
+        other => panic!("expected item_id ValidationError, got {other:?}"),
+    }
 }
 
 #[test]
