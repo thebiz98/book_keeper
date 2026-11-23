@@ -42,3 +42,6 @@ Thumbs.db
 
 # Machine-specific helper scripts; never committed
 local-only-scripts/
+
+# Agent worktrees (each has its own cargo target/); never committed or watched
+.claude/worktrees/
