@@ -48,6 +48,13 @@ describe('CreditDuesPage', () => {
     document.body.innerHTML = '';
   });
 
+  it('dues list fills the page height with a sticky header', async () => {
+    setup();
+    render(<CreditDuesPage />);
+    await waitFor(() => bodyText().includes('Sharma Traders'));
+    expect(document.querySelector('[data-table-scroll]')?.getAttribute('data-table-scroll')).toBe('fill');
+  });
+
   it('settles a single bill with transactionId', async () => {
     const api = setup();
     render(<CreditDuesPage />);

@@ -182,8 +182,8 @@ export const CreditDuesPage: React.FC = () => {
   ];
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
+    <div className="flex flex-col gap-4 h-full min-h-0">
+      <div className="shrink-0 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
         <Tabs
           activeTab={activeTab}
           onChange={(id) => setActiveTab(id === 'VENDOR' ? 'VENDOR' : 'CUSTOMER')}
@@ -200,7 +200,7 @@ export const CreditDuesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3">
+      <div className="shrink-0 p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <input
@@ -216,6 +216,8 @@ export const CreditDuesPage: React.FC = () => {
       </div>
 
       <DataTable
+        scroll="fill"
+        className="flex-1 min-h-[240px]"
         columns={columns}
         items={filtered}
         rowKey={(d) => d.partyId}

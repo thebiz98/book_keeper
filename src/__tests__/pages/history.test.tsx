@@ -24,6 +24,14 @@ describe('Sales history', () => {
     document.body.innerHTML = '';
   });
 
+  it('uses a full-height scroll container with a sticky header', async () => {
+    installApi({ getSalesHistory: { items: [row(1, 30)], total: 1, page: 1, limit: 25 } });
+    render(<SalesHistoryPage />);
+    await waitFor(() => bodyText().includes('SAL-1'));
+    expect(document.querySelector('[data-table-scroll]')?.getAttribute('data-table-scroll')).toBe('fill');
+    expect(document.querySelector('th')?.className).toContain('sticky');
+  });
+
   it('loads server-side with default filters, shows partyName/lineCount, and settle only when due', async () => {
     const api = installApi({
       getSalesHistory: { items: [row(1, 30), row(2, 0)], total: 60, page: 1, limit: 25 },

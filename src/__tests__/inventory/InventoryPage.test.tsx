@@ -22,6 +22,13 @@ function mount(over: Record<string, unknown> = {}) {
 }
 
 describe('InventoryPage catalog', () => {
+  it('fills the page height with a sticky header (FR-10 rev.)', async () => {
+    const { container } = mount();
+    await flush();
+    expect(container.querySelector('[data-table-scroll]')?.getAttribute('data-table-scroll')).toBe('fill');
+    expect(container.querySelector('th')?.className).toContain('sticky');
+  });
+
   it('loads server-side page 1 and renders spec columns with itemId rows', async () => {
     const { api, container } = mount();
     await flush();

@@ -106,8 +106,8 @@ export const PartiesPage: React.FC = () => {
     });
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
+    <div className="flex flex-col gap-4 h-full min-h-0">
+      <div className="shrink-0 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Users className="h-5 w-5 text-blue-600" />
           <h2 className="text-sm font-bold">Parties Directory</h2>
@@ -122,7 +122,7 @@ export const PartiesPage: React.FC = () => {
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="shrink-0 flex flex-wrap items-end justify-between gap-3">
         <Tabs
           tabs={[
             { id: 'CUSTOMER', label: 'Customers', icon: <User className="h-3.5 w-3.5" /> },
@@ -142,13 +142,13 @@ export const PartiesPage: React.FC = () => {
       </div>
 
       {error && (
-        <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium px-1">
+        <p role="alert" className="shrink-0 text-xs text-rose-600 dark:text-rose-400 font-medium px-1">
           {error}
         </p>
       )}
 
-      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
-        <Table dense>
+      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs flex-1 min-h-[240px] flex flex-col">
+        <Table dense scroll="fill">
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>

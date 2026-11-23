@@ -151,8 +151,8 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
   ];
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
+    <div className="flex flex-col gap-4 flex-1 min-h-0">
+      <div className="shrink-0 flex flex-wrap items-center gap-3 bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2.5 top-2.5 text-slate-400" size={16} />
           <input
@@ -196,6 +196,8 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
       </div>
 
       <DataTable
+        scroll="fill"
+        className="flex-1 min-h-[240px]"
         columns={columns}
         items={rows}
         rowKey={(r) => r.id}
