@@ -2,6 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { click, flush, installApi, key, makeItem, typeInto, byText } from '../inventory/testHelpers';
 import type { ItemSearchResult } from '@/types';
+import { fakeBillPreview } from '../pages/helpers';
+
+/**
+ * DD-56: the screen shows what `preview_purchase` returns. The double here only supplies totals
+ * (plain arithmetic) and canned payment verdicts per scenario; the real rules are tested in Rust.
+ */
+type PreviewIn = Parameters<typeof fakeBillPreview>[0] & { partyId?: number | null };
+const previewWith = (verdict: (p: PreviewIn) => { field: string; message: string }[] = () => []) =>
+  vi.fn(async (p: PreviewIn) => fakeBillPreview(p, { errors: verdict(p) }));
 
 // Stub the pickers: the real ones are covered by their own tests.
 let pickItem: (i: ItemSearchResult) => void = () => {};
@@ -26,6 +35,7 @@ const box = { bundleId: 5, bundleName: 'Box', unitsPerBundle: 25, bundlePrice: n
 function mount(over: Record<string, unknown> = {}) {
   const api = installApi({
     createPurchase: vi.fn().mockResolvedValue({ purchaseId: 1, transactionCode: 'PUR-0042' }),
+    previewPurchase: previewWith(),
     ...over,
   });
   const r = render(<NewPurchasePage />);
@@ -44,8 +54,13 @@ async function addBoxLine(container: HTMLElement, cost = '100') {
   ) as HTMLInputElement;
   typeInto(costInput, cost);
   click(byText(container, 'button', /Add Line/));
-  await flush();
+  await settle();
 }
+
+/** Lets the debounced previews (totals, then payment) come back. */
+const settle = async () => {
+  for (let i = 0; i < 4; i++) await flush(120); // separate act scopes: totals first, then the payment preview
+};
 
 describe('NewPurchasePage', () => {
   beforeEach(() => {
@@ -66,7 +81,7 @@ describe('NewPurchasePage', () => {
     const row = container.querySelector('[data-testid="purchase-line"]') as HTMLElement;
     expect(row.textContent).toContain('100 PCS');
     expect(row.textContent).toContain('4.0000'); // 100 per box / 25
-    expect(row.textContent).toContain('400.00');
+    expect(row.textContent).toContain('400.00'); // the line total is the preview's
     expect(container.querySelector('[data-testid="purchase-total"]')?.textContent).toContain('400.00');
   });
 
@@ -75,6 +90,7 @@ describe('NewPurchasePage', () => {
     await flush();
     await addBoxLine(container, '100');
     typeInto(container.querySelector('input[placeholder="e.g. INV-9841"]') as HTMLInputElement, ' INV-77 ');
+    await settle();
 
     click(byText(container, 'button', /Record Inward Stock/));
     await flush();
@@ -97,10 +113,17 @@ describe('NewPurchasePage', () => {
   });
 
   it('requires a vendor for UNPAID and PARTIAL and blocks the call', async () => {
-    const { container, api } = mount();
+    const { container, api } = mount({
+      previewPurchase: previewWith((p) =>
+        p.paymentStatus && p.paymentStatus !== 'PAID' && p.partyId == null
+          ? [{ field: 'party_id', message: 'vendor required for credit' }]
+          : []
+      ),
+    });
     await flush();
     await addBoxLine(container);
     click(byText(container, 'button', 'UNPAID'));
+    await settle();
     click(byText(container, 'button', /Record Inward Stock/));
     await flush();
     expect(api.createPurchase).not.toHaveBeenCalled();
@@ -109,6 +132,7 @@ describe('NewPurchasePage', () => {
     // With a vendor it goes through, paid = 0.
     const { act } = await import('react');
     act(() => pickParty({ id: 7 }));
+    await settle();
     click(byText(container, 'button', /Record Inward Stock/));
     await flush();
     expect(api.createPurchase).toHaveBeenCalledTimes(1);
@@ -120,7 +144,17 @@ describe('NewPurchasePage', () => {
   });
 
   it('rejects PARTIAL with paid >= total or 0 and overpayment', async () => {
-    const { container, api } = mount();
+    const { container, api } = mount({
+      previewPurchase: previewWith((p) =>
+        p.paymentStatus !== 'PARTIAL' || p.paidAmount == null
+          ? []
+          : p.paidAmount > 400
+            ? [{ field: 'paid_amount', message: 'paid_amount cannot exceed the purchase total' }]
+            : p.paidAmount >= 400 || p.paidAmount <= 0
+              ? [{ field: 'paid_amount', message: 'PARTIAL needs 0 < paid_amount < total' }]
+              : []
+      ),
+    });
     await flush();
     await addBoxLine(container); // total 400
     const { act } = await import('react');
@@ -129,18 +163,21 @@ describe('NewPurchasePage', () => {
     const paid = container.querySelector('input[aria-label="Paid amount"]') as HTMLInputElement;
 
     typeInto(paid, '400');
+    await settle();
     click(byText(container, 'button', /Record Inward Stock/));
     await flush();
     expect(api.createPurchase).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/PARTIAL|exceed/);
 
     typeInto(paid, '500');
+    await settle();
     click(byText(container, 'button', /Record Inward Stock/));
     await flush();
     expect(container.querySelector('[role="alert"]')?.textContent).toMatch(/exceed/i);
     expect(api.createPurchase).not.toHaveBeenCalled();
 
     typeInto(paid, '150');
+    await settle();
     click(byText(container, 'button', /Record Inward Stock/));
     await flush();
     expect(api.createPurchase.mock.calls[0][0]).toMatchObject({ paymentStatus: 'PARTIAL', paidAmount: 150, partyId: 7 });
@@ -230,8 +267,10 @@ describe('NewPurchasePage', () => {
       await flush(10);
     };
     await addOne('car');
+    await settle();
     expect(tid('purchase-total').textContent).toContain('500.00');
     await addOne('cash', '30');
+    await settle();
     expect(tid('purchase-total').textContent).toContain('470.00');
     expect(tid('purchase-items-subtotal').textContent).toBe('400');
 

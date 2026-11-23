@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, Trash2, CheckCircle2 } from 'lucide-react';
 import { api } from '@/api';
 import { errorMessage } from '@/api/errors';
@@ -6,25 +6,24 @@ import { todayLocal } from '@/lib/dates';
 import { useAppStore } from '@/store/useAppStore';
 import { peekBillEdit, takeBillEdit } from './billEditHandoff';
 import { purchaseLineToDraft } from '@/lib/billEditDraft';
-import { round2 } from '@/lib/money';
+import { usePreview } from '@/hooks/usePreview';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
-import type { CreatePurchasePayload, ItemBundle, ItemSearchResult, PaymentStatus } from '@/types';
+import type {
+  BillPreview,
+  CreatePurchasePayload,
+  ItemBundle,
+  ItemSearchResult,
+  PaymentStatus,
+  PreviewPurchasePayload,
+} from '@/types';
 import { PartySelector } from '@/components/domain/PartySelector';
 import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
 import { ItemQuickCreateModal } from '@/components/domain/ItemQuickCreateModal';
 import { BillChargesPanel, type BillChargesPanelHandle } from '@/components/domain/BillChargesPanel';
 import { BillTotalsSummary } from '@/components/domain/BillTotalsSummary';
-import { billTotals, toChargeInputs, type BillChargeLine } from '@/lib/billMath';
-import {
-  effectivePaid,
-  lineBaseQuantity,
-  lineCostPerBase,
-  lineTotal,
-  purchaseTotal,
-  validatePayment,
-  type PurchaseLine,
-} from '@/components/domain/purchaseMath';
+import { toChargeInputs, type BillChargeLine } from '@/lib/billMath';
+import { lineBaseQuantity, lineCostPerBase, type PurchaseLine } from '@/components/domain/purchaseMath';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { QuantityInput } from '@/components/common/QuantityInput';
 import { Button } from '@/components/ui/Button';
@@ -73,8 +72,6 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
   // FR-20 edit mode: decided synchronously so the code preview never overwrites the bill's code.
   const editRequested = useRef(peekBillEdit()?.kind === 'PURCHASE');
   const [editing, setEditing] = useState<{ id: number; code: string } | null>(null);
-  /** Edit: money already applied to the bill by later settlements / return credits. */
-  const [applied, setApplied] = useState(0);
   const [cancelEditOpen, setCancelEditOpen] = useState(false);
   const setActiveRoute = useAppStore((s) => s.setActiveRoute);
   const [inwardDate, setInwardDate] = useState<string>(todayLocal());
@@ -169,10 +166,9 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
         setNotes(p.notes ?? '');
         setLines(drafts);
         setCharges(d.charges.map((c) => ({ key: chargeKey.current++, chargeTypeId: c.chargeTypeId, name: c.chargeName, effect: c.effect, amount: c.amount })));
-        setApplied(g.appliedAmount);
-        const open = round2(Math.max(p.totalAmount - g.appliedAmount, 0));
+        // Prefill the payment control from what is stored; the backend preview judges the result.
         const up = g.upfrontAmount;
-        setPaymentStatus(up >= open - 1e-9 ? 'PAID' : up > 0 ? 'PARTIAL' : 'UNPAID');
+        setPaymentStatus(p.paymentStatus === 'PAID' ? 'PAID' : up > 0 ? 'PARTIAL' : 'UNPAID');
         setPaidInput(up);
       } catch (e) {
         if (live) {
@@ -297,9 +293,56 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
   const patchLine = (key: number, patch: Partial<PurchaseLine>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
-  const itemsSubtotal = purchaseTotal(lines);
-  const totals = billTotals(itemsSubtotal, charges);
-  const total = totals.grandTotal;
+  // DD-56: every figure comes from the backend. `totals` previews the bill without a payment (line
+  // totals, charges, total, what is open); `payPreview` adds the chosen payment (balance, errors).
+  const bill = useMemo<PreviewPurchasePayload | null>(
+    () =>
+      lines.length === 0
+        ? null
+        : {
+            transactionDate: inwardDate,
+            partyId: vendorId,
+            supplierInvoiceRef: supplierInvoiceRef.trim() || null,
+            paymentMode: 'CASH',
+            charges: toChargeInputs(charges),
+            notes: notes.trim() || null,
+            items: lines.map((l) => ({
+              itemId: l.itemId,
+              bundleId: l.bundleId,
+              bundleQuantity: l.quantity,
+              unitCost: l.unitCost,
+              ...(editing ? { purchaseItemId: l.purchaseItemId ?? null } : {}),
+            })),
+          },
+    [lines, inwardDate, vendorId, supplierInvoiceRef, charges, notes, editing]
+  );
+  const totalsPreview = usePreview<PreviewPurchasePayload, BillPreview>({
+    input: bill,
+    fetcher: (p) => api.previewPurchase(p, editing?.id ?? null),
+  });
+  const totals = totalsPreview.data;
+  /** PAID pays what is open (the backend's figure); UNPAID pays nothing; PARTIAL is what was typed. */
+  const paidToSend =
+    paymentStatus === 'PAID' ? totals?.openAmount : paymentStatus === 'UNPAID' ? 0 : paidInput;
+  const payInput = useMemo<PreviewPurchasePayload | null>(
+    () =>
+      bill && paidToSend != null && !totalsPreview.isLoading
+        ? { ...bill, paymentStatus, paidAmount: paidToSend }
+        : null,
+    [bill, paymentStatus, paidToSend, totalsPreview.isLoading]
+  );
+  const payPreview = usePreview<PreviewPurchasePayload, BillPreview>({
+    input: payInput,
+    fetcher: (p) => api.previewPurchase(p, editing?.id ?? null),
+  });
+  const pending = bill !== null && (totalsPreview.isLoading || payPreview.isLoading || payPreview.data === null);
+  const previewErrors = [...totalsPreview.errors, ...payPreview.errors];
+  const itemsSubtotal = totals?.itemsSubtotal ?? 0;
+  const total = totals?.totalAmount ?? 0;
+  const applied = totals?.appliedAmount ?? 0;
+  const paid = paymentStatus === 'PARTIAL' ? paidInput : (payPreview.data?.payment?.paidAmount ?? paidToSend ?? 0);
+  const balanceDue = payPreview.data?.payment?.balanceDue ?? totals?.openAmount ?? 0;
+  const paymentError = lines.length > 0 && !pending ? (previewErrors[0]?.message ?? null) : null;
 
   const addCharge = (line: Omit<BillChargeLine, 'key'>): boolean => {
     if (!(line.amount > 0)) return false;
@@ -312,11 +355,6 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     return true;
   };
   const removeCharge = (key: number) => setCharges((prev) => prev.filter((c) => c.key !== key));
-  // Payment describes the new upfront amount against what is still open (edit: total - applied).
-  const open = editing ? round2(Math.max(total - applied, 0)) : total;
-  const paid = effectivePaid(paymentStatus, open, paidInput);
-  const balanceDue = Math.max(0, open - paid);
-  const paymentError = lines.length > 0 ? validatePayment(paymentStatus, open, paid, vendorId) : null;
   const totalBaseUnits = lines.reduce((a, l) => a + lineBaseQuantity(l), 0);
 
   const handleRecordInward = async () => {
@@ -325,22 +363,10 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       setError('Add at least one line before recording the purchase');
       return;
     }
-    if (total < 0) {
-      setError('Discounts exceed the bill amount');
-      return;
-    }
-    const pe = validatePayment(paymentStatus, open, paid, vendorId);
-    if (pe) {
-      setError(pe);
-      return;
-    }
-    const short = lines.find((l) => l.minBaseQty && lineBaseQuantity(l) + 1e-9 < l.minBaseQty);
-    if (short) {
-      setError(`${short.itemName}: at least ${short.minBaseQty} already used`);
-      return;
-    }
-    if (editing && total + 1e-9 < applied) {
-      setError(`The new total is below the ₹${applied.toFixed(2)} already applied to this bill`);
+    // Saving waits for the backend's verdict on exactly what is on screen (pending or any error blocks).
+    if (!bill || pending) return;
+    if (previewErrors.length > 0) {
+      setError(previewErrors[0].message);
       return;
     }
 
@@ -350,28 +376,15 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     setSuccessCode(null);
 
     const payload: CreatePurchasePayload = {
-      transactionDate: inwardDate,
-      partyId: vendorId,
-      supplierInvoiceRef: supplierInvoiceRef.trim() || null,
+      ...bill,
       paymentStatus,
-      paidAmount: paid,
-      paymentMode: 'CASH',
-      charges: toChargeInputs(charges),
-      notes: notes.trim() || null,
-      items: lines.map((l) => ({
-        itemId: l.itemId,
-        bundleId: l.bundleId,
-        bundleQuantity: l.quantity,
-        unitCost: l.unitCost,
-        ...(editing ? { purchaseItemId: l.purchaseItemId ?? null } : {}),
-      })),
+      paidAmount: paidToSend ?? 0,
     };
 
     try {
       if (editing) {
         await api.updatePurchase(editing.id, payload);
         setEditing(null);
-        setApplied(0);
         setLines([]);
         setCharges([]);
         setActiveRoute('purchase-history');
@@ -695,7 +708,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
                     {lineCostPerBase(l).toFixed(4)}
                   </TableCell>
                   <TableCell align="right" mono className="font-bold text-slate-900 dark:text-slate-100">
-                    <CurrencyDisplay amount={lineTotal(l)} size="sm" />
+                    {totals?.lineTotals[idx] != null ? <CurrencyDisplay amount={totals.lineTotals[idx]} size="sm" /> : '—'}
                   </TableCell>
                   <TableCell className="text-center">
                     <button
@@ -843,7 +856,6 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
         onConfirm={() => {
           setCancelEditOpen(false);
           setEditing(null);
-          setApplied(0);
           setLines([]);
           setCharges([]);
           setActiveRoute('purchase-history');

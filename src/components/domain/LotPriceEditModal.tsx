@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
-import { lotPriceEffect } from '@/lib/lotPriceEffect';
-import type { BillEditGuard } from '@/types/api';
-import type { ItemLot, PaymentSettlement, PurchaseDetailView } from '@/types';
+import { usePreview } from '@/hooks/usePreview';
+import type { ItemLot, LotPriceUpdateResult, PaymentSettlement, PurchaseDetailView } from '@/types';
+import type { UpdateLotPricePayload } from '@/types/api';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
@@ -37,11 +36,13 @@ const Row: React.FC<{ label: string; old: React.ReactNode; next: React.ReactNode
   </div>
 );
 
-/** FR-25: edit one lot's Purchase Price, with a live preview of the bill and payment effect. */
+/**
+ * FR-25: edit one lot's Purchase Price. The bill and payment effect, and every refusal (returns,
+ * vendor return, total below what was applied), come from `preview_lot_purchase_price` (DD-56).
+ */
 export const LotPriceEditModal: React.FC<LotPriceEditModalProps> = ({ lot, baseUnit, onClose, onSaved }) => {
   const [price, setPrice] = useState(0);
   const [detail, setDetail] = useState<PurchaseDetailView | null>(null);
-  const [guard, setGuard] = useState<BillEditGuard | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,20 +60,17 @@ export const LotPriceEditModal: React.FC<LotPriceEditModalProps> = ({ lot, baseU
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lotId]);
 
+  // The bill as stored (its old figures and payment rows); the effect of the edit is the backend's.
   useEffect(() => {
     if (!lot || lot.source !== 'PURCHASE') {
       setDetail(null);
-      setGuard(null);
       return;
     }
     let live = true;
     setLoadError(null);
-    Promise.all([api.getPurchaseDetails(lot.purchaseTransactionId), api.getBillEditGuard('PURCHASE', lot.purchaseTransactionId)])
-      .then(([d, g]) => {
-        if (!live) return;
-        setDetail(d);
-        setGuard(g);
-      })
+    api
+      .getPurchaseDetails(lot.purchaseTransactionId)
+      .then((d) => live && setDetail(d))
       .catch((e) => live && setLoadError(errorMessage(e)));
     return () => {
       live = false;
@@ -80,32 +78,27 @@ export const LotPriceEditModal: React.FC<LotPriceEditModalProps> = ({ lot, baseU
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lotId, reloadKey]);
 
-  const packQty = lot?.packQuantity ?? 1;
-  const newLineTotal = round2(packQty * price);
-  const changed = lot ? Math.abs(newLineTotal / (lot.quantity || 1) - lot.unitCost) > 1e-9 : false;
-
-  const effect = useMemo(() => {
-    if (!lot || !isPurchase || !detail || !guard) return null;
-    return lotPriceEffect({
-      otherLineTotals: detail.items.filter((i) => i.purchaseItem.id !== lot.purchaseItemId).map((i) => i.purchaseItem.totalAmount),
-      editedLineTotal: newLineTotal,
-      charges: detail.charges,
-      settled: detail.settlements.filter((s) => s.kind === 'SETTLEMENT').reduce((s, r) => s + r.amountPaid, 0),
-      applied: guard.appliedAmount,
-      upfrontOld: guard.upfrontAmount,
-      oldBalanceDue: detail.purchase.balanceDue,
-    });
-  }, [lot, isPurchase, detail, guard, newLineTotal]);
-
-  const guardBlocks = guard?.reasons.filter((r) => r.blocksEdit) ?? [];
-  const limit = guard?.lotLimits.find((l) => l.purchaseItemId === lot?.purchaseItemId);
-  const vendorReturnBlock = isPurchase && changed && !!limit?.vendorReturned;
-  const belowApplied = effect?.blocked === true;
-  const settlementRows = (detail?.settlements ?? []).filter((s) => s.kind === 'SETTLEMENT');
-  const waiting = isPurchase && !loadError && (detail === null || guard === null);
-
+  /** Format check only: a number, 0 or more. */
   const problem = !Number.isFinite(price) || price < 0 ? 'Purchase price must be 0 or more' : null;
-  const canSave = !problem && changed && guardBlocks.length === 0 && !vendorReturnBlock && !belowApplied && !waiting;
+  // `reload` is part of the input: a corrected payment changes the answer for the same price.
+  const previewInput = useMemo<{ payload: UpdateLotPricePayload; reload: number } | null>(
+    () => (lot && !problem ? { payload: { purchaseItemId: lot.purchaseItemId, unitPrice: price }, reload: reloadKey } : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lotId, price, problem, reloadKey]
+  );
+  const preview = usePreview<{ payload: UpdateLotPricePayload; reload: number }, LotPriceUpdateResult>({
+    input: previewInput,
+    fetcher: (i) => api.previewLotPurchasePrice(i.payload),
+  });
+  const result = preview.data;
+  const previewErrors = preview.errors;
+  const belowApplied = previewErrors.some((e) => e.field === 'TOTAL_BELOW_APPLIED');
+  const otherErrors = previewErrors.filter((e) => e.field !== 'TOTAL_BELOW_APPLIED');
+  /** The backend reports an unchanged price by returning the same unit cost. */
+  const changed = result != null && result.newUnitCost !== result.oldUnitCost;
+  const settlementRows = (detail?.settlements ?? []).filter((s) => s.kind === 'SETTLEMENT');
+
+  const canSave = !problem && !preview.isLoading && result != null && previewErrors.length === 0 && changed;
 
   const save = async () => {
     if (!lot || !canSave || saving) return;
@@ -124,6 +117,7 @@ export const LotPriceEditModal: React.FC<LotPriceEditModalProps> = ({ lot, baseU
   };
 
   const unitLabel = lot?.packLabel ?? baseUnit;
+  const bill = result?.bill ?? null;
 
   return (
     <Modal
@@ -175,22 +169,21 @@ export const LotPriceEditModal: React.FC<LotPriceEditModalProps> = ({ lot, baseU
           {isPurchase && detail && (
             <div className="rounded-md border border-slate-200 dark:border-slate-800 p-3 flex flex-col gap-1.5" data-testid="lot-price-preview">
               <div className="text-xs font-semibold">Bill {detail.purchase.transactionCode}</div>
-              {effect && !effect.blocked && (
+              {bill && (
                 <>
-                  <Row label="Bill total" old={`₹${detail.purchase.totalAmount.toFixed(2)}`} next={`₹${effect.newTotal.toFixed(2)}`} />
-                  <Row label="Cash paid" old={`₹${detail.purchase.paidAmount.toFixed(2)}`} next={`₹${effect.newPaid.toFixed(2)}`} />
-                  <Row label="Balance due" old={`₹${detail.purchase.balanceDue.toFixed(2)}`} next={`₹${effect.balanceDue.toFixed(2)}`} />
-                  <Row label="Status" old={detail.purchase.paymentStatus} next={effect.status} />
+                  <Row label="Bill total" old={`₹${bill.oldTotal.toFixed(2)}`} next={`₹${bill.newTotal.toFixed(2)}`} />
+                  <Row label="Cash paid" old={`₹${bill.oldPaid.toFixed(2)}`} next={`₹${bill.newPaid.toFixed(2)}`} />
+                  <Row label="Balance due" old={`₹${detail.purchase.balanceDue.toFixed(2)}`} next={`₹${bill.balanceDue.toFixed(2)}`} />
+                  <Row label="Status" old={detail.purchase.paymentStatus} next={bill.paymentStatus} />
                 </>
               )}
             </div>
           )}
 
-          {belowApplied && effect && effect.blocked && detail && (
+          {belowApplied && detail && (
             <div role="alert" className="rounded-md border border-rose-300 dark:border-rose-800 p-3 text-xs" data-testid="lot-price-blocked">
               <p className="font-medium text-rose-600 dark:text-rose-400">
-                The new total ₹{effect.newTotal.toFixed(2)} is below the ₹{effect.applied.toFixed(2)} already applied to this
-                bill. Correct these payments first.
+                {previewErrors.find((e) => e.field === 'TOTAL_BELOW_APPLIED')?.message} Correct these payments first.
               </p>
               <ul className="mt-2 flex flex-col gap-1">
                 {settlementRows.map((s) => (
@@ -208,16 +201,11 @@ export const LotPriceEditModal: React.FC<LotPriceEditModalProps> = ({ lot, baseU
             </div>
           )}
 
-          {guardBlocks.map((r) => (
-            <p key={r.code} role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
-              {r.message}
+          {otherErrors.map((e, i) => (
+            <p key={i} role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
+              {e.message}
             </p>
           ))}
-          {vendorReturnBlock && (
-            <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
-              This stock was returned to the vendor at its old price. Delete that vendor return to change the price.
-            </p>
-          )}
           {(problem || error) && (
             <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
               {error ?? problem}

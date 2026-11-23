@@ -22,20 +22,3 @@ export function toChargeInputs(lines: BillChargeLine[]): BillChargeInput[] {
 export function validChargeAmount(n: number): boolean {
   return typeof n === 'number' && Number.isFinite(n) && n > 0;
 }
-
-// TEMPORARY (removed with the purchase and lot-price commits of DD-56): the old TS totals rule.
-import { round2 } from '@/lib/money';
-export interface BillTotalsView {
-  itemsSubtotal: number;
-  chargesTotal: number;
-  discountsTotal: number;
-  grandTotal: number;
-}
-export function billTotals(itemsSubtotal: number, lines: Pick<BillChargeLine, 'effect' | 'amount'>[]): BillTotalsView {
-  const sum = (e: ChargeEffect) =>
-    round2(lines.filter((l) => l.effect === e).reduce((s, l) => s + round2(l.amount), 0));
-  const items = round2(itemsSubtotal);
-  const chargesTotal = sum('CHARGE');
-  const discountsTotal = sum('DISCOUNT');
-  return { itemsSubtotal: items, chargesTotal, discountsTotal, grandTotal: round2(items + chargesTotal - discountsTotal) };
-}

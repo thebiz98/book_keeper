@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '../testUtils';
-import { installApi, flush, waitFor, click, setInput, bodyText } from '../pages/helpers';
+import { installApi, flush, waitFor, click, setInput, bodyText, fakeBillPreview } from '../pages/helpers';
 import { queueBillEdit, takeBillEdit } from '@/pages/billEditHandoff';
 import type { BillEditGuard, PurchaseDetailView } from '@/types';
 
@@ -34,6 +34,14 @@ function mount(g: BillEditGuard = guard()) {
     getBillEditGuard: g,
     searchItemsFts: [],
     getNextPurchaseCode: 'PUR-9999',
+    // DD-56: totals by plain arithmetic; the "below what was already used" verdict is canned here
+    // (the real rule is the backend's, tested in Rust).
+    previewPurchase: async (p: Parameters<typeof fakeBillPreview>[0]) =>
+      fakeBillPreview(p, {
+        errors: p.items.some((i) => i.bundleQuantity < 4)
+          ? [{ field: 'quantity', message: 'Pen: at least 4 already used' }]
+          : [],
+      }),
     updatePurchase: { purchaseId: 8, transactionCode: 'PUR-1008' },
   });
   queueBillEdit({ kind: 'PURCHASE', id: 8 });
@@ -54,6 +62,8 @@ describe('NewPurchasePage edit mode (FR-20)', () => {
     expect(document.querySelector('[data-testid="code-preview"]')?.textContent).toBe('PUR-1008');
     expect(document.querySelector('[data-testid="used-hint"]')?.textContent).toContain('Used: 4');
     expect((document.querySelector('button[aria-label="Remove Pen"]') as HTMLButtonElement).disabled).toBe(true);
+    for (let i = 0; i < 4; i++) await flush(120); // the totals and payment previews come back
+    expect(api.previewPurchase.mock.calls.at(-1)![1]).toBe(8); // the edit previews carry the purchase id
     click(Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('Update Purchase'))!);
     await flush();
     expect(api.updatePurchase).toHaveBeenCalledTimes(1);
@@ -67,6 +77,7 @@ describe('NewPurchasePage edit mode (FR-20)', () => {
     const api = mount();
     await waitFor(() => !!document.querySelector('[data-testid="edit-banner"]'));
     setInput(document.querySelector('input[aria-label="Quantity Pen"]')!, '3');
+    for (let i = 0; i < 4; i++) await flush(120);
     click(Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('Update Purchase'))!);
     await flush();
     expect(bodyText()).toContain('at least 4 already used');
