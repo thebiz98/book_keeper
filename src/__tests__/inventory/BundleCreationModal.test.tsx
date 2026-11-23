@@ -93,6 +93,57 @@ describe('BundleCreationModal', () => {
     expect(container.textContent).toContain('Barcode already used by item X');
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('plain Enter in the multiplier input saves', async () => {
+    const { container, api } = mount();
+    await flush(60);
+    typeInto(nameInput(container), 'Box');
+    typeInto(multInput(container), '50');
+    key(multInput(container), { key: 'Enter' });
+    await flush();
+    expect(api.createBundle).toHaveBeenCalledTimes(1);
+  });
+
+  it('Enter in the outer barcode input (scanner) does not save', async () => {
+    const { container, api } = mount();
+    await flush(60);
+    typeInto(nameInput(container), 'Box');
+    typeInto(multInput(container), '50');
+    const barcode = container.querySelector('input[placeholder^="Scan outer"]') as HTMLInputElement;
+    typeInto(barcode, '8901234567890');
+    key(barcode, { key: 'Enter' });
+    await flush();
+    expect(api.createBundle).not.toHaveBeenCalled();
+  });
+
+  it('Enter in the name field with suggestions open applies the suggestion and does not save', async () => {
+    const { container, api } = mount();
+    await flush(60);
+    typeInto(nameInput(container), 'doz');
+    await flush();
+    expect(container.querySelector('[role="option"]')).not.toBeNull();
+    key(nameInput(container), { key: 'Enter' });
+    await flush(10);
+    expect(api.createBundle).not.toHaveBeenCalled();
+    expect(nameInput(container).value).toBe('Dozen');
+    expect(multInput(container).value).toBe('12');
+  });
+
+  it('Cancel calls onClose', async () => {
+    const { container, onClose } = mount();
+    await flush(60);
+    click(byText(container, 'button', /^Cancel/));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Create Bundle is disabled while the name is empty', async () => {
+    const { container } = mount();
+    await flush(60);
+    const btn = byText(container, 'button', /Create Bundle/) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    typeInto(nameInput(container), 'Box');
+    expect((byText(container, 'button', /Create Bundle/) as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
 function act_mouseDown(el: Element) {

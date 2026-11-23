@@ -4,7 +4,7 @@ import { api } from '@/api';
 import { errorMessage } from '@/api/errors';
 import type { BundleSuggestion, ItemBundle } from '@/types';
 import { Modal } from '../ui/Modal';
-import { Button } from '../ui/Button';
+import { FormActions, enterToSubmit } from '../ui/FormActions';
 import { TextInput } from '../ui/TextInput';
 import { parseOptional, validationField } from './formUtils';
 
@@ -145,13 +145,6 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
     }
   };
 
-  const onBodyKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      void handleSave();
-    }
-  };
-
   const onNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!showSuggestions || filtered.length === 0) return;
     if (e.key === 'ArrowDown') {
@@ -180,23 +173,17 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
       description={`Define a packaged selling unit (e.g. Box of 10 ${baseUnit})`}
       size="md"
       footer={
-        <>
-          <Button variant="outline" size="sm" onClick={onClose} hotkey="Esc">
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => void handleSave()}
-            isLoading={isLoading}
-            hotkey="Ctrl+Enter"
-          >
-            {isEdit ? 'Save Bundle' : 'Create Bundle'}
-          </Button>
-        </>
+        <FormActions
+          onSave={() => void handleSave()}
+          onCancel={onClose}
+          isSubmitting={isLoading}
+          canSave={bundleName.trim().length > 0}
+          saveLabel={isEdit ? 'Save Bundle' : 'Create Bundle'}
+          saveHotkey="Enter"
+        />
       }
     >
-      <div className="flex flex-col gap-4 py-1" onKeyDown={onBodyKeyDown}>
+      <div className="flex flex-col gap-4 py-1" onKeyDown={enterToSubmit(() => void handleSave())}>
         <div className="grid grid-cols-2 gap-3">
           <div className="relative">
             <TextInput
@@ -301,6 +288,7 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
         <div>
           <TextInput
             label="Outer Package Barcode"
+            data-enter-submit="off"
             placeholder="Scan outer package barcode (optional)"
             value={barcode}
             onChange={(e) => setBarcode(e.target.value)}
