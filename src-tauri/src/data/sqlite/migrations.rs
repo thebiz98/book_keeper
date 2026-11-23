@@ -367,6 +367,12 @@ CREATE VIRTUAL TABLE charge_type_search_fts USING fts5(
 );
 "#;
 
+const SCHEMA_V8: &str = r#"
+ALTER TABLE sale_transactions ADD COLUMN updated_at TEXT;
+ALTER TABLE purchase_transactions ADD COLUMN updated_at TEXT;
+CREATE INDEX idx_return_tx_original ON return_transactions(return_type, original_transaction_id);
+"#;
+
 /// All known migrations, ascending and gap-free. Append only; never edit a shipped step.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 },
@@ -384,6 +390,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 5, name: "unrecorded_stock_reason", sql: SCHEMA_V5_UNRECORDED_STOCK },
     Migration { version: 6, name: "expenses_code_sequences", sql: SCHEMA_V6 },
     Migration { version: 7, name: "bill_charges", sql: SCHEMA_V7 },
+    Migration { version: 8, name: "bill_correction", sql: SCHEMA_V8 },
 ];
 
 /// Highest schema version this build knows.

@@ -109,6 +109,7 @@ pub fn create_test_purchase_tx(
         items_subtotal: total,
         charges_total: 0.0,
         discounts_total: 0.0,
+        updated_at: None,
     }
 }
 
@@ -173,6 +174,7 @@ pub fn create_test_sale_tx(
         items_subtotal: total,
         charges_total: 0.0,
         discounts_total: 0.0,
+        updated_at: None,
     }
 }
 

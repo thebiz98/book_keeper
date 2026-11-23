@@ -9,7 +9,7 @@ use crate::data::contracts::purchase_repository::PurchaseRepository;
 use crate::data::sqlite::code_gen::{next_code, seq_for_source};
 use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
-const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total";
+const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total, updated_at";
 const ITEM_COLS: &str = "id, purchase_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_cost, total_amount, remaining_quantity";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<PurchaseTransaction> {
@@ -31,6 +31,7 @@ fn map_tx(r: &Row<'_>) -> rusqlite::Result<PurchaseTransaction> {
         items_subtotal: r.get(14)?,
         charges_total: r.get(15)?,
         discounts_total: r.get(16)?,
+        updated_at: r.get(17)?,
     })
 }
 
@@ -105,12 +106,12 @@ impl SqlitePurchaseRepository {
 impl PurchaseRepository for SqlitePurchaseRepository {
     fn create_transaction(&mut self, tx: &PurchaseTransaction) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"),
+            &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"),
             params![
                 opt_id(tx.id), tx.transaction_code, enum_to_sql(&tx.source)?, tx.supplier_invoice_ref,
                 tx.transaction_date, tx.party_id, tx.party_name, tx.payment_mode,
                 enum_to_sql(&tx.payment_status)?, tx.total_amount, tx.paid_amount, tx.balance_due,
-                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total
+                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total, tx.updated_at
             ],
         )?;
         Ok(self.conn.last_insert_rowid())

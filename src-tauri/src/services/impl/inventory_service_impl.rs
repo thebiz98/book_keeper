@@ -248,6 +248,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             items_subtotal: 0.0,
             charges_total: 0.0,
             discounts_total: 0.0,
+            updated_at: None,
         };
         let header_id = uow.purchases().create_transaction(&header)?;
         let mut ids = Vec::with_capacity(resolved.len());

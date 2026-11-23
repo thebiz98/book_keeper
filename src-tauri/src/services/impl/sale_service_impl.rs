@@ -161,6 +161,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             items_subtotal: totals.items_subtotal,
             charges_total: totals.charges_total,
             discounts_total: totals.discounts_total,
+            updated_at: None,
         };
         let sale_id = tx.sales().create_transaction(&sale_tx)?;
         insert_bill_charges(&mut *tx, TransactionType::Sale, sale_id, &charges)?;

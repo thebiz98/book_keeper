@@ -427,6 +427,8 @@ const V5: &str = include_str!("fixtures/schema/v5.sql");
 const V6: &str = include_str!("fixtures/schema/v6.sql");
 #[allow(dead_code)]
 const V7: &str = include_str!("fixtures/schema/v7.sql");
+#[allow(dead_code)]
+const V8: &str = include_str!("fixtures/schema/v8.sql");
 
 /// Builds a database at the version reached by replaying `steps` (fixtures 1..N).
 fn db_from_fixtures(tag: &str, steps: &[&str]) -> (PathBuf, Connection) {
@@ -835,5 +837,34 @@ fn charge_tables_enforce_checks() {
     assert!(ins(5.0).is_ok());
     drop(conn);
     drop(pool);
+    cleanup(&path);
+}
+
+#[test]
+fn v7_database_upgrades_to_v8_keeping_bills() {
+    let (path, conn) = db_from_fixtures("v7up", &[V1, V2, V3, V4, V5, V6, V7]);
+    conn.execute_batch(
+        "INSERT INTO sale_transactions (id, transaction_code, transaction_date, payment_status, total_amount, paid_amount)
+           VALUES (1, 'SAL-1001', '2026-11-01', 'PAID', 150, 150);
+         INSERT INTO purchase_transactions (id, transaction_code, transaction_date, payment_status, total_amount, source)
+           VALUES (1, 'PUR-1001', '2026-11-01', 'UNPAID', 200, 'PURCHASE');",
+    )
+    .unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 8);
+    for t in ["sale_transactions", "purchase_transactions"] {
+        let n: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {t} WHERE updated_at IS NULL"), [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1, "{t} row kept with NULL updated_at");
+    }
+    let idx: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_return_tx_original'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(idx, 1);
+    let fk: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(fk, 0);
+    let before = current_version(&conn).unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(current_version(&conn).unwrap(), before);
+    drop(conn);
     cleanup(&path);
 }

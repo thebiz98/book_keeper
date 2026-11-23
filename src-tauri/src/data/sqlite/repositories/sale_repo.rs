@@ -9,7 +9,7 @@ use crate::data::contracts::sale_repository::SaleRepository;
 use crate::data::sqlite::code_gen::{next_code, SALE_CODE};
 use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
-const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total";
+const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total, updated_at";
 const ITEM_COLS: &str = "id, sale_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_price, total_amount";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<SaleTransaction> {
@@ -29,6 +29,7 @@ fn map_tx(r: &Row<'_>) -> rusqlite::Result<SaleTransaction> {
         items_subtotal: r.get(12)?,
         charges_total: r.get(13)?,
         discounts_total: r.get(14)?,
+        updated_at: r.get(15)?,
     })
 }
 
@@ -101,11 +102,11 @@ impl SqliteSaleRepository {
 impl SaleRepository for SqliteSaleRepository {
     fn create_transaction(&mut self, tx: &SaleTransaction) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO sale_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"),
+            &format!("INSERT INTO sale_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"),
             params![
                 opt_id(tx.id), tx.transaction_code, tx.transaction_date, tx.party_id, tx.party_name,
                 tx.payment_mode, enum_to_sql(&tx.payment_status)?, tx.total_amount, tx.paid_amount, tx.balance_due,
-                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total
+                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total, tx.updated_at
             ],
         )?;
         Ok(self.conn.last_insert_rowid())

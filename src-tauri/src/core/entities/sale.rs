@@ -19,6 +19,8 @@ pub struct SaleTransaction {
     pub items_subtotal: f64,
     pub charges_total: f64,
     pub discounts_total: f64,
+    /// Last edit time (FR-20, v8); `None` if never edited.
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
