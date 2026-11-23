@@ -23,6 +23,7 @@ export interface MockItem {
   defaultSalePrice: number;
   currentStock: number;
   isLowStock: boolean;
+  lowStockThreshold: number;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -80,6 +81,7 @@ function makeItem(
     mrp,
     currentStock: stock,
     isLowStock: stock < 5,
+    lowStockThreshold: 5,
     isActive: true,
     createdAt: SEED_TS,
     updatedAt: SEED_TS,

@@ -14,7 +14,7 @@ export function makeItem(over: Partial<ItemSearchResult> = {}): ItemSearchResult
     mrp: 12,
     defaultSalePrice: 10,
     currentStock: 100,
-    isLowStock: false,
+    isLowStock: false, lowStockThreshold: 5,
     bundles: [],
     matchedBundleId: null,
     ...over,

@@ -51,6 +51,15 @@ describe('MockApiClient contract shapes', () => {
     expect(row?.itemType).toBe('PHYSICAL');
   });
 
+  it('updateItemLowStockThreshold returns the row with the new level', async () => {
+    const page = await c.getItemsCatalog({ limit: 1 });
+    const id = page.items[0].itemId;
+    const row = await c.updateItemLowStockThreshold(id, 12);
+    expect(row.itemId).toBe(id);
+    expect(row.lowStockThreshold).toBe(12);
+    await expect(c.updateItemLowStockThreshold(99999999, 1)).rejects.toSatisfy(isAppError);
+  });
+
   it('simulates one typed error path', async () => {
     await expect(c.searchItemsFts('__error__')).rejects.toSatisfy(isAppError);
   });

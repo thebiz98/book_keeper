@@ -170,6 +170,8 @@ export interface CreateItemPayload {
   bundles: CreateBundlePayload[] | null;
   /** Optional; omitted => PHYSICAL. SERVICE is rejected by the backend in v1.1. */
   itemType?: ItemType | null;
+  /** Optional; omitted => 5. 0 = never low. */
+  lowStockThreshold?: number | null;
 }
 
 export interface UpdateItemPayload {
@@ -180,6 +182,8 @@ export interface UpdateItemPayload {
   mrp: number | null;
   defaultSalePrice: number;
   itemType?: ItemType | null;
+  /** Optional; omitted/null => keep the current level. */
+  lowStockThreshold?: number | null;
 }
 
 export interface BundleSuggestion {
@@ -342,6 +346,8 @@ export interface ApiClient {
   listCategories(): Promise<string[]>;
   createItem(payload: CreateItemPayload): Promise<number>;
   updateItem(itemId: number, payload: UpdateItemPayload): Promise<void>;
+  /** Sets the per-item low stock level (>= 0; 0 = never) and returns the refreshed row. */
+  updateItemLowStockThreshold(itemId: number, threshold: number): Promise<ItemSearchResult>;
   getBundleSuggestions(): Promise<BundleSuggestion[]>;
   createBundle(payload: CreateBundlePayload): Promise<ItemBundle>;
   updateBundle(bundleId: number, payload: UpdateBundlePayload): Promise<ItemBundle>;

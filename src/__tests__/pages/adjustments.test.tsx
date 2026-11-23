@@ -14,7 +14,7 @@ const ITEM: ItemSearchResult = {
   mrp: null,
   defaultSalePrice: 10,
   currentStock: 5,
-  isLowStock: false,
+  isLowStock: false, lowStockThreshold: 5,
   bundles: [],
   matchedBundleId: null,
 };

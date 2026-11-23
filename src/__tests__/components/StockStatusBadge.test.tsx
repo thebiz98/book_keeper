@@ -74,6 +74,12 @@ describe('StockStatusBadge - Three-Tier Retail Stock Health Indicator', () => {
       const b = render(<StockStatusBadge currentStock={-0.5} />);
       expect(b.container.textContent).toContain('Out of Stock');
     });
+    it('shows the per-item level as a tooltip, and "alert off" for 0', () => {
+      const a = render(<StockStatusBadge currentStock={3} isLowStock baseUnit="KG" lowStockThreshold={10} />);
+      expect((a.container.firstChild as HTMLElement).getAttribute('title')).toBe('Low when below 10 KG');
+      const b = render(<StockStatusBadge currentStock={3} baseUnit="KG" lowStockThreshold={0} />);
+      expect((b.container.firstChild as HTMLElement).getAttribute('title')).toBe('Low-stock alert off');
+    });
     it('treats a just-above-EPS stock as in stock', () => {
       const { container } = render(<StockStatusBadge currentStock={0.001} baseUnit="KG" />);
       expect(container.textContent).toContain('0.001 KG');

@@ -69,6 +69,8 @@ export class TauriClient implements ApiClient {
   createItem: ApiClient['createItem'] = (payload) => invokeCmd('create_item', { payload });
   updateItem: ApiClient['updateItem'] = (itemId, payload) =>
     invokeCmd('update_item', { itemId, payload });
+  updateItemLowStockThreshold: ApiClient['updateItemLowStockThreshold'] = (itemId, threshold) =>
+    invokeCmd('update_item_low_stock_threshold', { itemId, threshold });
   getBundleSuggestions: ApiClient['getBundleSuggestions'] = () =>
     invokeCmd('get_bundle_suggestions');
   createBundle: ApiClient['createBundle'] = (payload) =>

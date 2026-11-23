@@ -54,6 +54,8 @@ export interface ItemSearchResult {
   defaultSalePrice: number;
   currentStock: number;
   isLowStock: boolean;
+  /** Per-item low stock level in base units (0 = never low). */
+  lowStockThreshold: number;
   bundles: ItemBundleSearchResult[];
   /** Set when the query matched a bundle barcode. */
   matchedBundleId: number | null;
@@ -79,6 +81,7 @@ export interface LowStockItem {
   currentStock: number;
   defaultSalePrice: number;
   mrp: number | null;
+  lowStockThreshold: number;
 }
 
 export interface Party {

@@ -6,6 +6,8 @@ export interface StockStatusBadgeProps {
   /** Server-computed low-stock flag (is_low_stock). The only source of the Low Stock state. */
   isLowStock?: boolean;
   baseUnit?: string;
+  /** Per-item level (server flag still decides the state); used for the tooltip and aria text. */
+  lowStockThreshold?: number;
   className?: string;
 }
 
@@ -16,6 +18,7 @@ export const StockStatusBadge: React.FC<StockStatusBadgeProps> = ({
   currentStock,
   isLowStock = false,
   baseUnit = 'PCS',
+  lowStockThreshold,
   className,
 }) => {
   const isOutOfStock = currentStock <= STOCK_EPS;
@@ -38,8 +41,17 @@ export const StockStatusBadge: React.FC<StockStatusBadgeProps> = ({
       'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800';
   }
 
+  const hint =
+    lowStockThreshold === undefined
+      ? undefined
+      : lowStockThreshold === 0
+        ? 'Low-stock alert off'
+        : `Low when below ${lowStockThreshold} ${baseUnit}`;
+
   return (
     <span
+      title={hint}
+      aria-label={hint ? `${label}. ${hint}` : undefined}
       className={cn(
         'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border select-none tabular-nums',
         colorStyles,

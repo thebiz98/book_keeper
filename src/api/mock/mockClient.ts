@@ -66,6 +66,7 @@ function toSearchResult(i: MockItem, matchedBundleId: number | null = null): Ite
     defaultSalePrice: i.defaultSalePrice,
     currentStock: i.currentStock,
     isLowStock: i.isLowStock,
+    lowStockThreshold: i.lowStockThreshold,
     bundles: i.bundles.map((b) => ({
       bundleId: b.id,
       bundleName: b.bundleName,
@@ -325,6 +326,7 @@ export class MockApiClient implements ApiClient {
       defaultSalePrice: payload.defaultSalePrice,
       currentStock: payload.initialStock ?? 0,
       isLowStock: false,
+      lowStockThreshold: payload.lowStockThreshold ?? 5,
       isActive: true,
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -336,8 +338,16 @@ export class MockApiClient implements ApiClient {
   async updateItem(itemId: number, payload: Parameters<ApiClient['updateItem']>[1]) {
     const item = this.items.find((i) => i.id === itemId);
     if (!item) throw notFound('Item', itemId);
-    const { itemType, ...rest } = payload;
+    const { itemType, lowStockThreshold, ...rest } = payload;
     Object.assign(item, rest, itemType ? { itemType } : {}, { updatedAt: nowIso() });
+    if (lowStockThreshold != null) item.lowStockThreshold = lowStockThreshold;
+  }
+  async updateItemLowStockThreshold(itemId: number, threshold: number) {
+    const item = this.items.find((i) => i.id === itemId);
+    if (!item) throw notFound('Item', itemId);
+    // DD-27: the mock does not recompute the low-stock flag.
+    item.lowStockThreshold = threshold;
+    return toSearchResult(item);
   }
   async getBundleSuggestions() {
     return structuredClone(initialBundleSuggestions);
@@ -564,6 +574,7 @@ export class MockApiClient implements ApiClient {
         currentStock: i.currentStock,
         defaultSalePrice: i.defaultSalePrice,
         mrp: i.mrp,
+        lowStockThreshold: i.lowStockThreshold,
       }));
   }
   async getSalesPurchaseTrend(period: string) {
