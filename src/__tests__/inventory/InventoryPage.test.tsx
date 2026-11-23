@@ -215,7 +215,25 @@ describe('Item edit drawer', () => {
       baseUnit: 'PCS',
       mrp: null,
       defaultSalePrice: 45,
+      lowStockThreshold: 5,
     });
+  });
+
+  it('edit sends the changed Low Stock Level; negative shows a field error', async () => {
+    const { api, container } = mount();
+    await flush();
+    await openEdit(container);
+    const low = inputByLabel(container, /Low Stock Level/);
+    expect(low.value).toBe('5');
+    typeInto(low, '-1');
+    click(byText(container, 'button', /Save Changes/));
+    await flush();
+    expect(api.updateItem).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Low stock level must be 0 or more');
+    typeInto(low, '12');
+    click(byText(container, 'button', /Save Changes/));
+    await flush();
+    expect(api.updateItem).toHaveBeenCalledWith(1, expect.objectContaining({ lowStockThreshold: 12 }));
   });
 
   it('rejects MRP 0 on the client', async () => {

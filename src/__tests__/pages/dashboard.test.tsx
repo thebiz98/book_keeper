@@ -18,8 +18,8 @@ const metrics: DashboardMetrics = {
 
 const base = {
   getLowStockAlerts: [
-    { id: 1, name: 'Pencil', category: null, baseUnit: 'PCS', currentStock: 1, defaultSalePrice: 5, mrp: null },
-    { id: 2, name: 'Eraser', category: 'Misc', baseUnit: 'PCS', currentStock: 2, defaultSalePrice: 5, mrp: null },
+    { id: 1, name: 'Pencil', category: null, baseUnit: 'PCS', currentStock: 1, defaultSalePrice: 5, mrp: null, lowStockThreshold: 10 },
+    { id: 2, name: 'Eraser', category: 'Misc', baseUnit: 'PCS', currentStock: 2, defaultSalePrice: 5, mrp: null, lowStockThreshold: 5 },
   ],
   getRecentTransactions: [
     { kind: 'SALE', id: 1, code: 'SAL-1', date: '2026-02-01', createdAt: '2026-02-01T10:30:00', partyName: 'Ram', amount: 100, paymentStatus: 'PAID' },
@@ -43,6 +43,7 @@ describe('DashboardPage', () => {
     }
     expect(api.getRecentTransactions.mock.calls[0][0]).toBe(10);
     expect(document.querySelector('[data-testid="low-count"]')!.textContent).toBe('2');
+    expect(bodyText()).toContain('1 / 10 PCS');
     expect(bodyText()).toContain('SAL-1');
     expect(bodyText()).toContain('RET-1');
     expect(bodyText()).toContain('Inward (F3)');

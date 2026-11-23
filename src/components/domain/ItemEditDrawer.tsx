@@ -26,7 +26,8 @@ type Field =
   | 'mrp'
   | 'defaultSalePrice'
   | 'initialStock'
-  | 'initialCost';
+  | 'initialCost'
+  | 'lowStockThreshold';
 
 const FIELD_MAP: Record<string, Field> = {
   name: 'name',
@@ -37,6 +38,7 @@ const FIELD_MAP: Record<string, Field> = {
   default_sale_price: 'defaultSalePrice',
   initial_stock: 'initialStock',
   initial_cost: 'initialCost',
+  low_stock_threshold: 'lowStockThreshold',
 };
 
 const numText = (n: number | null | undefined) => (n === null || n === undefined ? '' : String(n));
@@ -60,6 +62,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   const [price, setPrice] = useState('');
   const [initialStock, setInitialStock] = useState('');
   const [initialCost, setInitialCost] = useState('');
+  const [lowStock, setLowStock] = useState('5');
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -78,6 +81,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     setPrice(item ? String(item.defaultSalePrice) : '');
     setInitialStock('');
     setInitialCost('');
+    setLowStock(item ? String(item.lowStockThreshold) : '5');
     setErrors({});
     setFormError(null);
     busy.current = false;
@@ -96,6 +100,10 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     if (!baseUnit.trim()) errs.baseUnit = 'Base unit is required';
     if (priceVal === null || !Number.isFinite(priceVal) || priceVal < 0) {
       errs.defaultSalePrice = 'Enter a sale price (0 or more)';
+    }
+    const lowVal = parseOptional(lowStock);
+    if (lowVal === null || !Number.isFinite(lowVal) || lowVal < 0) {
+      errs.lowStockThreshold = 'Low stock level must be 0 or more';
     }
     if (mrpVal !== null && (!Number.isFinite(mrpVal) || mrpVal <= 0)) {
       errs.mrp = 'MRP must be greater than 0 (leave empty for none)';
@@ -124,6 +132,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
       baseUnit: baseUnit.trim().toUpperCase(),
       mrp: mrpVal, // empty => null, never 0
       defaultSalePrice: priceVal as number,
+      lowStockThreshold: lowVal as number,
     };
     try {
       if (isEdit) {
@@ -236,6 +245,20 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
             error={errors.defaultSalePrice}
             className="text-right font-mono"
           />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <TextInput
+            label="Low Stock Level (base units)"
+            type="number"
+            min={0}
+            step="any"
+            value={lowStock}
+            onChange={(e) => setLowStock(e.target.value)}
+            error={errors.lowStockThreshold}
+            className="text-right font-mono"
+          />
+          <p className="text-[10px] text-slate-400">Marked Low Stock when stock falls below this. 0 = never</p>
         </div>
 
         <div className="flex items-center justify-between rounded-md bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs">

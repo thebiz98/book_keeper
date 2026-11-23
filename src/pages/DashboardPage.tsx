@@ -306,7 +306,7 @@ export const DashboardPage: React.FC = () => {
           ) : !low ? (
             <p className="py-8 text-center text-xs text-slate-400">Loading...</p>
           ) : low.length === 0 ? (
-            <p className="py-8 text-center text-xs text-slate-400">Inventory is healthy. No items under the threshold.</p>
+            <p className="py-8 text-center text-xs text-slate-400">No items below their low stock level.</p>
           ) : (
             <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800 overflow-y-auto max-h-[520px]">
               {low.map((item) => (
@@ -316,7 +316,15 @@ export const DashboardPage: React.FC = () => {
                     <span className="text-[10px] text-slate-400">{item.category ?? 'Uncategorized'}</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <StockStatusBadge currentStock={item.currentStock} isLowStock baseUnit={item.baseUnit} />
+                    <span className="text-[10px] text-slate-400 tabular-nums">
+                      {item.currentStock} / {item.lowStockThreshold} {item.baseUnit}
+                    </span>
+                    <StockStatusBadge
+                      currentStock={item.currentStock}
+                      isLowStock
+                      lowStockThreshold={item.lowStockThreshold}
+                      baseUnit={item.baseUnit}
+                    />
                     <button
                       type="button"
                       onClick={() => navigateWithParam('purchase', 'inwardItem', String(item.id))}
