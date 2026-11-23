@@ -89,6 +89,8 @@ fn main() {
             party_controller::update_party,
             settings_controller::update_shop_settings,
             settings_controller::verify_database_integrity,
+            charge_type_controller::search_charge_types,
+            charge_type_controller::create_charge_type,
             expense_controller::search_expense_types,
             expense_controller::list_expense_types,
             expense_controller::create_expense_type,

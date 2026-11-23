@@ -3,6 +3,7 @@ use crate::data::contracts::search_indexer::{FtsIndex, ItemSearchIndexer};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::backup_service::BackupService;
+use crate::services::contracts::charge_type_service::ChargeTypeService;
 use crate::services::contracts::data_reset_service::DataResetService;
 use crate::services::contracts::expense_service::ExpenseService;
 use crate::services::contracts::item_import_service::ItemImportService;
@@ -37,6 +38,7 @@ pub struct AppState {
     pub report_service: Arc<dyn ReportService>,
     pub party_service: Arc<dyn PartyService>,
     pub expense_service: Arc<dyn ExpenseService>,
+    pub charge_type_service: Arc<dyn ChargeTypeService>,
     pub item_import_service: Arc<dyn ItemImportService>,
     pub vedbill_import_service: Arc<dyn VedbillImportService>,
     pub backup_service: Arc<dyn BackupService>,
@@ -151,7 +153,7 @@ fn build_sqlite_app_state_full(
     use crate::data::sqlite::connection::create_pool;
     use crate::data::sqlite::fts::SqliteFtsIndex;
     use crate::data::sqlite::fts_indexer::SqliteFts5SearchIndexer;
-    use crate::data::sqlite::fts_specs::{EXPENSE_TYPE_FTS, ITEM_FTS, PARTY_FTS};
+    use crate::data::sqlite::fts_specs::{CHARGE_TYPE_FTS, EXPENSE_TYPE_FTS, ITEM_FTS, PARTY_FTS};
     use crate::data::sqlite::migrations::run_migrations;
     use crate::data::sqlite::sqlite_uow::SqliteUnitOfWork;
     use crate::services::r#impl::*;
@@ -168,7 +170,9 @@ fn build_sqlite_app_state_full(
     let item_fts: Arc<dyn FtsIndex> = Arc::new(SqliteFtsIndex::new(pool.clone(), &ITEM_FTS));
     let party_index: Arc<dyn FtsIndex> = Arc::new(SqliteFtsIndex::new(pool.clone(), &PARTY_FTS));
     let expense_type_index: Arc<dyn FtsIndex> = Arc::new(SqliteFtsIndex::new(pool.clone(), &EXPENSE_TYPE_FTS));
-    let fts_indexes: Vec<Arc<dyn FtsIndex>> = vec![item_fts, party_index.clone(), expense_type_index.clone()];
+    let charge_type_index: Arc<dyn FtsIndex> = Arc::new(SqliteFtsIndex::new(pool.clone(), &CHARGE_TYPE_FTS));
+    let fts_indexes: Vec<Arc<dyn FtsIndex>> =
+        vec![item_fts, party_index.clone(), expense_type_index.clone(), charge_type_index.clone()];
     let search_indexer: Arc<dyn ItemSearchIndexer> = Arc::new(SqliteFts5SearchIndexer::new(pool));
 
     // Inventory first: ItemService and ItemImportService delegate opening stock to it, and it
@@ -194,6 +198,8 @@ fn build_sqlite_app_state_full(
     let party_service: Arc<dyn PartyService> = Arc::new(PartyServiceImpl::new(uow.clone(), party_index.clone()));
     let expense_service: Arc<dyn ExpenseService> =
         Arc::new(ExpenseServiceImpl::new(uow.clone(), expense_type_index.clone()));
+    let charge_type_service: Arc<dyn ChargeTypeService> =
+        Arc::new(ChargeTypeServiceImpl::new(uow.clone(), charge_type_index.clone()));
     let item_import_service: Arc<dyn ItemImportService> =
         Arc::new(ItemImportServiceImpl::new(uow.clone(), inventory_service.clone()).with_indexer(search_indexer.clone()));
     let vedbill_reader: Arc<dyn crate::data::contracts::vedbill_reader::VedbillBackupReader> =
@@ -229,6 +235,7 @@ fn build_sqlite_app_state_full(
     ensure_search_index(&*uow, &*search_indexer)?;
     ensure_fts_index(&*party_index)?;
     ensure_fts_index(&*expense_type_index)?;
+    ensure_fts_index(&*charge_type_index)?;
 
     // A previously chosen backup folder overrides the default.
     let saved_dir = uow.begin_read()?.settings().get_backup_directory()?;
@@ -253,6 +260,7 @@ fn build_sqlite_app_state_full(
         report_service,
         party_service,
         expense_service,
+        charge_type_service,
         item_import_service,
         vedbill_import_service,
         backup_service,

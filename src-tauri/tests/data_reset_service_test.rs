@@ -193,3 +193,34 @@ fn tc_exp_014_all_scope_clears_types_index_and_code_sequences() {
     assert!(e.app.expense_service.search_expense_types("te", None).unwrap().is_empty());
     assert_eq!(e.app.sale_service.get_next_sale_code().unwrap(), "SAL-1001");
 }
+
+#[test]
+fn bill_charges_cleared_by_transactions_and_types_by_all() {
+    let e = env(true);
+    seed(&e.app);
+    let t = e
+        .app
+        .charge_type_service
+        .create_charge_type(CreateChargeTypePayload {
+            name: "Transport".into(), effect: ChargeEffect::Charge, applies_to: ChargeAppliesTo::Both, default_amount: None,
+        })
+        .unwrap();
+    e.app
+        .sale_service
+        .create_sale(CreateSalePayload {
+            charges: vec![BillChargeInput { charge_type_id: t.id, amount: 5.0 }],
+            transaction_date: "2026-11-22".into(), party_id: None, payment_mode: None,
+            payment_status: PaymentStatus::Paid, paid_amount: 15.0, notes: None,
+            items: vec![CreateSaleItemPayload { item_id: 1, bundle_id: None, bundle_quantity: 1.0, unit_price: 10.0 }],
+        })
+        .unwrap();
+    assert_eq!(count(&e.db, "bill_charges"), 1);
+    e.app.data_reset_service.reset(ResetScope::Transactions, e.backups.to_str().unwrap()).unwrap();
+    assert_eq!(count(&e.db, "bill_charges"), 0);
+    assert_eq!(count(&e.db, "charge_types"), 1, "types kept");
+    assert_eq!(e.app.charge_type_service.search_charge_types("tra", TransactionType::Sale, None).unwrap().len(), 1);
+    e.app.data_reset_service.reset(ResetScope::All, e.backups.to_str().unwrap()).unwrap();
+    assert_eq!(count(&e.db, "charge_types"), 0);
+    assert_eq!(count(&e.db, "charge_type_search_fts"), 0);
+    assert!(e.app.charge_type_service.search_charge_types("tra", TransactionType::Sale, None).unwrap().is_empty());
+}

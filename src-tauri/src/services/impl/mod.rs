@@ -2,6 +2,7 @@ pub mod accounting_service_impl;
 pub mod backup_scheduler;
 pub mod backup_service_impl;
 pub mod bill_math;
+pub mod charge_type_service_impl;
 pub mod data_reset_service_impl;
 pub mod expense_service_impl;
 pub mod fifo_strategy;
@@ -20,6 +21,7 @@ pub mod vedbill_import_service_impl;
 
 pub use accounting_service_impl::AccountingServiceImpl;
 pub use backup_service_impl::BackupServiceImpl;
+pub use charge_type_service_impl::ChargeTypeServiceImpl;
 pub use data_reset_service_impl::DataResetServiceImpl;
 pub use expense_service_impl::ExpenseServiceImpl;
 pub use fifo_strategy::FifoStrategy;

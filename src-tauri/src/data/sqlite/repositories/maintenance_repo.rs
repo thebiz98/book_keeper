@@ -33,6 +33,7 @@ impl SqliteMaintenanceRepository {
 
 /// Child tables first. OPENING lots (and their purchase headers) are kept.
 const TRANSACTION_STEPS: &[(&str, &str)] = &[
+    ("bill_charges", "DELETE FROM bill_charges"),
     ("expenses", "DELETE FROM expenses"),
     ("stock_outflow_allocations", "DELETE FROM stock_outflow_allocations"),
     ("sale_stock_allocations", "DELETE FROM sale_stock_allocations"),
@@ -58,7 +59,7 @@ const TRANSACTION_STEPS: &[(&str, &str)] = &[
 const TRANSACTION_TABLES: &[&str] = &[
     "stock_outflow_allocations", "sale_stock_allocations", "payment_settlements", "return_items",
     "return_transactions", "sale_items", "sale_transactions", "stock_adjustments",
-    "purchase_items", "purchase_transactions", "expenses",
+    "purchase_items", "purchase_transactions", "expenses", "bill_charges",
 ];
 
 const CATALOG_STEPS: &[(&str, &str)] = &[
@@ -68,10 +69,11 @@ const CATALOG_STEPS: &[(&str, &str)] = &[
     ("items", "DELETE FROM items"),
     ("parties", "DELETE FROM parties"),
     ("expense_types", "DELETE FROM expense_types"),
+    ("charge_types", "DELETE FROM charge_types"),
     ("code_sequences", "DELETE FROM code_sequences"),
 ];
 
-const CATALOG_TABLES: &[&str] = &["purchase_items", "purchase_transactions", "item_bundles", "items", "parties", "expense_types"];
+const CATALOG_TABLES: &[&str] = &["purchase_items", "purchase_transactions", "item_bundles", "items", "parties", "expense_types", "charge_types"];
 
 impl MaintenanceRepository for SqliteMaintenanceRepository {
     fn clear_transactions(&mut self) -> Result<Vec<(String, i64)>, AppError> {
