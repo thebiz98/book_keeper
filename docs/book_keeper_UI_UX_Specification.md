@@ -269,6 +269,7 @@ The application maintains a persistent desktop shell across all views.
 * **Tabs:** `Customers` and `Suppliers`.
 * **Table Columns:** `Party Name`, `Phone`, `Address / Notes`, `Total Transactions`, `Current Outstanding Balance (₹)`, `Actions`.
 * **Actions:** `[+ Add Party]`, `[Edit Details]`, `[View Transaction History]` (party ledger). No archive/delete in v1.
+* Add/Edit Party dialog: Enter in any field saves. Validation errors show inside the dialog.
 
 ---
 
@@ -296,10 +297,12 @@ The application maintains a persistent desktop shell across all views.
    - If defining a brand new package (e.g. "Strip" of 10), typing it and saving automatically adds it to the system's dynamic suggestion index for all future items without code changes.
    - Fields: Bundle Name, Multiplier relative to base unit (`units_per_bundle`), Bundle MRP (₹, optional), Default Bundle Price (₹), Outer Barcode (optional).
    - Commits immediately to `ITEM_BUNDLE` and selects it in the active line.
+   - Visible **Cancel** and **Create Bundle** buttons. Enter saves (Ctrl+Enter too), Esc cancels.
 2. **Inline Party Creation Modal (`Alt + C` / `Alt + V`):**
-   - Quick creation of Customer or Vendor on the fly without abandoning cart.
+   - Quick creation of a Customer or Vendor without leaving the cart: Name (required), Phone (optional), and visible **Save** (primary) and **Cancel** buttons. Enter saves, Esc cancels. Save is disabled until a name is typed.
 3. **Negative Stock Alert:**
    - Inline blocking alert if the cart's total base units for an item would exceed available stock.
+4. **Quick-create rule (FR-22):** every quick-create form shows Save + Cancel in addition to Enter/Esc.
 
 ---
 
@@ -324,4 +327,5 @@ The application maintains a persistent desktop shell across all views.
 | **FR-15** | Keyboard Checkout & Payment Dialog | **Page 2** (Enter flow) & **Page 3** (Payment / Summary Dialog) |
 | **FR-16** | Optional MRP | **Page 2** (indicator & cart), **Page 5** (item & bundle fields) |
 | **FR-17** | Soft-Deletion | *Deferred to v2 — no UI in v1* |
+| **FR-22** | Explicit Save/Cancel on quick-create | Page 2/4 (Alt+C/V, Alt+B), Page 11, §4 |
 | **NFR-06** | Keyboard Ergonomics | Global shell hotkey registry, **Page 2/3/4** |

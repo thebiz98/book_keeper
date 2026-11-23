@@ -146,7 +146,7 @@ src/
   - `F6`: Navigate to Inventory Master
   - `Ctrl + B`: Open Backup utility in Settings
   - `Alt + B`: New bundle (billing/purchase unit selector context)
-  - `Alt + C` / `Alt + V`: Inline new Customer / Vendor (sale / purchase screens)
+  - `Alt + C` / `Alt + V`: Inline new Customer / Vendor (sale / purchase screens; the inline form also shows Save / Cancel buttons, FR-22)
   - `Ctrl + Enter`: Complete bill (opens payment dialog on sale; records purchase on purchase screen)
   - `Esc`: Close any active modal dialog or dismiss popovers; on the payment dialog, back to the cart without saving
 * No other global shortcuts exist; `HotkeyBar` and `Sidebar` badges render from this single registry.
@@ -264,6 +264,28 @@ interface ModalProps {
 // </Table>
 ```
 
+#### 6. `FormActions` (FR-22, DD-44)
+```typescript
+interface FormActionsProps {
+  onSave: () => void;            // click on Save
+  onCancel: () => void;          // click on Cancel
+  saveLabel?: string;            // default 'Save'
+  cancelLabel?: string;          // default 'Cancel'
+  isSubmitting?: boolean;        // Save shows spinner + disabled; Cancel disabled
+  canSave?: boolean;             // default true; false => Save disabled (required fields empty)
+  saveHotkey?: string;           // badge, default 'Enter'
+  cancelHotkey?: string;         // badge, default 'Esc'
+  size?: 'xs' | 'sm' | 'md';     // default 'sm'
+  className?: string;
+}
+function enterToSubmit(submit: () => void): (e: React.KeyboardEvent) => void;
+```
+* Renders `<div data-form-actions class="flex items-center justify-end gap-2">` containing Cancel (`variant="outline"`, `type="button"`) and then Save (`variant="primary"`, `type="button"`).
+* `enterToSubmit` is attached to the `onKeyDown` of the wrapper around the form fields. Plain Enter or Ctrl+Enter submits.
+* It ignores keys when `defaultPrevented`, `repeat`, Shift, or Alt is set, and when the target is a TEXTAREA, SELECT or BUTTON.
+* A field marked `data-enter-submit="off"` swallows Enter without submitting. Use this for scanner barcode fields.
+* All quick-create forms (new customer/vendor, new bundle, and later new expense type and new charge type) use it.
+
 ---
 
 ### 5.2 Tier 2: Specialized Retail Molecules (`src/components/common/`)
@@ -349,6 +371,7 @@ interface PaymentStatusBadgeProps {
   - Commits to SQLite `ITEM_BUNDLE` via API and auto-selects in the calling line item.
   - In Item Master the same modal edits an existing bundle (`updateBundle`, any field incl. multiplier); delete calls `deleteBundle` (always allowed). Bills keep their own pack snapshot, so neither affects history.
   - Cart and bill views display lines as `pack_quantity × pack_label = quantity base_unit` when a pack was used (e.g. `2 × Box of 10 = 20 PCS`), else `quantity base_unit`.
+* Footer uses `FormActions` (Cancel / Create Bundle). Enter in any field saves, except in Bundle Name while suggestions are open (Enter applies the suggestion) and in Outer Barcode (scanner Enter is ignored). Ctrl+Enter saves anywhere. Esc cancels.
 
 #### 4. `SettlementModal`
 * Two entry modes:
@@ -364,6 +387,9 @@ interface PaymentStatusBadgeProps {
 * **Customer tab:** pick a bill (search by code / customer) or choose "No receipt". Linked mode lists the bill's lines with `sold`, `already returned`, `returnable` and pre-filled rate (editable down only). Per line: qty, condition. Settlement: `REFUND` (preview "₹X credited to this bill, ₹Y cash to hand back" — a linked return only credits its own bill) or `REPLACEMENT` (linked only; returned lines keep their condition — Restockable for a colour/size swap, Damaged/Scrap for a defective unit — then an "Issue" list where any item can be searched and added with a qty, stock-checked; a non-blocking warning shows the value difference at default prices; no money step). Unlinked mode: item search, qty, rate, condition, unit cost when the item has no lot history; party optional.
 * **Vendor tab:** pick a purchase bill or vendor; lines show `PURCHASE`-source lots (`getItemLots`) with remaining qty; per line qty ≤ remaining, or "FIFO" when no lot chosen. Preview of credit vs cash received.
 * Result toast shows `returnCode`, `creditedAmount`, `cashRefunded`.
+
+#### 7. `PartySelector` inline create
+* Name + Phone + `FormActions size="xs"` (Cancel / Save). Save is disabled while Name is empty or a create is in flight. Enter saves, Esc and Cancel close and refocus the trigger.
 
 ---
 
