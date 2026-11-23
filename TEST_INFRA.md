@@ -14,6 +14,7 @@
 | `sale_service_test` | Billing, bundles, credit, validation, code sequence (§11.5) |
 | `purchase_service_test` | Inward receipts and lots (§11.6) |
 | `search_indexer_test` | FTS5 prefix and barcode search (§11.7); generic `FtsIndex` (TC-FTS-01..05) |
+| `expense_service_test` | Store expenses: types, codes, list, validation (TC-EXP-001..010); reports/reset/startup repair in report, reset and smoke suites (TC-EXP-011..015) |
 | `party_search_test` | FTS-backed party search (TC-PSRCH-01..08) |
 | `accounting_service_test` | Khata dues and FIFO settlement (§11.8) |
 | `report_service_test` | Dashboard (today-scoped), P&L, valuation (§11.9) |
