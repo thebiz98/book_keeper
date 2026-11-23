@@ -80,6 +80,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * One-click local database backup to a user-selected folder or external USB drive, plus a database integrity check.
   * *Deferred to v2:* all exports, parties import, opening dues, VedBill migration, restore from backup.
 * **FR-12: Future Invoicing Foundation**
+  * *(v1.2, 2026-11-23)* Printing is now in scope: see FR-27.
   * Transactions are stored with unique sequential transaction codes, customer/vendor relationships, line-item breakdowns, and shop profile headers, allowing instant printable bill generation without schema changes.
 * **FR-13: Item Packaging & Bundles (Multi-UOM)**
   * The system supports pre-defined packaging bundles for an item (e.g., a "Box of 10 Pencils", a "Dozen of 12", a "Carton of 500 Sheets").
@@ -113,6 +114,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
     * Cash Received (auto-focused) & live Change to Return
   * Pressing `Enter` in the Payment dialog commits the sale (`paid_amount` = cash received for PAID/PARTIAL, 0 for UNPAID) and shows the result (bill code, balance due, change). Pressing `Enter` again resets the screen to a fresh, blank bill. `Escape` in the Payment dialog returns to the cart without saving.
   * *Note*: This is strictly an on-screen dialog; physical receipt printing and PDF/image export are deferred to future versions.
+  * *(v1.2)* The result screen offers **Print bill (P)** (FR-27). Receipt/thermal printing stays out of scope.
 * **FR-16: Optional Maximum Retail Price (MRP)**
   * The system supports recording an optional Maximum Retail Price (MRP in ₹) on items and bundles. This serves as a printed reference price distinct from the shop's actual selling price (`default_sale_price`), allowing price-to-MRP comparisons.
 * **FR-17: Soft-Deletion & Archival Integrity** *(deferred to v2)*
@@ -138,6 +140,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
     * Purchases report shows the items subtotal; charges and discounts are shown separately.
   * **Returns on a discounted sale:** a linked return's refund rate is capped at the line's **net rate** = `unit_price × (1 − discounts_total / items_subtotal)`, so a refund never exceeds what the customer effectively paid. Charges are never auto-refunded.
   * Charge and discount lines are shown in the Payment dialog before commit, in bill details, and are edited together with the bill (FR-20).
+  * *(v1.2 clarification, DD-54)* Discounts are **bill-level only**: they reduce `total_amount` and are never written onto `SALE_ITEM` rows. The only per-line figure is the derived `net_unit_price` (refund cap above).
 * **FR-20: Bill Correction — Edit & Delete** *(added 2026-11-22, DD-41; replaces the v1 immutability rule NFR-03)*
   * Manual entry causes mistakes, and the app must reflect the real store. The owner can **edit** or **delete** any sale or purchase bill: date, party, lines (item, quantity, pack, rate), charges/discounts, notes, and the upfront paid amount. A bill may end up very different from what was first entered; that is accepted.
   * An edit keeps the bill's id and code. It is applied atomically as **reverse-then-repost**: all stock, allocation and ledger effects of the old version are reversed, and the new version is validated and posted through the normal create rules (stock check, FIFO, status cross-check, party rules). Either the whole edit succeeds or nothing changes.
@@ -165,6 +168,36 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **v1.1 scope:** the column, entity, DTOs and validation only. All items are created as `PHYSICAL`; the backend rejects `SERVICE` on create/update until service billing is designed. Service billing (including services that consume stock items, such as photo printing using paper) is a separate, later design.
 * **FR-22: Explicit Submit on Quick-Create Forms** *(added 2026-11-22, DD-44)*
   * Every quick-create form (new customer / vendor, new bundle, new expense type, new charge type) shows a visible **Save** (primary) and **Cancel** button, in addition to Enter-to-submit and Escape-to-cancel. The user should never have to guess that Enter commits.
+
+* **FR-23: Inventory Keyboard Navigation & Item Details / History** *(added 2026-11-23, v1.2, DD-49)*
+  * The Item List is fully keyboard-navigable: **Up/Down** move the highlighted row (kept in view), **Enter** (or a click) opens the **Item details** drawer, **Right/Left** expand/collapse the lots row, **PageUp/PageDown** change page, **Home/End** jump to the first/last row, **Down** from the search box enters the list and **Up** on the first row returns to it, **E** opens Edit and **S** opens Set stock (physical items). Keys typed inside inputs, selects and buttons are ignored.
+  * **Item details** drawer: summary (stock, status, MRP, Sale Price, Low Stock Level, Edit), the item's **lots** (date, code, source, vendor, quantity, remaining, **Purchase Price**), and two tabs, **Sales** and **Purchases**, each listing the bills that contain the item, **10 per page**, newest first (bill date, then id): code, date, customer/vendor ("Walk-in" when none) and a **View** button that opens the bill details drawer. A bill appears once even if the item is on several of its lines. The Purchases tab lists only supplier bills (`source = PURCHASE`).
+  * **Performance:** each page is served from an index on `(item_id, transaction_date DESC, bill id DESC)` over the line tables (bill date denormalized onto the lines, schema v9), so the cost of a page does not grow with the item's history.
+* **FR-24: Inline Item Creation from Billing; Simplified Item Form** *(added 2026-11-23, v1.2, DD-50)*
+  * On New Sale and New Purchase, when the item search has no match, the user creates the item without leaving the screen: the `+ Create "<name>"` row, Enter on no match, or **Alt+N** opens a quick-create form (FR-22 Save/Cancel): Name (prefilled), Base Unit, MRP (optional), Sale Price.
+  * On **New Sale** the form also requires **Stock on hand** (> 0) and **Purchase Price per base unit** (> 0), because an item with no stock cannot be sold; the stock is recorded as an opening-stock lot (`OPN-`). On **New Purchase** these fields are hidden (the purchase line brings the stock).
+  * After Save the new item is placed in the entry row with focus on Quantity.
+  * **Category and barcode** are removed from the item UI (Item List column and category filter, item edit drawer, quick-create form). The backend and import keep both fields: editing an item sends its existing values unchanged, the import template still accepts them, and FTS still indexes them (a scanned barcode still finds the item).
+* **FR-25: Lot Purchase Price Correction** *(added 2026-11-23, v1.2, DD-51; uses FR-20 guards)*
+  * **Terminology:** *Purchase Price* is the lot's `PURCHASE_ITEM.unit_cost` (an item has no purchase price of its own; lots bought at different times have different prices). *Sale Price* is the item's `default_sale_price`, only a suggestion that prefills the sale rate; lots do not record a sale price. UI labels use these two names.
+  * From the Item details lots table the user can edit a lot's Purchase Price (per pack when the lot was entered in a pack, else per base unit; `total = round2(pack_quantity × price)`, `unit_cost = total / quantity`, as on create).
+  * **Purchase-bill lots** (`source = PURCHASE`): the line total, the bill's `items_subtotal` and `total_amount` change (charges/discounts and the other lines are untouched; totals are recomputed from stored line totals). Payment, with `applied = Σ SETTLEMENT + Σ RETURN_CREDIT` and `open = new_total − applied`:
+    * `open < 0` is rejected (`BillLocked TOTAL_BELOW_APPLIED`): money already settled on the bill would exceed it. The screen lists those settlements, each with Edit (FR-26), so the user corrects them first.
+    * A bill **paid entirely upfront** (balance 0, nothing applied later) stays `PAID`; its upfront payment follows the new total (recorded cash out changes).
+    * Otherwise the upfront amount is kept, capped at `open`; status is recomputed (`PAID` if it covers `open`, `PARTIAL` if > 0, else `UNPAID`). A bill paid later by settlements never gets an invented upfront payment.
+    * The FR-20 guards apply: linked returns lock the bill; a lot with a vendor-return outflow cannot change cost; `updated_at` is set.
+  * **Opening and adjustment lots** (`OPN-`, `ADJ-`) can be re-costed (no bill changes; the adjustment's stored `unit_cost` is updated). Lots created by customer returns (`RTL-`) are read-only.
+  * **Sold units:** the new cost flows into `SALE_STOCK_ALLOCATION.unit_cost` and outflow allocations (FR-20 re-cost), so COGS, losses and profit update. **Sale bills never change** (the customer paid what was billed).
+  * A preview before Save shows old → new bill total, paid, balance and status.
+* **FR-26: Batch Settlement & Settlement Correction** *(added 2026-11-23, v1.2, DD-52; FR-06 rev.)*
+  * **Settle bills (batch):** from Credit & Dues the user enters an amount; the party's open bills are listed with the oldest-first allocation pre-applied (the same FIFO rule as before, now visible). The table is editable: tick/untick bills and edit each amount (≤ its balance). Typing the amount re-runs the oldest-first fill; editing rows updates the amount. Save records all rows in **one atomic operation** (all or nothing), one `SETTLEMENT` row per bill.
+  * One backend path serves every settlement: a single-bill settlement is a batch of one; the legacy lump-sum call computes the FIFO allocation server-side and uses the same path.
+  * **Settle from any bill view:** the shared bill details drawer (Sales/Purchase History, Dashboard recent transactions, party ledger) shows **Settle** whenever the bill has a balance due and a party.
+  * **Settlement correction:** a recorded `SETTLEMENT` row can be **edited** (amount, date, mode, notes; new amount > 0 and ≤ the bill's balance + the row's old amount) or **deleted** (danger confirm). The bill's cached money fields, the cash drawer and reports follow. Upfront payments change only via bill edit (FR-20); return credits only via return delete. A lump-sum payment is one row per bill, so each bill's share is corrected separately.
+* **FR-27: Bill Printing** *(added 2026-11-23, v1.2, DD-53)*
+  * Sale and purchase bills can be printed on **A4** from the bill details drawer (**Print**, Ctrl+P) and right after a sale from the result screen (**Print bill**, P). The app renders a print view and opens the system print dialog (printer or Save as PDF).
+  * **Header:** the Shop Profile (shop name, address, phone, GSTIN; empty fields omitted), edited in Settings. **Body:** bill title (Bill / Purchase Bill), code, date, customer/vendor name and phone (Walk-in when none), supplier invoice ref (purchase), lines `# · Item · Qty (pack) · Rate (per pack) · Amount`, then items subtotal, each charge (+) and discount (−) by name, Grand Total, Paid, Balance due (when > 0), status and notes.
+  * Kept simple on purpose; customization (logo, footer text, templates, thermal receipts) follows user feedback.
 
 ### 2.2. Non-Functional Requirements (NFR)
 
@@ -220,8 +253,16 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 25. **Explicit Save buttons on quick-create forms (FR-22).**
 26. **Item Type entity field (FR-21)**: `PHYSICAL` / `SERVICE` column, `PHYSICAL` only in v1.1.
 
+### 3.1b. In Scope — v1.2 additions (2026-11-23)
+27. **Inventory keyboard navigation and Item details with sale/purchase history (FR-23)**, schema v9.
+28. **Inline item creation from sale/purchase screens; category and barcode hidden in the item UI (FR-24).**
+29. **Lot purchase price correction flowing into the purchase bill and COGS (FR-25).**
+30. **Batch settlement with an editable oldest-first split, Settle from any bill view, settlement edit/delete (FR-26).**
+31. **A4 bill printing for sales and purchases (FR-27).**
+
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
+   *(v1.2: A4 printing of sale and purchase bills via the system print dialog is in scope, FR-27. Still out: thermal receipts, logos/footers/templates, direct PDF export, printing returns.)*
 2. **Cloud Backups & Remote Synchronization**: Cloud sync (Google Drive, AWS S3, or remote API) is deferred; v1 is strictly local-first.
 3. **Item-Level Partial Payments**: Partial payments are handled strictly at the bill/transaction level; mapping partial money to individual line items is out of scope.
 4. **Complex Multi-Tier Tax Engine**: Comprehensive Indian GST slabs (CGST, SGST, IGST), HSN-based automated tax reports, and e-way bill generation.
@@ -237,6 +278,9 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 14. **Expense extras**: Expenses on credit / unpaid expense bills, expense vendors and payables, recurring expenses, expense attachments, and archiving expense types.
 15. **Charge/discount extras**: Percentage discounts, per-line (item-level) discounts, tax-as-a-charge, landed-cost allocation of purchase charges into lot costs, and archiving charge types.
 16. **Bulk low-stock level editing** (set one level for many items or a category at once) and a global default other than 5.
+17. **Hardened two-step delete** (impact screen + typed confirmation for every money-record delete). Today bill deletes need the typed bill code and settlement/expense deletes a danger confirm; the two-step flow is added only if accidental deletions are seen (DD-54).
+18. **Integer paise money model** (DD-55): store all money as integer paise (`INTEGER`, Rust `Paise(i64)` newtype, IPC in paise, string parsing on input); totals are primary and rates derived (`rate = total / qty`, display only); proration uses cumulative allocation `cost(n) = round(total × n / qty)` and the slice `cost(b) − cost(a)`, so a fully consumed lot always sums to its exact total and no "extra paisa" unit is tracked. One migration rebuilds money columns (`CAST(ROUND(x*100) AS INTEGER)`) with sum checks. A separate feature after v1.2; v1.2 keeps f64 + `round2` + `MONEY_EPS`.
+19. **Lump-sum grouping id** on settlement rows (one receipt shown as one ledger entry) and settlement-level receipts.
 
 ---
 
@@ -479,6 +523,7 @@ erDiagram
         decimal unit_cost "Cost per base unit"
         decimal total_amount "Total cost"
         decimal remaining_quantity "Base units left for FIFO"
+        string transaction_date "Copy of header date (v9)"
     }
 
     SALE_TRANSACTION {
@@ -510,6 +555,7 @@ erDiagram
         decimal quantity "Base units depleted via FIFO"
         decimal unit_price "Effective price per base unit"
         decimal total_amount "Line total"
+        string transaction_date "Copy of header date (v9)"
     }
 
     SALE_STOCK_ALLOCATION {
@@ -673,6 +719,7 @@ erDiagram
 | `unit_cost` | REAL | NOT NULL | Inward cost per base unit in ₹. |
 | `total_amount` | REAL | NOT NULL | Total cost for this line item in ₹. |
 | `remaining_quantity`| REAL | NOT NULL | Base units remaining in lot; decremented via FIFO sales. |
+| `transaction_date` | TEXT (ISO) | NOT NULL DEFAULT '' | *(v1.2, schema v9, FR-23)* Copy of the header's `transaction_date`, always equal to it (written on insert, updated with the header). Index `idx_purchase_items_item_date (item_id, transaction_date DESC, purchase_transaction_id DESC)`. |
 
 #### 7. `SALE_TRANSACTION`
 *Header for outward sales bills.*
@@ -708,6 +755,7 @@ erDiagram
 | `quantity` | REAL | NOT NULL | Base units (pack quantity × multiplier at entry time) depleted via FIFO. |
 | `unit_price` | REAL | NOT NULL | Effective selling rate per base unit in ₹. |
 | `total_amount` | REAL | NOT NULL | Line total in ₹. |
+| `transaction_date` | TEXT (ISO) | NOT NULL DEFAULT '' | *(v1.2, schema v9, FR-23)* Copy of the header's `transaction_date`, always equal to it. Index `idx_sale_items_item_date (item_id, transaction_date DESC, sale_transaction_id DESC)`. |
 
 #### 9. `SALE_STOCK_ALLOCATION`
 *FIFO audit bridge recording exact batch depletion and cost allocation.*
@@ -1351,9 +1399,33 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // search_parties is served by PARTY_SEARCH_FTS (same contract)
 ```
 
+#### 9. v1.2 Additions (summary — exact payloads live in the LLD)
+
+```typescript
+// --- Item details & history (FR-23) — inventory_api
+// get_item_sales { item_id, page, limit? (default 10, max 50) } -> Paginated<ItemBillRef>
+// get_item_purchases { item_id, page, limit? } -> Paginated<ItemBillRef>      // source = 'PURCHASE' only
+//   ItemBillRef { bill_id, transaction_code, transaction_date, party_name: string | null }
+//   Ordered transaction_date DESC, bill id DESC; one row per bill; unknown item -> NotFound.
+
+// --- Lot purchase price (FR-25) — inventory_api
+// update_lot_purchase_price { payload: { purchase_item_id, unit_price } }   // per pack if the lot has a pack, else per base unit
+//   -> LotPriceUpdateResult { purchase_item_id, old_unit_cost, new_unit_cost,
+//        bill: { purchase_id, transaction_code, old_total, new_total, old_paid, new_paid, balance_due, payment_status } | null }
+//   Rejections: BillLocked (LINKED_RETURNS, NOT_A_PURCHASE, VENDOR_RETURNED_COST_CHANGE, TOTAL_BELOW_APPLIED);
+//   ValidationError for RETURN-source lots and invalid prices. Unchanged cost = no-op.
+
+// --- Settlements (FR-26) — dues_api
+// settle_bills_batch { payload: { party_id, transaction_type, settlement_date, payment_mode?, notes?,
+//   allocations: Array<{ transaction_id, amount_paid }> } } -> SettlementResult   // 1..=200, unique bills, all-or-nothing
+// settle_bill_payment: unchanged contract; implemented on top of the batch path
+// update_settlement { settlement_id, payload: { amount_paid, settlement_date, payment_mode?, notes? } } -> PaymentSettlement
+// delete_settlement { settlement_id } -> { removed_amount, transaction_id }   // kind = SETTLEMENT only
+```
+
 ### 9.4. Atomic Transaction & Concurrency Controls
-* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`, and the v1.1 commands `create/update/delete_expense`, `create_expense_type`, `create_charge_type`, `update/delete_sale`, `update/delete_purchase`, `delete_return`, `update_item_low_stock_threshold`, `set_item_stock`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
-* No operation updates or deletes a committed transaction row except through the cached-value updates defined above (`paid_amount`, `balance_due`, `payment_status`, `remaining_quantity`, `returned_quantity`, `current_stock`, `is_low_stock`) **and the FR-20 correction operations** (`update_*` / `delete_*`), which reverse and repost all dependent rows in the same transaction.
+* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`, and the v1.1 commands `create/update/delete_expense`, `create_expense_type`, `create_charge_type`, `update/delete_sale`, `update/delete_purchase`, `delete_return`, `update_item_low_stock_threshold`, `set_item_stock`, and the v1.2 commands `update_lot_purchase_price`, `settle_bills_batch`, `update_settlement`, `delete_settlement`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
+* No operation updates or deletes a committed transaction row except through the cached-value updates defined above (`paid_amount`, `balance_due`, `payment_status`, `remaining_quantity`, `returned_quantity`, `current_stock`, `is_low_stock`) **and the FR-20 / FR-25 / FR-26 correction operations** (`update_*` / `delete_*`, lot price, settlement edit/delete), which reverse and repost all dependent rows in the same transaction.
 * This guarantees that FIFO lot allocation and inventory decrement operate in complete isolation, preventing double-depletion or race conditions even under rapid scanning.
 
 ---
@@ -1380,3 +1452,19 @@ Rules for every branch:
 * The mock client stays a thin fixture client (DD-27): new IPC methods get typed stub data, no business rules.
 
 > **v4 amendments (feat/live-search-low-stock):** (1) FR-11: optional Low Stock Level import column (blank = 5); `validate_items_import` lists it. (2) FR-14 rev.: a blank query lists everything; a query with no letters or digits matches nothing; party search also matches 3+ consecutive phone digits; client-side filtering of an already-loaded small list (Credit & Dues) counts as live. (3) `PARTY_SEARCH_FTS` also indexes `phone_digits`. (4) `get_items_catalog` input is `{ category?, low_stock_only?, search?, page, limit }`. (5) `update_item_low_stock_threshold` validates `threshold >= 0` and finite; response `is_low_stock` is recomputed.
+
+---
+
+## 11. v1.2 Delivery Plan (2026-11-23)
+
+Same rules as §10 (own branch, phased commits, LLD/UI LLD first, frozen-fixture migration tests, full gate, thin mock client). Branches are delivered **strictly one after another**, each created from `main` after the previous merge.
+
+| Order | Branch | Feature | Requirements | Schema migration | Depends on |
+|---|---|---|---|---|---|
+| 1 | `feat/item-quick-create` | Inline item create on sale/purchase; category/barcode out of the item UI; Purchase Price / Sale Price labels | FR-24, FR-25 (labels) | — | — |
+| 2 | `feat/item-details-history` | Inventory keyboard navigation; Item details drawer with lots and Sales/Purchases history | FR-23 | **v9** `transaction_date` on `sale_items` / `purchase_items` + item-date indexes | 1 |
+| 3 | `feat/dues-batch-settlement` | Batch settlement core and editable split form; Settle in bill drawer; settlement edit/delete | FR-26 | — | 2 |
+| 4 | `feat/lot-purchase-price` | Lot purchase price edit with bill/payment effect and COGS re-cost | FR-25 | — | 2, 3 |
+| 5 | `feat/bill-print` | A4 print of sale and purchase bills | FR-27 | — | 4 |
+
+Integer paise (DD-55) is a separate later feature with its own plan.

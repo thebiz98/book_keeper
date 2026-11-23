@@ -287,3 +287,41 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - **Codes.** v6 `code_sequences` already retires codes on issue, so v8 adds no sequence table and no `retire_code`.
 - **`BillLocked { code, message }`.** New `AppError` variant. Reason codes: `LINKED_RETURNS`, `RETURN_CREDITS`, `NOT_A_PURCHASE`, `CONSUMED_LOTS`, `TOTAL_BELOW_APPLIED`, `PARTY_CHANGE_WITH_CREDITS`, `PARTY_REQUIRED_WITH_PAYMENTS`, `LOT_BELOW_CONSUMED`, `CONSUMED_LINE_CHANGED`, `CONSUMED_LINE_REMOVED`, `VENDOR_RETURNED_COST_CHANGE`, `NEWER_RETURN`, `RESTOCKED_CONSUMED`, `RETURN_LOT_USED`.
 - *Rejected:* a per-return reversal table (old data lacks it); cascading re-allocation. Lots created later at "latest lot cost" keep their cost after a purchase re-cost.
+
+## v1.2 decisions (2026-11-23)
+
+**DD-49 — Item history: denormalized bill date, one row per bill, separate tabs (FR-23; schema v9).** `sale_items.transaction_date` and `purchase_items.transaction_date` copy the header date (back-filled in v9, written on insert, updated in `update_header_for_edit`; invariant: line date = header date). Indexes `(item_id, transaction_date DESC, <bill fk> DESC)` serve each 10-row page with an ordered index scan (`SELECT DISTINCT bill, date ... ORDER BY date DESC, bill DESC LIMIT/OFFSET`, joined to the header for code/party). A query-plan test forbids `USE TEMP B-TREE`. Sales and Purchases are separate tabs (two single-arm queries, no merge). Purchases list `source = PURCHASE` only. *Rejected:* joining lines to headers and sorting per page (cost grows with the item's history); one merged Sales+Purchases list.
+
+**DD-50 — Inline item quick create (FR-24).** One `ItemQuickCreateModal` on New Sale (stock on hand + purchase price required → an opening-stock `OPN-` lot via `create_item.initial_stock`) and on New Purchase (no stock fields). Opened by `+ Create`, Enter on no match, or Alt+N. Category and barcode leave the item UI only; an edit re-sends the stored values, so the backend, import and FTS keep them.
+
+**DD-51 — Lot purchase price edit (FR-25).** `update_lot_purchase_price` is a targeted correction, not a full bill repost:
+- **PURCHASE lots:** bill guards → `edit_purchase_lot` (re-costs allocations, vendor-return lock) → header totals from the *stored* line totals + existing charges (no rebuild from rates, so no rounding drift) → UPFRONT replaced → `recompute_bill`.
+- **Payment rule:** `applied = Σ SETTLEMENT + Σ RETURN_CREDIT`, `open = new_total − applied`.
+  - `open < 0` → `TOTAL_BELOW_APPLIED`.
+  - A bill paid entirely upfront (balance 0 and applied 0) stays PAID with `upfront = new_total`.
+  - Otherwise `upfront = min(old_upfront, open)`, with the status derived from it.
+  - No upfront is ever invented.
+- **OPENING / ADJUSTMENT lots:** re-cost only. For ADJUSTMENT, the matching `stock_adjustments.unit_cost` is updated (found via the `Stock adjustment #id` header note).
+- **RETURN lots:** read-only.
+- **Sale bills:** never change; only COGS does.
+
+**DD-52 — One settlement path; settlements are correctable (FR-26).**
+- `settle_bills_batch` (one `BEGIN IMMEDIATE`, 1..=200 unique allocations, all or nothing) is the core. `settle_bill_payment` wraps it: a bill id is a batch of one, and a null bill gets a server-side FIFO allocation. `apply_return_credit` shares the FIFO allocation builder.
+- `update_settlement` and `delete_settlement` act on `kind = SETTLEMENT` only. The new amount must be ≤ balance + old amount. Both end in `recompute_bill`.
+- The bill details drawer shows Settle whenever a balance and a party exist.
+- No grouping id for lump sums (deferred).
+
+**DD-53 — Printing via the webview (FR-27).** A pure `BillPrintDocument` is rendered into a `#print-root` portal, then `window.print()` is called. Print CSS hides the app and sets `@page A4`. There is no plugin and no Rust PDF. The header is the existing Shop Profile, with no new settings. Rate is shown per pack (`total / pack_quantity`).
+
+**DD-54 — Terminology, discounts, deletes.**
+- *Purchase Price* = lot `unit_cost`. *Sale Price* = item `default_sale_price`, a suggestion only; lots carry no sale price.
+- Discounts stay bill-level (FR-19). Only the derived `net_unit_price` refund cap is per line.
+- A hardened two-step delete is deferred until accidental deletes are seen. Bill deletes keep the typed code; settlement delete uses a danger confirm.
+
+**DD-55 — Integer paise money model (deferred; separate feature).**
+- **Storage and types:** money is stored as `INTEGER` paise, uses a `Paise(i64)` newtype in Rust (no `From<f64>`), and crosses IPC as paise. Input is parsed as a string.
+- **Totals and rates:** totals are primary; rates are derived for display only.
+- **Proration:** cumulative allocation, `cost(n) = round(total × n / qty)`, where a slice costs `cost(b) − cost(a)`. A fully consumed lot sums exactly to its total, and no "extra paisa" unit is tracked.
+- **Quantities:** stay `REAL`; milli-units are an option.
+- **Migration:** money columns are rebuilt with `CAST(ROUND(x*100) AS INTEGER)`, checked against sum invariants, and the invariant suite moves to exact equality.
+- *Why deferred:* it touches every money field. It should be done mechanically in its own branch set, not mixed with v1.2 features.
