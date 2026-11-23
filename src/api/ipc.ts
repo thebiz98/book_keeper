@@ -98,6 +98,21 @@ export class TauriClient implements ApiClient {
   searchParties: ApiClient['searchParties'] = (query, partyType) =>
     invokeCmd('search_parties', { query, partyType: partyType ?? null });
 
+  // --- Expenses ---
+  searchExpenseTypes: ApiClient['searchExpenseTypes'] = (query, limit) =>
+    invokeCmd('search_expense_types', { query, limit: limit ?? null });
+  listExpenseTypes: ApiClient['listExpenseTypes'] = () => invokeCmd('list_expense_types');
+  createExpenseType: ApiClient['createExpenseType'] = (name) =>
+    invokeCmd('create_expense_type', { payload: { name } });
+  updateExpenseType: ApiClient['updateExpenseType'] = (expenseTypeId, name) =>
+    invokeCmd('update_expense_type', { expenseTypeId, payload: { name } });
+  getNextExpenseCode: ApiClient['getNextExpenseCode'] = () => invokeCmd('get_next_expense_code');
+  createExpense: ApiClient['createExpense'] = (payload) => invokeCmd('create_expense', { payload });
+  updateExpense: ApiClient['updateExpense'] = (expenseId, payload) =>
+    invokeCmd('update_expense', { expenseId, payload });
+  deleteExpense: ApiClient['deleteExpense'] = (expenseId) => invokeCmd('delete_expense', { expenseId });
+  listExpenses: ApiClient['listExpenses'] = (filter) => invokeCmd('list_expenses', { filter: filter ?? {} });
+
   // --- Returns & Adjustments ---
   getNextReturnCode: ApiClient['getNextReturnCode'] = () => invokeCmd('get_next_return_code');
   createCustomerReturn: ApiClient['createCustomerReturn'] = (payload) =>

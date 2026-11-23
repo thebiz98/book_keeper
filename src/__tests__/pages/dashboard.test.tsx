@@ -14,6 +14,7 @@ const metrics: DashboardMetrics = {
   customerReceivables: 777,
   vendorPayables: 444,
   liveCashInDrawer: 888,
+  todayExpensesAmount: 350,
 };
 
 const base = {

@@ -1,5 +1,7 @@
 import type {
   BundleSuggestion,
+  Expense,
+  ExpenseType,
   ItemBundle,
   ItemType,
   Party,
@@ -586,3 +588,31 @@ export const initialBundleSuggestions: BundleSuggestion[] = [
     usageCount: 9,
   },
 ];
+
+export const initialExpenseTypes: ExpenseType[] = [
+  { id: 1, name: 'Printer Ink', isActive: true, createdAt: '2026-11-01T09:00:00Z' },
+  { id: 2, name: 'Electricity Bill', isActive: true, createdAt: '2026-11-01T09:00:00Z' },
+  { id: 3, name: 'Tea & Snacks', isActive: true, createdAt: '2026-11-01T09:00:00Z' },
+];
+
+/** Five expenses in the current month (dates relative to `monthDay`, e.g. `(d) => '2026-11-0' + d`). */
+export function initialExpenses(monthDay: (day: number) => string): Expense[] {
+  const row = (id: number, day: number, typeId: number, amount: number, notes: string | null): Expense => ({
+    id,
+    expenseCode: `EXP-${1000 + id}`,
+    expenseDate: monthDay(day),
+    expenseTypeId: typeId,
+    expenseTypeName: initialExpenseTypes.find((t) => t.id === typeId)?.name ?? '',
+    amount,
+    notes,
+    createdAt: `${monthDay(day)}T09:00:00Z`,
+    updatedAt: null,
+  });
+  return [
+    row(1, 1, 1, 450, 'Black cartridge'),
+    row(2, 2, 3, 120, null),
+    row(3, 3, 2, 1800, 'October bill'),
+    row(4, 4, 3, 80, null),
+    row(5, 5, 1, 300, null),
+  ];
+}

@@ -10,6 +10,9 @@
 import type {
   ApiClient,
   CashFlowReport,
+  Expense,
+  ExpenseType,
+  ExpenseListResponse,
   ItemBundle,
   ItemSearchResult,
   Paginated,
@@ -36,6 +39,8 @@ import {
   initialVendors,
   initialShopSettings,
   initialBundleSuggestions,
+  initialExpenseTypes,
+  initialExpenses,
   type MockItem,
   type MockParty,
   type MockBundle,
@@ -111,6 +116,10 @@ export class MockApiClient implements ApiClient {
   private purchases: PurchaseHistoryRow[] = [];
   private returns: ReturnTransaction[] = [];
   private adjustments: StockAdjustment[] = [];
+  private expenseTypes: ExpenseType[] = structuredClone(initialExpenseTypes);
+  private expenses: Expense[] = initialExpenses((d) => `${localDate().slice(0, 7)}-${String(d).padStart(2, '0')}`);
+  private nextExpenseTypeId = 100;
+  private nextExpenseId = 100;
   private nextId = 1;
   private nextBundleId = 100000;
 
@@ -273,6 +282,86 @@ export class MockApiClient implements ApiClient {
         },
       ],
       settlements: [],
+    };
+  }
+
+  // --- Expenses (no validation, DD-27) ---
+  async searchExpenseTypes(query: string, limit = 8) {
+    const q = query.trim().toLowerCase();
+    return this.expenseTypes.filter((t) => q === '' || t.name.toLowerCase().includes(q)).slice(0, limit);
+  }
+  async listExpenseTypes() {
+    return [...this.expenseTypes].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  async createExpenseType(name: string) {
+    const clean = name.trim().replace(/\s+/g, ' ');
+    const hit = this.expenseTypes.find((t) => t.name.toLowerCase() === clean.toLowerCase());
+    if (hit) return { ...hit };
+    const t: ExpenseType = { id: this.nextExpenseTypeId++, name: clean, isActive: true, createdAt: nowIso() };
+    this.expenseTypes.push(t);
+    return { ...t };
+  }
+  async updateExpenseType(expenseTypeId: number, name: string) {
+    const t = this.expenseTypes.find((x) => x.id === expenseTypeId);
+    if (!t) throw notFound('ExpenseType', expenseTypeId);
+    t.name = name.trim();
+    return { ...t };
+  }
+  async getNextExpenseCode() {
+    return `EXP-${1001 + this.expenses.length}`;
+  }
+  async createExpense(payload: Parameters<ApiClient['createExpense']>[0]) {
+    const t = this.expenseTypes.find((x) => x.id === payload.expenseTypeId);
+    if (!t) throw notFound('ExpenseType', payload.expenseTypeId);
+    const id = this.nextExpenseId++;
+    const e: Expense = {
+      id,
+      expenseCode: `EXP-${1001 + this.expenses.length}`,
+      expenseDate: payload.expenseDate,
+      expenseTypeId: t.id,
+      expenseTypeName: t.name,
+      amount: payload.amount,
+      notes: payload.notes,
+      createdAt: nowIso(),
+      updatedAt: null,
+    };
+    this.expenses.push(e);
+    return { ...e };
+  }
+  async updateExpense(expenseId: number, payload: Parameters<ApiClient['updateExpense']>[1]) {
+    const e = this.expenses.find((x) => x.id === expenseId);
+    if (!e) throw notFound('Expense', expenseId);
+    const t = this.expenseTypes.find((x) => x.id === payload.expenseTypeId);
+    Object.assign(e, {
+      expenseDate: payload.expenseDate,
+      expenseTypeId: payload.expenseTypeId,
+      expenseTypeName: t?.name ?? e.expenseTypeName,
+      amount: payload.amount,
+      notes: payload.notes,
+      updatedAt: nowIso(),
+    });
+    return { ...e };
+  }
+  async deleteExpense(expenseId: number) {
+    this.expenses = this.expenses.filter((x) => x.id !== expenseId);
+  }
+  async listExpenses(filter?: Parameters<ApiClient['listExpenses']>[0]): Promise<ExpenseListResponse> {
+    const q = (filter?.searchQuery ?? '').trim().toLowerCase();
+    const rows = this.expenses
+      .filter((e) => !filter?.startDate || e.expenseDate >= filter.startDate)
+      .filter((e) => !filter?.endDate || e.expenseDate <= filter.endDate)
+      .filter((e) => !filter?.expenseTypeId || e.expenseTypeId === filter.expenseTypeId)
+      .filter(
+        (e) =>
+          !q ||
+          e.expenseCode.toLowerCase().includes(q) ||
+          e.expenseTypeName.toLowerCase().includes(q) ||
+          (e.notes ?? '').toLowerCase().includes(q)
+      )
+      .sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || b.id - a.id);
+    return {
+      ...paginate(rows, filter?.page, filter?.limit),
+      periodTotal: rows.reduce((s, e) => s + e.amount, 0),
     };
   }
 
@@ -574,6 +663,7 @@ export class MockApiClient implements ApiClient {
         .filter((p) => p.partyType === 'VENDOR')
         .reduce((s, p) => s + p.balanceDue, 0),
       liveCashInDrawer: 3800,
+      todayExpensesAmount: 350,
     };
   }
   async getLowStockAlerts() {
@@ -628,8 +718,15 @@ export class MockApiClient implements ApiClient {
       cogs: 85000,
       grossProfit: 33000,
       inventoryLosses: 500,
-      netProfit: 32500,
+      netProfit: 31300,
       totalPurchases: 90000,
+      salesDiscounts: 0,
+      otherIncome: 0,
+      operatingExpenses: 1200,
+      expensesByType: [
+        { expenseTypeId: 2, expenseTypeName: 'Electricity Bill', amount: 800 },
+        { expenseTypeId: 1, expenseTypeName: 'Printer Ink', amount: 400 },
+      ],
     };
   }
   async getStockValuationReport() {
@@ -651,7 +748,8 @@ export class MockApiClient implements ApiClient {
       purchaseCashOutflow: 1500,
       vendorSettlementsOutflow: 200,
       refundsCashOutflow: 100,
-      netCashBalance: 2700,
+      expensesCashOutflow: 350,
+      netCashBalance: 2350,
     };
   }
 

@@ -28,6 +28,8 @@ describe('MockApiClient contract shapes', () => {
       'getPnLReport', 'getStockValuationReport', 'getCashFlowReport',
       'getShopSettings', 'updateShopSettings', 'backupDatabase', 'verifyDatabaseIntegrity',
       'validateItemsImport', 'executeItemsImport',
+      'searchExpenseTypes', 'listExpenseTypes', 'createExpenseType', 'updateExpenseType',
+      'getNextExpenseCode', 'createExpense', 'updateExpense', 'deleteExpense', 'listExpenses',
     ];
     for (const m of methods) expect(typeof (c as unknown as Record<string, unknown>)[m]).toBe('function');
   });
@@ -133,13 +135,13 @@ describe('MockApiClient contract shapes', () => {
   });
 
   it('report shapes', async () => {
-    has(await c.getDashboardMetrics(), ['todaySalesAmount', 'todaySalesCount', 'liveCashInDrawer', 'vendorPayables']);
+    has(await c.getDashboardMetrics(), ['todaySalesAmount', 'todaySalesCount', 'liveCashInDrawer', 'todayExpensesAmount', 'vendorPayables']);
     has((await c.getLowStockAlerts())[0], ['id', 'currentStock', 'baseUnit']);
     expect((await c.getSalesPurchaseTrend('7d')).length).toBe(7);
     has((await c.getSalesPurchaseTrend('1y'))[0], ['date', 'salesAmount', 'purchaseAmount']);
-    has(await c.getPnLReport('2026-11-01', '2026-11-21'), ['grossSales', 'salesReturns', 'netSales', 'inventoryLosses', 'totalPurchases']);
+    has(await c.getPnLReport('2026-11-01', '2026-11-21'), ['grossSales', 'salesReturns', 'netSales', 'inventoryLosses', 'totalPurchases', 'operatingExpenses', 'expensesByType', 'salesDiscounts', 'otherIncome']);
     has(await c.getStockValuationReport(), ['totalValuation', 'activeLotsCount', 'categoriesBreakdown']);
-    has(await c.getCashFlowReport('2026-11-01', '2026-11-21'), ['salesCashInflow', 'vendorRefundsInflow', 'netCashBalance']);
+    has(await c.getCashFlowReport('2026-11-01', '2026-11-21'), ['salesCashInflow', 'vendorRefundsInflow', 'expensesCashOutflow', 'netCashBalance']);
     expect(Array.isArray(await c.getRecentTransactions(5))).toBe(true);
   });
 
@@ -154,5 +156,25 @@ describe('MockApiClient contract shapes', () => {
     has(b, ['id', 'itemId', 'bundleName']);
     has(await c.updateBundle(b.id, { bundleName: 'T2', unitsPerBundle: 4, mrp: null, defaultBundlePrice: null, barcode: null }), ['id']);
     await c.deleteBundle(b.id);
+  });
+
+  it('expenses: list shape, filters and idempotent type create', async () => {
+    const m = new MockApiClient();
+    const page = await m.listExpenses({ limit: 2 });
+    expect(keys(page)).toEqual(['items', 'limit', 'page', 'periodTotal', 'total']);
+    expect(page.items).toHaveLength(2);
+    expect(page.total).toBe(5);
+    expect(page.periodTotal).toBe(2750);
+    has(page.items[0], ['id', 'expenseCode', 'expenseDate', 'expenseTypeId', 'expenseTypeName', 'amount', 'notes']);
+    expect((await m.listExpenses({ expenseTypeId: 1 })).total).toBe(2);
+    expect((await m.listExpenses({ searchQuery: 'october' })).total).toBe(1);
+    const a = await m.createExpenseType('Toner');
+    const b = await m.createExpenseType('  toner ');
+    expect(b.id).toBe(a.id);
+    expect((await m.searchExpenseTypes('print')).map((x) => x.name)).toEqual(['Printer Ink']);
+    const e = await m.createExpense({ expenseDate: '2026-11-20', expenseTypeId: a.id, amount: 10, notes: null });
+    expect(e.expenseTypeName).toBe('Toner');
+    await m.deleteExpense(e.id);
+    expect((await m.listExpenses()).total).toBe(5);
   });
 });

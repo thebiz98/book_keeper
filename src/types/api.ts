@@ -7,6 +7,8 @@ import type {
   AdjustmentReason,
   CashFlowReport,
   DashboardMetrics,
+  Expense,
+  ExpenseType,
   ItemBundle,
   ItemLot,
   ItemSearchResult,
@@ -45,6 +47,29 @@ export interface Paginated<T> {
   total: number;
   page: number;
   limit: number;
+}
+
+/** Payload for create_expense / update_expense. */
+export interface ExpensePayload {
+  expenseDate: string;
+  expenseTypeId: number;
+  amount: number;
+  notes: string | null;
+}
+
+/** Filter for list_expenses. Dates are YYYY-MM-DD, inclusive; newest first. */
+export interface ExpenseFilter {
+  startDate?: string | null;
+  endDate?: string | null;
+  expenseTypeId?: number | null;
+  searchQuery?: string | null;
+  page?: number | null;
+  limit?: number | null;
+}
+
+/** `periodTotal` sums every row matching the filter, not just this page. */
+export interface ExpenseListResponse extends Paginated<Expense> {
+  periodTotal: number;
 }
 
 export type PaymentStatusFilter = 'ALL' | PaymentStatus;
@@ -382,6 +407,19 @@ export interface ApiClient {
   getParty(partyId: number): Promise<Party>;
   listParties(partyType?: PartyType, activeOnly?: boolean): Promise<PartyListRow[]>;
   searchParties(query: string, partyType?: PartyType): Promise<PartyListRow[]>;
+
+  // Expenses (FR-18)
+  /** Live type search; a blank query returns the first active types. */
+  searchExpenseTypes(query: string, limit?: number): Promise<ExpenseType[]>;
+  listExpenseTypes(): Promise<ExpenseType[]>;
+  /** Idempotent: an existing name (case-insensitive) returns the existing type. */
+  createExpenseType(name: string): Promise<ExpenseType>;
+  updateExpenseType(expenseTypeId: number, name: string): Promise<ExpenseType>;
+  getNextExpenseCode(): Promise<string>;
+  createExpense(payload: ExpensePayload): Promise<Expense>;
+  updateExpense(expenseId: number, payload: ExpensePayload): Promise<Expense>;
+  deleteExpense(expenseId: number): Promise<void>;
+  listExpenses(filter?: ExpenseFilter): Promise<ExpenseListResponse>;
 
   // Returns & Adjustments
   getNextReturnCode(): Promise<string>;

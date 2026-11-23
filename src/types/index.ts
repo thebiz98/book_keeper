@@ -345,6 +345,12 @@ export interface PnLReport {
   inventoryLosses: number;
   netProfit: number;
   totalPurchases: number;
+  /** Placeholder until charges/discounts (FR-19): 0. */
+  salesDiscounts: number;
+  /** Placeholder until charges/discounts (FR-19): 0. */
+  otherIncome: number;
+  operatingExpenses: number;
+  expensesByType: ExpenseTypeTotal[];
 }
 
 export interface CategoryValuation {
@@ -366,6 +372,8 @@ export interface CashFlowReport {
   purchaseCashOutflow: number;
   vendorSettlementsOutflow: number;
   refundsCashOutflow: number;
+  /** Σ store expenses dated in the range (FR-18). */
+  expensesCashOutflow: number;
   netCashBalance: number;
 }
 
@@ -379,6 +387,7 @@ export interface DashboardMetrics {
   customerReceivables: number;
   vendorPayables: number;
   liveCashInDrawer: number;
+  todayExpensesAmount: number;
 }
 
 export interface TrendDataPoint {
@@ -423,4 +432,31 @@ export interface ShopSettings {
   phone: string | null;
   address: string | null;
   taxId: string | null;
+}
+
+// --- Store expenses (FR-18) ---
+export interface ExpenseType {
+  id: number;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface Expense {
+  id: number;
+  expenseCode: string;
+  expenseDate: string;
+  expenseTypeId: number;
+  /** Snapshot of the type name at the last save (DD-30). */
+  expenseTypeName: string;
+  amount: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+}
+
+export interface ExpenseTypeTotal {
+  expenseTypeId: number;
+  expenseTypeName: string;
+  amount: number;
 }
