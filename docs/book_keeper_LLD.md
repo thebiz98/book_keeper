@@ -1986,12 +1986,16 @@ pub enum AppError {
 
     #[error("IO / File system error: {0}")]
     IoError(String),
+
+    /// FR-20 (v8): an edit/delete was refused by a guard. `code` is one of the reason codes in §14.4.
+    #[error("Bill locked: {message}")]
+    BillLocked { code: String, message: String },
 }
 ```
 
 ### 10.2 Concurrency & Atomic Locking (SQLite WAL + `BEGIN IMMEDIATE`)
 1. **WAL Mode**: SQLite runs with `PRAGMA journal_mode = WAL` and `PRAGMA synchronous = NORMAL`. This ensures readers never block writers and writers never block readers.
-2. **Immediate Lock Escalation**: Every state-mutating service method (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_adjustment`, `set_item_stock`, item/bundle/party/settings writes, `execute_items_import`) calls `uow.begin_transaction()` exactly once, at the top, and passes the open context down (never nested), which executes:
+2. **Immediate Lock Escalation**: Every state-mutating service method (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_adjustment`, `set_item_stock`, item/bundle/party/settings writes, `execute_items_import`, and the v1.1 FR-20 commands `update_sale`, `delete_sale`, `update_purchase`, `delete_purchase`, `delete_return`) calls `uow.begin_transaction()` exactly once, at the top, and passes the open context down (never nested), which executes:
    ```sql
    BEGIN IMMEDIATE TRANSACTION;
    ```
@@ -2273,3 +2277,108 @@ Linked return unit price <= `net_unit_price` of the sale line; charges are never
 ### 13.7 Commands & tests
 `search_charge_types { query, applies_to, limit? }`, `create_charge_type { payload }`. Suite `bill_charges_test.rs`, `bill_math` unit tests, schema v7 upgrade test.
 
+
+
+## 14. Bill Correction (FR-20, schema v8, `feat/bill-edit-delete`)
+
+### 14.1 Entities and DTOs
+`SaleTransaction` and `PurchaseTransaction` gain `updated_at: Option<String>` (last field; `None` on create, set by every edit). `RETURN_ITEM.purchase_item_id` is also written for the `RETURN` lot of an unlinked restockable customer line. DTOs (`core/dtos/correction_dto.rs`): `CorrectionTarget { Sale, Purchase, Return }` (SCREAMING_SNAKE), `GuardReason { code, message, blocks_edit, blocks_delete }`, `LotEditLimit { purchase_item_id, consumed_quantity, referenced, vendor_returned }`, `BillEditGuard { target, id, code, can_edit, can_delete, can_change_party, reasons, upfront_amount, applied_amount, removed_cash_amount, removed_credit_amount, lot_limits }`, `DeleteBillResult { removed_cash_amount }`, `DeleteReturnResult { removed_cash_amount, removed_credit_amount }`. `CreatePurchaseItemPayload` gains `#[serde(default)] purchase_item_id: Option<i64>`; `create_purchase` rejects `Some`. There is **no** `CodeSequence` entity change: `code_sequences` exists since v6 and `next_code` upserts the high-water mark on issue, so deleting a record never frees its code; `retire_code` is not needed.
+
+### 14.2 Schema v8 (rules)
+```sql
+ALTER TABLE sale_transactions ADD COLUMN updated_at TEXT;
+ALTER TABLE purchase_transactions ADD COLUMN updated_at TEXT;
+CREATE INDEX idx_return_tx_original ON return_transactions(return_type, original_transaction_id);
+```
+Fixture `tests/fixtures/schema/v8.sql`; test `v7_database_upgrades_to_v8_keeping_bills`.
+
+### 14.3 Repository contracts (§5.2 additions)
+- `SaleRepository`: `update_header_for_edit(&SaleTransaction)` (date, party, snapshot name, mode, notes, subtotal/charges/discounts/total, `updated_at`; never code, `created_at` or the cached money fields), `delete_sale_items(sale_id)`, `delete_transaction(id)`.
+- `PurchaseRepository`: `update_header_for_edit`, `update_purchase_item(&PurchaseItem)` (table CHECK `0 <= remaining <= quantity`), `delete_purchase_item(id)`, `delete_transaction(id)`, `is_lot_referenced(lot)` (sale allocation, outflow allocation or return line points at it), `is_lot_referenced_except_return(lot, return_id)`, `find_return_lots_by_note(note, item_id)`.
+- `AllocationRepository`: `delete_by_sale_item_id`, `sale_item_ids_for_lot`, `update_unit_cost_for_lot`.
+- `OutflowAllocationRepository`: `delete_by_source`, `exists_for_lot(lot, type)`, `source_ids_for_lot(lot, type)`, `update_unit_cost_for_lot` (`ADJUSTMENT`, `REPLACEMENT` only).
+- `SettlementRepository`: `delete_by_transaction(type, id, kinds) -> Vec<PaymentSettlement>`, `update_party_for_transaction(type, id, party, kinds)`, `return_credit_return_ids(type, id)`, `delete_by_return(return_id) -> Vec<PaymentSettlement>`.
+- `ReturnRepository`: `list_linked(return_type, original_id)`, `newer_linked_return(&ReturnTransaction) -> Option<String>`, `list_customer_returned_items_for_sale_item(sid)` (id order), `set_return_item_lot`, `delete_return(id)` (items then header).
+
+### 14.4 Guard reason codes
+| Code | Blocks | When |
+|---|---|---|
+| `LINKED_RETURNS` | edit, delete | any linked return of the same `return_type` |
+| `RETURN_CREDITS` | delete (and party change) | `RETURN_CREDIT` rows from an unlinked return |
+| `NOT_A_PURCHASE` | edit, delete | header `source != PURCHASE` |
+| `CONSUMED_LOTS` | delete | any lot referenced |
+| `TOTAL_BELOW_APPLIED` | edit | new total < Σ SETTLEMENT + Σ RETURN_CREDIT |
+| `PARTY_CHANGE_WITH_CREDITS` | edit | party changed while unlinked-return credits exist |
+| `PARTY_REQUIRED_WITH_PAYMENTS` | edit | party cleared while applied > 0 |
+| `LOT_BELOW_CONSUMED` | edit | lot quantity < `quantity - remaining` |
+| `CONSUMED_LINE_CHANGED` / `CONSUMED_LINE_REMOVED` | edit | item change / removal of a referenced lot |
+| `VENDOR_RETURNED_COST_CHANGE` | edit | cost change on a lot with a `VENDOR_RETURN` outflow |
+| `NEWER_RETURN` | delete return | a newer return exists on the same original bill |
+| `RESTOCKED_CONSUMED` | delete return | restocked units no longer in the lot |
+| `RETURN_LOT_USED` | delete return | the `RETURN` lot has allocations or `remaining < quantity`, or was not found |
+
+### 14.5 Strategy, services and algorithms
+`InventoryAllocationStrategy::replay_reversals(allocs, qtys) -> Vec<Vec<(alloc_id, take)>>` has a **default body** (pure; sort allocations by id descending, capacity = `quantity_depleted`, for each qty take `min(cap, left)`), so the test `LifoStrategy` is unaffected. `InventoryService` gains `reverse_sale_bill_stock`, `edit_purchase_lot(LotEdit)` (+ private `recost_lot`), `remove_purchase_lot`, `plan_return_undo` (read-only, shared by the guard and the delete) and `apply_return_undo`. `PaymentService` (still the only ledger writer) gains `delete_bill_ledger`, `repoint_bill_party`, `recompute`, `delete_return_ledger`. `SaleService` / `PurchaseService` gain `update_*`, `delete_*`, `get_*_edit_guard`; `ReturnService` gains `delete_return`, `get_return_delete_guard`. The create paths are split into tx-scoped helpers (`validate_*_shape`, `resolve_*`, `check_*_payment`) shared with edit and reuse the FR-19 `bill_math` helpers (`resolve_bill_charges`, `compute_bill_totals`, `insert_bill_charges`, `delete_bill_charges`, `sale_payment_split`, `purchase_upfront`). Guards live in `services/impl/bill_guard.rs`.
+
+```
+evaluate_sale_guard(tx, sale_id):
+  linked = returns.list_linked(CUSTOMER, sale_id); rc_returns = settlements.return_credit_return_ids(SALE, id)
+  totals = settlements.sum_by_kind_for_transaction(SALE, id); applied = settlement + return_credit
+  removed_cash = upfront + settlement
+  reasons += LINKED_RETURNS {edit, delete} if linked; RETURN_CREDITS {delete} if rc_returns
+  can_change_party = rc_returns empty
+evaluate_purchase_guard: as sale with VENDOR; source != PURCHASE -> NOT_A_PURCHASE {edit, delete};
+  per lot: consumed = quantity - remaining, referenced = is_lot_referenced, vendor_returned = outflows.exists(lot, VENDOR_RETURN);
+  any referenced -> CONSUMED_LOTS {delete}
+evaluate_return_guard: can_edit = false; newer_linked_return -> NEWER_RETURN {delete}; dry-run plan_return_undo -> RESTOCKED_CONSUMED / RETURN_LOT_USED {delete}
+  removed_cash = Σ REFUND_* rows; removed_credit = Σ RETURN_CREDIT rows of the return
+
+update_sale(id, payload):                       // one BEGIN IMMEDIATE
+  validate_sale_shape(payload); old = find or NotFound
+  g = evaluate_sale_guard; !can_edit -> BillLocked(first edit reason)
+  inventory.reverse_sale_bill_stock(id)         // lots += depleted - returned, allocations deleted, stock cache +
+  sales.delete_sale_items(id); delete_bill_charges(SALE, id); payment.delete_bill_ledger(SALE, id, [UPFRONT])
+  r = resolve_sale(payload)                     // party, lines, charges, totals (shared with create)
+  party changed and !can_change_party -> PARTY_CHANGE_WITH_CREDITS; no party and applied > 0 -> PARTY_REQUIRED_WITH_PAYMENTS
+  inventory.validate_stock_availability(requirements)       // stock after reversal
+  total + MONEY_EPS < applied -> TOTAL_BELOW_APPLIED
+  (upfront, change) = check_sale_payment(status, paid, open = round2(total - applied), party)
+  sales.update_header_for_edit; post lines (FIFO); insert charges
+  if party changed: payment.repoint_bill_party; payment.recompute; if upfront > 0: record UPFRONT on payload date
+delete_sale(id): guard.can_delete else BillLocked; reverse stock; delete items, charges, ledger (ALL kinds -> removed cash); delete header (code stays retired)
+
+update_purchase(id, payload):
+  guard; delete charges and UPFRONT; r = resolve_purchase (lines carry optional purchase_item_id); party/applied/total checks as sale (VENDOR)
+  each line's purchase_item_id must be a lot of this purchase and used once, else ValidationError
+  old lots not kept -> remove_purchase_lot (CONSUMED_LINE_REMOVED if referenced)
+  kept lines -> edit_purchase_lot; new lines -> add_stock_for_purchase; header, charges, repoint, recompute, UPFRONT
+edit_purchase_lot(lot, e):
+  consumed = quantity - remaining; referenced = is_lot_referenced
+  item changed and referenced -> CONSUMED_LINE_CHANGED; e.quantity + EPS < consumed -> LOT_BELOW_CONSUMED
+  new_remaining = max(0, e.quantity - consumed); cost_changed and outflows.exists(lot, VENDOR_RETURN) -> VENDOR_RETURNED_COST_CHANGE
+  update the lot; stock delta (new_remaining - remaining, or per item when the item changed); if cost_changed and referenced: recost_lot
+recost_lot(lot, c):
+  allocations.update_unit_cost_for_lot; outflows.update_unit_cost_for_lot
+  for each sale line using the lot: takes = strategy.replay_reversals(allocs, RETURNED items' qty in id order); cost_amount = round2(Σ take * alloc.unit_cost)
+  for each REPLACEMENT return using the lot: walk its outflow rows in id order across its REPLACEMENT_ISSUED lines; cost_amount = round2(Σ qty * unit_cost)
+delete_purchase(id): guard; remove every lot (stock -remaining); delete charges, ledger (ALL), header
+
+delete_return(rid):
+  newer linked return on the same bill -> NEWER_RETURN
+  plan = inventory.plan_return_undo(r)           // dry-run; RESTOCKED_CONSUMED / RETURN_LOT_USED
+  payment.delete_return_ledger(rid) -> (cash, credit)  // recomputes each bill that had a credit
+  returns.delete_return(rid)                      // items then header
+  inventory.apply_return_undo(plan)               // after the return items are gone, so the FK to a RETURN lot is free
+plan (CUSTOMER): per linked RETURNED line: takes = replay for the sale line; mine = this item's takes;
+    returned_quantity -= take per allocation; restockable: lot.remaining >= take else RESTOCKED_CONSUMED, lot -= take, stock -
+  per unlinked RESTOCKABLE line: lot = ri.purchase_item_id, else legacy notes lookup; lot unreferenced (except this return) and remaining == quantity
+    else RETURN_LOT_USED; delete the lot, delete its header if empty, stock -qty
+  REPLACEMENT: restore_outflow (lots += qty, delete rows, stock +)
+plan (VENDOR): restore_outflow(VENDOR_RETURN)
+```
+
+### 14.6 Controllers
+`update_sale`, `delete_sale`, `update_purchase`, `delete_purchase`, `delete_return` in the existing controllers; `correction_controller::get_bill_edit_guard(target, id)` dispatches to the three services. All registered in `main.rs`.
+
+### 14.7 Test matrix
+`bill_correction_test.rs`: sale edit (quantity up/down, item change, own-units stock check and rollback, date moves UPFRONT, PAID/PARTIAL/UNPAID transitions, party change re-points settlements, unlinked-credit party lock, total floor, party required with payments, linked-return lock then unlock, delete restores lots/stock/cash, credit lock on delete, lump-sum settlement of the other bill untouched, no code reuse, charges reposted, guard reasons); purchase edit (nothing consumed, quantity floor, referenced line change/remove, fully-returned lot still referenced, cost change re-costs COGS and valuation, adjustment loss, scrap and replacement `cost_amount`, vendor-return cost lock, linked vendor return lock, vendor change, delete, `CONSUMED_LOTS`, `NOT_A_PURCHASE`, `purchase_item_id` rejected on create and foreign lot rejected). `return_delete_test.rs`: linked refund/cash/scrap, restocked-consumed, unlinked restock lot removal and `RETURN_LOT_USED`, credit over two bills, legacy notes lookup, replacement, vendor FIFO and named lot, newest-first rule, sale editable again, `RET-` not reused. Shared invariants in `tests/common`: `assert_ledger_invariant`, `assert_stock_invariant`, `assert_lot_flow_invariant` after every operation. Also `fifo_strategy_test` (`replay_reversals` equals the real reversal takes), `data_access_test` (repo methods), `schema_test` (v8).
