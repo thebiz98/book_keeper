@@ -87,3 +87,9 @@ Windows 11 ARM64 (verified 2026-11-22): requires VS Build Tools 2022 with the **
 ## Next (not started)
 - Package and run with `tauri build` on a desktop machine, then do a manual UI pass in Tauri mode (so far only the mock client and IPC contracts have been checked).
 - Optional: tighten the remaining `as any` tab-ID casts in ReportsPage and ReturnsAdjustmentsPage.
+
+## Branch feat/item-quick-create (FR-24, DD-50; frontend only, v1.2 B1)
+- New `ItemQuickCreateModal` (Name, Base Unit, MRP optional, Sale Price*; New Sale adds Stock on hand* and Purchase Price / base unit*, saved as an `OPN-` lot via `createItem.initialStock/initialCost`; New Purchase hides them). Opened by `+ Create "q"`, Enter on no match, or Alt+N (`newItem` hotkey, in the hotkey bar). After save the item drops into the line (sale: focus Qty; purchase: `chooseItem`).
+- `itemForm.ts` holds the shared item validation and backend field map. Category and barcode left the Inventory list (column, filter, `listCategories` fetch) and `ItemEditDrawer`; edit re-sends the stored values, create sends null. Backend, import and FTS unchanged.
+- Labels: lot cost is "Purchase Price" (LotInspector, New Purchase, bill drawer), item default_sale_price is "Sale Price".
+- **Manual check:** New Sale, type an unknown name: `+ Create` row, Enter opens the modal pre-filled; Save is rejected without stock and purchase price; after Save Qty is focused with the item in the line; Esc closes with no side effects; Alt+N with empty search works. New Purchase: no stock fields, item selected, focus on Purchase Price. Inventory edit keeps category/barcode (barcode search still finds the item); the new lot shows as OPN with the entered Purchase Price.
