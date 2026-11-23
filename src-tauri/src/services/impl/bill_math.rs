@@ -1,7 +1,7 @@
 //! Bill math shared by sale/purchase creation and (FR-20) bill edit/delete: charge line
 //! validation and resolution, totals, the discounted net rate and the payment cross-checks.
 //! Shared by create and (v8) edit paths; never begins a transaction.
-use crate::core::dtos::BillChargeInput;
+use crate::core::dtos::{BillChargeInput, BillPaymentPreview, BillPreview, PreviewError};
 use crate::core::entities::BillCharge;
 use crate::core::error::AppError;
 use crate::core::money::{round2, MONEY_EPS};
@@ -31,6 +31,57 @@ pub struct BillTotals {
 
 fn validation(field: &str, message: impl Into<String>) -> AppError {
     AppError::ValidationError { field: field.to_string(), message: message.into() }
+}
+
+/// Figures a bill command computes on its way, recorded as it goes so a preview can return the
+/// totals even when a later check (stock, payment) fails (DD-56). The real command ignores it.
+#[derive(Debug, Clone, Default)]
+pub struct BillFigures {
+    pub line_totals: Vec<f64>,
+    pub totals: Option<BillTotals>,
+    pub applied: f64,
+    pub open: f64,
+}
+
+impl BillFigures {
+    pub fn set_totals(&mut self, line_totals: &[f64], totals: BillTotals, applied: f64) {
+        self.line_totals = line_totals.to_vec();
+        self.totals = Some(totals);
+        self.applied = applied;
+        self.open = round2((totals.total_amount - applied).max(0.0));
+    }
+}
+
+/// Turns the outcome of a rolled-back dry run into a `BillPreview`. A business error becomes
+/// `errors` (with whatever totals were reached); any other error stays a failure.
+pub fn bill_preview(
+    fig: BillFigures,
+    outcome: Result<Option<BillPaymentPreview>, AppError>,
+) -> Result<BillPreview, AppError> {
+    let (payment, errors) = match outcome {
+        Ok(p) => (p, Vec::new()),
+        Err(e) => match PreviewError::from_app_error(&e) {
+            Some(pe) => (None, vec![pe]),
+            None => return Err(e),
+        },
+    };
+    let t = fig.totals.unwrap_or(BillTotals {
+        items_subtotal: 0.0,
+        charges_total: 0.0,
+        discounts_total: 0.0,
+        total_amount: 0.0,
+    });
+    Ok(BillPreview {
+        line_totals: fig.line_totals,
+        items_subtotal: t.items_subtotal,
+        charges_total: t.charges_total,
+        discounts_total: t.discounts_total,
+        total_amount: t.total_amount,
+        applied_amount: fig.applied,
+        open_amount: fig.open,
+        payment,
+        errors,
+    })
 }
 
 /// Pre-transaction checks: at most 50 lines; each amount finite and `round2(amount) > 0`.
