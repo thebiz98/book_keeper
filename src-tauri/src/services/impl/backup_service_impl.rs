@@ -179,7 +179,18 @@ fn list_file_names(dir: &str) -> Result<Vec<String>, AppError> {
 
 /// Stamp of a backup file name of `kind`: `<prefix>YYYYMMDD_HHMM[_n].db`. `None` for other files.
 pub fn parse_stamp(name: &str, kind: BackupKind) -> Option<chrono::NaiveDateTime> {
-    let rest = name.strip_prefix(kind.prefix())?.strip_suffix(".db")?;
+    let mut rest = name.strip_prefix(kind.prefix())?.strip_suffix(".db")?;
+    if kind == BackupKind::PreMigration {
+        // `v{from}_to_v{to}_` precedes the stamp in pre-migration file names (optional here).
+        if let Some(r) = rest.strip_prefix('v') {
+            let (from, r) = r.split_once("_to_v")?;
+            let (to, r) = r.split_once('_')?;
+            if from.is_empty() || to.is_empty() || !from.chars().chain(to.chars()).all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            rest = r;
+        }
+    }
     let stamp = rest.get(..13)?;
     let tail = &rest[13..];
     if !(tail.is_empty() || (tail.starts_with('_') && tail.len() > 1 && tail[1..].chars().all(|c| c.is_ascii_digit()))) {
@@ -188,7 +199,7 @@ pub fn parse_stamp(name: &str, kind: BackupKind) -> Option<chrono::NaiveDateTime
     chrono::NaiveDateTime::parse_from_str(stamp, "%Y%m%d_%H%M").ok()
 }
 
-/// Pure rotation rule: auto and pre-reset backups older than `retention_days` before `now`,
+/// Pure rotation rule: auto, pre-reset and pre-migration backups older than `retention_days` before `now`,
 /// except the newest auto backup. Manual and unrecognised files are never selected.
 pub fn select_for_deletion(names: &[String], now: chrono::NaiveDateTime, retention_days: u32) -> Vec<String> {
     let cutoff = now - chrono::Duration::days(i64::from(retention_days));
@@ -201,7 +212,7 @@ pub fn select_for_deletion(names: &[String], now: chrono::NaiveDateTime, retenti
         .iter()
         .filter(|n| Some(*n) != newest_auto.as_ref())
         .filter(|n| {
-            [BackupKind::Auto, BackupKind::PreReset]
+            [BackupKind::Auto, BackupKind::PreReset, BackupKind::PreMigration]
                 .iter()
                 .any(|k| parse_stamp(n, *k).is_some_and(|t| t < cutoff))
         })

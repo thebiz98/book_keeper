@@ -14,13 +14,22 @@ use book_keeper::data::sqlite::migrations::{current_version, latest_version, run
 use book_keeper::data::sqlite::{enum_from_sql, enum_to_sql};
 use rusqlite::Connection;
 
+/// Each database lives in its own unique folder, so the `backups/` folder written next to it
+/// by the pre-migration backup (DD-29) is private to the test.
 fn temp_path(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("bk_schema_{tag}_{}.db", uuid::Uuid::new_v4()))
+    let dir = std::env::temp_dir().join(format!("bk_schema_{tag}_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir.join("shop.db")
 }
 
 fn cleanup(path: &Path) {
     for ext in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{}", path.display(), ext));
+    }
+    if let Some(dir) = path.parent() {
+        if dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with("bk_schema_")) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
 
@@ -494,6 +503,72 @@ fn v2_database_upgrades_to_v3_and_existing_items_become_physical() {
     assert_eq!(name, "item_type");
     let fk: i64 = conn.prepare("PRAGMA foreign_key_check").unwrap().query_map([], |_| Ok(())).unwrap().count() as i64;
     assert_eq!(fk, 0);
+    drop(conn);
+    cleanup(&path);
+}
+
+// ---------------------------------------------------------------- pre-migration backup (DD-29)
+
+fn premigration_files(db: &Path) -> Vec<PathBuf> {
+    let dir = db.parent().unwrap().join("backups");
+    let mut v: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).collect())
+        .unwrap_or_default();
+    v.retain(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("book_keeper_premigration_")));
+    v
+}
+
+#[test]
+fn upgrade_takes_exactly_one_premigration_backup_at_the_old_version() {
+    let (path, conn) = db_from_fixtures("premig", &[V1, V2]);
+    conn.execute("INSERT INTO items (name) VALUES ('Pen')", []).unwrap();
+    run_migrations(&conn).expect("upgrade");
+    let files = premigration_files(&path);
+    assert_eq!(files.len(), 1, "{files:?}");
+    let name = files[0].file_name().unwrap().to_string_lossy().to_string();
+    assert!(name.starts_with("book_keeper_premigration_v2_to_v"), "{name}");
+    assert!(name.ends_with(".db"));
+    let bk = Connection::open(&files[0]).unwrap();
+    let max: i64 = bk.query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(max, 2);
+    let items: i64 = bk.query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0)).unwrap();
+    assert_eq!(items, 1);
+    let has_col: i64 = bk
+        .query_row("SELECT COUNT(*) FROM pragma_table_info('items') WHERE name = 'item_type'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(has_col, 0, "backup holds the pre-upgrade schema");
+    drop(bk);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn fresh_db_and_already_latest_db_create_no_premigration_backup() {
+    let (path, pool) = fresh();
+    assert!(premigration_files(&path).is_empty(), "fresh creation must not back up");
+    run_migrations(&pool.get().unwrap()).unwrap();
+    assert!(premigration_files(&path).is_empty(), "already-latest must not back up");
+    drop(pool);
+    cleanup(&path);
+}
+
+#[test]
+fn in_memory_database_upgrade_skips_the_backup() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(V1).unwrap();
+    conn.execute_batch(V2).unwrap();
+    run_migrations(&conn).expect("in-memory upgrade works without a backup");
+    assert_eq!(current_version(&conn).unwrap(), latest_version());
+}
+
+#[test]
+fn failed_premigration_backup_applies_nothing() {
+    let (path, conn) = db_from_fixtures("premigfail", &[V1, V2]);
+    // A file where the `backups` folder must go makes the snapshot impossible.
+    std::fs::write(path.parent().unwrap().join("backups"), b"not a folder").unwrap();
+    let err = run_migrations(&conn).expect_err("must abort");
+    assert!(matches!(err, AppError::MigrationError(_)), "{err:?}");
+    assert_eq!(current_version(&conn).unwrap(), 2, "nothing was applied");
     drop(conn);
     cleanup(&path);
 }

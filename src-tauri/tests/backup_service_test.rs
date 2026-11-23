@@ -169,3 +169,28 @@ fn change_detection_uses_file_times() {
     drop(conn);
     assert!(db_changed_since_last_auto(&live, &dest), "a write after the backup counts as a change");
 }
+
+#[test]
+fn premigration_files_are_parsed_and_rotated_like_prereset() {
+    assert_eq!(
+        parse_stamp("book_keeper_premigration_v2_to_v3_20260101_0930.db", BackupKind::PreMigration),
+        Some(ts("20260101_0930"))
+    );
+    assert_eq!(
+        parse_stamp("book_keeper_premigration_v2_to_v3_20260101_0930_2.db", BackupKind::PreMigration),
+        Some(ts("20260101_0930"))
+    );
+    assert_eq!(parse_stamp("book_keeper_premigration_vx_to_v3_20260101_0930.db", BackupKind::PreMigration), None);
+    let now = ts("20260120_1200");
+    let names: Vec<String> = [
+        "book_keeper_premigration_v2_to_v3_20260102_1000.db", // old -> delete
+        "book_keeper_premigration_v3_to_v4_20260119_1000.db", // recent -> keep
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    assert_eq!(
+        select_for_deletion(&names, now, 7),
+        vec!["book_keeper_premigration_v2_to_v3_20260102_1000.db".to_string()]
+    );
+}

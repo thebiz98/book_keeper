@@ -191,7 +191,7 @@ The footer payment-status inputs are removed. Notes stay in the footer.
 - A `schema_version` table and a numbered, forward-only migration runner are introduced:
   - each step runs in its own transaction;
   - foreign keys are turned off during table rebuilds;
-  - a backup is taken before migrating;
+  - a backup is taken before migrating (implemented with migration v3): when the database already has applied migrations and at least one is pending, `run_migrations` runs `VACUUM INTO '<db dir>/backups/book_keeper_premigration_v{from}_to_v{to}_YYYYMMDD_HHMM.db'` on the same connection before applying any step (`_2`, `_3` on a name clash). If the snapshot fails, a `MigrationError` is returned and nothing is applied. A fresh database, an already-current database and in-memory databases create no backup. Rotation (DD-33) deletes `book_keeper_premigration_` files after `retentionDays` like pre-reset files;
   - the app refuses to open a database newer than it understands.
 - A legacy development database (pre-alignment v1) is detected and rejected with a clear message.
 - Every schema change after this one is a real v2+ migration, covered by a frozen-fixture upgrade test.

@@ -324,8 +324,11 @@ pub fn run_migrations(conn: &rusqlite::Connection) -> Result<(), AppError> {
         return Ok(());
     }
 
-    // TODO(T9): when `applied > 0` (a real upgrade, not first creation) take a pre-migration
-    // backup through BackupService before applying any step.
+    // DD-29: a real upgrade (not first creation) snapshots the database first. A failed
+    // snapshot aborts before anything is applied.
+    if applied > 0 {
+        premigration_backup(conn, applied, latest)?;
+    }
 
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
     let result = apply_pending(conn);
@@ -333,6 +336,45 @@ pub fn run_migrations(conn: &rusqlite::Connection) -> Result<(), AppError> {
     let restore = conn.execute_batch("PRAGMA foreign_keys = ON;");
     result?;
     restore?;
+    Ok(())
+}
+
+/// Main database file of `conn`; `None` for in-memory / temporary databases.
+fn main_db_file(conn: &rusqlite::Connection) -> Result<Option<std::path::PathBuf>, AppError> {
+    let mut stmt = conn.prepare("PRAGMA database_list")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+    for row in rows {
+        let (name, file) = row?;
+        if name == "main" {
+            return Ok(if file.is_empty() { None } else { Some(file.into()) });
+        }
+    }
+    Ok(None)
+}
+
+/// Snapshot via `VACUUM INTO` to `<db dir>/backups/book_keeper_premigration_v{from}_to_v{to}_YYYYMMDD_HHMM.db`
+/// (`_2`, `_3`, ... on a name clash). Skipped for in-memory databases.
+fn premigration_backup(conn: &rusqlite::Connection, from: i64, to: i64) -> Result<(), AppError> {
+    let Some(db_file) = main_db_file(conn)? else { return Ok(()) };
+    let fail = |what: String| AppError::MigrationError(format!("pre-migration backup failed, nothing was changed: {what}"));
+    let dir = db_file.parent().map(|p| p.join("backups")).unwrap_or_else(|| std::path::PathBuf::from("backups"));
+    std::fs::create_dir_all(&dir).map_err(|e| fail(format!("cannot create '{}': {e}", dir.display())))?;
+    let stamp = chrono::Local::now().format("%Y%m%d_%H%M");
+    let prefix = format!("book_keeper_premigration_v{from}_to_v{to}_{stamp}");
+    let mut n = 1u32;
+    let dest = loop {
+        let name = if n == 1 { format!("{prefix}.db") } else { format!("{prefix}_{n}.db") };
+        let candidate = dir.join(name);
+        if !candidate.exists() {
+            break candidate;
+        }
+        n += 1;
+    };
+    let escaped = dest.to_string_lossy().replace('\'', "''");
+    if let Err(e) = conn.execute_batch(&format!("VACUUM INTO '{escaped}';")) {
+        let _ = std::fs::remove_file(&dest);
+        return Err(fail(e.to_string()));
+    }
     Ok(())
 }
 
