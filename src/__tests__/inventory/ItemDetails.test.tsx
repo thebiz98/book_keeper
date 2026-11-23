@@ -149,7 +149,7 @@ describe('Inventory keyboard map (D1)', () => {
   });
 
   it('E opens Edit; S opens Set stock for PHYSICAL items only', async () => {
-    const { container } = mount();
+    mount();
     await flush();
     press('ArrowDown');
     press('s');
