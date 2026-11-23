@@ -556,7 +556,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
         <div className="w-32">
           <TextInput
             ref={costRef}
-            label={`Unit Cost (₹ / ${packLabel || 'unit'}) *`}
+            label={`Purchase Price (₹ / ${packLabel || 'unit'}) *`}
             type="number"
             min={0}
             step="any"
@@ -610,8 +610,8 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
               <TableHead>Packaging</TableHead>
               <TableHead className="text-center">Inward Qty</TableHead>
               <TableHead className="text-center">Base Units</TableHead>
-              <TableHead align="right">Unit Cost (₹)</TableHead>
-              <TableHead align="right">Cost / Base Unit (₹)</TableHead>
+              <TableHead align="right">Purchase Price (₹)</TableHead>
+              <TableHead align="right">Purchase Price / base unit (₹)</TableHead>
               <TableHead align="right">Line Total (₹)</TableHead>
               <TableHead className="w-12 text-center">Action</TableHead>
             </TableRow>

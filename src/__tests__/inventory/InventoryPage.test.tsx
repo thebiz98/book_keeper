@@ -41,10 +41,12 @@ describe('InventoryPage catalog', () => {
       limit: 50,
     });
     const head = container.querySelector('thead')?.textContent ?? '';
-    for (const h of ['Item Name', 'Category', 'Base Unit', 'Current Stock', 'Low Stock Level', 'MRP', 'Sale Price', 'Bundles']) {
+    for (const h of ['Item Name', 'Base Unit', 'Current Stock', 'Low Stock Level', 'MRP', 'Sale Price', 'Bundles']) {
       expect(head).toContain(h);
     }
     expect(head).not.toContain('Barcode');
+    expect(head).not.toContain('Category');
+    expect(container.querySelector('select[aria-label="Category filter"]')).toBeNull();
     const trs = container.querySelectorAll('[data-testid="item-row"]');
     expect(trs.length).toBe(2);
     expect(trs[0].textContent).toContain('Low Stock: 3 PCS');
@@ -53,24 +55,19 @@ describe('InventoryPage catalog', () => {
     expect(container.querySelector('[data-testid="pager-summary"]')?.textContent).toContain('Page 1 of 3');
   });
 
-  it('populates categories from listCategories and filters server-side, resetting to page 1', async () => {
+  it('pages server-side and the low-stock filter resets to page 1 (no category filter, D5)', async () => {
     const { api, container } = mount();
     await flush();
-    const select = container.querySelector('select[aria-label="Category filter"]') as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(['ALL', 'Notebooks', 'Pens']);
+    expect(api.listCategories).not.toHaveBeenCalled();
 
     click(byText(container, 'button', 'Next'));
     await flush();
     expect(api.getItemsCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
 
-    typeInto(select, 'Pens');
-    await flush();
-    expect(api.getItemsCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ category: 'Pens', page: 1 }));
-
     click(container.querySelector('input[aria-label="Low stock only"]') as HTMLInputElement);
     await flush();
     expect(api.getItemsCatalog).toHaveBeenLastCalledWith(
-      expect.objectContaining({ category: 'Pens', lowStockOnly: true, page: 1 })
+      expect.objectContaining({ category: null, lowStockOnly: true, page: 1 })
     );
   });
 
@@ -259,9 +256,34 @@ describe('Item edit drawer', () => {
     click(byText(container, 'button', /Save Changes/));
     await flush();
     const err = Array.from(container.querySelectorAll('[role="alert"]')).find((e) => e.textContent === 'Barcode already in use');
-    expect(err).toBeTruthy();
-    // sits in the barcode field's wrapper
-    expect(err?.parentElement?.querySelector('input')?.value).toBe('8901');
+    expect(err).toBeTruthy(); // barcode is no longer a field, so the message shows as the form error
+  });
+
+  it('edit drawer has no Category/Barcode fields and preserves both on save (D5)', async () => {
+    const { api, container } = mount();
+    await flush();
+    await openEdit(container);
+    expect(container.textContent).not.toContain('Barcode / SKU');
+    expect(() => inputByLabel(container, /^Category/)).toThrow();
+    typeInto(inputByLabel(container, /Item Name/), 'Classmate Notebook 2');
+    click(byText(container, 'button', /Save Changes/));
+    await flush();
+    expect(api.updateItem).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ category: 'Notebooks', barcode: '8901', name: 'Classmate Notebook 2' })
+    );
+  });
+
+  it('create sends null category and barcode', async () => {
+    const { api, container } = mount();
+    await flush();
+    click(byText(container, 'button', /Add Item/));
+    await flush();
+    typeInto(inputByLabel(container, /Item Name/), 'Ruler');
+    typeInto(inputByLabel(container, /Sale Price/), '10');
+    click(byText(container, 'button', /Save Item/));
+    await flush();
+    expect(api.createItem).toHaveBeenCalledWith(expect.objectContaining({ category: null, barcode: null }));
   });
 
   it('shows a read-only Physical type line in the item drawer (FR-21)', async () => {
@@ -278,7 +300,7 @@ describe('Item edit drawer', () => {
     click(byText(container, 'button', /Add Item/));
     await flush();
     typeInto(inputByLabel(container, /Item Name/), 'New Ruler');
-    typeInto(inputByLabel(container, /Default Sale Price/), '10');
+    typeInto(inputByLabel(container, /Sale Price/), '10');
     click(byText(container, 'button', /Save Item/));
     await flush();
     expect(api.createItem).toHaveBeenCalledWith(

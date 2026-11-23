@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search,
   Plus,
-  Filter,
   RefreshCw,
   SlidersHorizontal,
   Pencil,
@@ -29,14 +28,12 @@ import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 
 const PAGE_SIZE = 50;
-const COLS = 11;
+const COLS = 10;
 
 const EMPTY_PAGE: Paginated<ItemSearchResult> = { items: [], total: 0, page: 1, limit: PAGE_SIZE };
 
 export const InventoryPage: React.FC = () => {
   const [page, setPage] = useState(1);
-  const [category, setCategory] = useState<string>('ALL');
-  const [categories, setCategories] = useState<string[]>([]);
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   /** Rows saved inline since the last fetch (server response wins over the stale list row). */
@@ -52,11 +49,11 @@ export const InventoryPage: React.FC = () => {
     initial: EMPTY_PAGE,
     emptyBehavior: 'fetch',
     debounceMs: LIST_SEARCH_DEBOUNCE_MS,
-    deps: [category, lowStockOnly, page],
+    deps: [lowStockOnly, page],
     onQueryCommit: () => setPage(1),
     fetcher: (q) =>
       api.getItemsCatalog({
-        category: category === 'ALL' ? null : category,
+        category: null,
         lowStockOnly: lowStockOnly || null,
         search: q || null,
         page,
@@ -78,22 +75,10 @@ export const InventoryPage: React.FC = () => {
     setPatched((prev) => new Map(prev).set(row.itemId, row));
   }, []);
 
-  const fetchCategories = useCallback(() => {
-    api
-      .listCategories()
-      .then((c) => setCategories(Array.isArray(c) ? c : []))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    fetchCategories();
-  }, [fetchCategories]);
-
   const refresh = live.refresh;
   const refreshAll = useCallback(() => {
     void refresh();
-    fetchCategories();
-  }, [refresh, fetchCategories]);
+  }, [refresh]);
 
   const toggleExpanded = (itemId: number) =>
     setExpanded((prev) => {
@@ -119,7 +104,7 @@ export const InventoryPage: React.FC = () => {
           <input
             type="text"
             aria-label="Search items"
-            placeholder="Search items by name, barcode, category..."
+            placeholder="Search items by name…"
             value={live.query}
             onChange={(e) => live.setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -133,26 +118,6 @@ export const InventoryPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <Filter className="h-3.5 w-3.5" />
-            <select
-              aria-label="Category filter"
-              value={category}
-              onChange={(e) => {
-                setPage(1);
-                setCategory(e.target.value);
-              }}
-              className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-800 dark:text-slate-200 focus:outline-none"
-            >
-              <option value="ALL">All Categories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -207,7 +172,6 @@ export const InventoryPage: React.FC = () => {
             <TableRow>
               <TableHead className="w-8" />
               <TableHead>Item Name</TableHead>
-              <TableHead>Category</TableHead>
               <TableHead>Base Unit</TableHead>
               <TableHead align="right">Current Stock</TableHead>
               <TableHead className="text-center">Status</TableHead>
@@ -257,7 +221,6 @@ export const InventoryPage: React.FC = () => {
                       <TableCell className="font-semibold text-slate-900 dark:text-slate-100">
                         {item.name}
                       </TableCell>
-                      <TableCell className="text-slate-500 text-xs">{item.category || '—'}</TableCell>
                       <TableCell className="text-xs text-slate-500">{item.baseUnit}</TableCell>
                       <TableCell align="right" mono className="text-xs">
                         {item.currentStock}
@@ -367,7 +330,6 @@ export const InventoryPage: React.FC = () => {
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         item={drawerItem}
-        categories={categories}
         onSaved={refreshAll}
       />
 

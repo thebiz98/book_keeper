@@ -77,7 +77,7 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit }) 
           <TableHead className="py-1 px-2 font-medium">Vendor</TableHead>
           <TableHead className="py-1 px-2 font-medium text-right">Original Qty</TableHead>
           <TableHead className="py-1 px-2 font-medium text-right">Remaining</TableHead>
-          <TableHead className="py-1 px-2 font-medium text-right">Unit Cost</TableHead>
+          <TableHead className="py-1 px-2 font-medium text-right">Purchase Price</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
