@@ -14,6 +14,7 @@ use book_keeper::core::entities::*;
 use book_keeper::core::value_objects::*;
 use book_keeper::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use book_keeper::services::contracts::accounting_service::AccountingService;
+use book_keeper::services::contracts::inventory_service::InventoryService;
 use book_keeper::services::contracts::report_service::ReportService;
 use book_keeper::services::contracts::sale_service::SaleService;
 
@@ -268,6 +269,80 @@ fn sale_payload(qty: f64, status: PaymentStatus, paid: f64, party: Option<i64>) 
         notes: None,
         items: vec![CreateSaleItemPayload { item_id: 1, bundle_id: None, bundle_quantity: qty, unit_price: 100.0 }],
     }
+}
+
+/// Item 1 with one PURCHASE lot of 10 @ 5, plus a sale service; returns inventory service too.
+fn unrec_harness() -> (TestDb, InventoryServiceImpl<FifoStrategy>, SaleServiceImpl<InventoryServiceImpl<FifoStrategy>, PaymentServiceImpl>) {
+    let uow = TestDb::new();
+    let inv = InventoryServiceImpl::new(FifoStrategy, uow.clone());
+    let sale = SaleServiceImpl::new(inv.clone(), PaymentServiceImpl, uow.clone());
+    let mut tx = uow.begin_transaction().unwrap();
+    tx.items().create(&create_test_item(1, "Notebook", Some("Paper"), None, 10.0, 100.0)).unwrap();
+    tx.purchases().create_transaction(&create_test_purchase_tx(1, "PUR-1001", None, 50.0, 50.0, TODAY)).unwrap();
+    tx.purchases().create_purchase_item(&create_test_purchase_lot(1, 1, 1, None, 10.0, 10.0, 5.0, 10.0)).unwrap();
+    tx.commit().unwrap();
+    (uow, inv, sale)
+}
+
+fn set_stock(item: i64, counted: f64, cost: Option<f64>) -> SetItemStockPayload {
+    SetItemStockPayload { item_id: item, counted_quantity: counted, unit_cost: cost, adjustment_date: TODAY.into(), notes: None }
+}
+
+#[test]
+fn tc_rep_unrec_1_unrecorded_stock_adds_valuation_only() {
+    let (uow, inv, _sale) = unrec_harness();
+    let rs = svc(&uow);
+    let val0 = rs.get_stock_valuation_report().unwrap();
+    let pnl0 = rs.get_pnl_report(TODAY, TODAY).unwrap();
+    let cash0 = rs.get_cash_flow_report(TODAY, TODAY).unwrap();
+    let dash0 = rs.get_dashboard_metrics().unwrap();
+    let recent0 = rs.get_recent_transactions(20).unwrap();
+
+    let res = inv.set_item_stock(set_stock(1, 30.0, Some(3.0))).unwrap();
+    assert_eq!(res.value_change, 60.0);
+
+    let val1 = rs.get_stock_valuation_report().unwrap();
+    assert_eq!(val1.total_valuation, val0.total_valuation + 60.0);
+    assert_eq!(val1.active_lots_count, val0.active_lots_count + 1);
+    let cat = |v: &StockValuationReport| v.categories_breakdown.iter().map(|c| c.valuation).sum::<f64>();
+    assert_eq!(cat(&val1), cat(&val0) + 60.0);
+
+    assert_eq!(rs.get_pnl_report(TODAY, TODAY).unwrap(), pnl0, "P&L untouched");
+    assert_eq!(rs.get_cash_flow_report(TODAY, TODAY).unwrap(), cash0, "cash flow untouched");
+    let mut dash1 = rs.get_dashboard_metrics().unwrap();
+    assert_eq!(dash1.total_stock_valuation, dash0.total_stock_valuation + 60.0);
+    dash1.total_stock_valuation = dash0.total_stock_valuation;
+    assert_eq!(dash1, dash0, "dashboard purchases/payables/profit untouched");
+
+    let recent1 = rs.get_recent_transactions(20).unwrap();
+    assert_eq!(recent1, recent0);
+    assert!(recent1.iter().all(|t| !t.code.starts_with("ADJ")));
+    let mut r = uow.begin_read().unwrap();
+    let hist = r.purchases().list_purchases(None, None, None, None, 0, 50).unwrap();
+    assert_eq!(hist.len(), 1);
+    assert!(hist[0].transaction_code.starts_with("PUR"));
+}
+
+#[test]
+fn tc_rep_unrec_2_later_sale_and_writeoff_use_the_entered_cost() {
+    let (uow, inv, sale) = unrec_harness();
+    inv.set_item_stock(set_stock(1, 45.0, Some(3.0))).unwrap(); // 10 @5 + 35 @3
+    sale.create_sale(CreateSalePayload {
+        transaction_date: TODAY.to_string(),
+        party_id: None,
+        payment_mode: Some("CASH".to_string()),
+        payment_status: PaymentStatus::Paid,
+        paid_amount: 3500.0,
+        notes: None,
+        items: vec![CreateSaleItemPayload { item_id: 1, bundle_id: None, bundle_quantity: 35.0, unit_price: 100.0 }],
+    })
+    .unwrap();
+    let rs = svc(&uow);
+    assert_eq!(rs.get_pnl_report(TODAY, TODAY).unwrap().cogs, 125.0, "10 x 5 + 25 x 3");
+    // 10 units remain (all from the unrecorded lot @3); count them down to 5.
+    let res = inv.set_item_stock(set_stock(1, 5.0, None)).unwrap();
+    assert_eq!((res.delta, res.value_change), (-5.0, -15.0));
+    assert_eq!(rs.get_pnl_report(TODAY, TODAY).unwrap().inventory_losses, 15.0);
 }
 
 #[test]

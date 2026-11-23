@@ -2148,7 +2148,7 @@ Schema upgrade cases (`schema_test.rs`): a frozen v4 database upgrades to v5 (`s
 | **TC-REP-005** | Cash flow buckets from ledger | Sale UPFRONT 500, SETTLEMENT 200, REFUND_OUT 50; purchase UPFRONT 300, SETTLEMENT 100, REFUND_IN 40; RETURN_CREDIT 70 | `get_cash_flow_report` | • In = 740, out = 450, net = 290; RETURN_CREDIT excluded. |
 | **TC-REP-006** | Non-purchase lots excluded | ADJ and OPN lots exist | dashboard + purchases + payables | • Not counted; valuation includes them. |
 | **TC-REP-UNREC-1** | Unrecorded stock adds valuation only | Purchase lot 10@5 | `set_item_stock(30, cost 3)` | • Valuation +60, active lots +1; P&L purchases/losses/net/gross, cash flow, dashboard purchases/payables, recent transactions and purchase history unchanged. |
-| **TC-REP-UNREC-2** | Later sale and write-off use entered cost | After UNREC-1 | sell 35; set stock 5 to 0 | • COGS 125; inventory_losses 15. |
+| **TC-REP-UNREC-2** | Later sale and write-off use entered cost | Lot 10@5 then set stock 45 @3 | sell 35; set stock to 5 | • COGS 125; inventory_losses 15. |
 
 ---
 
