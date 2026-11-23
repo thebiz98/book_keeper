@@ -61,7 +61,7 @@ src/
 │   │   ├── Badge.tsx                # Semantic status badges
 │   │   ├── Modal.tsx                # Accessible dialog with backdrop & trap
 │   │   ├── Drawer.tsx               # Slide-over inspector panel
-│   │   ├── Table.tsx                # Dense desktop table primitives
+│   │   ├── Table.tsx                # Dense desktop table primitives (sticky header, scroll modes)
 │   │   ├── Card.tsx                 # Bordered desktop surface container
 │   │   ├── Tabs.tsx                 # Tab list & panels
 │   │   └── Tooltip.tsx              # Lightweight hover tooltip
@@ -115,6 +115,7 @@ src/
 1. **Compact Retail Density:** Default padding of `py-1.5 px-3`, compact font sizing (`text-sm`, `text-xs`), and tight margins to maximize on-screen transaction visibility.
 2. **Tabular Numerics:** All currency, quantities, and timestamps enforce `tabular-nums font-mono` to prevent jitter during real-time updates and maintain vertical alignment in tables.
 3. **High-Contrast Dark Mode:** Avoiding pitch-black backgrounds; using rich slate/zinc layers (`slate-950` shell, `slate-900` surfaces, `slate-800` borders) for eye comfort during long shifts.
+4. **Sticky table headers (FR-10 rev., DD-43)** come from the shared `Table`; screens do not implement their own.
 
 ### 3.2 Semantic Color Tokens Across Themes
 
@@ -258,11 +259,27 @@ interface ModalProps {
 #### 5. `Table`
 ```typescript
 // Compound desktop table components:
-// <Table dense>
+// <Table dense scroll="fill">
 //   <TableHeader><TableRow><TableHead align="left">Name</TableHead></TableRow></TableHeader>
 //   <TableBody><TableRow><TableCell align="right font-mono">₹120.00</TableCell></TableRow></TableBody>
 // </Table>
+type TableScroll = 'bounded' | 'fill' | 'page' | 'none';
+interface TableProps extends React.TableHTMLAttributes<HTMLTableElement> {
+  dense?: boolean;
+  scroll?: TableScroll;          // default 'bounded'
+  containerClassName?: string;   // extra classes on <div data-table-scroll>
+}
 ```
+* The header cells are sticky (`position: sticky; top: 0; z-index: 10`) with an opaque background (`bg-slate-50` / `dark:bg-slate-800`) and a 1px bottom line drawn as an inset box-shadow, because `border-collapse` borders do not travel with sticky cells. (Shipped: `border-collapse` + sticky `th`; row lines stay on `tr`.)
+* The four modes:
+  * `'bounded'`: the container is `overflow-auto max-h-[60vh]` and scrolls by itself.
+  * `'fill'`: `overflow-auto flex-1 min-h-0`; fills a flex-column parent of bounded height. Used by full-page lists.
+  * `'page'`: no own scroll box (`overflow-visible`); the header sticks to the nearest scrolling ancestor (drawer or modal body). No horizontal scroll.
+  * `'none'`: `overflow-x-auto`, header **not** sticky. Used for tables nested in an expanded row of another table.
+* Never put `overflow-*` on an element between `<th>` and `[data-table-scroll]`.
+* A full-page list needs the chain: page root `h-full min-h-0 flex flex-col` -> card `flex-1 min-h-[240px] flex flex-col overflow-hidden` -> `Table scroll="fill"`.
+* `DataTable` passes `scroll` through and adds no scroll container of its own.
+* `ImportItemsDialog` tables keep their own `max-h-44 overflow-auto` box with `sticky top-0` opaque headers (already compliant).
 
 #### 6. `FormActions` (FR-22, DD-44)
 ```typescript

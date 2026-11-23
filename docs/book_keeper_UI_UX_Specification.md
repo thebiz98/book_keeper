@@ -15,6 +15,7 @@
    - **Amber / Yellow:** Low stock alert (`< 5 units`), partial payment status.
    - **Rose / Red:** Unpaid credit due, negative stock block, cash outflow.
 4. **Payment Methods Note:** Per design baseline, payment mode selection (UPI, Card, Bank) is deferred in the UI to minimize counter friction; the database retains the column as `NULLABLE` for future version extensibility.
+5. **Sticky column headers:** on every list the header row stays visible while rows scroll (light and dark: opaque header).
 
 ---
 
@@ -166,6 +167,7 @@ The application maintains a persistent desktop shell across all views.
   - Action Buttons: `[+ Add Item]`, `[Import Items (CSV / Excel)]` — opens the import dialog: file pick → dry-run report (valid rows, row errors, duplicates) → conflict strategy (`Skip` / `Overwrite details` / `Add stock`) → Confirm → summary. *(Export: deferred to v2.)*
 * **Items Table:**
   - Columns: `Barcode`, `Item Name`, `Category`, `Base Unit`, `Current Stock`, `Stock Status Badge`, `MRP (₹)`, `Default Sale Price (₹)`, `Bundles Configured`, `Actions`.
+* Header row is fixed; the table fills the page height and scrolls inside itself; the pager stays visible below.
 * **Item Details / Edit Drawer:**
   - General Info: Name, Category, Barcode, Base Unit, MRP (₹, optional), Default Selling Price.
   - **Packaging Bundles Sub-table:**
@@ -183,6 +185,7 @@ The application maintains a persistent desktop shell across all views.
 * **Top Level Tabs:**
   - **Tab 1: Customer Receivables** (Money owed to the shop).
   - **Tab 2: Vendor Payables** (Money owed by the shop).
+* Header row is fixed; the table fills the page height and scrolls inside itself; the pager stays visible below.
 * **Dues Table:**
   - Columns: `Party Name`, `Phone`, `Unsettled Bills Count`, `Earliest Bill Date`, `Total Invoiced (₹)`, `Total Paid (₹)`, `Net Due Balance (₹)`, `Actions`.
 * **Party Row Expand — Open Bills:** each unpaid/partial bill of the party (code, date, total, paid, balance) with its own `[Settle]` button (single-bill mode).
@@ -202,6 +205,7 @@ The application maintains a persistent desktop shell across all views.
 ### Page 7: Sales History Ledger
 * **Purpose:** Audit log of all past customer invoices.
 * **Filters:** Date Range, Payment Status (`All`, `PAID`, `PARTIAL`, `UNPAID`), Search (invoice code or customer name). Server-side pagination.
+* Header row is fixed; the table fills the page height and scrolls inside itself; the pager stays visible below.
 * **Table Columns:** `Invoice Code`, `Date & Time`, `Customer`, `Items` (line count), `Total Amount (₹)`, `Paid (₹)`, `Balance Due (₹)`, `Status Badge`, `Actions`.
 * **Actions:**
   - `[View Invoice / Line Items]` — lines with returned qty, FIFO cost breakdown, ledger rows.
@@ -214,6 +218,7 @@ The application maintains a persistent desktop shell across all views.
 ### Page 8: Purchase History Ledger
 * **Purpose:** Audit log of all inward supplier shipments and lot tracking.
 * **Filters:** Date Range, Payment Status, Search (purchase code or vendor name). Shows supplier purchases only (no ADJ/OPN/RTL lots).
+* Header row is fixed; the table fills the page height and scrolls inside itself; the pager stays visible below.
 * **Table Columns:** `Purchase Code`, `Date`, `Vendor`, `Supplier Bill Ref`, `Total (₹)`, `Paid (₹)`, `Balance Due (₹)`, `Status Badge`, `Actions`.
 * **Actions:**
   - `[View Batch Lines & Remaining FIFO Quantities]`
@@ -267,6 +272,7 @@ The application maintains a persistent desktop shell across all views.
 ### Page 11: Parties Directory (Customers & Suppliers)
 * **Purpose:** Unified directory for customer credit records and supplier contact details.
 * **Tabs:** `Customers` and `Suppliers`.
+* Header row is fixed; the table fills the page height and scrolls inside itself; the pager stays visible below.
 * **Table Columns:** `Party Name`, `Phone`, `Address / Notes`, `Total Transactions`, `Current Outstanding Balance (₹)`, `Actions`.
 * **Actions:** `[+ Add Party]`, `[Edit Details]`, `[View Transaction History]` (party ledger). No archive/delete in v1.
 * Add/Edit Party dialog: Enter in any field saves. Validation errors show inside the dialog.
@@ -319,7 +325,7 @@ The application maintains a persistent desktop shell across all views.
 | **FR-07** | Returns & Replacements | **Page 9** (Customer Return, Swap, Vendor Return) |
 | **FR-08** | Standalone Stock Adjustments | **Page 9** (Adjustment Tab) & **Page 1** (Quick action) |
 | **FR-09** | Financial Aggregations & Reports | **Page 10** (Reports) & **Page 1** (KPI Cards) |
-| **FR-10** | Lists & Operational Views | **Page 5, 6, 7, 8, 11** |
+| **FR-10** | Lists & Operational Views | **Page 1, 2, 4, 5, 6, 7, 8, 9, 10, 11** (sticky headers via shared Table) |
 | **FR-11** | Items Import & Local Backup | **Page 5** (Import dialog) & **Page 12** (Backup, Integrity) |
 | **FR-12** | Invoicing Foundation | **Page 7** (Sales History) & **Page 12** (Shop Profile) |
 | **FR-13** | Multi-UOM Bundles & Inline Creation | **Page 2 & 4** (`Alt + B`), **Page 5** (Item Master) |
