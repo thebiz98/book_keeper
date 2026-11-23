@@ -87,6 +87,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const costRef = useRef<HTMLInputElement>(null);
+  const tableCardRef = useRef<HTMLDivElement>(null);
 
   const focusSearch = () => {
     setTimeout(() => searchWrapRef.current?.querySelector('input')?.focus(), 0);
@@ -198,6 +199,16 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     setDraftError(null);
     focusSearch();
   };
+
+  // Lines are appended at the end: keep the newest one visible in the bounded table.
+  const prevLineCount = useRef(0);
+  useEffect(() => {
+    if (lines.length > prevLineCount.current) {
+      const el = tableCardRef.current?.querySelector<HTMLElement>('[data-table-scroll]');
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+    prevLineCount.current = lines.length;
+  }, [lines.length]);
 
   const handleRemoveLine = (key: number) => setLines((prev) => prev.filter((l) => l.key !== key));
 
@@ -449,7 +460,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       </div>
 
       {/* Inward Items Table */}
-      <div className="flex-1 min-h-[220px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
+      <div ref={tableCardRef} className="flex-1 min-h-[220px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
         <Table dense>
           <TableHeader>
             <TableRow>

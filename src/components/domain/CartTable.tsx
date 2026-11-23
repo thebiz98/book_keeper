@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Trash2, Plus, Minus, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CartLine } from '@/store/useCartStore';
@@ -89,6 +89,17 @@ export const CartTable: React.FC<CartTableProps> = ({
   className,
 }) => {
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // Lines are appended at the end: keep the newest one visible in the bounded table.
+  const lineCount = items.length;
+  const prevCount = useRef(lineCount);
+  useEffect(() => {
+    if (lineCount > prevCount.current) {
+      const el = bodyRef.current?.querySelector<HTMLElement>('[data-table-scroll]');
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+    prevCount.current = lineCount;
+  }, [lineCount]);
 
   if (items.length === 0) {
     return (
