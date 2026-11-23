@@ -430,7 +430,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         bill_preview(
             fig,
             outcome.map(|s| {
-                with_payment.then(|| BillPaymentPreview {
+                with_payment.then_some(BillPaymentPreview {
                     paid_amount: s.paid_amount,
                     balance_due: s.balance_due,
                     change_amount: s.change_amount,
