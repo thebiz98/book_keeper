@@ -1,14 +1,18 @@
 use std::sync::Arc;
 use crate::core::dtos::{
     LedgerCashSummary, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
-    RecordPaymentPayload, SettlePaymentPayload, SettlementResult,
+    DeleteSettlementResult, RecordPaymentPayload, SettleBatchPayload, SettlePaymentPayload, SettlementResult,
+    UpdateSettlementPayload,
 };
+use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
 use crate::core::money::{cash_direction, check_date, round2, CashDirection, MONEY_EPS};
 use crate::core::value_objects::{LotSource, PartyType, PaymentKind, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::payment_service::PaymentService;
+
+const MAX_BATCH_ALLOCATIONS: usize = 200;
 
 fn validation(field: &str, message: impl Into<String>) -> AppError {
     AppError::ValidationError { field: field.to_string(), message: message.into() }
@@ -110,8 +114,57 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
         })
     }
 
+    /// Loads a ledger row and enforces the D8 guard: only kind SETTLEMENT is corrected here.
+    fn load_settlement(
+        tx: &mut dyn TransactionContext,
+        settlement_id: i64,
+        verb: &str,
+    ) -> Result<PaymentSettlement, AppError> {
+        let row = tx.settlements().find_by_id(settlement_id)?.ok_or_else(|| AppError::NotFound {
+            entity: "PaymentSettlement".to_string(),
+            id: settlement_id.to_string(),
+        })?;
+        match row.kind {
+            PaymentKind::Settlement => Ok(row),
+            PaymentKind::Upfront => Err(validation(
+                "kind",
+                format!("Cannot {verb} an upfront payment here; change it by editing the bill"),
+            )),
+            PaymentKind::ReturnCredit => Err(validation(
+                "kind",
+                format!("Cannot {verb} a return credit here; delete the return instead"),
+            )),
+            _ => Err(validation("kind", format!("Cannot {verb} a refund here; it belongs to its return"))),
+        }
+    }
+
+    /// Oldest-first allocation of `amount` over the party's open bills as `(bill_id, apply)`.
+    /// Stops when the amount is exhausted or the bills run out. The one FIFO builder, shared by
+    /// the lump-sum settlement and the return-credit path.
+    fn fifo_allocations(
+        tx: &mut dyn TransactionContext,
+        tx_type: TransactionType,
+        party_id: i64,
+        amount: f64,
+    ) -> Result<Vec<(i64, f64)>, AppError> {
+        let mut remaining = round2(amount);
+        let mut out = Vec::new();
+        for (bill_id, balance) in Self::open_bills(tx, tx_type, party_id)? {
+            if remaining <= MONEY_EPS {
+                break;
+            }
+            let apply = round2(balance.min(remaining));
+            if apply <= 0.0 {
+                continue;
+            }
+            out.push((bill_id, apply));
+            remaining = round2(remaining - apply);
+        }
+        Ok(out)
+    }
+
     /// Spreads `amount` over the party's open bills oldest-first as ledger rows of `kind`.
-    /// Stops when the amount is exhausted or the bills run out. Returns the amount applied.
+    /// Returns the amount applied.
     #[allow(clippy::too_many_arguments)]
     fn apply_fifo(
         &self,
@@ -126,16 +179,8 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
         notes: Option<String>,
         result: &mut SettlementResult,
     ) -> Result<f64, AppError> {
-        let mut remaining = round2(amount);
         let mut applied = 0.0;
-        for (bill_id, balance) in Self::open_bills(tx, tx_type, party_id)? {
-            if remaining <= MONEY_EPS {
-                break;
-            }
-            let apply = round2(balance.min(remaining));
-            if apply <= 0.0 {
-                continue;
-            }
+        for (bill_id, apply) in Self::fifo_allocations(tx, tx_type, party_id, amount)? {
             let id = self.payment_service.record_payment(
                 tx,
                 RecordPaymentPayload {
@@ -152,10 +197,112 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
             )?;
             result.settlement_ids.push(id);
             result.bills_touched.push(bill_id);
-            remaining = round2(remaining - apply);
             applied = round2(applied + apply);
         }
         Ok(applied)
+    }
+
+    /// The one SETTLEMENT write path (D9). Validates the whole batch, then books one row per
+    /// allocation inside the caller's transaction (the caller commits: all or nothing).
+    #[allow(clippy::too_many_arguments)]
+    fn settle_allocations_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        party_id: i64,
+        tx_type: TransactionType,
+        date: &str,
+        payment_mode: Option<String>,
+        notes: Option<String>,
+        allocations: &[(i64, f64)],
+    ) -> Result<SettlementResult, AppError> {
+        if allocations.is_empty() || allocations.len() > MAX_BATCH_ALLOCATIONS {
+            return Err(validation(
+                "allocations",
+                format!("Settle between 1 and {MAX_BATCH_ALLOCATIONS} bills at a time"),
+            ));
+        }
+        check_date("settlement_date", date)?;
+        let party = tx.parties().find_by_id(party_id)?.ok_or_else(|| AppError::NotFound {
+            entity: "Party".to_string(),
+            id: party_id.to_string(),
+        })?;
+        if party.party_type != expected_party_type(tx_type) {
+            return Err(validation(
+                "transaction_type",
+                format!("{:?} settlements need a {:?} party", tx_type, expected_party_type(tx_type)),
+            ));
+        }
+
+        let mut seen: Vec<i64> = Vec::with_capacity(allocations.len());
+        let mut amounts: Vec<f64> = Vec::with_capacity(allocations.len());
+        for (i, (bill_id, raw)) in allocations.iter().enumerate() {
+            let field = format!("allocations[{i}].amount_paid");
+            if !raw.is_finite() {
+                return Err(validation(&field, "Settlement amount must be a finite number"));
+            }
+            let amount = round2(*raw);
+            if amount <= 0.0 {
+                return Err(validation(&field, "Settlement amount must be positive"));
+            }
+            if seen.contains(bill_id) {
+                return Err(validation(
+                    &format!("allocations[{i}].transaction_id"),
+                    "Each bill can appear only once in a batch",
+                ));
+            }
+            seen.push(*bill_id);
+            // The bill must exist, belong to the party (PURCHASE-source for purchases) and cover the amount.
+            let (owner, balance) = match tx_type {
+                TransactionType::Sale => tx
+                    .sales()
+                    .find_transaction_by_id(*bill_id)?
+                    .map(|b| (b.party_id, b.balance_due)),
+                TransactionType::Purchase => tx
+                    .purchases()
+                    .find_transaction_by_id(*bill_id)?
+                    .filter(|b| b.source == LotSource::Purchase)
+                    .map(|b| (b.party_id, b.balance_due)),
+            }
+            .ok_or_else(|| AppError::NotFound {
+                entity: match tx_type {
+                    TransactionType::Sale => "SaleTransaction",
+                    TransactionType::Purchase => "PurchaseTransaction",
+                }
+                .to_string(),
+                id: bill_id.to_string(),
+            })?;
+            if owner != Some(party_id) {
+                return Err(validation(
+                    &format!("allocations[{i}].transaction_id"),
+                    "Bill does not belong to this party",
+                ));
+            }
+            if amount > balance + MONEY_EPS {
+                return Err(validation(&field, "Settlement amount exceeds the bill's balance"));
+            }
+            amounts.push(amount);
+        }
+
+        let mut result = SettlementResult { settlement_ids: Vec::new(), bills_touched: Vec::new() };
+        for ((bill_id, _), amount) in allocations.iter().zip(amounts) {
+            let id = self.payment_service.record_payment(
+                tx,
+                RecordPaymentPayload {
+                    party_id: Some(party_id),
+                    transaction_type: tx_type,
+                    transaction_id: *bill_id,
+                    kind: PaymentKind::Settlement,
+                    return_id: None,
+                    settlement_date: date.to_string(),
+                    amount_paid: amount,
+                    payment_mode: payment_mode.clone(),
+                    notes: notes.clone(),
+                },
+            )?;
+            result.settlement_ids.push(id);
+            result.bills_touched.push(*bill_id);
+        }
+        Ok(result)
     }
 }
 
@@ -173,6 +320,23 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
         Ok(rows)
     }
 
+    fn settle_bills_batch(&self, payload: SettleBatchPayload) -> Result<SettlementResult, AppError> {
+        let allocations: Vec<(i64, f64)> =
+            payload.allocations.iter().map(|a| (a.transaction_id, a.amount_paid)).collect();
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.settle_allocations_in_tx(
+            &mut *tx,
+            payload.party_id,
+            payload.transaction_type,
+            &payload.settlement_date,
+            payload.payment_mode,
+            payload.notes,
+            &allocations,
+        )?;
+        tx.commit()?;
+        Ok(result)
+    }
+
     fn settle_bill_payment(&self, payload: SettlePaymentPayload) -> Result<SettlementResult, AppError> {
         if !payload.amount_paid.is_finite() {
             return Err(validation("amount_paid", "Settlement amount must be a finite number"));
@@ -185,80 +349,89 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
 
         let tx_type = payload.transaction_type;
         let mut tx = self.uow.begin_transaction()?;
-
-        let party = tx.parties().find_by_id(payload.party_id)?.ok_or_else(|| AppError::NotFound {
-            entity: "Party".to_string(),
-            id: payload.party_id.to_string(),
-        })?;
-        if party.party_type != expected_party_type(tx_type) {
-            return Err(validation(
-                "transaction_type",
-                format!("{:?} settlements need a {:?} party", tx_type, expected_party_type(tx_type)),
-            ));
-        }
-
-        let mut result = SettlementResult { settlement_ids: Vec::new(), bills_touched: Vec::new() };
-        if let Some(bill_id) = payload.transaction_id {
-            // Specific bill: must belong to the party (and be a PURCHASE-source bill for purchases).
-            let owner = match tx_type {
-                TransactionType::Sale => tx.sales().find_transaction_by_id(bill_id)?.map(|b| b.party_id),
-                TransactionType::Purchase => tx
-                    .purchases()
-                    .find_transaction_by_id(bill_id)?
-                    .filter(|b| b.source == LotSource::Purchase)
-                    .map(|b| b.party_id),
-            }
-            .ok_or_else(|| AppError::NotFound {
-                entity: match tx_type {
-                    TransactionType::Sale => "SaleTransaction",
-                    TransactionType::Purchase => "PurchaseTransaction",
+        let allocations = match payload.transaction_id {
+            // A bill id is a batch of one.
+            Some(bill_id) => vec![(bill_id, amount)],
+            None => {
+                // Lump sum: reject over-settlement before any write, then FIFO-allocate.
+                let party = tx.parties().find_by_id(payload.party_id)?.ok_or_else(|| AppError::NotFound {
+                    entity: "Party".to_string(),
+                    id: payload.party_id.to_string(),
+                })?;
+                if party.party_type != expected_party_type(tx_type) {
+                    return Err(validation(
+                        "transaction_type",
+                        format!("{:?} settlements need a {:?} party", tx_type, expected_party_type(tx_type)),
+                    ));
                 }
-                .to_string(),
-                id: bill_id.to_string(),
-            })?;
-            if owner != Some(payload.party_id) {
-                return Err(validation("transaction_id", "Bill does not belong to this party"));
+                let outstanding: f64 = Self::open_bills(&mut *tx, tx_type, payload.party_id)?
+                    .iter()
+                    .map(|(_, b)| b)
+                    .sum();
+                if amount > round2(outstanding) + MONEY_EPS {
+                    return Err(validation("amount_paid", "Settlement amount exceeds total outstanding dues"));
+                }
+                Self::fifo_allocations(&mut *tx, tx_type, payload.party_id, amount)?
             }
-            let id = self.payment_service.record_payment(
-                &mut *tx,
-                RecordPaymentPayload {
-                    party_id: Some(payload.party_id),
-                    transaction_type: tx_type,
-                    transaction_id: bill_id,
-                    kind: PaymentKind::Settlement,
-                    return_id: None,
-                    settlement_date: payload.settlement_date,
-                    amount_paid: amount,
-                    payment_mode: payload.payment_mode,
-                    notes: payload.notes,
-                },
-            )?;
-            result.settlement_ids.push(id);
-            result.bills_touched.push(bill_id);
-        } else {
-            // Lump sum: reject over-settlement before any write.
-            let outstanding: f64 = Self::open_bills(&mut *tx, tx_type, payload.party_id)?
-                .iter()
-                .map(|(_, b)| b)
-                .sum();
-            if amount > round2(outstanding) + MONEY_EPS {
-                return Err(validation("amount_paid", "Settlement amount exceeds total outstanding dues"));
-            }
-            self.apply_fifo(
-                &mut *tx,
-                tx_type,
-                payload.party_id,
-                amount,
-                PaymentKind::Settlement,
-                None,
-                &payload.settlement_date,
-                payload.payment_mode,
-                payload.notes,
-                &mut result,
-            )?;
-        }
+        };
+        let result = self.settle_allocations_in_tx(
+            &mut *tx,
+            payload.party_id,
+            tx_type,
+            &payload.settlement_date,
+            payload.payment_mode,
+            payload.notes,
+            &allocations,
+        )?;
         tx.commit()?;
         Ok(result)
+    }
+
+    fn update_settlement(
+        &self,
+        settlement_id: i64,
+        payload: UpdateSettlementPayload,
+    ) -> Result<PaymentSettlement, AppError> {
+        if !payload.amount_paid.is_finite() {
+            return Err(validation("amount_paid", "Settlement amount must be a finite number"));
+        }
+        let amount = round2(payload.amount_paid);
+        if amount <= 0.0 {
+            return Err(validation("amount_paid", "Settlement amount must be positive"));
+        }
+        check_date("settlement_date", &payload.settlement_date)?;
+        let mut tx = self.uow.begin_transaction()?;
+        let old = Self::load_settlement(&mut *tx, settlement_id, "edit")?;
+        let bill_id = old.transaction_id.ok_or_else(|| validation("transaction_id", "Settlement has no bill"))?;
+        let balance = match old.transaction_type {
+            TransactionType::Sale => tx.sales().find_transaction_by_id(bill_id)?.map(|b| b.balance_due),
+            TransactionType::Purchase => tx.purchases().find_transaction_by_id(bill_id)?.map(|b| b.balance_due),
+        }
+        .ok_or_else(|| AppError::NotFound { entity: "Bill".to_string(), id: bill_id.to_string() })?;
+        if amount > round2(balance + old.amount_paid) + MONEY_EPS {
+            return Err(validation("amount_paid", "Settlement amount exceeds the bill's balance"));
+        }
+        let updated = PaymentSettlement {
+            settlement_date: payload.settlement_date,
+            amount_paid: amount,
+            payment_mode: payload.payment_mode,
+            notes: payload.notes,
+            ..old
+        };
+        tx.settlements().update_settlement(&updated)?;
+        self.payment_service.recompute(&mut *tx, updated.transaction_type, bill_id)?;
+        tx.commit()?;
+        Ok(updated)
+    }
+
+    fn delete_settlement(&self, settlement_id: i64) -> Result<DeleteSettlementResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let old = Self::load_settlement(&mut *tx, settlement_id, "delete")?;
+        let bill_id = old.transaction_id.ok_or_else(|| validation("transaction_id", "Settlement has no bill"))?;
+        tx.settlements().delete_settlement(settlement_id)?;
+        self.payment_service.recompute(&mut *tx, old.transaction_type, bill_id)?;
+        tx.commit()?;
+        Ok(DeleteSettlementResult { removed_amount: old.amount_paid, transaction_id: bill_id })
     }
 
     fn apply_return_credit(

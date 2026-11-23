@@ -5,6 +5,11 @@ use crate::core::value_objects::{PaymentKind, TransactionType};
 
 pub trait SettlementRepository {
     fn create_settlement(&mut self, settlement: &PaymentSettlement) -> Result<i64, AppError>;
+    fn find_by_id(&self, id: i64) -> Result<Option<PaymentSettlement>, AppError>;
+    /// D8: rewrites amount, date, mode and notes of one row.
+    fn update_settlement(&mut self, settlement: &PaymentSettlement) -> Result<(), AppError>;
+    /// D8: deletes one row by id.
+    fn delete_settlement(&mut self, id: i64) -> Result<(), AppError>;
     fn list_by_party(&self, party_id: i64) -> Result<Vec<PaymentSettlement>, AppError>;
     fn list_by_transaction(&self, tx_type: TransactionType, tx_id: i64) -> Result<Vec<PaymentSettlement>, AppError>;
     /// Σ `amount_paid` for one bill grouped by `kind` (recomputes the cached header invariant).

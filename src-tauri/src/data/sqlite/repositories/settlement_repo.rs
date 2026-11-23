@@ -124,6 +124,26 @@ impl SettlementRepository for SqliteSettlementRepository {
         Ok(self.conn.last_insert_rowid())
     }
 
+    fn find_by_id(&self, id: i64) -> Result<Option<PaymentSettlement>, AppError> {
+        Ok(self
+            .query(&format!("SELECT {COLS} FROM payment_settlements WHERE id = ?1"), params![id])?
+            .into_iter()
+            .next())
+    }
+
+    fn update_settlement(&mut self, s: &PaymentSettlement) -> Result<(), AppError> {
+        self.conn.execute(
+            "UPDATE payment_settlements SET settlement_date = ?2, amount_paid = ?3, payment_mode = ?4, notes = ?5 WHERE id = ?1",
+            params![s.id, s.settlement_date, s.amount_paid, s.payment_mode, s.notes],
+        )?;
+        Ok(())
+    }
+
+    fn delete_settlement(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn.execute("DELETE FROM payment_settlements WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     fn list_by_party(&self, party_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
         self.query(
             &format!("SELECT {COLS} FROM payment_settlements WHERE party_id = ?1 ORDER BY id"),
