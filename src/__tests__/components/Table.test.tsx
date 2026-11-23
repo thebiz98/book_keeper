@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '../testUtils';
+import { DataTable } from '@/components/domain/DataTable';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 
 // Sticky headers (FR-10 rev., DD-43). happy-dom has no layout, so these are structural checks.
@@ -70,5 +71,27 @@ describe('Table - sticky header and scroll modes', () => {
     const box = container.querySelector('[data-table-scroll]') as HTMLElement;
     expect(box.className).toContain('max-h-64');
     expect(box.className).not.toContain('max-h-[60vh]');
+  });
+});
+
+describe('DataTable - single scroll container (sticky pitfall)', () => {
+  it('TC-TBL-06: no overflow element sits between th and the scroll box, and there is exactly one box', () => {
+    const { container } = render(
+      <DataTable
+        columns={[{ key: 'n', header: 'Name', render: (r: { id: number }) => `Row ${r.id}` }]}
+        items={[{ id: 1 }, { id: 2 }]}
+        rowKey={(r) => r.id}
+        scroll="fill"
+      />
+    );
+    expect(container.querySelectorAll('[data-table-scroll]').length).toBe(1);
+    const box = container.querySelector('[data-table-scroll]') as HTMLElement;
+    expect(box.getAttribute('data-table-scroll')).toBe('fill');
+    let el = container.querySelector('th')!.parentElement;
+    while (el && el !== box) {
+      expect(el.className).not.toMatch(/overflow-/);
+      el = el.parentElement;
+    }
+    expect(el).toBe(box);
   });
 });

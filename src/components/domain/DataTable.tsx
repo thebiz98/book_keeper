@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../ui/Table';
+import { Table, type TableScroll, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../ui/Table';
 import { Pager } from './Pager';
 
 export interface DataTableColumn<T> {
@@ -28,6 +28,8 @@ export interface DataTableProps<T> {
   isExpanded?: (row: T) => boolean;
   renderExpanded?: (row: T) => React.ReactNode;
   dense?: boolean;
+  /** Scroll mode of the shared Table (default 'bounded'). Use 'fill' for full-page lists. */
+  scroll?: TableScroll;
   className?: string;
   // Server-side paging
   total?: number;
@@ -52,6 +54,7 @@ export function DataTable<T>({
   isExpanded,
   renderExpanded,
   dense = true,
+  scroll = 'bounded',
   className,
   total,
   page = 1,
@@ -98,13 +101,13 @@ export function DataTable<T>({
       )}
     >
       <div
-        className="overflow-x-auto flex-1 focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+        className="flex-1 min-h-0 flex flex-col focus:outline-none focus:ring-1 focus:ring-blue-500/40"
         tabIndex={0}
         role="grid"
         aria-rowcount={items.length}
         onKeyDown={onKeyDown}
       >
-        <Table dense={dense}>
+        <Table dense={dense} scroll={scroll}>
           <TableHeader>
             <TableRow>
               {columns.map((col) => (
