@@ -1,15 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
+import { usePreview } from '@/hooks/usePreview';
 import { todayLocal } from '@/lib/dates';
-import type { ItemLot, SetItemStockResult } from '@/types';
+import type { SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload } from '@/types';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { FormActions, enterToSubmit } from '../ui/FormActions';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
-import { estimateFifoCost, latestLotCost } from './lotCost';
 
 export interface SetStockItem {
   itemId: number;
@@ -27,20 +26,28 @@ export interface SetStockDialogProps {
 
 type Mode = 'SET' | 'ADD';
 
-const round3 = (n: number) => Math.round(n * 1000) / 1000;
+type StockInput = { mode: 'SET'; payload: SetItemStockPayload } | { mode: 'ADD'; payload: StockAdjustmentPayload };
+/** What the dialog shows, whichever command was previewed. */
+interface StockView {
+  delta: number;
+  newStock: number;
+  unitCost: number | null;
+  valueChange: number;
+}
 
 /**
  * Set stock on hand (FR-08 rev., DD-40). "Set counted stock" sends the counted quantity and lets the
- * backend compute the delta; "Add quantity" posts an UNRECORDED_STOCK adjustment directly.
+ * backend compute the delta; "Add quantity" posts an UNRECORDED_STOCK adjustment directly. The delta,
+ * the default unit cost (latest lot), the FIFO loss and the value change all come from
+ * `preview_set_item_stock` / `preview_stock_adjustment` (DD-56).
  */
 export const SetStockDialog: React.FC<SetStockDialogProps> = ({ isOpen, onClose, item, onDone }) => {
   const [mode, setMode] = useState<Mode>('SET');
   const [counted, setCounted] = useState(item.currentStock);
   const [addQty, setAddQty] = useState(0);
   const [date, setDate] = useState(todayLocal());
-  const [unitCost, setUnitCost] = useState(0);
-  const [lots, setLots] = useState<ItemLot[]>([]);
-  const [hasLots, setHasLots] = useState<boolean | null>(null);
+  /** Typed unit cost; null = not typed, the backend uses the latest lot cost. */
+  const [typedCost, setTypedCost] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,67 +62,59 @@ export const SetStockDialog: React.FC<SetStockDialogProps> = ({ isOpen, onClose,
     setNotes('');
     setError(null);
     setResult(null);
-    setUnitCost(0);
-    setHasLots(null);
-    setLots([]);
-    let live = true;
-    api
-      .getItemLots(item.itemId)
-      .then((l) => {
-        if (!live) return;
-        setLots(l);
-        setHasLots(l.length > 0);
-        const c = latestLotCost(l);
-        if (c !== null) setUnitCost(c);
-      })
-      .catch(() => {
-        if (live) setHasLots(false);
-      });
-    return () => {
-      live = false;
-    };
+    setTypedCost(null);
   }, [isOpen, item.itemId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const delta = mode === 'SET' ? round3(counted - item.currentStock) : addQty;
+  const cost = typedCost !== null && typedCost > 0 ? typedCost : null;
+  const noteVal = notes.trim() || null;
+  const input = useMemo<StockInput | null>(() => {
+    if (!isOpen || !date) return null;
+    if (mode === 'SET') {
+      return { mode, payload: { itemId: item.itemId, countedQuantity: counted, unitCost: cost, adjustmentDate: date, notes: noteVal } };
+    }
+    if (!(addQty > 0)) return null;
+    return {
+      mode,
+      payload: { adjustmentDate: date, itemId: item.itemId, quantity: addQty, reason: 'UNRECORDED_STOCK', unitCost: cost, notes: noteVal },
+    };
+  }, [isOpen, mode, item.itemId, counted, addQty, date, cost, noteVal]);
+
+  const preview = usePreview<StockInput, StockView>({
+    input,
+    fetcher: async (i) => {
+      if (i.mode === 'SET') {
+        const r = await api.previewSetItemStock(i.payload);
+        return { delta: r.delta, newStock: r.newStock, unitCost: r.unitCost, valueChange: r.valueChange };
+      }
+      const r = await api.previewStockAdjustment(i.payload);
+      return { delta: i.payload.quantity, newStock: r.newStock, unitCost: r.unitCost, valueChange: r.valueChange };
+    },
+  });
+  const view = preview.data;
+  const delta = view?.delta ?? 0;
   const up = delta > 0;
   const down = delta < 0;
+  const hasInput = input !== null;
+  const canSave = hasInput && !preview.isLoading && view !== null && preview.errors.length === 0 && delta !== 0;
 
   const submit = async () => {
-    if (delta === 0 || busy) return;
-    if (!date) return setError('Date is required');
-    if (mode === 'SET' && counted < 0) return setError('Counted stock cannot be negative');
-    if (mode === 'ADD' && !(addQty > 0)) return setError('Quantity must be greater than 0');
-    if (up && !(unitCost > 0)) return setError('Unit cost is required for unrecorded stock');
+    if (!canSave || busy || !input) return;
     setBusy(true);
     setError(null);
     try {
-      const noteVal = notes.trim() || null;
       let res: SetItemStockResult;
-      if (mode === 'SET') {
-        res = await api.setItemStock({
-          itemId: item.itemId,
-          countedQuantity: counted,
-          unitCost: up ? round2(unitCost) : null,
-          adjustmentDate: date,
-          notes: noteVal,
-        });
+      if (input.mode === 'SET') {
+        res = await api.setItemStock(input.payload);
       } else {
-        const r = await api.createStockAdjustment({
-          adjustmentDate: date,
-          itemId: item.itemId,
-          quantity: addQty,
-          reason: 'UNRECORDED_STOCK',
-          unitCost: round2(unitCost),
-          notes: noteVal,
-        });
+        const r = await api.createStockAdjustment(input.payload);
         res = {
           adjustmentId: r.adjustmentId,
-          delta: addQty,
+          delta: input.payload.quantity,
           reason: 'UNRECORDED_STOCK',
           previousStock: item.currentStock,
-          newStock: round3(item.currentStock + addQty),
-          unitCost: round2(unitCost),
-          valueChange: round2(addQty * unitCost),
+          newStock: view?.newStock ?? item.currentStock,
+          unitCost: view?.unitCost ?? null,
+          valueChange: view?.valueChange ?? 0,
         };
       }
       setResult(res);
@@ -136,7 +135,7 @@ export const SetStockDialog: React.FC<SetStockDialogProps> = ({ isOpen, onClose,
       onSave={() => void submit()}
       onCancel={onClose}
       isSubmitting={busy}
-      canSave={delta !== 0}
+      canSave={canSave}
       saveLabel="Save stock"
       saveHotkey="Ctrl+Enter"
     />
@@ -209,11 +208,11 @@ export const SetStockDialog: React.FC<SetStockDialogProps> = ({ isOpen, onClose,
               />
             </div>
           </div>
-          {up && (
+          {(mode === 'ADD' || counted > item.currentStock) && (
             <NumericInput
-              label={`Unit Cost (₹)${hasLots === false ? ' * required (no lots yet)' : ''}`}
-              value={unitCost}
-              onChange={setUnitCost}
+              label="Unit Cost (₹)"
+              value={typedCost ?? view?.unitCost ?? 0}
+              onChange={setTypedCost}
               min={0}
             />
           )}
@@ -221,19 +220,24 @@ export const SetStockDialog: React.FC<SetStockDialogProps> = ({ isOpen, onClose,
             data-testid="set-stock-preview"
             className="rounded-md bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm"
           >
-            {up && (
+            {preview.errors.length > 0 && (
+              <span role="alert" data-testid="stock-preview-error" className="text-rose-600 dark:text-rose-400">
+                {preview.errors[0].message}
+              </span>
+            )}
+            {preview.errors.length === 0 && up && (
               <span>
-                +{delta} {item.baseUnit} · Unrecorded stock · Adds <CurrencyDisplay amount={round2(delta * unitCost)} /> to
+                +{delta} {item.baseUnit} · Unrecorded stock · Adds <CurrencyDisplay amount={view?.valueChange ?? 0} /> to
                 stock value
               </span>
             )}
-            {down && (
+            {preview.errors.length === 0 && down && (
               <span>
-                −{-delta} {item.baseUnit} · Count correction · Estimated write-off ≈{' '}
-                <CurrencyDisplay amount={estimateFifoCost(lots, -delta)} /> (oldest lots first)
+                −{-delta} {item.baseUnit} · Count correction · Write-off ≈{' '}
+                <CurrencyDisplay amount={-(view?.valueChange ?? 0)} /> (oldest lots first)
               </span>
             )}
-            {delta === 0 && <span>No change</span>}
+            {preview.errors.length === 0 && view !== null && delta === 0 && <span>No change</span>}
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="setstock-notes" className="text-xs font-medium text-slate-700 dark:text-slate-300">

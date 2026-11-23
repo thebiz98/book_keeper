@@ -26,14 +26,33 @@ vi.mock('@/components/domain/ItemSearchTypeahead', () => ({
   ),
 }));
 
+
+// DD-56: the default cost, the valuation effect, the write-off and the refusals are the backend's
+// `preview_stock_adjustment`; canned here.
+const settle = async () => {
+  for (let i = 0; i < 3; i++) await flush(120);
+};
+const previewOf = (p: { quantity: number; unitCost: number | null }) => {
+  if (p.quantity > 0 && p.unitCost == null) {
+    throw { type: 'ValidationError', details: { field: 'unit_cost', message: 'unit cost required: item has no prior lot' } };
+  }
+  return {
+    previousStock: 5,
+    newStock: 5 + p.quantity,
+    unitCost: p.quantity > 0 ? p.unitCost : null,
+    lossValue: p.quantity < 0 ? 40 : 0,
+    valueChange: p.quantity > 0 ? p.quantity * (p.unitCost ?? 0) : -40,
+  };
+};
+
 describe('StockAdjustmentModal (item search)', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
   });
 
-  it('opens without an item, searches one, and posts date + unitCost for an increase', async () => {
+  it('opens without an item, searches one; an increase needs a cost the backend accepts', async () => {
     const api = installApi({
-      getItemLots: [],
+      previewStockAdjustment: async (p: { quantity: number; unitCost: number | null }) => previewOf(p),
       createStockAdjustment: { adjustmentId: 4, lossValue: 0 },
     });
     render(<StockAdjustmentModal isOpen onClose={() => {}} />);
@@ -42,14 +61,15 @@ describe('StockAdjustmentModal (item search)', () => {
     expect(bodyText()).toContain('Gel Pen');
     const select = document.querySelector('select')!;
     setInput(select, 'INCREASE');
-    await flush();
+    await settle();
+    expect(bodyText()).toContain('unit cost required');
     click(buttonByText('Apply Adjustment'));
     await flush();
-    expect(bodyText()).toContain('Unit cost is required');
     expect(api.createStockAdjustment).not.toHaveBeenCalled();
     const nums = document.querySelectorAll('input[type="number"]');
     setInput(nums[0], '2.5'); // quantity
     setInput(nums[1], '12.75'); // unit cost
+    await settle();
     click(buttonByText('Apply Adjustment'));
     await flush();
     expect(api.createStockAdjustment.mock.calls[0][0]).toEqual({
@@ -65,7 +85,7 @@ describe('StockAdjustmentModal (item search)', () => {
 
   it('UNRECORDED_STOCK forces an increase, shows the valuation effect and posts the reason', async () => {
     const api = installApi({
-      getItemLots: [],
+      previewStockAdjustment: async (p: { quantity: number; unitCost: number | null }) => previewOf(p),
       createStockAdjustment: { adjustmentId: 6, lossValue: 0 },
     });
     render(<StockAdjustmentModal isOpen onClose={() => {}} itemId={9} itemName="Gel Pen" currentStock={5} baseUnit="PCS" />);
@@ -79,7 +99,7 @@ describe('StockAdjustmentModal (item search)', () => {
     const nums = document.querySelectorAll('input[type="number"]');
     setInput(nums[0], '2');
     setInput(nums[1], '10');
-    await flush();
+    await settle();
     expect(document.querySelector('[data-testid="valuation-effect"]')!.textContent).toContain('₹20.00');
     click(buttonByText('Apply Adjustment'));
     await flush();
@@ -90,7 +110,7 @@ describe('StockAdjustmentModal (item search)', () => {
   });
 
   it('the decrease direction does not offer UNRECORDED_STOCK', async () => {
-    installApi({ getItemLots: [] });
+    installApi({ previewStockAdjustment: async (p: { quantity: number; unitCost: number | null }) => previewOf(p) });
     render(<StockAdjustmentModal isOpen onClose={() => {}} itemId={9} itemName="Gel Pen" currentStock={5} baseUnit="PCS" />);
     await flush();
     const values = [...document.querySelectorAll('select')[1].querySelectorAll('option')].map((o) => o.value);
@@ -100,11 +120,12 @@ describe('StockAdjustmentModal (item search)', () => {
 
   it('shows the write-off value after a decrease', async () => {
     const api = installApi({
-      getItemLots: [],
+      previewStockAdjustment: async (p: { quantity: number; unitCost: number | null }) => previewOf(p),
       createStockAdjustment: { adjustmentId: 5, lossValue: 40 },
     });
     render(<StockAdjustmentModal isOpen onClose={() => {}} itemId={9} itemName="Gel Pen" currentStock={5} baseUnit="PCS" />);
-    await flush();
+    await settle();
+    expect(document.querySelector('[data-testid="writeoff-effect"]')!.textContent).toContain('₹40.00');
     click(buttonByText('Apply Adjustment'));
     await flush();
     expect(api.createStockAdjustment.mock.calls[0][0]).toMatchObject({ quantity: -1, unitCost: null, itemId: 9 });
