@@ -9,9 +9,9 @@ All milestones M1–M6 are done. Gate (`bash run_e2e_tests.sh`): 54 backend test
 |---|---|
 | Domain, DTOs, contracts | `src-tauri/src/core`, `src-tauri/src/{data,services}/contracts` |
 | Services | `src-tauri/src/services/impl` |
-| SQLite (pool, schema v3, unit of work, FTS5, 12 repos) | `src-tauri/src/data/sqlite` |
+| SQLite (pool, schema v4, unit of work, FTS5, 12 repos) | `src-tauri/src/data/sqlite` |
 | Bootstrap | `app_state::build_sqlite_app_state(db_path)` |
-| IPC (49 commands) | `src-tauri/src/api`, `src-tauri/src/main.rs` |
+| IPC (50 commands) | `src-tauri/src/api`, `src-tauri/src/main.rs` |
 | Frontend | `src/` — one IPC boundary in `src/api/ipc.ts` (`invokeCmd`, converts snake_case ↔ camelCase) |
 
 ## Conventions that matter
@@ -46,6 +46,12 @@ Windows 11 ARM64 (verified 2026-11-22): requires VS Build Tools 2022 with the **
 - Frozen schema fixtures now live in `src-tauri/tests/fixtures/schema/vN.sql` (v1 = full aligned schema, v2, ...). Each later migration adds its own `vN.sql` and builds the previous database from fixtures 1..N-1. Never edit a shipped fixture; never assert `latest_version() == N`.
 - **Pre-migration backup (DD-29):** a real upgrade (database already has applied migrations and one is pending) writes `<db dir>/backups/book_keeper_premigration_v{from}_to_v{to}_YYYYMMDD_HHMM.db` via `VACUUM INTO` before applying anything; failure aborts the upgrade untouched. Fresh, current and in-memory databases write nothing. Rotation deletes these after `retentionDays` (only in the configured backup folder). Later migration tests must tolerate the backups folder.
 - **Manual check:** start the app on an existing v2 `shop.db`: it upgrades, a `book_keeper_premigration_v2_to_v3_*.db` appears in `backups/` next to it, existing items open with "Type: Physical (stocked item)", and Add Item shows the same line.
+
+## Branch feat/live-search-low-stock (FR-05 rev., FR-14 rev.; migration v4)
+- Schema is now **v4**: `items.low_stock_threshold` (default 5, `>= 0`, 0 = never; PHYSICAL only) and `party_search_fts`. Fixtures `v3.sql` and `v4.sql` added. IPC commands: 50 (`update_item_low_stock_threshold`).
+- **Conventions:** every search field uses `useLiveSearch` (`src/hooks/useLiveSearch.ts`; debounce `TYPEAHEAD_DEBOUNCE_MS` 50 / `LIST_SEARCH_DEBOUNCE_MS` 150; no hand-rolled `setTimeout`); typeaheads are built on `LiveSearchTypeahead` (`onCreate` for inline create). FTS: `FtsIndex` / `FtsSpec` / `SqliteFtsIndex` / `fts_prefix_query` / `sync_after_commit` (post-commit, failures logged); specs in `data/sqlite/fts_specs.rs`; new indexes are pushed to `AppState.fts_indexes`, call `ensure_fts_index` at startup (reset-All rebuilds them via `with_fts_indexes`). Low-stock rule lives only in `core::stock_rules` (`is_low_stock`, `LOW_STOCK_SQL`).
+- Party search moved from substring to token-prefix (mid-word "mesh" no longer finds "Ramesh"); 3+ digits also match anywhere in the phone.
+- **Manual check:** Inventory: type in the search box (results update without a button, Enter is immediate); Barcode column gone; edit a Low Stock Level cell (Enter moves down, Esc reverts, blur saves, -1 shows an error); Status badge changes; 0 turns the alert off. Drawer has "Low Stock Level". Dashboard shows `stock / level`. Parties page, party selector, sales/purchase history and the return bill picker filter as you type; "9876543210" finds "98765-43210". On an existing v3 `shop.db` the app upgrades and writes a pre-migration backup.
 
 ## Next (not started)
 - Package and run with `tauri build` on a desktop machine, then do a manual UI pass in Tauri mode (so far only the mock client and IPC contracts have been checked).
