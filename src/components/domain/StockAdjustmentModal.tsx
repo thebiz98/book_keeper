@@ -31,7 +31,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Stock Adjustment"
-      description="Write off damaged, expired or lost stock, or correct a count"
+      description="Write off damaged, expired or lost stock, correct a count, or add unrecorded stock"
       size="md"
     >
       <StockAdjustmentForm item={item} onAdjusted={() => onAdjusted?.()} onCancel={onClose} />

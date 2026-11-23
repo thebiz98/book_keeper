@@ -63,6 +63,41 @@ describe('StockAdjustmentModal (item search)', () => {
     expect(document.querySelector('[data-testid="adjustment-result"]')).not.toBeNull();
   });
 
+  it('UNRECORDED_STOCK forces an increase, shows the valuation effect and posts the reason', async () => {
+    const api = installApi({
+      getItemLots: [],
+      createStockAdjustment: { adjustmentId: 6, lossValue: 0 },
+    });
+    render(<StockAdjustmentModal isOpen onClose={() => {}} itemId={9} itemName="Gel Pen" currentStock={5} baseUnit="PCS" />);
+    await flush();
+    const selects = () => document.querySelectorAll('select');
+    setInput(selects()[0], 'INCREASE'); // the reason is only offered for increases
+    await flush();
+    setInput(selects()[1], 'UNRECORDED_STOCK');
+    await flush();
+    expect((selects()[0] as HTMLSelectElement).value).toBe('INCREASE');
+    const nums = document.querySelectorAll('input[type="number"]');
+    setInput(nums[0], '2');
+    setInput(nums[1], '10');
+    await flush();
+    expect(document.querySelector('[data-testid="valuation-effect"]')!.textContent).toContain('₹20.00');
+    click(buttonByText('Apply Adjustment'));
+    await flush();
+    expect(api.createStockAdjustment.mock.calls[0][0]).toMatchObject({
+      reason: 'UNRECORDED_STOCK', quantity: 2, unitCost: 10,
+    });
+    expect(document.querySelector('[data-testid="adjustment-result"]')!.textContent).toContain('₹20.00');
+  });
+
+  it('the decrease direction does not offer UNRECORDED_STOCK', async () => {
+    installApi({ getItemLots: [] });
+    render(<StockAdjustmentModal isOpen onClose={() => {}} itemId={9} itemName="Gel Pen" currentStock={5} baseUnit="PCS" />);
+    await flush();
+    const values = [...document.querySelectorAll('select')[1].querySelectorAll('option')].map((o) => o.value);
+    expect(values).not.toContain('UNRECORDED_STOCK');
+    expect(values).toContain('THEFT_LOST');
+  });
+
   it('shows the write-off value after a decrease', async () => {
     const api = installApi({
       getItemLots: [],

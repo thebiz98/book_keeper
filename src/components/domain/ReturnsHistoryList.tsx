@@ -3,6 +3,7 @@ import { api, errorMessage } from '@/api';
 import type { ReturnTransaction, ReturnType, StockAdjustment } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { DataTable, type DataTableColumn } from './DataTable';
+import { ADJUSTMENT_REASONS } from './StockAdjustmentForm';
 
 const PAGE_SIZE = 10;
 
@@ -97,7 +98,11 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
       mono: true,
       render: (r) => (r.quantity > 0 ? `+${r.quantity}` : String(r.quantity)),
     },
-    { key: 'reason', header: 'Reason', render: (r) => r.reason },
+    {
+      key: 'reason',
+      header: 'Reason',
+      render: (r) => ADJUSTMENT_REASONS.find((x) => x.value === r.reason)?.label ?? r.reason,
+    },
     {
       key: 'cost',
       header: 'Unit Cost',

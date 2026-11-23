@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { api, errorMessage } from '@/api';
 import { round2 } from '@/lib/money';
 import { todayLocal } from '@/lib/dates';
-import type { AdjustmentReason, ItemLot, StockAdjustmentResult } from '@/types';
+import type { AdjustmentReason, StockAdjustmentResult } from '@/types';
+import { latestLotCost } from './lotCost';
 import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
@@ -21,6 +22,7 @@ export const ADJUSTMENT_REASONS: { value: AdjustmentReason; label: string }[] = 
   { value: 'EXPIRED', label: 'Expired' },
   { value: 'COUNT_CORRECTION', label: 'Count correction' },
   { value: 'THEFT_LOST', label: 'Theft / lost' },
+  { value: 'UNRECORDED_STOCK', label: 'Unrecorded stock (no purchase)' },
 ];
 
 export interface StockAdjustmentFormProps {
@@ -28,13 +30,6 @@ export interface StockAdjustmentFormProps {
   item?: AdjustmentItem | null;
   onAdjusted?: (result: StockAdjustmentResult) => void;
   onCancel?: () => void;
-}
-
-/** Latest lot (by date, then id order of the API) cost, or null when the item has no lots. */
-function latestLotCost(lots: ItemLot[]): number | null {
-  if (lots.length === 0) return null;
-  const sorted = [...lots].sort((a, b) => (a.transactionDate < b.transactionDate ? 1 : -1));
-  return sorted[0].unitCost;
 }
 
 export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: initial = null, onAdjusted, onCancel }) => {
@@ -50,6 +45,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StockAdjustmentResult | null>(null);
+  const [addedValue, setAddedValue] = useState<number | null>(null);
 
   useEffect(() => {
     setItem(initial);
@@ -101,6 +97,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
         unitCost: increase ? round2(unitCost) : null,
         notes: notes.trim() || null,
       });
+      setAddedValue(increase ? round2(quantity * unitCost) : null);
       setResult(res);
       onAdjusted?.(res);
     } catch (e) {
@@ -124,9 +121,15 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
         <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
           Adjustment #{result.adjustmentId} recorded.
         </p>
-        <p className="text-sm">
-          Write-off value: <CurrencyDisplay amount={result.lossValue} colored />
-        </p>
+        {addedValue !== null ? (
+          <p className="text-sm">
+            Stock value added: <CurrencyDisplay amount={addedValue} colored />
+          </p>
+        ) : (
+          <p className="text-sm">
+            Write-off value: <CurrencyDisplay amount={result.lossValue} colored />
+          </p>
+        )}
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={reset}>
             Adjust another
@@ -189,7 +192,9 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
           label="Direction"
           value={direction}
           onChange={(v) => {
-            setDirection(v === 'INCREASE' ? 'INCREASE' : 'DECREASE');
+            const next = v === 'INCREASE' ? 'INCREASE' : 'DECREASE';
+            setDirection(next);
+            if (next === 'DECREASE' && reason === 'UNRECORDED_STOCK') setReason('COUNT_CORRECTION');
           }}
           options={[
             { value: 'DECREASE', label: 'Decrease (write-off)' },
@@ -206,8 +211,11 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
         <Select
           label="Reason"
           value={reason}
-          onChange={(v) => setReason(v as AdjustmentReason)}
-          options={ADJUSTMENT_REASONS}
+          onChange={(v) => {
+            setReason(v as AdjustmentReason);
+            if (v === 'UNRECORDED_STOCK') setDirection('INCREASE');
+          }}
+          options={increase ? ADJUSTMENT_REASONS : ADJUSTMENT_REASONS.filter((r) => r.value !== 'UNRECORDED_STOCK')}
         />
       </div>
 
@@ -219,6 +227,9 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
             onChange={setUnitCost}
             min={0}
           />
+          <p data-testid="valuation-effect" className="text-[11px] text-slate-500 mt-1">
+            Adds <CurrencyDisplay amount={round2(quantity * unitCost)} /> to stock value
+          </p>
           {lotsError && <p className="text-[11px] text-amber-600 mt-1">Could not load lots: {lotsError}</p>}
         </div>
       )}
