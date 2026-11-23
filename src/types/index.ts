@@ -114,6 +114,9 @@ export interface SaleTransaction {
   balanceDue: number;
   notes: string | null;
   createdAt: string;
+  itemsSubtotal: number;
+  chargesTotal: number;
+  discountsTotal: number;
 }
 
 export interface SaleItem {
@@ -145,6 +148,8 @@ export interface SaleItemDetail {
   /** Base units already returned. */
   returnedQuantity: number;
   allocations: SaleStockAllocation[];
+  /** Sold rate net of the bill discount share (FR-19): the linked-refund cap. */
+  netUnitPrice: number;
 }
 
 export interface PurchaseTransaction {
@@ -162,6 +167,9 @@ export interface PurchaseTransaction {
   balanceDue: number;
   notes: string | null;
   createdAt: string;
+  itemsSubtotal: number;
+  chargesTotal: number;
+  discountsTotal: number;
 }
 
 export interface PurchaseItem {
@@ -210,6 +218,9 @@ export interface SaleHistoryRow {
   paidAmount: number;
   balanceDue: number;
   paymentStatus: PaymentStatus;
+  itemsSubtotal: number;
+  chargesTotal: number;
+  discountsTotal: number;
 }
 
 export interface PurchaseHistoryRow extends SaleHistoryRow {
@@ -221,6 +232,7 @@ export interface SaleDetailView {
   party: Party | null;
   items: SaleItemDetail[];
   settlements: PaymentSettlement[];
+  charges: BillCharge[];
 }
 
 export interface PurchaseDetailView {
@@ -228,6 +240,32 @@ export interface PurchaseDetailView {
   party: Party | null;
   items: PurchaseItemDetail[];
   settlements: PaymentSettlement[];
+  charges: BillCharge[];
+}
+
+export type ChargeEffect = 'CHARGE' | 'DISCOUNT';
+export type ChargeAppliesTo = 'SALE' | 'PURCHASE' | 'BOTH';
+
+/** Reusable charge/discount type (FR-19). */
+export interface ChargeType {
+  id: number;
+  name: string;
+  effect: ChargeEffect;
+  appliesTo: ChargeAppliesTo;
+  defaultAmount: number | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+/** A charge or discount line on a bill; name and effect are snapshots. */
+export interface BillCharge {
+  id: number;
+  transactionType: TransactionType;
+  transactionId: number;
+  chargeTypeId: number;
+  chargeName: string;
+  effect: ChargeEffect;
+  amount: number;
 }
 
 export interface ReturnTransaction {
@@ -345,11 +383,15 @@ export interface PnLReport {
   inventoryLosses: number;
   netProfit: number;
   totalPurchases: number;
-  /** Placeholder until charges/discounts (FR-19): 0. */
+  /** Σ sale discounts (FR-19). */
   salesDiscounts: number;
-  /** Placeholder until charges/discounts (FR-19): 0. */
+  /** saleChargesIncome + purchaseDiscountsIncome. */
   otherIncome: number;
+  /** Expenses + purchaseChargesExpense. */
   operatingExpenses: number;
+  saleChargesIncome: number;
+  purchaseDiscountsIncome: number;
+  purchaseChargesExpense: number;
   expensesByType: ExpenseTypeTotal[];
 }
 

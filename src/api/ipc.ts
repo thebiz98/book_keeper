@@ -98,6 +98,11 @@ export class TauriClient implements ApiClient {
   searchParties: ApiClient['searchParties'] = (query, partyType) =>
     invokeCmd('search_parties', { query, partyType: partyType ?? null });
 
+  // --- Charge types ---
+  searchChargeTypes: ApiClient['searchChargeTypes'] = (query, appliesTo, limit) =>
+    invokeCmd('search_charge_types', { query, appliesTo, limit: limit ?? null });
+  createChargeType: ApiClient['createChargeType'] = (payload) => invokeCmd('create_charge_type', { payload });
+
   // --- Expenses ---
   searchExpenseTypes: ApiClient['searchExpenseTypes'] = (query, limit) =>
     invokeCmd('search_expense_types', { query, limit: limit ?? null });

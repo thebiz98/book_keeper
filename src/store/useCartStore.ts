@@ -6,6 +6,7 @@ import type {
   CustomerInput,
 } from '@/types/store';
 import { round2 } from '@/lib/money';
+import { billTotals, validChargeAmount, type BillChargeLine } from '@/lib/billMath';
 
 export type { ItemInput, BundleInput, CustomerInput };
 
@@ -18,7 +19,14 @@ export type { CartLine as CartItemLine };
 
 export interface CartState {
   items: CartLine[];
+  /** Items subtotal (before charges and discounts). */
   subtotal: number;
+  /** Bill-level charge/discount lines (FR-19). */
+  charges: BillChargeLine[];
+  chargesTotal: number;
+  discountsTotal: number;
+  /** items subtotal + charges - discounts; the amount the customer owes. */
+  grandTotal: number;
   totalBaseUnits: number;
   totalItems: number;
   selectedCustomer: CustomerInput | null;
@@ -40,6 +48,10 @@ export interface CartState {
   setBundle: (lineId: string, bundle: BundleInput | null) => boolean;
   updateRate: (lineId: string, rate: number) => boolean;
   removeItem: (lineId: string) => void;
+  /** Adds a charge/discount line; rejects (false) an amount that is not positive after rounding. */
+  addCharge: (line: Omit<BillChargeLine, 'key'>) => boolean;
+  updateChargeAmount: (key: number, amount: number) => boolean;
+  removeCharge: (key: number) => void;
   clearCart: () => void;
   setCustomer: (customer: CustomerInput | null) => void;
 }
@@ -50,9 +62,16 @@ const nextLineId = () => `line-${++lineSeq}`;
 const validQty = (q: number) => typeof q === 'number' && Number.isFinite(q) && q > 0;
 const validRate = (r: number) => typeof r === 'number' && Number.isFinite(r) && r >= 0;
 
-function totalsFor(items: CartLine[]) {
+let chargeSeq = 0;
+
+function totalsFor(items: CartLine[], charges: BillChargeLine[] = []) {
+  const subtotal = round2(items.reduce((sum, i) => sum + i.lineTotal, 0));
+  const t = billTotals(subtotal, charges);
   return {
-    subtotal: round2(items.reduce((sum, i) => sum + i.lineTotal, 0)),
+    subtotal,
+    chargesTotal: t.chargesTotal,
+    discountsTotal: t.discountsTotal,
+    grandTotal: t.grandTotal,
     totalBaseUnits: items.reduce((sum, i) => sum + i.baseQuantity, 0),
     totalItems: items.length,
   };
@@ -68,6 +87,10 @@ export function cartBaseQuantity(items: CartLine[], itemId: number, excludeLineI
 const initialState = {
   items: [] as CartLine[],
   subtotal: 0,
+  charges: [] as BillChargeLine[],
+  chargesTotal: 0,
+  discountsTotal: 0,
+  grandTotal: 0,
   totalBaseUnits: 0,
   totalItems: 0,
   selectedCustomer: null as CustomerInput | null,
@@ -132,7 +155,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         },
       ];
     }
-    set({ items: updated, ...totalsFor(updated) });
+    set({ items: updated, ...totalsFor(updated, get().charges) });
     return true;
   },
 
@@ -153,7 +176,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       baseQuantity: base,
       lineTotal: round2(quantity * line.rate),
     };
-    set({ items: updated, ...totalsFor(updated) });
+    set({ items: updated, ...totalsFor(updated, get().charges) });
     return true;
   },
 
@@ -181,7 +204,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       mrp: bundle?.mrp ?? line.mrp,
       lineTotal: round2(line.quantity * rate),
     };
-    set({ items: updated, ...totalsFor(updated) });
+    set({ items: updated, ...totalsFor(updated, get().charges) });
     return true;
   },
 
@@ -192,13 +215,34 @@ export const useCartStore = create<CartState>((set, get) => ({
     if (index === -1) return false;
     const updated = [...items];
     updated[index] = { ...items[index], rate, lineTotal: round2(items[index].quantity * rate) };
-    set({ items: updated, ...totalsFor(updated) });
+    set({ items: updated, ...totalsFor(updated, get().charges) });
     return true;
   },
 
   removeItem: (lineId) => {
     const updated = get().items.filter((i) => i.lineId !== lineId);
-    set({ items: updated, ...totalsFor(updated) });
+    set({ items: updated, ...totalsFor(updated, get().charges) });
+  },
+
+  addCharge: (line) => {
+    if (!validChargeAmount(line.amount)) return false;
+    const charges = [...get().charges, { ...line, amount: round2(line.amount), key: ++chargeSeq }];
+    set({ charges, ...totalsFor(get().items, charges) });
+    return true;
+  },
+
+  updateChargeAmount: (key, amount) => {
+    if (!validChargeAmount(amount)) return false;
+    const { charges, items } = get();
+    if (!charges.some((c) => c.key === key)) return false;
+    const next = charges.map((c) => (c.key === key ? { ...c, amount: round2(amount) } : c));
+    set({ charges: next, ...totalsFor(items, next) });
+    return true;
+  },
+
+  removeCharge: (key) => {
+    const charges = get().charges.filter((c) => c.key !== key);
+    set({ charges, ...totalsFor(get().items, charges) });
   },
 
   clearCart: () => set({ ...initialState }),

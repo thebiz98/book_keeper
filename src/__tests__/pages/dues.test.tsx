@@ -28,6 +28,9 @@ const bill = (id: number, date: string, due: number, status: 'UNPAID' | 'PARTIAL
   paidAmount: 50,
   balanceDue: due,
   paymentStatus: status,
+  itemsSubtotal: 0,
+  chargesTotal: 0,
+  discountsTotal: 0,
 });
 
 function setup() {

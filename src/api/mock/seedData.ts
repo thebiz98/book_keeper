@@ -1,5 +1,6 @@
 import type {
   BundleSuggestion,
+  ChargeType,
   Expense,
   ExpenseType,
   ItemBundle,
@@ -587,6 +588,13 @@ export const initialBundleSuggestions: BundleSuggestion[] = [
     unitsPerBundle: 100,
     usageCount: 9,
   },
+];
+
+export const initialChargeTypes: ChargeType[] = [
+  { id: 1, name: 'Transport', effect: 'CHARGE', appliesTo: 'BOTH', defaultAmount: 50, isActive: true, createdAt: '2026-11-01T09:00:00Z' },
+  { id: 2, name: 'Delivery', effect: 'CHARGE', appliesTo: 'SALE', defaultAmount: 30, isActive: true, createdAt: '2026-11-01T09:00:00Z' },
+  { id: 3, name: 'Cash Discount', effect: 'DISCOUNT', appliesTo: 'BOTH', defaultAmount: null, isActive: true, createdAt: '2026-11-01T09:00:00Z' },
+  { id: 4, name: 'Carrier Fee', effect: 'CHARGE', appliesTo: 'PURCHASE', defaultAmount: 100, isActive: true, createdAt: '2026-11-01T09:00:00Z' },
 ];
 
 export const initialExpenseTypes: ExpenseType[] = [

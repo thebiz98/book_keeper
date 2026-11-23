@@ -242,6 +242,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       paymentStatus,
       paidAmount: paid,
       paymentMode: 'CASH',
+      charges: [],
       notes: notes.trim() || null,
       items: lines.map((l) => ({
         itemId: l.itemId,

@@ -17,6 +17,9 @@ const row = (id: number, due: number): SaleHistoryRow => ({
   paidAmount: 100 - due,
   balanceDue: due,
   paymentStatus: due > 0 ? 'PARTIAL' : 'PAID',
+  itemsSubtotal: 100,
+  chargesTotal: 0,
+  discountsTotal: 0,
 });
 
 describe('Sales history', () => {

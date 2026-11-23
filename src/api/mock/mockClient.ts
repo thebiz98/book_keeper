@@ -9,7 +9,9 @@
  */
 import type {
   ApiClient,
+  BillCharge,
   CashFlowReport,
+  ChargeType,
   Expense,
   ExpenseType,
   ExpenseListResponse,
@@ -40,6 +42,7 @@ import {
   initialShopSettings,
   initialBundleSuggestions,
   initialExpenseTypes,
+  initialChargeTypes,
   initialExpenses,
   type MockItem,
   type MockParty,
@@ -118,6 +121,10 @@ export class MockApiClient implements ApiClient {
   private adjustments: StockAdjustment[] = [];
   private expenseTypes: ExpenseType[] = structuredClone(initialExpenseTypes);
   private expenses: Expense[] = initialExpenses((d) => `${localDate().slice(0, 7)}-${String(d).padStart(2, '0')}`);
+  private chargeTypes: ChargeType[] = structuredClone(initialChargeTypes);
+  private nextChargeTypeId = 100;
+  private billCharges: BillCharge[] = [];
+  private nextBillChargeId = 1;
   private nextExpenseTypeId = 100;
   private nextExpenseId = 100;
   private nextId = 1;
@@ -140,9 +147,11 @@ export class MockApiClient implements ApiClient {
     return `SAL-${1001 + this.sales.length}`;
   }
   async createSale(payload: Parameters<ApiClient['createSale']>[0]) {
-    const total = payload.items.reduce((s, l) => s + l.bundleQuantity * l.unitPrice, 0);
-    const paid = Math.min(payload.paidAmount, total);
+    const itemsSubtotal = payload.items.reduce((s, l) => s + l.bundleQuantity * l.unitPrice, 0);
     const id = this.id();
+    const { chargesTotal, discountsTotal } = this.recordCharges('SALE', id, payload.charges ?? []);
+    const total = itemsSubtotal + chargesTotal - discountsTotal;
+    const paid = Math.min(payload.paidAmount, total);
     const code = `SAL-${1001 + this.sales.length}`;
     const row: SaleHistoryRow = {
       id,
@@ -156,6 +165,9 @@ export class MockApiClient implements ApiClient {
       paidAmount: paid,
       balanceDue: total - paid,
       paymentStatus: payload.paymentStatus,
+      itemsSubtotal,
+      chargesTotal,
+      discountsTotal,
     };
     this.sales.unshift(row);
     return {
@@ -189,6 +201,9 @@ export class MockApiClient implements ApiClient {
         balanceDue: row.balanceDue,
         notes: null,
         createdAt: row.createdAt,
+        itemsSubtotal: row.itemsSubtotal,
+        chargesTotal: row.chargesTotal,
+        discountsTotal: row.discountsTotal,
       },
       party: row.partyId ? toParty(this.findParty(row.partyId)) : null,
       items: [
@@ -201,16 +216,21 @@ export class MockApiClient implements ApiClient {
             packLabel: null,
             packQuantity: 1,
             quantity: 1,
-            unitPrice: row.totalAmount,
-            totalAmount: row.totalAmount,
+            unitPrice: row.itemsSubtotal,
+            totalAmount: row.itemsSubtotal,
           },
           itemName: item.name,
           bundleName: null,
           returnedQuantity: 0,
           allocations: [],
+          netUnitPrice:
+            row.itemsSubtotal > 0
+              ? row.itemsSubtotal * Math.max(0, 1 - row.discountsTotal / row.itemsSubtotal)
+              : row.itemsSubtotal,
         },
       ],
       settlements: [],
+      charges: this.billCharges.filter((c) => c.transactionType === 'SALE' && c.transactionId === row.id),
     };
   }
 
@@ -219,8 +239,10 @@ export class MockApiClient implements ApiClient {
     return `PUR-${1001 + this.purchases.length}`;
   }
   async createPurchase(payload: Parameters<ApiClient['createPurchase']>[0]) {
-    const total = payload.items.reduce((s, l) => s + l.bundleQuantity * l.unitCost, 0);
+    const itemsSubtotal = payload.items.reduce((s, l) => s + l.bundleQuantity * l.unitCost, 0);
     const id = this.id();
+    const { chargesTotal, discountsTotal } = this.recordCharges('PURCHASE', id, payload.charges ?? []);
+    const total = itemsSubtotal + chargesTotal - discountsTotal;
     const code = `PUR-${1001 + this.purchases.length}`;
     this.purchases.unshift({
       id,
@@ -235,6 +257,9 @@ export class MockApiClient implements ApiClient {
       paidAmount: payload.paidAmount,
       balanceDue: total - payload.paidAmount,
       paymentStatus: payload.paymentStatus,
+      itemsSubtotal,
+      chargesTotal,
+      discountsTotal,
     });
     return { purchaseId: id, transactionCode: code };
   }
@@ -261,6 +286,9 @@ export class MockApiClient implements ApiClient {
         balanceDue: row.balanceDue,
         notes: null,
         createdAt: row.createdAt,
+        itemsSubtotal: row.itemsSubtotal,
+        chargesTotal: row.chargesTotal,
+        discountsTotal: row.discountsTotal,
       },
       party: row.partyId ? toParty(this.findParty(row.partyId)) : null,
       items: [
@@ -273,8 +301,8 @@ export class MockApiClient implements ApiClient {
             packLabel: null,
             packQuantity: 1,
             quantity: 1,
-            unitCost: row.totalAmount,
-            totalAmount: row.totalAmount,
+            unitCost: row.itemsSubtotal,
+            totalAmount: row.itemsSubtotal,
             remainingQuantity: 1,
           },
           itemName: item.name,
@@ -282,7 +310,59 @@ export class MockApiClient implements ApiClient {
         },
       ],
       settlements: [],
+      charges: this.billCharges.filter((c) => c.transactionType === 'PURCHASE' && c.transactionId === row.id),
     };
+  }
+
+  // --- Charge types (no validation beyond the duplicate-name rule, DD-27) ---
+  private recordCharges(side: 'SALE' | 'PURCHASE', transactionId: number, inputs: { chargeTypeId: number; amount: number }[]) {
+    let chargesTotal = 0;
+    let discountsTotal = 0;
+    for (const c of inputs) {
+      const t = this.chargeTypes.find((x) => x.id === c.chargeTypeId);
+      if (!t) continue;
+      this.billCharges.push({
+        id: this.nextBillChargeId++,
+        transactionType: side,
+        transactionId,
+        chargeTypeId: t.id,
+        chargeName: t.name,
+        effect: t.effect,
+        amount: c.amount,
+      });
+      if (t.effect === 'CHARGE') chargesTotal += c.amount;
+      else discountsTotal += c.amount;
+    }
+    return { chargesTotal, discountsTotal };
+  }
+  async searchChargeTypes(query: string, appliesTo: 'SALE' | 'PURCHASE', limit = 8) {
+    const q = query.trim().toLowerCase();
+    return this.chargeTypes
+      .filter((t) => t.isActive && (t.appliesTo === 'BOTH' || t.appliesTo === appliesTo))
+      .filter((t) => q === '' || t.name.toLowerCase().split(/\s+/).some((w) => w.startsWith(q)) || t.name.toLowerCase().startsWith(q))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, limit);
+  }
+  async createChargeType(payload: Parameters<ApiClient['createChargeType']>[0]) {
+    const name = payload.name.trim().replace(/\s+/g, ' ');
+    if (this.chargeTypes.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+      const err: AppError = {
+        type: 'ValidationError',
+        details: { field: 'name', message: `A charge type named '${name}' already exists` },
+      };
+      throw err;
+    }
+    const t: ChargeType = {
+      id: this.nextChargeTypeId++,
+      name,
+      effect: payload.effect,
+      appliesTo: payload.appliesTo,
+      defaultAmount: payload.defaultAmount,
+      isActive: true,
+      createdAt: nowIso(),
+    };
+    this.chargeTypes.push(t);
+    return t;
   }
 
   // --- Expenses (no validation, DD-27) ---
@@ -720,9 +800,12 @@ export class MockApiClient implements ApiClient {
       inventoryLosses: 500,
       netProfit: 31300,
       totalPurchases: 90000,
-      salesDiscounts: 0,
-      otherIncome: 0,
-      operatingExpenses: 1200,
+      salesDiscounts: 1500,
+      otherIncome: 900,
+      saleChargesIncome: 700,
+      purchaseDiscountsIncome: 200,
+      purchaseChargesExpense: 300,
+      operatingExpenses: 1500,
       expensesByType: [
         { expenseTypeId: 2, expenseTypeName: 'Electricity Bill', amount: 800 },
         { expenseTypeId: 1, expenseTypeName: 'Printer Ink', amount: 400 },

@@ -23,6 +23,12 @@ describe('caseConvert', () => {
     expect(out).toEqual({ party_id: 1, items: [{ item_id: 3, bundle_id: null }] });
   });
 
+  it('converts bill charge inputs to the backend field names (FR-19)', () => {
+    expect(camelToSnake({ charges: [{ chargeTypeId: 1, amount: 5 }] })).toEqual({
+      charges: [{ charge_type_id: 1, amount: 5 }],
+    });
+  });
+
   it('leaves primitives and arrays of primitives untouched', () => {
     expect(snakeToCamel('a_b')).toBe('a_b');
     expect(snakeToCamel(['x_y', 1])).toEqual(['x_y', 1]);

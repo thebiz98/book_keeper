@@ -112,6 +112,7 @@ export const NewSalePage: React.FC = () => {
       paymentStatus: values.paymentStatus,
       paidAmount: values.cashReceived,
       paymentMode: 'CASH',
+      charges: [],
       notes: notes.trim() || null,
       items: items.map((it) => ({
         itemId: it.itemId,

@@ -29,6 +29,7 @@ describe('MockApiClient contract shapes', () => {
       'getShopSettings', 'updateShopSettings', 'backupDatabase', 'verifyDatabaseIntegrity',
       'validateItemsImport', 'executeItemsImport',
       'searchExpenseTypes', 'listExpenseTypes', 'createExpenseType', 'updateExpenseType',
+      'searchChargeTypes', 'createChargeType',
       'getNextExpenseCode', 'createExpense', 'updateExpense', 'deleteExpense', 'listExpenses',
     ];
     for (const m of methods) expect(typeof (c as unknown as Record<string, unknown>)[m]).toBe('function');
@@ -70,7 +71,7 @@ describe('MockApiClient contract shapes', () => {
     const sale = await c.createSale(
       payload<Parameters<ApiClient['createSale']>[0]>({
         transactionDate: '2026-11-21', partyId: null, paymentStatus: 'PAID', paidAmount: 100,
-        paymentMode: 'CASH', notes: null,
+        paymentMode: 'CASH', notes: null, charges: [],
         items: [{ itemId: 1001, bundleId: null, bundleQuantity: 1, unitPrice: 50 }],
       })
     );
@@ -78,7 +79,7 @@ describe('MockApiClient contract shapes', () => {
     const hist = await c.getSalesHistory();
     expect(keys(hist)).toEqual(['items', 'limit', 'page', 'total']);
     has(hist.items[0], ['id', 'transactionCode', 'lineCount', 'partyName', 'balanceDue']);
-    has(await c.getSaleDetails(sale.saleId), ['sale', 'party', 'items', 'settlements']);
+    has(await c.getSaleDetails(sale.saleId), ['sale', 'party', 'items', 'settlements', 'charges']);
 
     const pur = await c.createPurchase(
       payload<Parameters<ApiClient['createPurchase']>[0]>({
@@ -90,7 +91,35 @@ describe('MockApiClient contract shapes', () => {
     expect(keys(pur)).toEqual(['purchaseId', 'transactionCode']);
     const ph = await c.getPurchasesHistory();
     has(ph.items[0], ['supplierInvoiceRef']);
-    has(await c.getPurchaseDetails(pur.purchaseId), ['purchase', 'party', 'items', 'settlements']);
+    has(await c.getPurchaseDetails(pur.purchaseId), ['purchase', 'party', 'items', 'settlements', 'charges']);
+  });
+
+  it('charge types: side filtering, blank list and duplicate rejection', async () => {
+    const sale = await c.searchChargeTypes('tr', 'SALE');
+    expect(sale.map((t) => t.name)).toEqual(['Transport']);
+    const pur = await c.searchChargeTypes('', 'PURCHASE');
+    expect(pur.map((t) => t.name)).toEqual(['Carrier Fee', 'Cash Discount', 'Transport']);
+    expect((await c.searchChargeTypes('car', 'SALE')).length).toBe(0);
+    const made = await c.createChargeType({ name: ' Packing ', effect: 'CHARGE', appliesTo: 'SALE', defaultAmount: null });
+    expect(made).toMatchObject({ name: 'Packing', effect: 'CHARGE', appliesTo: 'SALE', isActive: true });
+    await expect(
+      c.createChargeType({ name: 'packing', effect: 'DISCOUNT', appliesTo: 'BOTH', defaultAmount: null })
+    ).rejects.toSatisfy(isAppError);
+  });
+
+  it('charges flow into the sale totals and bill details', async () => {
+    const s = await c.createSale(
+      payload<Parameters<ApiClient['createSale']>[0]>({
+        transactionDate: '2026-11-21', partyId: null, paymentStatus: 'PAID', paidAmount: 230,
+        paymentMode: 'CASH', notes: null,
+        items: [{ itemId: 1001, bundleId: null, bundleQuantity: 2, unitPrice: 100 }],
+        charges: [{ chargeTypeId: 1, amount: 50 }, { chargeTypeId: 3, amount: 20 }],
+      })
+    );
+    expect(s.totalAmount).toBe(230);
+    const d = await c.getSaleDetails(s.saleId);
+    expect(d.charges.map((x) => x.chargeName)).toEqual(['Transport', 'Cash Discount']);
+    expect(d.items[0].netUnitPrice).toBeCloseTo(90 * 2, 5);
   });
 
   it('parties and dues shapes', async () => {

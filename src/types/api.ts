@@ -6,6 +6,9 @@
 import type {
   AdjustmentReason,
   CashFlowReport,
+  ChargeAppliesTo,
+  ChargeEffect,
+  ChargeType,
   DashboardMetrics,
   Expense,
   ExpenseType,
@@ -116,6 +119,20 @@ export interface CreateSalePayload {
   paymentMode: string | null;
   notes: string | null;
   items: CreateSaleItemPayload[];
+  /** Bill-level charge/discount lines (FR-19). */
+  charges: BillChargeInput[];
+}
+
+export interface BillChargeInput {
+  chargeTypeId: number;
+  amount: number;
+}
+
+export interface CreateChargeTypePayload {
+  name: string;
+  effect: ChargeEffect;
+  appliesTo: ChargeAppliesTo;
+  defaultAmount: number | null;
 }
 
 export interface SaleSummaryResponse {
@@ -144,6 +161,8 @@ export interface CreatePurchasePayload {
   paymentMode: string | null;
   notes: string | null;
   items: CreatePurchaseItemPayload[];
+  /** Bill-level charge/discount lines (FR-19). */
+  charges: BillChargeInput[];
 }
 
 export interface PurchaseSummaryResponse {
@@ -407,6 +426,12 @@ export interface ApiClient {
   getParty(partyId: number): Promise<Party>;
   listParties(partyType?: PartyType, activeOnly?: boolean): Promise<PartyListRow[]>;
   searchParties(query: string, partyType?: PartyType): Promise<PartyListRow[]>;
+
+  // Charge / discount types (FR-19)
+  /** Live type search for one bill side; a blank query lists the applicable types by name. */
+  searchChargeTypes(query: string, appliesTo: TransactionType, limit?: number): Promise<ChargeType[]>;
+  /** A name that already exists (case-insensitive) is rejected with a ValidationError on `name`. */
+  createChargeType(payload: CreateChargeTypePayload): Promise<ChargeType>;
 
   // Expenses (FR-18)
   /** Live type search; a blank query returns the first active types. */

@@ -153,4 +153,39 @@ describe('useCartStore (F6 rules)', () => {
       expect(s().subtotal).toBe(0);
     });
   });
+
+  describe('charges (FR-19)', () => {
+    const transport = { chargeTypeId: 1, name: 'Transport', effect: 'CHARGE' as const, amount: 50 };
+    const discount = { chargeTypeId: 2, name: 'Cash Discount', effect: 'DISCOUNT' as const, amount: 20 };
+
+    it('recomputes the grand total on add, update and remove', () => {
+      s().addItem(pencil, 2, null, 100);
+      expect(s().addCharge(transport)).toBe(true);
+      expect(s().addCharge(discount)).toBe(true);
+      expect(s()).toMatchObject({ subtotal: 200, chargesTotal: 50, discountsTotal: 20, grandTotal: 230 });
+      const key = s().charges[1].key;
+      expect(s().updateChargeAmount(key, 30)).toBe(true);
+      expect(s().grandTotal).toBe(220);
+      s().removeCharge(key);
+      expect(s()).toMatchObject({ discountsTotal: 0, grandTotal: 250 });
+    });
+
+    it('recomputes the grand total when an item changes', () => {
+      s().addItem(pencil, 1, null, 100);
+      s().addCharge(transport);
+      const id = s().items[0].lineId;
+      s().updateQuantity(id, 3);
+      expect(s().grandTotal).toBe(350);
+    });
+
+    it('rejects invalid amounts and clears with the cart', () => {
+      expect(s().addCharge({ ...transport, amount: 0 })).toBe(false);
+      expect(s().addCharge({ ...transport, amount: Number.NaN })).toBe(false);
+      expect(s().addCharge({ ...transport, amount: -5 })).toBe(false);
+      expect(s().charges).toHaveLength(0);
+      s().addCharge(transport);
+      s().clearCart();
+      expect(s()).toMatchObject({ charges: [], chargesTotal: 0, grandTotal: 0 });
+    });
+  });
 });
