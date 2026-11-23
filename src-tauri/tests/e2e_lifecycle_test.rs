@@ -43,7 +43,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
         payment_mode: Some("CASH".to_string()),
         supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 500.0,
         notes: Some("Lot #1 Inward".to_string()),
-        items: vec![CreatePurchaseItemPayload {
+        items: vec![CreatePurchaseItemPayload { purchase_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 100.0,
@@ -80,7 +80,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
         payment_mode: Some("CASH".to_string()),
         supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 300.0,
         notes: Some("Lot #2 Inward".to_string()),
-        items: vec![CreatePurchaseItemPayload {
+        items: vec![CreatePurchaseItemPayload { purchase_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 50.0,

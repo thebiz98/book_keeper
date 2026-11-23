@@ -47,7 +47,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
         payment_mode: Some("CASH".to_string()),
         supplier_invoice_ref: None, payment_status: PaymentStatus::Partial, paid_amount: 1500.0,
         notes: Some("Morning bulk delivery".to_string()),
-        items: vec![CreatePurchaseItemPayload {
+        items: vec![CreatePurchaseItemPayload { purchase_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 500.0,

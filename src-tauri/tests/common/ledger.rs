@@ -175,7 +175,7 @@ pub fn purchase_payload(
         notes: None,
         items: lines
             .iter()
-            .map(|&(item_id, bundle_id, bundle_quantity, unit_cost)| CreatePurchaseItemPayload {
+            .map(|&(item_id, bundle_id, bundle_quantity, unit_cost)| CreatePurchaseItemPayload { purchase_item_id: None,
                 item_id,
                 bundle_id,
                 bundle_quantity,

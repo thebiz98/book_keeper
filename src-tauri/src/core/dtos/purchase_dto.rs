@@ -24,6 +24,10 @@ pub struct CreatePurchaseItemPayload {
     pub bundle_id: Option<i64>, // Write-time helper only; not stored (DD-28)
     pub bundle_quantity: f64,   // Inward quantity in bundle or base units
     pub unit_cost: f64,         // Inward cost per selected unit/bundle (₹)
+    /// FR-20 edit only: the existing lot this line keeps (`None` = a new line). `create_purchase`
+    /// rejects `Some`.
+    #[serde(default)]
+    pub purchase_item_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

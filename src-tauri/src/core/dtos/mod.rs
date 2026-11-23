@@ -1,5 +1,6 @@
 pub mod adjustment_dto;
 pub mod charge_dto;
+pub mod correction_dto;
 pub mod dues_dto;
 pub mod expense_dto;
 pub mod item_dto;
@@ -15,6 +16,9 @@ pub use adjustment_dto::{
     AdjustmentItemPayload, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload, StockAdjustmentResult,
 };
 pub use charge_dto::{BillChargeInput, CreateChargeTypePayload};
+pub use correction_dto::{
+    BillEditGuard, CorrectionTarget, DeleteBillResult, DeleteReturnResult, GuardReason, LotEditLimit,
+};
 pub use dues_dto::{
     PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView, SettlePaymentPayload,
     SettlementResult,

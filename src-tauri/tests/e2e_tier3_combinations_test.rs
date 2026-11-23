@@ -79,7 +79,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
         payment_mode: Some("CASH".to_string()),
         supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 6000.0,
         notes: None,
-        items: vec![CreatePurchaseItemPayload {
+        items: vec![CreatePurchaseItemPayload { purchase_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 100.0,
@@ -226,7 +226,7 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
         payment_mode: Some("CASH".to_string()),
         supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 400.0,
         notes: None,
-        items: vec![CreatePurchaseItemPayload {
+        items: vec![CreatePurchaseItemPayload { purchase_item_id: None,
             item_id: 1,
             bundle_id: Some(1),
             bundle_quantity: 5.0,
@@ -282,7 +282,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
         payment_mode: None,
         supplier_invoice_ref: None, payment_status: PaymentStatus::Unpaid, paid_amount: 0.0,
         notes: None,
-        items: vec![CreatePurchaseItemPayload {
+        items: vec![CreatePurchaseItemPayload { purchase_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 50.0,
@@ -461,7 +461,7 @@ fn test_tc_t3_cmb_008_low_stock_alert_reorder_cleared() {
         payment_mode: Some("CASH".to_string()),
         supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 375.0,
         notes: Some("Reorder low stock".to_string()),
-        items: vec![CreatePurchaseItemPayload {
+        items: vec![CreatePurchaseItemPayload { purchase_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 25.0,

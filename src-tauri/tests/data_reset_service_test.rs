@@ -50,7 +50,7 @@ fn seed(app: &AppState) -> i64 {
             charges: vec![],
             transaction_date: "2026-11-20".into(), party_id: None, payment_mode: Some("CASH".into()),
             supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 35.0, notes: None,
-            items: vec![CreatePurchaseItemPayload { item_id: item, bundle_id: None, bundle_quantity: 5.0, unit_cost: 7.0 }],
+            items: vec![CreatePurchaseItemPayload { purchase_item_id: None, item_id: item, bundle_id: None, bundle_quantity: 5.0, unit_cost: 7.0 }],
         })
         .unwrap();
     app.sale_service

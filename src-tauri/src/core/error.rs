@@ -46,6 +46,10 @@ pub enum AppError {
     /// The operation is disabled in this build (e.g. data reset when `testingMode` is off).
     #[error("Operation not allowed: {0}")]
     OperationNotAllowed(String),
+
+    /// FR-20: an edit/delete was refused by a guard. `code` is a stable reason code (LLD 14.4).
+    #[error("Bill locked: {message}")]
+    BillLocked { code: String, message: String },
 }
 
 pub type DomainResult<T> = Result<T, AppError>;
@@ -113,6 +117,8 @@ mod tests {
             (AppError::MigrationError("g".into()), json!({"type":"MigrationError","details":"g"})),
             (AppError::IoError("i".into()), json!({"type":"IoError","details":"i"})),
             (AppError::OperationNotAllowed("o".into()), json!({"type":"OperationNotAllowed","details":"o"})),
+            (AppError::BillLocked { code: "LINKED_RETURNS".into(), message: "m".into() },
+             json!({"type":"BillLocked","details":{"code":"LINKED_RETURNS","message":"m"}})),
         ];
         for (err, expected) in cases {
             assert_eq!(serde_json::to_value(&err).unwrap(), expected);

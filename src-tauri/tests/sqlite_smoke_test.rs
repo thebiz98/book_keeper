@@ -34,7 +34,7 @@ fn sqlite_end_to_end_smoke() {
             supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 100.0,
             payment_mode: Some("CASH".to_string()),
             notes: None,
-            items: vec![CreatePurchaseItemPayload { item_id, bundle_id: None, bundle_quantity: 10.0, unit_cost: 10.0 }],
+            items: vec![CreatePurchaseItemPayload { purchase_item_id: None, item_id, bundle_id: None, bundle_quantity: 10.0, unit_cost: 10.0 }],
         })
         .expect("purchase");
 
@@ -92,7 +92,7 @@ fn sales_history_honours_start_end_date_filter() {
         charges: vec![],
         transaction_date: "2026-01-01".into(), party_id: None, supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 50.0,
         payment_mode: Some("CASH".into()), notes: None,
-        items: vec![CreatePurchaseItemPayload { item_id, bundle_id: None, bundle_quantity: 10.0, unit_cost: 5.0 }],
+        items: vec![CreatePurchaseItemPayload { purchase_item_id: None, item_id, bundle_id: None, bundle_quantity: 10.0, unit_cost: 5.0 }],
     }).expect("purchase");
     for date in ["2026-01-05", "2026-02-05"] {
         state.sale_service.create_sale(CreateSalePayload {
