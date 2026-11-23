@@ -241,6 +241,20 @@ CREATE VIRTUAL TABLE item_search_fts USING fts5(
 );
 "#;
 
+const SCHEMA_V4: &str = r#"
+ALTER TABLE items ADD COLUMN low_stock_threshold REAL NOT NULL DEFAULT 5 CHECK (low_stock_threshold >= 0);
+UPDATE items SET is_low_stock =
+  CASE WHEN item_type = 'PHYSICAL' AND current_stock < low_stock_threshold THEN 1 ELSE 0 END;
+CREATE VIRTUAL TABLE party_search_fts USING fts5(
+    party_id UNINDEXED, name, phone, phone_digits,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+INSERT INTO party_search_fts (party_id, name, phone, phone_digits)
+  SELECT id, name, phone,
+         REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),' ',''),'-',''),'+',''),'(',''),')',''),'.','')
+  FROM parties WHERE is_active = 1;
+"#;
+
 /// All known migrations, ascending and gap-free. Append only; never edit a shipped step.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 },
@@ -254,6 +268,7 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "item_type",
         sql: "ALTER TABLE items ADD COLUMN item_type TEXT NOT NULL DEFAULT 'PHYSICAL' CHECK (item_type IN ('PHYSICAL', 'SERVICE'));",
     },
+    Migration { version: 4, name: "low_stock_threshold_party_fts", sql: SCHEMA_V4 },
 ];
 
 /// Highest schema version this build knows.

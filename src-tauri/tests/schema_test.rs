@@ -410,6 +410,7 @@ fn db_path_defaults_to_shop_db_and_env_override_wins() {
 /// Exact DDL delta of each shipped migration (v1 = the whole aligned schema). Never edited.
 const V1: &str = include_str!("fixtures/schema/v1.sql");
 const V2: &str = include_str!("fixtures/schema/v2.sql");
+const V3: &str = include_str!("fixtures/schema/v3.sql");
 
 /// Builds a database at the version reached by replaying `steps` (fixtures 1..N).
 fn db_from_fixtures(tag: &str, steps: &[&str]) -> (PathBuf, Connection) {
@@ -572,6 +573,55 @@ fn failed_premigration_backup_applies_nothing() {
     let err = run_migrations(&conn).expect_err("must abort");
     assert!(matches!(err, AppError::MigrationError(_)), "{err:?}");
     assert_eq!(current_version(&conn).unwrap(), 2, "nothing was applied");
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn fresh_db_v4_has_threshold_default_check_and_party_fts() {
+    let (path, pool) = fresh();
+    let conn = pool.get().unwrap();
+    assert!(latest_version() >= 4);
+    conn.execute("INSERT INTO items (name) VALUES ('X')", []).unwrap();
+    let t: f64 = conn.query_row("SELECT low_stock_threshold FROM items WHERE name='X'", [], |r| r.get(0)).unwrap();
+    assert_eq!(t, 5.0);
+    assert!(conn.execute("UPDATE items SET low_stock_threshold = -1", []).is_err());
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name='party_search_fts'", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 1);
+    drop(conn);
+    drop(pool);
+    cleanup(&path);
+}
+
+#[test]
+fn v3_database_upgrades_to_v4_recomputes_flag_and_indexes_parties() {
+    let (path, conn) = db_from_fixtures("v3up", &[V1, V2, V3]);
+    conn.execute_batch(
+        "INSERT INTO items (name, current_stock, is_low_stock, item_type) VALUES
+           ('Pen', 3, 1, 'PHYSICAL'), ('Ink', 10, 0, 'PHYSICAL'), ('Print', 0, 1, 'SERVICE'), ('Paper', 5, 0, 'PHYSICAL');
+         INSERT INTO parties (id, name, phone, party_type, is_active) VALUES
+           (1, 'Ramesh Kumar', '98765-43210', 'CUSTOMER', 1),
+           (2, 'Old Vendor', NULL, 'VENDOR', 0),
+           (3, 'Sita Traders', '+91 99887 66554', 'VENDOR', 1);",
+    )
+    .unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 4);
+    let thr: Vec<f64> = conn.prepare("SELECT low_stock_threshold FROM items ORDER BY id").unwrap()
+        .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    assert_eq!(thr, vec![5.0; 4]);
+    let flags: Vec<i64> = conn.prepare("SELECT is_low_stock FROM items ORDER BY id").unwrap()
+        .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    assert_eq!(flags, vec![1, 0, 0, 0]);
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM party_search_fts", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 2);
+    let id: i64 = conn.query_row("SELECT party_id FROM party_search_fts WHERE party_search_fts MATCH '\"ram\"*'", [], |r| r.get(0)).unwrap();
+    assert_eq!(id, 1);
+    let d: String = conn.query_row("SELECT phone_digits FROM party_search_fts WHERE party_id = 1", [], |r| r.get(0)).unwrap();
+    assert_eq!(d, "9876543210");
+    let id: i64 = conn.query_row("SELECT party_id FROM party_search_fts WHERE party_search_fts MATCH '\"9199\"*'", [], |r| r.get(0)).unwrap();
+    assert_eq!(id, 3);
+    run_migrations(&conn).expect("second run is a no-op");
     drop(conn);
     cleanup(&path);
 }
