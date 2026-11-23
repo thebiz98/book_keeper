@@ -12,6 +12,7 @@ import type { CreatePurchasePayload, ItemBundle, ItemSearchResult, PaymentStatus
 import { PartySelector } from '@/components/domain/PartySelector';
 import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
+import { ItemQuickCreateModal } from '@/components/domain/ItemQuickCreateModal';
 import { BillChargesPanel, type BillChargesPanelHandle } from '@/components/domain/BillChargesPanel';
 import { BillTotalsSummary } from '@/components/domain/BillTotalsSummary';
 import { billTotals, toChargeInputs, type BillChargeLine } from '@/lib/billMath';
@@ -107,6 +108,8 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const costRef = useRef<HTMLInputElement>(null);
+  /** Non-null while the New Item quick-create modal is open (holds the pre-filled name). */
+  const [quickName, setQuickName] = useState<string | null>(null);
   const tableCardRef = useRef<HTMLDivElement>(null);
 
   const focusSearch = () => {
@@ -398,11 +401,18 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
   // Hotkeys: Ctrl+Enter records, Alt+B opens the bundle modal. Own listener so the page works
   // regardless of the shell's registry; always calls the latest handler.
-  const latest = useRef({ record: handleRecordInward, bundle: () => {}, charges: () => {}, modalOpen: false });
+  const latest = useRef({
+    record: handleRecordInward,
+    bundle: () => {},
+    charges: () => {},
+    newItem: () => {},
+    modalOpen: false,
+  });
   latest.current = {
-    modalOpen: isBundleModalOpen || chargeModalOpen,
+    modalOpen: isBundleModalOpen || chargeModalOpen || quickName !== null,
     record: handleRecordInward,
     charges: () => chargesRef.current?.open(),
+    newItem: () => setQuickName(searchWrapRef.current?.querySelector('input')?.value.trim() ?? ''),
     bundle: () => {
       if (selectedItem) setIsBundleModalOpen(true);
       else setDraftError('Select an item before creating a bundle (Alt+B)');
@@ -420,6 +430,9 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       } else if (e.altKey && e.key.toLowerCase() === 'x') {
         e.preventDefault();
         latest.current.charges();
+      } else if (e.altKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        latest.current.newItem();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -515,6 +528,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
           <div ref={searchWrapRef} data-purchase-search data-testid="purchase-item-search">
             <ItemSearchTypeahead
               onSelectItem={chooseItem}
+              onCreate={(q) => setQuickName(q)}
               autoFocus
               placeholder="Search catalog item by name, barcode or category..."
             />
@@ -843,6 +857,20 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
         initialItemId={selectedItem?.itemId}
         baseUnit={selectedItem?.baseUnit}
         onBundleCreated={handleBundleCreated}
+      />
+
+      <ItemQuickCreateModal
+        isOpen={quickName !== null}
+        initialName={quickName ?? ''}
+        withStock={false}
+        onClose={() => {
+          setQuickName(null);
+          setTimeout(() => searchWrapRef.current?.querySelector('input')?.focus(), 0);
+        }}
+        onCreated={(it) => {
+          setQuickName(null);
+          chooseItem(it);
+        }}
       />
     </div>
   );

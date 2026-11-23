@@ -15,6 +15,7 @@ import { cartBaseQuantity, STOCK_EPS, type CartLine } from '@/store/useCartStore
 import { Button } from '../ui/Button';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { ItemSearchTypeahead } from './ItemSearchTypeahead';
+import { ItemQuickCreateModal } from './ItemQuickCreateModal';
 
 export interface BillingLineEntry {
   item: ItemSearchResult;
@@ -151,6 +152,10 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
       enabled: !!onOpenBundleModal,
     });
 
+    // Alt+N / "+ Create" / Enter on no match: quick-create an item with opening stock (FR-24).
+    const [quickName, setQuickName] = useState<string | null>(null);
+    useHotkeyAction('newItem', () => setQuickName(searchRef.current?.value.trim() ?? ''), { scope: 'page' });
+
     const chooseUnit = (next: string, list: ItemBundleSearchResult[] = bundles) => {
       if (!item) return;
       setUnit(next);
@@ -261,6 +266,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
               onSelectItem={() => undefined}
               onSelect={(it, info) => handleSelectItem(it, info.matchedBundleId)}
               onEmptyEnter={onCompleteBill}
+              onCreate={(q) => setQuickName(q)}
             />
           </div>
 
@@ -385,6 +391,25 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
             {error}
           </div>
         )}
+
+        <ItemQuickCreateModal
+          isOpen={quickName !== null}
+          initialName={quickName ?? ''}
+          withStock
+          onClose={() => {
+            setQuickName(null);
+            setTimeout(() => searchRef.current?.focus(), 0);
+          }}
+          onCreated={(it) => {
+            setQuickName(null);
+            handleSelectItem(it, null);
+            // After the modal's own focus restore has run.
+            setTimeout(() => {
+              qtyRef.current?.focus();
+              qtyRef.current?.select();
+            }, 0);
+          }}
+        />
       </div>
     );
   }

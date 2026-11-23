@@ -28,6 +28,9 @@ export interface ItemSearchTypeaheadProps {
   /** Clear the query after a selection (default true). */
   clearOnSelect?: boolean;
   disabled?: boolean;
+  /** Enables the "+ Create" row and Enter-on-no-match; receives the trimmed query. */
+  onCreate?: (query: string) => void;
+  createLabel?: (query: string) => string;
 }
 
 /** Best match for Enter: results shown -> the highlighted row; else exact (bundle) barcode hit, else the top row. */
@@ -58,9 +61,13 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
   inputRef,
   clearOnSelect = true,
   disabled = false,
+  onCreate,
+  createLabel,
 }) => (
   <LiveSearchTypeahead<ItemSearchResult>
     search={searchItems}
+    onCreate={onCreate}
+    createLabel={createLabel}
     getKey={(i) => i.itemId}
     getLabel={(i) => i.name}
     pickOnEnter={pickOnEnter}
