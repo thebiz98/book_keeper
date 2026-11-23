@@ -15,6 +15,8 @@
 | `purchase_service_test` | Inward receipts and lots (§11.6) |
 | `search_indexer_test` | FTS5 prefix and barcode search (§11.7); generic `FtsIndex` (TC-FTS-01..05) |
 | `bill_charges_test` | Bill charges and discounts (FR-19): totals, payment cross-check, applies_to, rounding, purchase lot cost, charge type service, linked refund cap, P&L fields; unit tests in `bill_math`; schema v7 upgrade in `schema_test`; reset in `data_reset_service_test` |
+| `bill_correction_test` | FR-20 sale/purchase edit and delete: FIFO repost, own-unit stock check and rollback, payment transitions, party re-pointing, credit/total floors, lot floors, referenced lots, re-costing (COGS, losses, return costs, replay over two lots), vendor-return cost lock, code non-reuse; every case ends with `common/invariants.rs` (ledger, stock cache, lot flow) |
+| `return_delete_test` | FR-20 return delete: linked refund/cash/scrap, restocked-consumed, unlinked RETURN lot (incl. legacy notes lookup), credit over two bills, replacement, vendor FIFO/named lot, newest-first rule, code non-reuse; schema v8 upgrade in `schema_test`; `replay_reversals` in `fifo_strategy_test` |
 | `expense_service_test` | Store expenses: types, codes, list, validation (TC-EXP-001..010); reports/reset/startup repair in report, reset and smoke suites (TC-EXP-011..015) |
 | `party_search_test` | FTS-backed party search (TC-PSRCH-01..08) |
 | `accounting_service_test` | Khata dues and FIFO settlement (§11.8) |
