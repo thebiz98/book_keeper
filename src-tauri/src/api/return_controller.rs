@@ -29,3 +29,8 @@ pub async fn list_returns(state: State<'_, AppState>, filter: ReturnsFilter) -> 
     let svc = state.return_service.clone();
     super::run_blocking(move || svc.list_returns(filter)).await
 }
+#[tauri::command]
+pub async fn delete_return(state: State<'_, AppState>, return_id: i64) -> Result<DeleteReturnResult, AppError> {
+    let svc = state.return_service.clone();
+    super::run_blocking(move || svc.delete_return(return_id)).await
+}

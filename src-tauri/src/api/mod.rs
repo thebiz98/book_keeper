@@ -1,5 +1,6 @@
 pub mod adjustment_controller;
 pub mod charge_type_controller;
+pub mod correction_controller;
 pub mod dues_controller;
 pub mod expense_controller;
 pub mod item_controller;

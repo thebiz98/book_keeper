@@ -23,3 +23,13 @@ pub async fn get_purchase_details(state: State<'_, AppState>, purchase_id: i64) 
     let svc = state.purchase_service.clone();
     super::run_blocking(move || svc.get_purchase_details(purchase_id)).await
 }
+#[tauri::command]
+pub async fn update_purchase(state: State<'_, AppState>, purchase_id: i64, payload: CreatePurchasePayload) -> Result<PurchaseSummaryResponse, AppError> {
+    let svc = state.purchase_service.clone();
+    super::run_blocking(move || svc.update_purchase(purchase_id, payload)).await
+}
+#[tauri::command]
+pub async fn delete_purchase(state: State<'_, AppState>, purchase_id: i64) -> Result<DeleteBillResult, AppError> {
+    let svc = state.purchase_service.clone();
+    super::run_blocking(move || svc.delete_purchase(purchase_id)).await
+}

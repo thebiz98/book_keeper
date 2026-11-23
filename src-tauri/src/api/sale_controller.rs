@@ -23,3 +23,13 @@ pub async fn get_sale_details(state: State<'_, AppState>, sale_id: i64) -> Resul
     let svc = state.sale_service.clone();
     super::run_blocking(move || svc.get_sale_details(sale_id)).await
 }
+#[tauri::command]
+pub async fn update_sale(state: State<'_, AppState>, sale_id: i64, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError> {
+    let svc = state.sale_service.clone();
+    super::run_blocking(move || svc.update_sale(sale_id, payload)).await
+}
+#[tauri::command]
+pub async fn delete_sale(state: State<'_, AppState>, sale_id: i64) -> Result<DeleteBillResult, AppError> {
+    let svc = state.sale_service.clone();
+    super::run_blocking(move || svc.delete_sale(sale_id)).await
+}
