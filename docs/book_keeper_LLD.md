@@ -2382,3 +2382,30 @@ plan (VENDOR): restore_outflow(VENDOR_RETURN)
 
 ### 14.7 Test matrix
 `bill_correction_test.rs`: sale edit (quantity up/down, item change, own-units stock check and rollback, date moves UPFRONT, PAID/PARTIAL/UNPAID transitions, party change re-points settlements, unlinked-credit party lock, total floor, party required with payments, linked-return lock then unlock, delete restores lots/stock/cash, credit lock on delete, lump-sum settlement of the other bill untouched, no code reuse, charges reposted, guard reasons); purchase edit (nothing consumed, quantity floor, referenced line change/remove, fully-returned lot still referenced, cost change re-costs COGS and valuation, adjustment loss, scrap and replacement `cost_amount`, vendor-return cost lock, linked vendor return lock, vendor change, delete, `CONSUMED_LOTS`, `NOT_A_PURCHASE`, `purchase_item_id` rejected on create and foreign lot rejected). `return_delete_test.rs`: linked refund/cash/scrap, restocked-consumed, unlinked restock lot removal and `RETURN_LOT_USED`, credit over two bills, legacy notes lookup, replacement, vendor FIFO and named lot, newest-first rule, sale editable again, `RET-` not reused. Shared invariants in `tests/common`: `assert_ledger_invariant`, `assert_stock_invariant`, `assert_lot_flow_invariant` after every operation. Also `fifo_strategy_test` (`replay_reversals` equals the real reversal takes), `data_access_test` (repo methods), `schema_test` (v8).
+
+## 15. Item Details & History (FR-23, schema v9, `feat/item-details-history`)
+
+### 15.1 Schema v9
+`sale_items.transaction_date` and `purchase_items.transaction_date` (`TEXT NOT NULL DEFAULT ''`) are back-filled from the header in the migration itself, then indexed:
+`idx_sale_items_item_date (item_id, transaction_date DESC, sale_transaction_id DESC)` and `idx_purchase_items_item_date (item_id, transaction_date DESC, purchase_transaction_id DESC)`. Fixture `v9.sql`.
+
+### 15.2 Keeping the line date equal to the header date
+No entity change. `create_sale_item` / `create_purchase_item` take the date from the header with a `(SELECT transaction_date FROM <header> WHERE id = ?)` sub-select (the header is always inserted first). Both `update_header_for_edit` methods also run `UPDATE <lines> SET transaction_date = ? WHERE <fk> = ?`. No other code writes a header `transaction_date`. Invariant `assert_line_date_invariant` (in `tests/common/invariants.rs`, called by the ledger and lot-flow invariants) fails on any mismatch.
+
+### 15.3 Queries (final form)
+Page (sales; purchases add `JOIN purchase_transactions h ... AND h.source = 'PURCHASE'` inside the sub-select):
+```sql
+SELECT st.id, st.transaction_code, st.transaction_date, st.party_name
+FROM (SELECT DISTINCT sale_transaction_id AS tid, transaction_date AS d FROM sale_items
+      WHERE item_id = ?1 ORDER BY transaction_date DESC, sale_transaction_id DESC LIMIT ?2 OFFSET ?3) x
+JOIN sale_transactions st ON st.id = x.tid
+```
+**DISTINCT was kept** (EXPLAIN shows `SEARCH ... USING COVERING INDEX idx_sale_items_item_date (item_id=?)` and no TEMP B-TREE for the sub-select). The outer `ORDER BY` was dropped because it cost a `USE TEMP B-TREE FOR ORDER BY`; the repo re-sorts the at most 50 rows by `(date DESC, id DESC)` in Rust.
+Total: `COUNT(DISTINCT ...)` needs a TEMP B-TREE, so the count is `SELECT COUNT(*) FROM (SELECT 1 FROM sale_items WHERE item_id = ?1 GROUP BY transaction_date, sale_transaction_id)`, which streams in index order.
+The test `item_history_queries_use_the_v9_indexes_without_a_temp_btree` runs EXPLAIN QUERY PLAN on the production SQL constants.
+
+### 15.4 Service, DTO, IPC
+`InventoryService::get_item_sales / get_item_purchases(item_id, page, limit)`: default limit 10, max 50, unknown item `NotFound`, returns `Paginated<ItemBillRef { bill_id, transaction_code, transaction_date, party_name }>`. Commands `get_item_sales`, `get_item_purchases` (adjustment controller).
+
+### 15.5 UI
+`ItemDetailsDrawer` (summary, Lots with `LotInspector`, lazy Sales / Purchases tabs with `Pager` + `Table scroll="none"`, View opens `BillDetailDrawer`, Edit opens `ItemEditDrawer`). Inventory keys (D1) live in `hooks/useGridKeyboardNav.ts`: Up/Down, Enter, Right/Left (lots row), PageUp/PageDown, Home/End, Down from search enters the grid, Up on row 0 returns, E edit, S set stock (PHYSICAL only); keys typed in INPUT/SELECT/TEXTAREA/BUTTON are ignored; the active row is kept by item id across refreshes.
