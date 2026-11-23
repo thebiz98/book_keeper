@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::core::constants::EPS;
-use crate::core::dtos::{validate_date_range, 
+use crate::core::dtos::{validate_date_range, BillEditGuard, DeleteReturnResult,
     CustomerReturnPayload, PageRequest, Paginated, RecordRefundPayload, ReturnDetailView, ReturnItemDetail,
     ReturnResult, ReturnsFilter, VendorReturnPayload,
 };
@@ -18,6 +18,7 @@ use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
 use crate::services::contracts::return_service::ReturnService;
+use crate::services::r#impl::bill_guard::{check_return_deletable, evaluate_return_guard};
 use crate::services::r#impl::bill_math::net_unit_price;
 
 
@@ -276,6 +277,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         let (mut linked_value, mut unlinked_value) = (0.0, 0.0);
         for (idx, it) in payload.items.iter().enumerate() {
             let restock = it.condition == StockCondition::Restockable;
+            let mut return_lot: Option<i64> = None;
             let cost = match it.sale_item_id {
                 Some(sid) => {
                     linked_value += line_totals[idx];
@@ -297,6 +299,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                             .purchases()
                             .find_purchase_item_by_id(lot_id)?
                             .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+                        return_lot = Some(lot_id); // FR-20: lets a return delete find its lot
                         it.quantity * lot.unit_cost
                     } else {
                         0.0
@@ -310,7 +313,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                 item_id: it.item_id,
                 item_name: item_names[idx].clone(),
                 sale_item_id: it.sale_item_id,
-                purchase_item_id: None,
+                purchase_item_id: return_lot,
                 quantity: it.quantity,
                 unit_price: it.unit_price,
                 total_amount: line_totals[idx],
@@ -524,6 +527,26 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         let mut tx = self.uow.begin_read()?;
         let (rows, total) = tx.returns().list_returns_page(&filter, page.offset(), page.limit)?;
         Ok(Paginated::new(rows, total, page.page, page.limit))
+    }
+
+    fn delete_return(&self, return_id: i64) -> Result<DeleteReturnResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let r = tx
+            .returns()
+            .find_return_by_id(return_id)?
+            .ok_or_else(|| AppError::not_found("ReturnTransaction", return_id.to_string()))?;
+        let plan = check_return_deletable(&mut *tx, &r, &self.inventory_service)?;
+        let (cash, credit) = self.payment_service.delete_return_ledger(&mut *tx, return_id)?;
+        tx.returns().delete_return(return_id)?;
+        // After the lines are gone: a RETURN lot may only be deleted once nothing references it.
+        self.inventory_service.apply_return_undo(&mut *tx, &plan)?;
+        tx.commit()?;
+        Ok(DeleteReturnResult { removed_cash_amount: cash, removed_credit_amount: credit })
+    }
+
+    fn get_return_delete_guard(&self, return_id: i64) -> Result<BillEditGuard, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        evaluate_return_guard(&mut *tx, return_id, &self.inventory_service)
     }
 
     fn get_return_details(&self, return_id: i64) -> Result<ReturnDetailView, AppError> {
