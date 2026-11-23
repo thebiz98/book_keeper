@@ -36,6 +36,12 @@ export interface SaleSummaryModalProps {
   onDone: (result: SaleSummaryResponse) => void;
   /** Display-only code preview shown while paying. */
   invoiceCode?: string;
+  /** FR-20: 'edit' pays against `grandTotal - appliedAmount` and reads "Update bill". */
+  mode?: 'create' | 'edit';
+  /** Edit: money already applied to the bill by later settlements / return credits. */
+  appliedAmount?: number;
+  /** Edit: the bill's old upfront amount, prefilled as the cash received. */
+  initialCash?: number;
 }
 
 const STATUSES: PaymentStatus[] = ['PAID', 'PARTIAL', 'UNPAID'];
@@ -72,9 +78,15 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   onSubmit,
   onDone,
   invoiceCode,
+  mode: billMode = 'create',
+  appliedAmount = 0,
+  initialCash = 0,
 }) => {
+  const editing = billMode === 'edit';
+  /** Amount this dialog collects: the whole total, or what is still open on an edited bill. */
+  const due = editing ? round2(Math.max(grandTotal - appliedAmount, 0)) : grandTotal;
   const [status, setStatus] = useState<PaymentStatus>('PAID');
-  const [cashStr, setCashStr] = useState(String(grandTotal));
+  const [cashStr, setCashStr] = useState(String(due));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SaleSummaryResponse | null>(null);
@@ -82,30 +94,45 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   const cashRef = useRef<HTMLInputElement>(null);
   const doneBtnRef = useRef<HTMLButtonElement>(null);
   const submittingRef = useRef(false);
-  const totalRef = useRef(grandTotal);
-  totalRef.current = grandTotal;
+  const totalRef = useRef(due);
+  totalRef.current = due;
+  const initialCashRef = useRef(initialCash);
+  initialCashRef.current = initialCash;
 
   useBusyLock(submitting);
 
   // Reset only when the dialog opens: never while the cashier is typing.
   useEffect(() => {
     if (!isOpen) return;
-    setStatus('PAID');
-    setCashStr(String(totalRef.current));
+    if (editing && totalRef.current > 0) {
+      // Prefill from the old upfront payment: enough = PAID, some = PARTIAL, none = UNPAID.
+      const c = initialCashRef.current;
+      const st: PaymentStatus = c >= totalRef.current ? 'PAID' : c > 0 ? 'PARTIAL' : 'UNPAID';
+      setStatus(st);
+      setCashStr(st === 'PAID' ? String(Math.max(c, totalRef.current)) : String(c));
+    } else {
+      setStatus('PAID');
+      setCashStr(editing ? '0' : String(totalRef.current));
+    }
     setError(null);
     setResult(null);
     setSubmitting(false);
     submittingRef.current = false;
     cashRef.current?.focus();
     cashRef.current?.select();
-  }, [isOpen]);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (result) doneBtnRef.current?.focus();
   }, [result]);
 
   const cash = cashStr.trim() === '' ? NaN : parseFloat(cashStr);
-  const validation = validatePayment(status, grandTotal, cash, customer != null);
+  const validation =
+    editing && due <= 0
+      ? customer == null && appliedAmount > 0
+        ? 'Select a customer: later payments were recorded for this bill'
+        : null
+      : validatePayment(status, due, cash, customer != null);
   const mode = result ? 'result' : 'payment';
 
   const pickStatus = (next: PaymentStatus) => {
@@ -128,8 +155,8 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
     setError(null);
     try {
       const res = await onSubmit({
-        paymentStatus: status,
-        cashReceived: status === 'UNPAID' ? 0 : round2(cash),
+        paymentStatus: editing && due <= 0 ? 'PAID' : status,
+        cashReceived: editing && due <= 0 ? 0 : status === 'UNPAID' ? 0 : round2(cash),
       });
       setResult(res);
     } catch (e) {
@@ -144,8 +171,8 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
     if (result) onDone(result);
   };
 
-  const changeAmount = round2(cash - grandTotal);
-  const balance = status === 'UNPAID' ? round2(grandTotal) : round2(Math.max(grandTotal - (Number.isFinite(cash) ? cash : 0), 0));
+  const changeAmount = round2(cash - due);
+  const balance = status === 'UNPAID' ? round2(due) : round2(Math.max(due - (Number.isFinite(cash) ? cash : 0), 0));
   const message = error ?? validation;
 
   const onStatusKeyDown = (e: React.KeyboardEvent) => {
@@ -174,7 +201,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={mode === 'payment' ? () => { if (!submittingRef.current) onClose(); } : finish}
-      title={mode === 'payment' ? 'Payment' : 'Sale Complete'}
+      title={mode === 'payment' ? (editing ? 'Update bill' : 'Payment') : editing ? 'Bill updated' : 'Sale Complete'}
       description={mode === 'payment' ? 'Nothing is saved until you confirm.' : undefined}
       size="md"
       closeOnBackdrop={false}
@@ -195,7 +222,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
               isLoading={submitting}
               hotkey="Enter"
             >
-              Confirm Sale
+              {editing ? 'Update bill' : 'Confirm Sale'}
             </Button>
           </>
         ) : (
@@ -206,7 +233,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
             onClick={finish}
             className="inline-flex items-center justify-center font-medium rounded-md transition-colors select-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 px-3 py-1.5 text-sm gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer"
           >
-            <span>Next Customer</span>
+            <span>{editing ? 'Done' : 'Next Customer'}</span>
             <kbd className="px-1 py-0.5 rounded bg-black/10 dark:bg-white/10 text-[10px] font-mono font-semibold uppercase">
               Enter
             </kbd>
@@ -244,6 +271,17 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
             <CurrencyDisplay amount={result?.totalAmount ?? grandTotal} size="hero" />
           </div>
         </div>
+
+        {mode === 'payment' && editing && (
+          <div data-testid="edit-payment-info" className="flex items-center justify-between text-xs font-mono rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
+            <span>
+              Already received later: <CurrencyDisplay amount={appliedAmount} size="sm" />
+            </span>
+            <span>
+              Due now: <CurrencyDisplay amount={due} size="sm" />
+            </span>
+          </div>
+        )}
 
         {mode === 'payment' ? (
           <>
@@ -355,7 +393,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
         ) : (
           <div data-testid="sale-result" className="flex flex-col gap-2 text-sm">
             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-semibold">
-              <CheckCircle2 className="h-5 w-5" /> Saved as {result?.transactionCode}
+              <CheckCircle2 className="h-5 w-5" /> {editing ? 'Updated' : 'Saved as'} {result?.transactionCode}
             </div>
             <dl className="grid grid-cols-2 gap-y-1 font-mono">
               <dt className="text-slate-500">Paid</dt>

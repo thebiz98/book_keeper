@@ -3,6 +3,11 @@ import { Plus, Trash2, CheckCircle2 } from 'lucide-react';
 import { api } from '@/api';
 import { errorMessage } from '@/api/errors';
 import { todayLocal } from '@/lib/dates';
+import { useAppStore } from '@/store/useAppStore';
+import { peekBillEdit, takeBillEdit } from './billEditHandoff';
+import { purchaseLineToDraft } from '@/lib/billEditDraft';
+import { round2 } from '@/lib/money';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import type { CreatePurchasePayload, ItemBundle, ItemSearchResult, PaymentStatus } from '@/types';
 import { PartySelector } from '@/components/domain/PartySelector';
 import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
@@ -64,6 +69,13 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
   initialItemName,
 }) => {
   const [codePreview, setCodePreview] = useState<string | null>(null);
+  // FR-20 edit mode: decided synchronously so the code preview never overwrites the bill's code.
+  const editRequested = useRef(peekBillEdit()?.kind === 'PURCHASE');
+  const [editing, setEditing] = useState<{ id: number; code: string } | null>(null);
+  /** Edit: money already applied to the bill by later settlements / return credits. */
+  const [applied, setApplied] = useState(0);
+  const [cancelEditOpen, setCancelEditOpen] = useState(false);
+  const setActiveRoute = useAppStore((s) => s.setActiveRoute);
   const [inwardDate, setInwardDate] = useState<string>(todayLocal());
   const [vendorId, setVendorId] = useState<number | null>(null);
   const [supplierInvoiceRef, setSupplierInvoiceRef] = useState<string>('');
@@ -104,12 +116,72 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
   const refreshCodePreview = useCallback(() => {
     api
       .getNextPurchaseCode()
-      .then((c) => setCodePreview(c || null))
-      .catch(() => setCodePreview(null));
+      .then((c) => {
+        if (!editRequested.current) setCodePreview(c || null);
+      })
+      .catch(() => {
+        if (!editRequested.current) setCodePreview(null);
+      });
   }, []);
 
   useEffect(() => {
     refreshCodePreview();
+  }, [refreshCodePreview]);
+
+  // FR-20: load the queued purchase into the entry screen.
+  useEffect(() => {
+    const req = takeBillEdit();
+    if (req?.kind !== 'PURCHASE') return;
+    let live = true;
+    (async () => {
+      try {
+        const [d, g] = await Promise.all([api.getPurchaseDetails(req.id), api.getBillEditGuard('PURCHASE', req.id)]);
+        if (!live) return;
+        if (!g.canEdit) {
+          editRequested.current = false;
+          setError(g.reasons.find((r) => r.blocksEdit)?.message ?? 'This purchase cannot be edited');
+          refreshCodePreview();
+          return;
+        }
+        const drafts: PurchaseLine[] = [];
+        for (const it of d.items) {
+          const lot = it.purchaseItem;
+          const found = (await api.searchItemsFts(lot.itemName, 8).catch(() => [])).find((r) => r.itemId === lot.itemId);
+          const lim = g.lotLimits.find((l) => l.purchaseItemId === lot.id);
+          drafts.push({
+            ...purchaseLineToDraft(lot, found ?? null),
+            key: lineKey.current++,
+            minBaseQty: lim?.consumedQuantity ?? 0,
+            locked: lim?.referenced ?? false,
+            costLocked: lim?.vendorReturned ?? false,
+          });
+        }
+        if (!live) return;
+        const p = d.purchase;
+        setEditing({ id: p.id, code: p.transactionCode });
+        setCodePreview(p.transactionCode);
+        setInwardDate(p.transactionDate);
+        setVendorId(p.partyId);
+        setSupplierInvoiceRef(p.supplierInvoiceRef ?? '');
+        setNotes(p.notes ?? '');
+        setLines(drafts);
+        setCharges(d.charges.map((c) => ({ key: chargeKey.current++, chargeTypeId: c.chargeTypeId, name: c.chargeName, effect: c.effect, amount: c.amount })));
+        setApplied(g.appliedAmount);
+        const open = round2(Math.max(p.totalAmount - g.appliedAmount, 0));
+        const up = g.upfrontAmount;
+        setPaymentStatus(up >= open - 1e-9 ? 'PAID' : up > 0 ? 'PARTIAL' : 'UNPAID');
+        setPaidInput(up);
+      } catch (e) {
+        if (live) {
+          editRequested.current = false;
+          setError(errorMessage(e));
+          refreshCodePreview();
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
   }, [refreshCodePreview]);
 
   const chooseItem = useCallback((item: ItemSearchResult) => {
@@ -218,7 +290,9 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     prevLineCount.current = lines.length;
   }, [lines.length]);
 
-  const handleRemoveLine = (key: number) => setLines((prev) => prev.filter((l) => l.key !== key));
+  const handleRemoveLine = (key: number) => setLines((prev) => prev.filter((l) => l.key !== key || l.locked));
+  const patchLine = (key: number, patch: Partial<PurchaseLine>) =>
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
   const itemsSubtotal = purchaseTotal(lines);
   const totals = billTotals(itemsSubtotal, charges);
@@ -235,9 +309,11 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     return true;
   };
   const removeCharge = (key: number) => setCharges((prev) => prev.filter((c) => c.key !== key));
-  const paid = effectivePaid(paymentStatus, total, paidInput);
-  const balanceDue = Math.max(0, total - paid);
-  const paymentError = lines.length > 0 ? validatePayment(paymentStatus, total, paid, vendorId) : null;
+  // Payment describes the new upfront amount against what is still open (edit: total - applied).
+  const open = editing ? round2(Math.max(total - applied, 0)) : total;
+  const paid = effectivePaid(paymentStatus, open, paidInput);
+  const balanceDue = Math.max(0, open - paid);
+  const paymentError = lines.length > 0 ? validatePayment(paymentStatus, open, paid, vendorId) : null;
   const totalBaseUnits = lines.reduce((a, l) => a + lineBaseQuantity(l), 0);
 
   const handleRecordInward = async () => {
@@ -250,9 +326,18 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       setError('Discounts exceed the bill amount');
       return;
     }
-    const pe = validatePayment(paymentStatus, total, paid, vendorId);
+    const pe = validatePayment(paymentStatus, open, paid, vendorId);
     if (pe) {
       setError(pe);
+      return;
+    }
+    const short = lines.find((l) => l.minBaseQty && lineBaseQuantity(l) + 1e-9 < l.minBaseQty);
+    if (short) {
+      setError(`${short.itemName}: at least ${short.minBaseQty} already used`);
+      return;
+    }
+    if (editing && total + 1e-9 < applied) {
+      setError(`The new total is below the ₹${applied.toFixed(2)} already applied to this bill`);
       return;
     }
 
@@ -275,10 +360,20 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
         bundleId: l.bundleId,
         bundleQuantity: l.quantity,
         unitCost: l.unitCost,
+        ...(editing ? { purchaseItemId: l.purchaseItemId ?? null } : {}),
       })),
     };
 
     try {
+      if (editing) {
+        await api.updatePurchase(editing.id, payload);
+        setEditing(null);
+        setApplied(0);
+        setLines([]);
+        setCharges([]);
+        setActiveRoute('purchase-history');
+        return;
+      }
       const res = await api.createPurchase(payload);
       setSuccessCode(res.transactionCode);
       setLines([]);
@@ -340,6 +435,20 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
   return (
     <div className="flex flex-col gap-4">
+      {editing && (
+        <div
+          data-testid="edit-banner"
+          className="flex items-center justify-between gap-3 px-3.5 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200"
+        >
+          <span>
+            Editing <span className="font-mono font-bold">{editing.code}</span> — saving replaces the original bill
+            {applied > 0 && <> · Already paid later: ₹{applied.toFixed(2)}</>}
+          </span>
+          <Button variant="outline" size="sm" data-testid="cancel-edit" onClick={() => setCancelEditOpen(true)}>
+            Cancel edit
+          </Button>
+        </div>
+      )}
       {/* Header Info Bar */}
       <div className="flex flex-wrap items-end justify-between gap-3 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
         <div className="flex flex-wrap items-end gap-3">
@@ -525,13 +634,48 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
                     {l.bundleId !== null ? `${l.packLabel} (× ${l.unitsPerBundle})` : l.baseUnit}
                   </TableCell>
                   <TableCell className="text-center font-mono font-medium">
-                    {l.quantity} {l.packLabel}
+                    {editing ? (
+                      <div className="flex flex-col items-center gap-0.5">
+                        <input
+                          type="number"
+                          aria-label={`Quantity ${l.itemName}`}
+                          min={0.001}
+                          step="any"
+                          value={l.quantity}
+                          onChange={(e) => patchLine(l.key, { quantity: parseFloat(e.target.value) || 0 })}
+                          className="w-20 text-right bg-transparent border border-slate-300 dark:border-slate-700 rounded px-1"
+                        />
+                        {!!l.minBaseQty && l.minBaseQty > 0 && (
+                          <span data-testid="used-hint" className="text-[10px] text-slate-500">
+                            Used: {l.minBaseQty}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        {l.quantity} {l.packLabel}
+                      </>
+                    )}
                   </TableCell>
                   <TableCell className="text-center font-mono font-medium text-blue-600 dark:text-blue-400">
                     {lineBaseQuantity(l)} {l.baseUnit}
                   </TableCell>
                   <TableCell align="right" mono>
-                    <CurrencyDisplay amount={l.unitCost} size="sm" />
+                    {editing ? (
+                      <input
+                        type="number"
+                        aria-label={`Unit cost ${l.itemName}`}
+                        min={0}
+                        step="any"
+                        value={l.unitCost}
+                        disabled={l.costLocked}
+                        title={l.costLocked ? 'Returned to the vendor at this cost: delete that vendor return to change it' : undefined}
+                        onChange={(e) => patchLine(l.key, { unitCost: parseFloat(e.target.value) || 0 })}
+                        className="w-24 text-right bg-transparent border border-slate-300 dark:border-slate-700 rounded px-1 disabled:opacity-60"
+                      />
+                    ) : (
+                      <CurrencyDisplay amount={l.unitCost} size="sm" />
+                    )}
                   </TableCell>
                   <TableCell align="right" mono className="text-slate-500">
                     {lineCostPerBase(l).toFixed(4)}
@@ -543,6 +687,8 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
                     <button
                       type="button"
                       aria-label={`Remove ${l.itemName}`}
+                      disabled={l.locked}
+                      title={l.locked ? 'Already sold or moved: this line cannot be removed' : undefined}
                       onClick={() => handleRemoveLine(l.key)}
                       className="p-1 rounded text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
                     >
@@ -646,7 +792,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
             hotkey="Ctrl+Enter"
             leftIcon={<CheckCircle2 className="h-5 w-5" />}
           >
-            Record Inward Stock
+            {editing ? 'Update Purchase' : 'Record Inward Stock'}
           </Button>
         </div>
       </div>
@@ -672,6 +818,24 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
           Purchase recorded: <span className="font-mono font-bold">{successCode}</span>
         </p>
       )}
+
+      <ConfirmDialog
+        isOpen={cancelEditOpen}
+        title="Discard changes?"
+        message={`Leave the edit of ${editing?.code ?? 'this purchase'} without saving. The original bill stays as it was.`}
+        variant="warning"
+        confirmText="Discard changes"
+        cancelText="Keep editing"
+        onConfirm={() => {
+          setCancelEditOpen(false);
+          setEditing(null);
+          setApplied(0);
+          setLines([]);
+          setCharges([]);
+          setActiveRoute('purchase-history');
+        }}
+        onCancel={() => setCancelEditOpen(false)}
+      />
 
       <BundleCreationModal
         isOpen={isBundleModalOpen}

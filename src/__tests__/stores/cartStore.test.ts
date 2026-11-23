@@ -188,4 +188,40 @@ describe('useCartStore (F6 rules)', () => {
       expect(s()).toMatchObject({ charges: [], chargesTotal: 0, grandTotal: 0 });
     });
   });
+
+  describe('edit mode (FR-20)', () => {
+    const line = (over = {}) => ({
+      itemId: 1, name: 'Pencil', baseUnit: 'PCS', unitsPerBundle: 1, quantity: 5, baseQuantity: 5, rate: 10,
+      lineTotal: 50, availableStock: 52, ...over,
+    });
+
+    it('loadForEdit sets lines, customer, editing and the credit', () => {
+      s().loadForEdit([line()], { id: 3, name: 'Ram' }, { saleId: 9, code: 'SAL-1009' }, { 1: 2 });
+      expect(s().editing).toEqual({ saleId: 9, code: 'SAL-1009' });
+      expect(s().editCredit).toEqual({ 1: 2 });
+      expect(s().selectedCustomer?.id).toBe(3);
+      expect(s().items[0].lineId).toBeTruthy();
+      expect(s().subtotal).toBe(50);
+    });
+
+    it('addItem allows current stock plus the credit and rejects above it', () => {
+      s().loadForEdit([], null, { saleId: 9, code: 'SAL-1009' }, { 1: 5 });
+      expect(s().addItem({ ...pencil, currentStock: 50 }, 55)).toBe(true);
+      expect(s().addItem({ ...pencil, currentStock: 50 }, 1)).toBe(false);
+    });
+
+    it('an item sold out today can still be added back up to its credit', () => {
+      s().loadForEdit([], null, { saleId: 9, code: 'SAL-1009' }, { 1: 3 });
+      expect(s().addItem({ ...pencil, currentStock: 0 }, 3)).toBe(true);
+      expect(s().addItem({ ...pencil, currentStock: 0 }, 1)).toBe(false);
+    });
+
+    it('clearCart resets edit mode', () => {
+      s().loadForEdit([line()], null, { saleId: 9, code: 'SAL-1009' }, { 1: 5 });
+      s().clearCart();
+      expect(s().editing).toBeNull();
+      expect(s().editCredit).toEqual({});
+      expect(s().items).toHaveLength(0);
+    });
+  });
 });

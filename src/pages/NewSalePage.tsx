@@ -5,7 +5,10 @@ import { todayLocal } from '@/lib/dates';
 import { useCartStore } from '@/store/useCartStore';
 import { useAppStore } from '@/store/useAppStore';
 import { useHotkeyAction, useHotkey } from '@/hooks/useHotkeys';
-import type { CreateSalePayload, ItemBundle, ItemSearchResult, SaleSummaryResponse } from '@/types';
+import type { BillEditGuard, CreateSalePayload, ItemBundle, ItemSearchResult, SaleSummaryResponse } from '@/types';
+import { errorMessage } from '@/api';
+import { takeBillEdit } from '@/pages/billEditHandoff';
+import { editStockCredit, saleLineToCart } from '@/lib/billEditDraft';
 import { CartTable } from '@/components/domain/CartTable';
 import { BillChargesPanel, type BillChargesPanelHandle } from '@/components/domain/BillChargesPanel';
 import { toChargeInputs } from '@/lib/billMath';
@@ -40,7 +43,10 @@ export const NewSalePage: React.FC = () => {
     removeCharge,
     clearCart,
     setCustomer,
+    editing,
+    loadForEdit,
   } = useCartStore();
+  const setActiveRoute = useAppStore((s) => s.setActiveRoute);
   const refreshMetrics = useAppStore((s) => s.refreshMetrics);
 
   const [invoiceCode, setInvoiceCode] = useState<string>('');
@@ -52,6 +58,9 @@ export const NewSalePage: React.FC = () => {
   const [newBundle, setNewBundle] = useState<{ bundle: ItemBundle; seq: number } | null>(null);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** FR-20: money already applied to the bill being edited / its old upfront payment. */
+  const [editMoney, setEditMoney] = useState<{ applied: number; upfront: number }>({ applied: 0, upfront: 0 });
+  const [isCancelEditOpen, setIsCancelEditOpen] = useState(false);
 
   const rowRef = useRef<RapidBillingRowHandle>(null);
   const chargesRef = useRef<BillChargesPanelHandle>(null);
@@ -65,8 +74,56 @@ export const NewSalePage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    loadCodePreview();
-  }, [loadCodePreview]);
+    // FR-20: a queued bill edit takes over the page; otherwise show the next-code preview.
+    const req = takeBillEdit();
+    if (req?.kind !== 'SALE') {
+      if (!useCartStore.getState().editing) loadCodePreview();
+      return;
+    }
+    let live = true;
+    (async () => {
+      try {
+        const [detail, guard]: [Awaited<ReturnType<typeof api.getSaleDetails>>, BillEditGuard] = await Promise.all([
+          api.getSaleDetails(req.id),
+          api.getBillEditGuard('SALE', req.id),
+        ]);
+        if (!live) return;
+        if (!guard.canEdit) {
+          setError(guard.reasons.find((r) => r.blocksEdit)?.message ?? 'This bill cannot be edited');
+          loadCodePreview();
+          return;
+        }
+        const credit = editStockCredit(detail.items.map((i) => ({ itemId: i.saleItem.itemId, quantity: i.saleItem.quantity })));
+        const lines = [];
+        for (const it of detail.items) {
+          const found = (await api.searchItemsFts(it.saleItem.itemName, 8).catch(() => [])).find(
+            (r) => r.itemId === it.saleItem.itemId
+          );
+          lines.push(saleLineToCart(it.saleItem, found ?? null, (found?.currentStock ?? 0) + (credit[it.saleItem.itemId] ?? 0)));
+        }
+        if (!live) return;
+        loadForEdit(
+          lines,
+          detail.party ? { id: detail.party.id, name: detail.party.name, phone: detail.party.phone } : null,
+          { saleId: detail.sale.id, code: detail.sale.transactionCode },
+          credit,
+          detail.charges.map((c) => ({ chargeTypeId: c.chargeTypeId, name: c.chargeName, effect: c.effect, amount: c.amount }))
+        );
+        setInvoiceCode(detail.sale.transactionCode);
+        setInvoiceDate(detail.sale.transactionDate);
+        setNotes(detail.sale.notes ?? '');
+        setEditMoney({ applied: guard.appliedAmount, upfront: guard.upfrontAmount });
+      } catch (e) {
+        if (live) {
+          setError(errorMessage(e));
+          loadCodePreview();
+        }
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [loadCodePreview, loadForEdit]);
 
   const focusSearchSoon = () => setTimeout(() => rowRef.current?.focusSearch(), 0);
 
@@ -91,7 +148,8 @@ export const NewSalePage: React.FC = () => {
   useHotkey(
     'Escape',
     () => {
-      if (items.length > 0) setIsClearConfirmOpen(true);
+      if (editing) setIsCancelEditOpen(true);
+      else if (items.length > 0) setIsClearConfirmOpen(true);
     },
     { scope: 'page', allowInInputs: true }
   );
@@ -137,12 +195,20 @@ export const NewSalePage: React.FC = () => {
         unitPrice: it.bundleId != null ? it.rate : it.rate / it.unitsPerBundle,
       })),
     };
-    const res = await api.createSale(payload);
+    const res = editing ? await api.updateSale(editing.saleId, payload) : await api.createSale(payload);
     void refreshMetrics();
     return res;
   };
 
   const handleDone = () => {
+    if (editing) {
+      clearCart();
+      setNotes('');
+      setError(null);
+      setIsSummaryOpen(false);
+      setActiveRoute('sales-history');
+      return;
+    }
     clearCart();
     setNotes('');
     setError(null);
@@ -154,12 +220,26 @@ export const NewSalePage: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-4">
+      {editing && (
+        <div
+          data-testid="edit-banner"
+          className="flex items-center justify-between gap-3 px-3.5 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200"
+        >
+          <span>
+            Editing <span className="font-mono font-bold">{editing.code}</span> — saving replaces the original bill
+          </span>
+          <Button variant="outline" size="sm" data-testid="cancel-edit" onClick={() => setIsCancelEditOpen(true)}>
+            Cancel edit
+          </Button>
+        </div>
+      )}
+
       {/* Top Invoice Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800">
             <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">
-              Next Invoice
+              {editing ? 'Invoice' : 'Next Invoice'}
             </span>
             <span data-testid="invoice-preview" className="text-sm font-bold font-mono text-blue-950 dark:text-blue-100">
               {invoiceCode || '—'}
@@ -299,7 +379,7 @@ export const NewSalePage: React.FC = () => {
             hotkey="Ctrl+Enter"
             leftIcon={<CheckCircle className="h-5 w-5" />}
           >
-            Complete Sale
+            {editing ? 'Update Sale' : 'Complete Sale'}
           </Button>
         </div>
       </div>
@@ -325,6 +405,26 @@ export const NewSalePage: React.FC = () => {
         onSubmit={handleSubmit}
         onDone={handleDone}
         invoiceCode={invoiceCode}
+        mode={editing ? 'edit' : 'create'}
+        appliedAmount={editMoney.applied}
+        initialCash={editMoney.upfront}
+      />
+
+      <ConfirmDialog
+        isOpen={isCancelEditOpen}
+        title="Discard changes?"
+        message={`Leave the edit of ${editing?.code ?? 'this bill'} without saving. The original bill stays as it was.`}
+        variant="warning"
+        confirmText="Discard changes"
+        cancelText="Keep editing"
+        onConfirm={() => {
+          setIsCancelEditOpen(false);
+          clearCart();
+          setNotes('');
+          setError(null);
+          setActiveRoute('sales-history');
+        }}
+        onCancel={() => setIsCancelEditOpen(false)}
       />
 
       <BundleCreationModal
