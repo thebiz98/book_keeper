@@ -3,7 +3,9 @@ import { api } from '@/api';
 import { errorMessage } from '@/api/errors';
 import type { ItemSearchResult } from '@/types';
 import { Drawer } from '../ui/Drawer';
+import { Button } from '../ui/Button';
 import { FormActions } from '../ui/FormActions';
+import { SetStockDialog } from './SetStockDialog';
 import { TextInput } from '../ui/TextInput';
 import { BundleTable } from './BundleTable';
 import { parseOptional, validationField } from './formUtils';
@@ -43,7 +45,7 @@ const FIELD_MAP: Record<string, Field> = {
 
 const numText = (n: number | null | undefined) => (n === null || n === undefined ? '' : String(n));
 
-/** Item master create / edit drawer. Stock is read-only on edit (DD-07). */
+/** Item master create / edit drawer. Stock is changed only through the Set stock dialog (DD-07, DD-40). */
 export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   isOpen,
   onClose,
@@ -68,6 +70,9 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
   const bundleModalOpen = useRef(false);
+  const [stockOpen, setStockOpen] = useState(false);
+  const stockDialogOpen = useRef(false);
+  stockDialogOpen.current = stockOpen;
 
   // Re-seed the form only when the drawer opens or a different item is chosen, so a bundle
   // refresh (new `item` object, same id) does not wipe unsaved edits.
@@ -159,7 +164,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (bundleModalOpen.current) return;
+    if (bundleModalOpen.current || stockDialogOpen.current) return;
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void handleSave();
@@ -170,10 +175,12 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     <Drawer
       isOpen={isOpen}
       onClose={() => {
-        if (!bundleModalOpen.current) onClose();
+        if (!bundleModalOpen.current && !stockDialogOpen.current) onClose();
       }}
       title={isEdit ? `Edit Item: ${item.name}` : 'Add New Item'}
-      description={isEdit ? 'Stock is read-only here. Change it via purchases, sales, returns or adjustments.' : undefined}
+      description={
+        isEdit ? 'Stock changes through purchases, sales, returns, adjustments or Set stock.' : undefined
+      }
       width="lg"
       footer={
         <FormActions
@@ -270,9 +277,22 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
 
         {isEdit ? (
           <div className="flex items-center justify-between rounded-md bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs">
-            <span className="text-slate-500">Current stock (read-only)</span>
-            <span className="font-mono font-semibold" data-testid="readonly-stock">
-              {item.currentStock} {item.baseUnit}
+            <span className="text-slate-500">Stock on hand</span>
+            <span className="flex items-center gap-2">
+              <span className="font-mono font-semibold" data-testid="readonly-stock">
+                {item.currentStock} {item.baseUnit}
+              </span>
+              {item.itemType !== 'SERVICE' && (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  data-testid="set-stock-button"
+                  onClick={() => setStockOpen(true)}
+                >
+                  Set stock…
+                </Button>
+              )}
             </span>
           </div>
         ) : (
@@ -322,6 +342,14 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           <p className="text-xs text-slate-400">Save the item first to add packaging bundles.</p>
         )}
       </div>
+      {isEdit && (
+        <SetStockDialog
+          isOpen={stockOpen}
+          item={{ itemId: item.itemId, name: item.name, currentStock: item.currentStock, baseUnit: item.baseUnit }}
+          onClose={() => setStockOpen(false)}
+          onDone={onSaved}
+        />
+      )}
     </Drawer>
   );
 };

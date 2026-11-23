@@ -1,3 +1,4 @@
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '../testUtils';
 import { SetStockDialog } from '@/components/domain/SetStockDialog';

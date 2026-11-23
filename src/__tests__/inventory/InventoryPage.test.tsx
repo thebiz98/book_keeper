@@ -348,3 +348,54 @@ describe('Bundles sub-table', () => {
     });
   });
 });
+
+describe('Set stock entry points (DD-40)', () => {
+  const stockApi = {
+    getItemLots: vi.fn().mockResolvedValue([]), setItemStock: vi.fn().mockResolvedValue({
+      adjustmentId: 1, delta: 5, reason: 'UNRECORDED_STOCK', previousStock: 3, newStock: 8, unitCost: 4, valueChange: 20,
+    }),
+  };
+
+  it('row action opens the dialog and a save refreshes the catalog; SERVICE rows have no button', async () => {
+    const service = makeItem({ itemId: 3, name: 'Lamination', itemType: 'SERVICE', currentStock: 0 });
+    const api = installApi({
+      getItemsCatalog: vi.fn().mockResolvedValue({ items: [...rows, service], total: 3, page: 1, limit: 50 }),
+      listCategories: vi.fn().mockResolvedValue([]),
+      ...stockApi,
+    });
+    const { container } = render(<InventoryPage />);
+    await flush();
+    expect(container.querySelector('[aria-label="Set stock for Lamination"]')).toBeNull();
+    click(container.querySelector('[aria-label="Set stock for Classmate Notebook"]') as HTMLElement);
+    await flush();
+    expect(container.textContent).toContain('Set stock on hand');
+    const input = container.querySelector('input[type="number"]') as HTMLInputElement;
+    typeInto(input, '8');
+    typeInto(container.querySelectorAll('input[type="number"]')[1], '4');
+    await flush();
+    click(byText(container, 'button', /Save stock/));
+    await flush();
+    expect(api.setItemStock).toHaveBeenCalledTimes(1);
+    expect(api.getItemsCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('drawer shows stock on hand with Set stock; Cancel closes only the dialog', async () => {
+    installApi({
+      getItemsCatalog: vi.fn().mockResolvedValue({ items: rows, total: 2, page: 1, limit: 50 }),
+      listCategories: vi.fn().mockResolvedValue([]),
+      ...stockApi,
+    });
+    const { container } = render(<InventoryPage />);
+    await flush();
+    click(container.querySelector('button[aria-label="Edit Classmate Notebook"]') as HTMLElement);
+    await flush();
+    expect(container.textContent).toContain('Stock on hand');
+    click(container.querySelector('[data-testid="set-stock-button"]') as HTMLElement);
+    await flush();
+    expect(container.textContent).toContain('Set stock on hand');
+    click(byText(container, 'button', /^Cancel/));
+    await flush();
+    expect(container.textContent).not.toContain('Set stock on hand');
+    expect(container.textContent).toContain('Edit Item: Classmate Notebook');
+  });
+});
