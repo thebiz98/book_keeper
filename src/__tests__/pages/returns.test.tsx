@@ -30,7 +30,7 @@ vi.mock('@/components/domain/PartySelector', () => ({
   PartySelector: () => <span>party-selector</span>,
 }));
 
-const saleDetail = (): SaleDetailView =>
+const saleDetail = (netUnitPrice = 50): SaleDetailView =>
   ({
     sale: { id: 5, transactionCode: 'SAL-5', transactionDate: '2026-01-01', partyId: 3, partyName: 'Ram', balanceDue: 100 },
     party: null,
@@ -42,6 +42,7 @@ const saleDetail = (): SaleDetailView =>
         bundleName: null,
         returnedQuantity: 4,
         allocations: [],
+        netUnitPrice,
       },
     ],
   }) as unknown as SaleDetailView;
@@ -93,6 +94,15 @@ describe('ReturnFormCustomer', () => {
       replacementItems: [],
     });
     expect(document.querySelector('[data-testid="return-result"]')!.textContent).toContain('RET-1');
+  });
+
+  it('defaults the refund rate to the net rate and says it is net of the bill discount (FR-19)', async () => {
+    installApi({ getSaleDetails: async () => saleDetail(45), createCustomerReturn: async () => result });
+    render(<ReturnFormCustomer initialBillId={5} />);
+    await waitFor(() => bodyText().includes('Notebook'));
+    const rate = document.querySelector('input[aria-label="Return rate for Notebook"]') as HTMLInputElement;
+    expect(rate.value).toBe('45');
+    expect(document.querySelector('[data-testid="net-rate-hint"]')!.textContent).toContain('net of bill discount');
   });
 
   it('caps the quantity at the returnable amount', async () => {

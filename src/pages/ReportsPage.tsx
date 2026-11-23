@@ -101,12 +101,34 @@ export const ReportsPage: React.FC = () => {
           {p && (
             <div data-testid="pnl">
               <Line testId="pnl-gross-sales" label="Gross Sales" amount={p.grossSales} />
+              <Line testId="pnl-sales-discounts" label="Less: Sales Discounts" amount={p.salesDiscounts} negative />
               <Line testId="pnl-sales-returns" label="Less: Sales Returns" amount={p.salesReturns} negative />
               <Line testId="pnl-net-sales" label="Net Sales" amount={p.netSales} strong />
               <Line testId="pnl-cogs" label="Less: FIFO COGS (net of returns)" amount={p.cogs} negative />
               <Line testId="pnl-gross-profit" label="Gross Profit" amount={p.grossProfit} strong />
+              <Line testId="pnl-other-income" label="Add: Other Income" amount={p.otherIncome} />
+              {p.otherIncome > 0 && (
+                <ul className="ml-4 mb-1 text-xs text-slate-500">
+                  <li data-testid="pnl-sale-charges" className="flex items-center justify-between py-0.5">
+                    <span>Charges collected on sales</span>
+                    <CurrencyDisplay amount={p.saleChargesIncome} size="sm" />
+                  </li>
+                  <li data-testid="pnl-purchase-discounts" className="flex items-center justify-between py-0.5">
+                    <span>Discounts received on purchases</span>
+                    <CurrencyDisplay amount={p.purchaseDiscountsIncome} size="sm" />
+                  </li>
+                </ul>
+              )}
               <Line testId="pnl-losses" label="Less: Inventory Losses" amount={p.inventoryLosses} negative />
               <Line testId="pnl-opex" label="Less: Operating Expenses" amount={p.operatingExpenses} negative />
+              {p.purchaseChargesExpense > 0 && (
+                <ul className="ml-4 mb-1 text-xs text-slate-500">
+                  <li data-testid="pnl-purchase-charges" className="flex items-center justify-between py-0.5">
+                    <span>Purchase charges paid</span>
+                    <CurrencyDisplay amount={p.purchaseChargesExpense} size="sm" />
+                  </li>
+                </ul>
+              )}
               {p.expensesByType.length > 0 && (
                 <ul data-opex-breakdown className="ml-4 mb-1 text-xs text-slate-500">
                   {p.expensesByType.map((t) => (

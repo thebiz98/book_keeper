@@ -41,7 +41,10 @@ interface BillLine {
   name: string;
   sold: number;
   returned: number;
+  /** Sold rate net of the bill discount share (FR-19): the refund cap. */
   soldRate: number;
+  /** Rate on the bill before the bill-level discount. */
+  listRate: number;
   qty: number;
   rate: number;
   condition: StockCondition;
@@ -107,9 +110,10 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
             name: it.itemName,
             sold: it.saleItem.quantity,
             returned: it.returnedQuantity,
-            soldRate: it.saleItem.unitPrice,
+            soldRate: it.netUnitPrice,
+            listRate: it.saleItem.unitPrice,
             qty: 0,
-            rate: it.saleItem.unitPrice,
+            rate: it.netUnitPrice,
             condition: 'RESTOCKABLE',
           }))
         );
@@ -310,6 +314,11 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
                       <TableCell className="text-right font-mono">{returnable(l)}</TableCell>
                       <TableCell className="text-right">
                         <CurrencyDisplay amount={l.soldRate} size="sm" />
+                        {l.soldRate < l.listRate - 0.005 && (
+                          <div className="text-[10px] text-slate-400" data-testid="net-rate-hint">
+                            net of bill discount (sold ₹{l.listRate})
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell>
                         <NumericInput

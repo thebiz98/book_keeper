@@ -94,6 +94,19 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
             render: (r: Row) => (r as PurchaseHistoryRow).supplierInvoiceRef ?? '-',
           },
         ]),
+    {
+      key: 'adj',
+      header: 'Chg / Disc',
+      align: 'right',
+      render: (r) =>
+        r.chargesTotal || r.discountsTotal ? (
+          <span className="font-mono text-xs" data-testid="adj-cell">
+            +₹{r.chargesTotal.toFixed(2)} / −₹{r.discountsTotal.toFixed(2)}
+          </span>
+        ) : (
+          '—'
+        ),
+    },
     { key: 'total', header: 'Total', align: 'right', render: (r) => <CurrencyDisplay amount={r.totalAmount} /> },
     { key: 'paid', header: 'Paid', align: 'right', render: (r) => <CurrencyDisplay amount={r.paidAmount} /> },
     {

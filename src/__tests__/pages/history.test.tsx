@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { SalesHistoryPage } from '@/pages/SalesHistoryPage';
+import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
+import type { SaleDetailView } from '@/types';
 import { PurchaseHistoryPage } from '@/pages/PurchaseHistoryPage';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText } from './helpers';
 import type { SaleHistoryRow } from '@/types';
@@ -107,5 +109,44 @@ describe('Purchase history', () => {
     await waitFor(() => bodyText().includes('PUR-1'));
     expect(api.getPurchasesHistory).toBeDefined();
     expect(bodyText()).toContain('INV-77');
+  });
+});
+
+describe('Bill charges in history (FR-19)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('shows the Chg / Disc column', async () => {
+    installApi({
+      getSalesHistory: { items: [{ ...row(1, 0), chargesTotal: 50, discountsTotal: 20, itemsSubtotal: 200, totalAmount: 230 }, row(2, 0)], total: 2, page: 1, limit: 25 },
+    });
+    render(<SalesHistoryPage />);
+    await waitFor(() => !!document.querySelector('[data-testid="adj-cell"]'));
+    expect(bodyText()).toContain('Chg / Disc');
+    const cells = Array.from(document.querySelectorAll('[data-testid="adj-cell"]')).map((c) => c.textContent);
+    expect(cells).toEqual(['+₹50.00 / −₹20.00']);
+  });
+
+  it('the drawer lists the charge lines and the subtotal breakdown', async () => {
+    const detail = {
+      sale: { id: 1, transactionCode: 'SAL-1', transactionDate: '2026-02-01', partyName: null, paymentStatus: 'PAID', totalAmount: 230, paidAmount: 230, balanceDue: 0, itemsSubtotal: 200, chargesTotal: 50, discountsTotal: 20 },
+      party: null,
+      settlements: [],
+      items: [],
+      charges: [
+        { id: 1, transactionType: 'SALE', transactionId: 1, chargeTypeId: 1, chargeName: 'Transport', effect: 'CHARGE', amount: 50 },
+        { id: 2, transactionType: 'SALE', transactionId: 1, chargeTypeId: 3, chargeName: 'Cash Discount', effect: 'DISCOUNT', amount: 20 },
+      ],
+    } as unknown as SaleDetailView;
+    installApi({ getSaleDetails: detail });
+    render(<BillDetailDrawer kind="SALE" billId={1} onClose={() => {}} />);
+    await waitFor(() => !!document.querySelector('[data-testid="bill-charges"]'));
+    const text = document.querySelector('[data-testid="bill-charges"]')!.textContent ?? '';
+    expect(text).toContain('Transport');
+    expect(text).toContain('Cash Discount');
+    expect(document.querySelector('[data-testid="bill-items-subtotal"]')!.textContent).toContain('200.00');
+    expect(document.querySelector('[data-testid="bill-charges-total"]')!.textContent).toContain('50.00');
+    expect(document.querySelector('[data-testid="bill-discounts-total"]')!.textContent).toContain('20.00');
   });
 });

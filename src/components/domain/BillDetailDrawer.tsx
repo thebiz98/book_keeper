@@ -84,6 +84,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   }, [kind, billId]);
 
   const head = sale?.sale ?? purchase?.purchase ?? null;
+  const charges = sale?.charges ?? purchase?.charges ?? [];
   const supplierRef = purchase?.purchase.supplierInvoiceRef ?? null;
 
   return (
@@ -179,7 +180,44 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
             </TableBody>
           </Table>
 
-          <div className="flex flex-col items-end gap-0.5">
+          {charges.length > 0 && (
+            <div data-testid="bill-charges">
+              <h3 className="font-semibold mb-1">Charges &amp; discounts</h3>
+              <Table dense scroll="none">
+                <TableBody>
+                  {charges.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="py-1 font-medium">{c.chargeName}</TableCell>
+                      <TableCell>{c.effect === 'CHARGE' ? 'Charge' : 'Discount'}</TableCell>
+                      <TableCell className="text-right font-mono">
+                        {c.effect === 'CHARGE' ? '+' : '−'}
+                        <CurrencyDisplay amount={c.amount} size="sm" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          <div className="flex flex-col items-end gap-0.5" data-testid="bill-totals-block">
+            {(head.chargesTotal > 0 || head.discountsTotal > 0) && (
+              <>
+                <div data-testid="bill-items-subtotal">
+                  Items subtotal: <CurrencyDisplay amount={head.itemsSubtotal} size="sm" />
+                </div>
+                {head.chargesTotal > 0 && (
+                  <div data-testid="bill-charges-total">
+                    + Charges: <CurrencyDisplay amount={head.chargesTotal} size="sm" />
+                  </div>
+                )}
+                {head.discountsTotal > 0 && (
+                  <div data-testid="bill-discounts-total">
+                    − Discounts: <CurrencyDisplay amount={head.discountsTotal} size="sm" />
+                  </div>
+                )}
+              </>
+            )}
             <div>
               Total: <CurrencyDisplay amount={head.totalAmount} size="sm" />
             </div>
