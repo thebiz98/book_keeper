@@ -16,6 +16,10 @@ import { Button } from '../ui/Button';
 import { useAppStore } from '@/store/useAppStore';
 import { useCartStore } from '@/store/useCartStore';
 import { queueBillEdit } from '@/pages/billEditHandoff';
+import { Pencil, Trash2, DollarSign } from 'lucide-react';
+import { SettlementModal } from './SettlementModal';
+import { SettlementEditModal } from './SettlementEditModal';
+import { refreshAppMetrics } from './navParams';
 
 export interface BillDetailDrawerProps {
   kind: TransactionType;
@@ -40,33 +44,76 @@ const KIND_LABEL: Record<string, string> = {
   REFUND_IN: 'Refund received',
 };
 
-export const LedgerRows: React.FC<{ rows: PaymentSettlement[] }> = ({ rows }) =>
-  rows.length === 0 ? (
-    <p className="text-xs text-slate-500">No payments recorded.</p>
-  ) : (
+export interface LedgerRowsProps {
+  rows: PaymentSettlement[];
+  /** Edit / delete icons show on SETTLEMENT rows only (D8). */
+  onEditSettlement?: (row: PaymentSettlement) => void;
+  onDeleteSettlement?: (row: PaymentSettlement) => void;
+  /** Adds a "Bill" column (party ledger, where rows span many bills). */
+  billCodeOf?: (row: PaymentSettlement) => string;
+}
+
+export const LedgerRows: React.FC<LedgerRowsProps> = ({ rows, onEditSettlement, onDeleteSettlement, billCodeOf }) => {
+  if (rows.length === 0) return <p className="text-xs text-slate-500">No payments recorded.</p>;
+  const hasActions = !!(onEditSettlement || onDeleteSettlement);
+  return (
     <Table dense scroll="page">
       <TableHeader>
         <TableRow className="text-left text-slate-400">
           <TableHead className="py-1">Date</TableHead>
+          {billCodeOf && <TableHead>Bill</TableHead>}
           <TableHead>Kind</TableHead>
           <TableHead>Mode</TableHead>
           <TableHead className="text-right">Amount</TableHead>
+          {hasActions && <TableHead className="text-right w-16"></TableHead>}
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((r) => (
-          <TableRow key={r.id} >
+          <TableRow key={r.id}>
             <TableCell className="py-1 font-mono">{r.settlementDate}</TableCell>
+            {billCodeOf && <TableCell className="font-mono">{billCodeOf(r)}</TableCell>}
             <TableCell>{KIND_LABEL[r.kind] ?? r.kind}</TableCell>
             <TableCell>{r.paymentMode ?? '-'}</TableCell>
             <TableCell className="text-right">
               <CurrencyDisplay amount={r.amountPaid} size="sm" />
             </TableCell>
+            {hasActions && (
+              <TableCell className="text-right">
+                {r.kind === 'SETTLEMENT' && (
+                  <span className="inline-flex gap-1">
+                    {onEditSettlement && (
+                      <button
+                        type="button"
+                        aria-label="Edit payment"
+                        data-testid={`settlement-edit-${r.id}`}
+                        className="p-1 rounded text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        onClick={() => onEditSettlement(r)}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    )}
+                    {onDeleteSettlement && (
+                      <button
+                        type="button"
+                        aria-label="Delete payment"
+                        data-testid={`settlement-delete-${r.id}`}
+                        className="p-1 rounded text-slate-500 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        onClick={() => onDeleteSettlement(r)}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </span>
+                )}
+              </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>
     </Table>
   );
+};
 
 export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId, onClose, onChanged }) => {
   const [sale, setSale] = useState<SaleDetailView | null>(null);
@@ -78,6 +125,11 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const setActiveRoute = useAppStore((s) => s.setActiveRoute);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [editingRow, setEditingRow] = useState<PaymentSettlement | null>(null);
+  const [deletingRow, setDeletingRow] = useState<PaymentSettlement | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
 
   useEffect(() => {
     if (billId === null) return;
@@ -89,6 +141,10 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     setActionError(null);
     setConfirmDelete(false);
     setConfirmDiscard(false);
+    setSettleOpen(false);
+    setEditingRow(null);
+    setDeletingRow(null);
+    setRowError(null);
     setLoading(true);
     api
       .getBillEditGuard(kind, billId)
@@ -102,7 +158,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     return () => {
       live = false;
     };
-  }, [kind, billId]);
+  }, [kind, billId, reloadKey]);
 
   const startEdit = () => {
     if (billId === null) return;
@@ -129,7 +185,28 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     }
   };
 
+  /** After a settle / edit / delete: reload this drawer, tell the caller, refresh dashboard metrics. */
+  const afterMoneyChange = () => {
+    setReloadKey((k) => k + 1);
+    onChanged?.();
+    refreshAppMetrics();
+  };
+  const doDeleteRow = async () => {
+    if (!deletingRow) return;
+    setRowError(null);
+    try {
+      await api.deleteSettlement(deletingRow.id);
+      setDeletingRow(null);
+      afterMoneyChange();
+    } catch (e) {
+      setRowError(errorMessage(e));
+    }
+  };
+
   const head = sale?.sale ?? purchase?.purchase ?? null;
+  const settlements = sale?.settlements ?? purchase?.settlements ?? [];
+  const canSettle = !!head && head.balanceDue > 0 && head.partyId !== null;
+  const rowMax = (r: PaymentSettlement) => (head ? head.balanceDue + r.amountPaid : r.amountPaid);
   const charges = sale?.charges ?? purchase?.charges ?? [];
   const supplierRef = purchase?.purchase.supplierInvoiceRef ?? null;
 
@@ -151,6 +228,17 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
               </ul>
             )}
             <div className="flex justify-end gap-2">
+              {canSettle && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  data-testid="bill-settle"
+                  leftIcon={<DollarSign size={12} />}
+                  onClick={() => setSettleOpen(true)}
+                >
+                  Settle
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -311,7 +399,14 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
 
           <div>
             <h3 className="font-semibold mb-1">Ledger</h3>
-            <LedgerRows rows={sale?.settlements ?? purchase?.settlements ?? []} />
+            <LedgerRows
+              rows={settlements}
+              onEditSettlement={setEditingRow}
+              onDeleteSettlement={(r) => {
+                setRowError(null);
+                setDeletingRow(r);
+              }}
+            />
           </div>
         </div>
       )}
@@ -336,6 +431,48 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
           )}
         </ConfirmDialog>
       )}
+      {head && canSettle && head.partyId !== null && settleOpen && (
+        <SettlementModal
+          isOpen
+          onClose={() => setSettleOpen(false)}
+          partyId={head.partyId}
+          partyName={head.partyName ?? ''}
+          totalDue={head.balanceDue}
+          transactionType={kind}
+          transactionId={head.id}
+          billCode={head.transactionCode}
+          onSettled={afterMoneyChange}
+        />
+      )}
+      <SettlementEditModal
+        settlement={editingRow}
+        billCode={head?.transactionCode}
+        maxAmount={editingRow ? rowMax(editingRow) : 0}
+        onClose={() => setEditingRow(null)}
+        onSaved={afterMoneyChange}
+      />
+      <ConfirmDialog
+        isOpen={deletingRow !== null}
+        variant="danger"
+        title="Delete this payment?"
+        message={
+          deletingRow
+            ? `Removes the payment of ₹${deletingRow.amountPaid.toFixed(2)} against ${head?.transactionCode ?? 'this bill'}. The bill balance goes back up and cash records drop by ₹${deletingRow.amountPaid.toFixed(2)}.`
+            : ''
+        }
+        confirmText="Delete payment"
+        onConfirm={doDeleteRow}
+        onCancel={() => {
+          setDeletingRow(null);
+          setRowError(null);
+        }}
+      >
+        {rowError && (
+          <p role="alert" className="mt-2 text-xs text-rose-600 dark:text-rose-400">
+            {rowError}
+          </p>
+        )}
+      </ConfirmDialog>
       <ConfirmDialog
         isOpen={confirmDiscard}
         variant="warning"
