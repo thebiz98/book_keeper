@@ -3,7 +3,7 @@ import { api } from '@/api';
 import { errorMessage } from '@/api/errors';
 import type { ItemSearchResult } from '@/types';
 import { Drawer } from '../ui/Drawer';
-import { Button } from '../ui/Button';
+import { FormActions } from '../ui/FormActions';
 import { TextInput } from '../ui/TextInput';
 import { BundleTable } from './BundleTable';
 import { parseOptional, validationField } from './formUtils';
@@ -167,14 +167,13 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
       description={isEdit ? 'Stock is read-only here. Change it via purchases, sales, returns or adjustments.' : undefined}
       width="lg"
       footer={
-        <>
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="sm" onClick={() => void handleSave()} isLoading={saving} hotkey="Ctrl+Enter">
-            {isEdit ? 'Save Changes' : 'Save Item'}
-          </Button>
-        </>
+        <FormActions
+          onSave={() => void handleSave()}
+          onCancel={onClose}
+          isSubmitting={saving}
+          saveLabel={isEdit ? 'Save Changes' : 'Save Item'}
+          saveHotkey="Ctrl+Enter"
+        />
       }
     >
       <div className="flex flex-col gap-3" onKeyDown={onKeyDown}>
