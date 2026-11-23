@@ -107,3 +107,34 @@ fn sales_history_honours_start_end_date_filter() {
         let _ = std::fs::remove_file(format!("{}{}", path.display(), ext));
     }
 }
+
+#[test]
+fn tc_exp_015_expense_type_index_is_repaired_at_startup() {
+    use book_keeper::core::dtos::{CreateExpenseTypePayload, ExpensePayload};
+    let path = std::env::temp_dir().join(format!("bk_smoke_exp_{}.db", uuid::Uuid::new_v4()));
+    {
+        let state = build_sqlite_app_state(&path).expect("build state");
+        for n in ["Printer Ink", "Electricity Bill"] {
+            state.expense_service.create_expense_type(CreateExpenseTypePayload { name: n.into() }).unwrap();
+        }
+        let t = state.expense_service.search_expense_types("elec", None).unwrap()[0].id;
+        let e = state
+            .expense_service
+            .create_expense(ExpensePayload { expense_date: "2026-11-01".into(), expense_type_id: t, amount: 5.0, notes: None })
+            .unwrap();
+        assert_eq!(e.expense_code, "EXP-1001");
+    }
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute("DELETE FROM expense_type_search_fts", []).unwrap();
+    }
+    let state = build_sqlite_app_state(&path).expect("rebuild state");
+    let hits = state.expense_service.search_expense_types("pri", None).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].name, "Printer Ink");
+    assert_eq!(state.expense_service.search_expense_types("elec", None).unwrap().len(), 1);
+    drop(state);
+    for ext in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", path.display(), ext));
+    }
+}

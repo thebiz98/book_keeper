@@ -151,3 +151,42 @@ fn all_scope_empties_everything_but_the_shop_profile() {
     }).unwrap();
     assert_eq!(id, 1);
 }
+
+fn seed_expenses(app: &AppState) -> i64 {
+    use book_keeper::core::dtos::{CreateExpenseTypePayload, ExpensePayload};
+    let t = app.expense_service.create_expense_type(CreateExpenseTypePayload { name: "Tea".into() }).unwrap();
+    for amt in [10.0, 20.0] {
+        app.expense_service
+            .create_expense(ExpensePayload { expense_date: "2026-11-21".into(), expense_type_id: t.id, amount: amt, notes: None })
+            .unwrap();
+    }
+    t.id
+}
+
+#[test]
+fn tc_exp_014_transactions_scope_clears_expenses_and_restarts_codes_but_keeps_types() {
+    let e = env(true);
+    seed(&e.app);
+    seed_expenses(&e.app);
+    assert_eq!(e.app.expense_service.get_next_expense_code().unwrap(), "EXP-1003");
+    let summary = e.app.data_reset_service.reset(ResetScope::Transactions, e.backups.to_str().unwrap()).unwrap();
+    assert!(summary.deleted.iter().any(|d| d.table == "expenses" && d.rows == 2));
+    assert_eq!(count(&e.db, "expenses"), 0);
+    assert_eq!(count(&e.db, "expense_types"), 1);
+    assert_eq!(e.app.expense_service.get_next_expense_code().unwrap(), "EXP-1001", "codes restart");
+    assert_eq!(e.app.expense_service.search_expense_types("te", None).unwrap().len(), 1, "types stay searchable");
+}
+
+#[test]
+fn tc_exp_014_all_scope_clears_types_index_and_code_sequences() {
+    let e = env(true);
+    seed(&e.app);
+    seed_expenses(&e.app);
+    let summary = e.app.data_reset_service.reset(ResetScope::All, e.backups.to_str().unwrap()).unwrap();
+    assert!(summary.deleted.iter().any(|d| d.table == "expense_types" && d.rows == 1));
+    assert_eq!(count(&e.db, "expense_types"), 0);
+    assert_eq!(count(&e.db, "expense_type_search_fts"), 0);
+    assert_eq!(count(&e.db, "code_sequences"), 0);
+    assert!(e.app.expense_service.search_expense_types("te", None).unwrap().is_empty());
+    assert_eq!(e.app.sale_service.get_next_sale_code().unwrap(), "SAL-1001");
+}

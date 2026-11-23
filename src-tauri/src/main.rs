@@ -89,6 +89,15 @@ fn main() {
             party_controller::update_party,
             settings_controller::update_shop_settings,
             settings_controller::verify_database_integrity,
+            expense_controller::search_expense_types,
+            expense_controller::list_expense_types,
+            expense_controller::create_expense_type,
+            expense_controller::update_expense_type,
+            expense_controller::get_next_expense_code,
+            expense_controller::create_expense,
+            expense_controller::update_expense,
+            expense_controller::delete_expense,
+            expense_controller::list_expenses,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
