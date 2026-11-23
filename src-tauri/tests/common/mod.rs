@@ -6,6 +6,7 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 
 pub mod fixtures;
+pub mod invariants;
 pub mod ledger;
 pub mod stock;
 pub mod vedbill_fixture;
