@@ -1,3 +1,4 @@
+use crate::core::constants::EPS;
 use crate::core::entities::{SaleStockAllocation, StockOutflowAllocation};
 use crate::core::error::AppError;
 use crate::core::value_objects::OutflowSourceType;
@@ -74,6 +75,34 @@ pub trait InventoryAllocationStrategy: Send + Sync {
         item_id: i64,
         quantity: f64,
     ) -> Result<OutflowDepletionResult, AppError>;
+
+    /// FR-20: pure replay of the customer-return reversal walk. `allocs` are a sale line's
+    /// allocations (any order), `qtys` the quantities of its `RETURNED` lines in id order. Returns,
+    /// per quantity, the `(allocation_id, take)` pairs the real walk took (latest allocation id
+    /// first, capacity `quantity_depleted`). Valid while allocations are immutable and returns are
+    /// deleted newest first; used to undo a return and to recompute `RETURN_ITEM.cost_amount`.
+    fn replay_reversals(&self, allocs: &[SaleStockAllocation], qtys: &[f64]) -> Vec<Vec<(i64, f64)>> {
+        let mut caps: Vec<(i64, f64)> = allocs.iter().map(|a| (a.id, a.quantity_depleted)).collect();
+        caps.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+        let mut out = Vec::with_capacity(qtys.len());
+        for &q in qtys {
+            let mut left = q;
+            let mut takes = Vec::new();
+            for (id, cap) in caps.iter_mut() {
+                if left <= EPS {
+                    break;
+                }
+                let take = cap.min(left);
+                if take > EPS {
+                    *cap -= take;
+                    left -= take;
+                    takes.push((*id, take));
+                }
+            }
+            out.push(takes);
+        }
+        out
+    }
 }
 
 impl<T: InventoryAllocationStrategy + ?Sized> InventoryAllocationStrategy for std::sync::Arc<T> {
@@ -115,5 +144,9 @@ impl<T: InventoryAllocationStrategy + ?Sized> InventoryAllocationStrategy for st
         quantity: f64,
     ) -> Result<OutflowDepletionResult, AppError> {
         (**self).deplete_lots_for_outflow(uow, source_type, source_id, item_id, quantity)
+    }
+
+    fn replay_reversals(&self, allocs: &[SaleStockAllocation], qtys: &[f64]) -> Vec<Vec<(i64, f64)>> {
+        (**self).replay_reversals(allocs, qtys)
     }
 }

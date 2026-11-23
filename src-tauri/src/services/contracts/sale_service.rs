@@ -1,5 +1,6 @@
 use crate::core::dtos::{
-    CreateSalePayload, Paginated, SaleDetailView, SaleHistoryRow, SaleSummaryResponse, SalesHistoryFilter,
+    BillEditGuard, CreateSalePayload, DeleteBillResult, Paginated, SaleDetailView, SaleHistoryRow,
+    SaleSummaryResponse, SalesHistoryFilter,
 };
 use crate::core::error::AppError;
 
@@ -18,6 +19,16 @@ pub trait SaleService: Send + Sync {
 
     /// Retrieves detailed breakdown of a sale including lines, bundles, and FIFO cost breakdown.
     fn get_sale_details(&self, sale_id: i64) -> Result<SaleDetailView, AppError>;
+
+    /// FR-20: replaces a sale (same id and code): reverse the old stock, ledger and charges, then
+    /// repost the payload through the create rules, in one transaction. `BillLocked` when guarded.
+    fn update_sale(&self, sale_id: i64, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError>;
+
+    /// FR-20: deletes a sale and every effect it had. The code is never reissued.
+    fn delete_sale(&self, sale_id: i64) -> Result<DeleteBillResult, AppError>;
+
+    /// FR-20 pre-check for the UI (same evaluation as the commands).
+    fn get_sale_edit_guard(&self, sale_id: i64) -> Result<BillEditGuard, AppError>;
 }
 
 impl<T: SaleService + ?Sized> SaleService for std::sync::Arc<T> {
@@ -38,5 +49,17 @@ impl<T: SaleService + ?Sized> SaleService for std::sync::Arc<T> {
 
     fn get_sale_details(&self, sale_id: i64) -> Result<SaleDetailView, AppError> {
         (**self).get_sale_details(sale_id)
+    }
+
+    fn update_sale(&self, sale_id: i64, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError> {
+        (**self).update_sale(sale_id, payload)
+    }
+
+    fn delete_sale(&self, sale_id: i64) -> Result<DeleteBillResult, AppError> {
+        (**self).delete_sale(sale_id)
+    }
+
+    fn get_sale_edit_guard(&self, sale_id: i64) -> Result<BillEditGuard, AppError> {
+        (**self).get_sale_edit_guard(sale_id)
     }
 }

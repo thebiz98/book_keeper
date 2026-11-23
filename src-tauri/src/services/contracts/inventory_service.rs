@@ -6,6 +6,36 @@ use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, OutflowSourceType};
 use crate::data::contracts::unit_of_work::TransactionContext;
 use super::inventory_allocation_strategy::DepletionResult;
+use crate::core::entities::ReturnTransaction;
+
+/// New values of a purchase lot during a bill edit (FR-20). Quantities are base units.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LotEdit {
+    pub item_id: i64,
+    pub item_name: String,
+    pub pack_label: Option<String>,
+    pub pack_quantity: f64,
+    pub quantity: f64,
+    pub unit_cost: f64,
+    pub total_amount: f64,
+}
+
+/// One stock effect of a return to undo (FR-20), produced by a dry run and applied after the
+/// return's rows are deleted.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReturnUndoStep {
+    /// `returned_quantity -= take` per allocation; when `restock`, the same units leave the lots.
+    Unreverse { sale_item_id: i64, item_id: i64, takes: Vec<(i64, f64)>, restock: bool },
+    /// Delete the `RETURN` lot of an unlinked restockable line (and its header when empty).
+    RemoveReturnLot { lot_id: i64 },
+    /// Put the units of a replacement / vendor-return outflow back on their lots.
+    RestoreOutflow { source_type: OutflowSourceType, source_id: i64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ReturnUndoPlan {
+    pub steps: Vec<ReturnUndoStep>,
+}
 
 /// Sole writer of `items.current_stock` / `is_low_stock`, lot `remaining_quantity`, allocation
 /// `returned_quantity` and the outflow/allocation rows (NFR-05). Invariant after every call:
@@ -132,6 +162,24 @@ pub trait InventoryService: Send + Sync {
         &self,
         uow: &mut dyn TransactionContext,
     ) -> Result<Vec<(i64, f64, f64)>, AppError>;
+
+    /// FR-20: undoes the stock effect of a sale bill: every allocation's `depleted - returned`
+    /// goes back to its lot, the allocations are deleted and the cache is raised per item.
+    fn reverse_sale_bill_stock(&self, uow: &mut dyn TransactionContext, sale_id: i64) -> Result<(), AppError>;
+
+    /// FR-20: updates an existing purchase lot in place (id kept). Enforces the quantity floor and
+    /// the item / vendor-return rules and re-costs dependants on a cost change (`BillLocked`).
+    fn edit_purchase_lot(&self, uow: &mut dyn TransactionContext, lot_id: i64, edit: &LotEdit) -> Result<(), AppError>;
+
+    /// FR-20: deletes an unreferenced lot and lowers the cache by its remaining quantity.
+    fn remove_purchase_lot(&self, uow: &mut dyn TransactionContext, lot_id: i64) -> Result<(), AppError>;
+
+    /// FR-20 dry run: what deleting the return would undo; `BillLocked` (`RESTOCKED_CONSUMED`,
+    /// `RETURN_LOT_USED`) when impossible. Writes nothing.
+    fn plan_return_undo(&self, uow: &mut dyn TransactionContext, r: &ReturnTransaction) -> Result<ReturnUndoPlan, AppError>;
+
+    /// FR-20: applies a plan from [`Self::plan_return_undo`]. Call after the return's lines are deleted.
+    fn apply_return_undo(&self, uow: &mut dyn TransactionContext, plan: &ReturnUndoPlan) -> Result<(), AppError>;
 }
 
 impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
@@ -254,5 +302,25 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
         uow: &mut dyn TransactionContext,
     ) -> Result<Vec<(i64, f64, f64)>, AppError> {
         (**self).repair_stock_cache(uow)
+    }
+
+    fn reverse_sale_bill_stock(&self, uow: &mut dyn TransactionContext, sale_id: i64) -> Result<(), AppError> {
+        (**self).reverse_sale_bill_stock(uow, sale_id)
+    }
+
+    fn edit_purchase_lot(&self, uow: &mut dyn TransactionContext, lot_id: i64, edit: &LotEdit) -> Result<(), AppError> {
+        (**self).edit_purchase_lot(uow, lot_id, edit)
+    }
+
+    fn remove_purchase_lot(&self, uow: &mut dyn TransactionContext, lot_id: i64) -> Result<(), AppError> {
+        (**self).remove_purchase_lot(uow, lot_id)
+    }
+
+    fn plan_return_undo(&self, uow: &mut dyn TransactionContext, r: &ReturnTransaction) -> Result<ReturnUndoPlan, AppError> {
+        (**self).plan_return_undo(uow, r)
+    }
+
+    fn apply_return_undo(&self, uow: &mut dyn TransactionContext, plan: &ReturnUndoPlan) -> Result<(), AppError> {
+        (**self).apply_return_undo(uow, plan)
     }
 }

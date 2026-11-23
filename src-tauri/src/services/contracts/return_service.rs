@@ -1,6 +1,6 @@
 use crate::core::dtos::{
-    CustomerReturnPayload, Paginated, ReturnDetailView, ReturnResult, ReturnsFilter,
-    VendorReturnPayload,
+    BillEditGuard, CustomerReturnPayload, DeleteReturnResult, Paginated, ReturnDetailView, ReturnResult,
+    ReturnsFilter, VendorReturnPayload,
 };
 use crate::core::entities::ReturnTransaction;
 use crate::core::error::AppError;
@@ -13,6 +13,12 @@ pub trait ReturnService: Send + Sync {
     /// Newest first, paginated in SQL (`page` 1-based, default 1; `limit` default 50).
     fn list_returns(&self, filter: ReturnsFilter) -> Result<Paginated<ReturnTransaction>, AppError>;
     fn get_return_details(&self, return_id: i64) -> Result<ReturnDetailView, AppError>;
+
+    /// FR-20: deletes a return and reverses its stock and ledger effects (newest first per bill).
+    fn delete_return(&self, return_id: i64) -> Result<DeleteReturnResult, AppError>;
+
+    /// FR-20 pre-check for the UI (same evaluation as the command).
+    fn get_return_delete_guard(&self, return_id: i64) -> Result<BillEditGuard, AppError>;
 }
 
 impl<T: ReturnService + ?Sized> ReturnService for std::sync::Arc<T> {
@@ -34,5 +40,13 @@ impl<T: ReturnService + ?Sized> ReturnService for std::sync::Arc<T> {
 
     fn get_return_details(&self, return_id: i64) -> Result<ReturnDetailView, AppError> {
         (**self).get_return_details(return_id)
+    }
+
+    fn delete_return(&self, return_id: i64) -> Result<DeleteReturnResult, AppError> {
+        (**self).delete_return(return_id)
+    }
+
+    fn get_return_delete_guard(&self, return_id: i64) -> Result<BillEditGuard, AppError> {
+        (**self).get_return_delete_guard(return_id)
     }
 }

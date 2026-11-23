@@ -5,14 +5,21 @@ use crate::core::dtos::{
     StockAdjustmentResult,
 };
 use crate::core::money::round2;
-use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction, StockAdjustment, StockOutflowAllocation};
+use crate::core::entities::{
+    Item, PurchaseItem, PurchaseTransaction, ReturnTransaction, StockAdjustment, StockOutflowAllocation,
+};
 use crate::core::error::AppError;
-use crate::core::value_objects::{AdjustmentReason, ItemType, LotSource, OutflowSourceType, PaymentStatus};
+use crate::core::value_objects::{
+    AdjustmentReason, ItemType, LotSource, OutflowSourceType, PaymentStatus, ReturnLineType, ReturnType,
+    SettlementType, StockCondition,
+};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_allocation_strategy::{
     DepletionResult, InventoryAllocationStrategy,
 };
-use crate::services::contracts::inventory_service::InventoryService;
+use crate::services::contracts::inventory_service::{
+    InventoryService, LotEdit, ReturnUndoPlan, ReturnUndoStep,
+};
 
 /// Sole writer of the stock cache and lot/allocation state. The strategy is injected (DD-08);
 /// this type never names a concrete strategy. It reads items through `uow.items()` rather than
@@ -63,7 +70,82 @@ fn require_stockable(item: &Item) -> Result<(), AppError> {
     Ok(())
 }
 
+fn locked(code: &str, message: impl Into<String>) -> AppError {
+    AppError::BillLocked { code: code.to_string(), message: message.into() }
+}
+
 impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
+    /// FR-20: pushes a new lot cost into everything costed from the lot: sale allocations,
+    /// adjustment / replacement outflow rows, and the stored `RETURN_ITEM.cost_amount` of linked
+    /// customer lines (replayed) and replacement lines (outflow rows walked in id order).
+    fn recost_lot(&self, uow: &mut dyn TransactionContext, lot_id: i64, cost: f64) -> Result<(), AppError> {
+        uow.allocations().update_unit_cost_for_lot(lot_id, cost)?;
+        uow.outflow_allocations().update_unit_cost_for_lot(lot_id, cost)?;
+        for sid in uow.allocations().sale_item_ids_for_lot(lot_id)? {
+            let ris = uow.returns().list_customer_returned_items_for_sale_item(sid)?;
+            if ris.is_empty() {
+                continue;
+            }
+            let allocs = uow.allocations().find_by_sale_item_id(sid)?;
+            let qtys: Vec<f64> = ris.iter().map(|r| r.quantity).collect();
+            let takes = self.strategy.replay_reversals(&allocs, &qtys);
+            for (ri, t) in ris.iter().zip(takes) {
+                let c: f64 = t
+                    .iter()
+                    .map(|(aid, q)| q * allocs.iter().find(|a| a.id == *aid).map(|a| a.unit_cost).unwrap_or(0.0))
+                    .sum();
+                uow.returns().update_return_item_cost(ri.id, round2(c))?;
+            }
+        }
+        for rid in uow.outflow_allocations().source_ids_for_lot(lot_id, OutflowSourceType::Replacement)? {
+            let outs = uow.outflow_allocations().find_by_source(OutflowSourceType::Replacement, rid)?;
+            let lines: Vec<_> = uow
+                .returns()
+                .find_items_by_return_id(rid)?
+                .into_iter()
+                .filter(|i| i.line_type == ReturnLineType::ReplacementIssued)
+                .collect();
+            let mut left: Vec<(f64, f64)> = outs.iter().map(|o| (o.quantity_depleted, o.unit_cost)).collect();
+            for line in lines {
+                let mut need = line.quantity;
+                let mut c = 0.0;
+                for (qty, unit) in left.iter_mut() {
+                    if need <= EPS {
+                        break;
+                    }
+                    let take = qty.min(need);
+                    if take > EPS {
+                        *qty -= take;
+                        need -= take;
+                        c += take * *unit;
+                    }
+                }
+                uow.returns().update_return_item_cost(line.id, round2(c))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The `RETURN` lot an unlinked restockable return line created: the recorded link, else the
+    /// legacy `RTL-` header-notes lookup (first unclaimed lot of the item with the line's quantity).
+    fn resolve_return_lot(
+        uow: &mut dyn TransactionContext,
+        r: &ReturnTransaction,
+        ri: &crate::core::entities::ReturnItem,
+        claimed: &[i64],
+    ) -> Result<i64, AppError> {
+        if let Some(l) = ri.purchase_item_id {
+            return Ok(l);
+        }
+        let note = format!("Return {}", r.return_code);
+        uow.purchases()
+            .find_return_lots_by_note(&note, ri.item_id)?
+            .into_iter()
+            .find(|l| !claimed.contains(&l.id) && (l.quantity - ri.quantity).abs() <= EPS)
+            .map(|l| l.id)
+            .ok_or_else(|| locked("RETURN_LOT_USED", format!("The stock lot created by {} was not found", r.return_code)))
+    }
+
     /// Writes one adjustment row and its stock effect inside the caller's transaction.
     /// Returns `(adjustment_id, loss_value, unit_cost_used)`.
     #[allow(clippy::too_many_arguments)]
@@ -459,5 +541,260 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         }
         uow.items().recompute_low_stock_flags()?;
         Ok(bad)
+    }
+
+    fn reverse_sale_bill_stock(&self, uow: &mut dyn TransactionContext, sale_id: i64) -> Result<(), AppError> {
+        let mut per_item: Vec<(i64, f64)> = Vec::new();
+        for line in uow.sales().list_items_by_transaction_id(sale_id)? {
+            for a in uow.allocations().find_by_sale_item_id(line.id)? {
+                let back = a.quantity_depleted - a.returned_quantity;
+                if back <= EPS {
+                    continue;
+                }
+                let lot = uow
+                    .purchases()
+                    .find_purchase_item_by_id(a.purchase_item_id)?
+                    .ok_or_else(|| AppError::not_found("PurchaseItem", a.purchase_item_id.to_string()))?;
+                uow.purchases()
+                    .update_remaining_quantity(lot.id, (lot.remaining_quantity + back).min(lot.quantity))?;
+                match per_item.iter_mut().find(|(i, _)| *i == line.item_id) {
+                    Some(e) => e.1 += back,
+                    None => per_item.push((line.item_id, back)),
+                }
+            }
+            uow.allocations().delete_by_sale_item_id(line.id)?;
+        }
+        for (item_id, qty) in per_item {
+            uow.items().apply_stock_delta(item_id, qty)?;
+        }
+        Ok(())
+    }
+
+    fn edit_purchase_lot(&self, uow: &mut dyn TransactionContext, lot_id: i64, e: &LotEdit) -> Result<(), AppError> {
+        let lot = uow
+            .purchases()
+            .find_purchase_item_by_id(lot_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+        require_positive("quantity", e.quantity)?;
+        let consumed = lot.quantity - lot.remaining_quantity;
+        let referenced = uow.purchases().is_lot_referenced(lot_id)?;
+        if e.item_id != lot.item_id {
+            if referenced {
+                return Err(locked(
+                    "CONSUMED_LINE_CHANGED",
+                    format!("'{}' has already been sold or moved, so its item cannot change", lot.item_name),
+                ));
+            }
+            find_item(uow, e.item_id)?;
+        }
+        if e.quantity + EPS < consumed {
+            return Err(locked(
+                "LOT_BELOW_CONSUMED",
+                format!("'{}': at least {consumed} already used, quantity cannot go below that", lot.item_name),
+            ));
+        }
+        let new_remaining = (e.quantity - consumed).max(0.0);
+        let cost_changed = (e.unit_cost - lot.unit_cost).abs() > 1e-9;
+        if cost_changed && uow.outflow_allocations().exists_for_lot(lot_id, OutflowSourceType::VendorReturn)? {
+            return Err(locked(
+                "VENDOR_RETURNED_COST_CHANGE",
+                format!("'{}' was returned to the vendor at its old cost; delete that vendor return to change the cost", lot.item_name),
+            ));
+        }
+        uow.purchases().update_purchase_item(&PurchaseItem {
+            id: lot_id,
+            purchase_transaction_id: lot.purchase_transaction_id,
+            item_id: e.item_id,
+            item_name: e.item_name.clone(),
+            pack_label: e.pack_label.clone(),
+            pack_quantity: e.pack_quantity,
+            quantity: e.quantity,
+            unit_cost: e.unit_cost,
+            total_amount: e.total_amount,
+            remaining_quantity: new_remaining,
+        })?;
+        if e.item_id == lot.item_id {
+            let delta = new_remaining - lot.remaining_quantity;
+            if delta.abs() > 0.0 {
+                uow.items().apply_stock_delta(e.item_id, delta)?;
+            }
+        } else {
+            uow.items().apply_stock_delta(lot.item_id, -lot.remaining_quantity)?;
+            uow.items().apply_stock_delta(e.item_id, new_remaining)?;
+        }
+        if cost_changed && referenced {
+            self.recost_lot(uow, lot_id, e.unit_cost)?;
+        }
+        Ok(())
+    }
+
+    fn remove_purchase_lot(&self, uow: &mut dyn TransactionContext, lot_id: i64) -> Result<(), AppError> {
+        let lot = uow
+            .purchases()
+            .find_purchase_item_by_id(lot_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+        if uow.purchases().is_lot_referenced(lot_id)? {
+            return Err(locked(
+                "CONSUMED_LINE_REMOVED",
+                format!("'{}' has already been sold or moved, so its line cannot be removed", lot.item_name),
+            ));
+        }
+        uow.items().apply_stock_delta(lot.item_id, -lot.remaining_quantity)?;
+        uow.purchases().delete_purchase_item(lot_id)?;
+        Ok(())
+    }
+
+    fn plan_return_undo(&self, uow: &mut dyn TransactionContext, r: &ReturnTransaction) -> Result<ReturnUndoPlan, AppError> {
+        let mut plan = ReturnUndoPlan::default();
+        match r.return_type {
+            ReturnType::Vendor => {
+                plan.steps.push(ReturnUndoStep::RestoreOutflow {
+                    source_type: OutflowSourceType::VendorReturn,
+                    source_id: r.id,
+                });
+            }
+            ReturnType::Customer => {
+                let mut restock_need: Vec<(i64, f64)> = Vec::new();
+                let mut claimed: Vec<i64> = Vec::new();
+                // Replacement units go back first, so they count as available when the returned
+                // (restocked) units are taken out again.
+                let mut restored: Vec<(i64, f64)> = Vec::new();
+                if r.settlement_type == SettlementType::Replacement {
+                    plan.steps.push(ReturnUndoStep::RestoreOutflow {
+                        source_type: OutflowSourceType::Replacement,
+                        source_id: r.id,
+                    });
+                    for o in uow.outflow_allocations().find_by_source(OutflowSourceType::Replacement, r.id)? {
+                        match restored.iter_mut().find(|(l, _)| *l == o.purchase_item_id) {
+                            Some(e) => e.1 += o.quantity_depleted,
+                            None => restored.push((o.purchase_item_id, o.quantity_depleted)),
+                        }
+                    }
+                }
+                let items = uow.returns().find_items_by_return_id(r.id)?;
+                for ri in items.iter().filter(|i| i.line_type == ReturnLineType::Returned) {
+                    let restock = ri.condition == Some(StockCondition::Restockable);
+                    if let Some(sid) = ri.sale_item_id {
+                        let allocs = uow.allocations().find_by_sale_item_id(sid)?;
+                        let ris = uow.returns().list_customer_returned_items_for_sale_item(sid)?;
+                        let qtys: Vec<f64> = ris.iter().map(|x| x.quantity).collect();
+                        let takes = self.strategy.replay_reversals(&allocs, &qtys);
+                        let idx = ris
+                            .iter()
+                            .position(|x| x.id == ri.id)
+                            .ok_or_else(|| AppError::not_found("ReturnItem", ri.id.to_string()))?;
+                        let mine = takes[idx].clone();
+                        if restock {
+                            for (aid, t) in &mine {
+                                if let Some(a) = allocs.iter().find(|a| a.id == *aid) {
+                                    match restock_need.iter_mut().find(|(l, _)| *l == a.purchase_item_id) {
+                                        Some(e) => e.1 += t,
+                                        None => restock_need.push((a.purchase_item_id, *t)),
+                                    }
+                                }
+                            }
+                        }
+                        plan.steps.push(ReturnUndoStep::Unreverse {
+                            sale_item_id: sid,
+                            item_id: ri.item_id,
+                            takes: mine,
+                            restock,
+                        });
+                    } else if restock {
+                        let lot_id = Self::resolve_return_lot(uow, r, ri, &claimed)?;
+                        claimed.push(lot_id);
+                        let lot = uow
+                            .purchases()
+                            .find_purchase_item_by_id(lot_id)?
+                            .ok_or_else(|| locked("RETURN_LOT_USED", format!("The stock lot created by {} was not found", r.return_code)))?;
+                        if uow.purchases().is_lot_referenced_except_return(lot_id, r.id)?
+                            || lot.remaining_quantity + EPS < lot.quantity
+                        {
+                            return Err(locked(
+                                "RETURN_LOT_USED",
+                                format!("Stock restocked by {} has already been sold or moved", r.return_code),
+                            ));
+                        }
+                        plan.steps.push(ReturnUndoStep::RemoveReturnLot { lot_id });
+                    }
+                }
+                for (lot_id, need) in restock_need {
+                    let lot = uow
+                        .purchases()
+                        .find_purchase_item_by_id(lot_id)?
+                        .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+                    let back = restored.iter().find(|(l, _)| *l == lot_id).map(|(_, q)| *q).unwrap_or(0.0);
+                    if lot.remaining_quantity + back + EPS < need {
+                        return Err(locked(
+                            "RESTOCKED_CONSUMED",
+                            format!(
+                                "{} units of '{}' restocked by {} have already been sold or moved",
+                                need, lot.item_name, r.return_code
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(plan)
+    }
+
+    fn apply_return_undo(&self, uow: &mut dyn TransactionContext, plan: &ReturnUndoPlan) -> Result<(), AppError> {
+        for step in &plan.steps {
+            match step {
+                ReturnUndoStep::Unreverse { sale_item_id, item_id, takes, restock } => {
+                    let allocs = uow.allocations().find_by_sale_item_id(*sale_item_id)?;
+                    let mut removed = 0.0;
+                    for (aid, take) in takes {
+                        let a = allocs
+                            .iter()
+                            .find(|a| a.id == *aid)
+                            .ok_or_else(|| AppError::not_found("SaleStockAllocation", aid.to_string()))?;
+                        uow.allocations()
+                            .update_returned_quantity(a.id, (a.returned_quantity - take).max(0.0))?;
+                        if *restock {
+                            let lot = uow
+                                .purchases()
+                                .find_purchase_item_by_id(a.purchase_item_id)?
+                                .ok_or_else(|| AppError::not_found("PurchaseItem", a.purchase_item_id.to_string()))?;
+                            if lot.remaining_quantity + EPS < *take {
+                                return Err(locked("RESTOCKED_CONSUMED", "Restocked units have already been sold or moved"));
+                            }
+                            uow.purchases()
+                                .update_remaining_quantity(lot.id, (lot.remaining_quantity - take).max(0.0))?;
+                            removed += take;
+                        }
+                    }
+                    if removed > 0.0 {
+                        uow.items().apply_stock_delta(*item_id, -removed)?;
+                    }
+                }
+                ReturnUndoStep::RemoveReturnLot { lot_id } => {
+                    let lot = uow
+                        .purchases()
+                        .find_purchase_item_by_id(*lot_id)?
+                        .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+                    uow.items().apply_stock_delta(lot.item_id, -lot.remaining_quantity)?;
+                    uow.purchases().delete_purchase_item(lot.id)?;
+                    if uow.purchases().list_items_by_transaction_id(lot.purchase_transaction_id)?.is_empty() {
+                        uow.purchases().delete_transaction(lot.purchase_transaction_id)?;
+                    }
+                }
+                ReturnUndoStep::RestoreOutflow { source_type, source_id } => {
+                    for o in uow.outflow_allocations().delete_by_source(*source_type, *source_id)? {
+                        let lot = uow
+                            .purchases()
+                            .find_purchase_item_by_id(o.purchase_item_id)?
+                            .ok_or_else(|| AppError::not_found("PurchaseItem", o.purchase_item_id.to_string()))?;
+                        uow.purchases().update_remaining_quantity(
+                            lot.id,
+                            (lot.remaining_quantity + o.quantity_depleted).min(lot.quantity),
+                        )?;
+                        uow.items().apply_stock_delta(lot.item_id, o.quantity_depleted)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }

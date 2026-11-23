@@ -179,4 +179,60 @@ impl PaymentService for PaymentServiceImpl {
         };
         uow.settlements().create_settlement(&settlement)
     }
+
+    fn delete_bill_ledger(
+        &self,
+        uow: &mut dyn TransactionContext,
+        tx_type: TransactionType,
+        tx_id: i64,
+        kinds: &[PaymentKind],
+    ) -> Result<f64, AppError> {
+        let rows = uow.settlements().delete_by_transaction(tx_type, tx_id, kinds)?;
+        let cash: f64 = rows
+            .iter()
+            .filter(|r| matches!(r.kind, PaymentKind::Upfront | PaymentKind::Settlement))
+            .map(|r| r.amount_paid)
+            .sum();
+        recompute_bill(uow, tx_type, tx_id)?;
+        Ok(round2(cash))
+    }
+
+    fn repoint_bill_party(
+        &self,
+        uow: &mut dyn TransactionContext,
+        tx_type: TransactionType,
+        tx_id: i64,
+        party_id: Option<i64>,
+    ) -> Result<(), AppError> {
+        uow.settlements()
+            .update_party_for_transaction(tx_type, tx_id, party_id, &[PaymentKind::Upfront, PaymentKind::Settlement])
+    }
+
+    fn recompute(&self, uow: &mut dyn TransactionContext, tx_type: TransactionType, tx_id: i64) -> Result<(), AppError> {
+        recompute_bill(uow, tx_type, tx_id)
+    }
+
+    fn delete_return_ledger(&self, uow: &mut dyn TransactionContext, return_id: i64) -> Result<(f64, f64), AppError> {
+        let rows = uow.settlements().delete_by_return(return_id)?;
+        let (mut cash, mut credit) = (0.0, 0.0);
+        let mut touched: Vec<(TransactionType, i64)> = Vec::new();
+        for r in &rows {
+            match r.kind {
+                PaymentKind::RefundOut | PaymentKind::RefundIn => cash += r.amount_paid,
+                PaymentKind::ReturnCredit => {
+                    credit += r.amount_paid;
+                    if let Some(id) = r.transaction_id {
+                        if !touched.contains(&(r.transaction_type, id)) {
+                            touched.push((r.transaction_type, id));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (t, id) in touched {
+            recompute_bill(uow, t, id)?;
+        }
+        Ok((round2(cash), round2(credit)))
+    }
 }
