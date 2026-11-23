@@ -1,37 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
-import type { PartyType, PurchaseHistoryRow, ReturnResult, SaleHistoryRow, TransactionType } from '@/types';
+import type { PreviewError, PurchaseHistoryRow, ReturnResult, SaleHistoryRow, TransactionType } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 
 /** Tolerance for decimal quantity / price comparisons. */
 export const EPS = 1e-6;
 
-/** Refund preview: value reduces the available balance first, the rest is cash. */
-export function creditSplit(value: number, balance: number): { credited: number; cash: number } {
-  const v = round2(Math.max(0, value));
-  const credited = round2(Math.min(v, Math.max(0, balance)));
-  return { credited, cash: round2(v - credited) };
-}
-
-export const RefundPreview: React.FC<{ value: number; balance: number | null; label?: string }> = ({
-  value,
-  balance,
-  label = 'Preview',
-}) => {
-  const { credited, cash } = creditSplit(value, balance ?? 0);
-  return (
-    <div data-testid="refund-preview" className="p-2.5 rounded-md bg-blue-50/60 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40 text-xs">
-      <span className="font-semibold">{label}: </span>
-      <CurrencyDisplay amount={credited} size="sm" /> credited · <CurrencyDisplay amount={cash} size="sm" /> cash
-      <span className="text-slate-500"> (total value </span>
-      <CurrencyDisplay amount={value} size="sm" />
-      <span className="text-slate-500">)</span>
-    </div>
-  );
-};
-
+/**
+ * Refund preview (DD-56): the credited/cash split and the value come from the backend's
+ * `preview_*_return`; this only shows them.
+ */
+export const RefundPreview: React.FC<{
+  result: ReturnResult | null;
+  errors?: PreviewError[];
+  label?: string;
+}> = ({ result, errors = [], label = 'Preview' }) => (
+  <div data-testid="refund-preview" className="p-2.5 rounded-md bg-blue-50/60 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40 text-xs">
+    <span className="font-semibold">{label}: </span>
+    {result ? (
+      <>
+        <CurrencyDisplay amount={result.creditedAmount} size="sm" /> credited ·{' '}
+        <CurrencyDisplay amount={result.cashRefunded} size="sm" /> cash
+        <span className="text-slate-500"> (total value </span>
+        <CurrencyDisplay amount={result.totalAmount} size="sm" />
+        <span className="text-slate-500">)</span>
+      </>
+    ) : (
+      <span className="text-slate-500">—</span>
+    )}
+    {errors.length > 0 && (
+      <p role="alert" data-testid="return-preview-error" className="mt-1 text-rose-600 dark:text-rose-400">
+        {errors[0].message}
+      </p>
+    )}
+  </div>
+);
 export const ReturnResultPanel: React.FC<{ result: ReturnResult; onAnother: () => void }> = ({ result, onAnother }) => (
   <div data-testid="return-result" className="flex flex-col gap-2 p-4 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/50 dark:bg-emerald-950/20">
     <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
@@ -47,23 +51,6 @@ export const ReturnResultPanel: React.FC<{ result: ReturnResult; onAnother: () =
   </div>
 );
 
-/** Outstanding balance of a party (from the directory rows), null while unknown. */
-export function usePartyBalance(partyType: PartyType, partyId: number | null): number | null {
-  const [balance, setBalance] = useState<number | null>(null);
-  useEffect(() => {
-    setBalance(null);
-    if (partyId === null) return;
-    let live = true;
-    api
-      .listParties(partyType, false)
-      .then((rows) => live && setBalance(rows.find((r) => r.id === partyId)?.outstandingBalance ?? 0))
-      .catch(() => live && setBalance(null));
-    return () => {
-      live = false;
-    };
-  }, [partyType, partyId]);
-  return balance;
-}
 
 type BillRow = SaleHistoryRow | PurchaseHistoryRow;
 

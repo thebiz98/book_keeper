@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePreview } from '@/hooks/usePreview';
 import { Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
 import { todayLocal } from '@/lib/dates';
 import type {
   ItemLot,
@@ -10,6 +10,7 @@ import type {
   PurchaseDetailView,
   ReturnResult,
   VendorReturnItemPayload,
+  VendorReturnPayload,
 } from '@/types';
 import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
@@ -20,12 +21,10 @@ import { ItemSearchTypeahead } from './ItemSearchTypeahead';
 import { PartySelector } from './PartySelector';
 import {
   BillPicker,
-  EPS,
   FieldLabel,
   RefundPreview,
   ReturnResultPanel,
   inputCls,
-  usePartyBalance,
 } from './ReturnFormShared';
 import { refreshAppMetrics } from './navParams';
 
@@ -63,22 +62,6 @@ function lineRemaining(l: VendorLine): number {
   return l.lots.find((x) => String(x.purchaseItemId) === l.lot)?.remainingQuantity ?? 0;
 }
 
-/** Cost of returning qty from a chosen lot, or walking FIFO lots oldest first. */
-function lineValue(l: VendorLine): number {
-  if (l.lot !== FIFO) {
-    const lot = l.lots.find((x) => String(x.purchaseItemId) === l.lot);
-    return lot ? round2(lot.unitCost * l.qty) : 0;
-  }
-  let left = l.qty;
-  let v = 0;
-  for (const lot of l.lots) {
-    const take = Math.min(left, lot.remainingQuantity);
-    v += take * lot.unitCost;
-    left -= take;
-    if (left <= 0) break;
-  }
-  return round2(v);
-}
 
 export interface ReturnFormVendorProps {
   initialBillId?: number | null;
@@ -141,44 +124,41 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
       .catch((e) => setLoadError(`Could not load lots for ${it.name}: ${errorMessage(e)}`));
   };
 
-  const value =
-    mode === 'BILL'
-      ? round2(billLines.reduce((s, l) => s + (l.qty > 0 ? l.qty * l.cost : 0), 0))
-      : round2(lines.reduce((s, l) => s + lineValue(l), 0));
-
-  const vendorBalance = usePartyBalance('VENDOR', mode === 'VENDOR' ? vendor?.id ?? null : null);
-  const balance = mode === 'BILL' ? detail?.purchase.balanceDue ?? 0 : vendor ? vendorBalance : 0;
+  // DD-56: the value (lot cost removed, FIFO or named lot), the credited/cash split and every
+  // refusal (more than remaining ...) come from `preview_vendor_return`.
+  const payload = useMemo<VendorReturnPayload | null>(() => {
+    const items: VendorReturnItemPayload[] =
+      mode === 'BILL'
+        ? billLines
+            .filter((l) => l.qty > 0)
+            .map((l) => ({ itemId: l.itemId, purchaseItemId: l.purchaseItemId, quantity: l.qty }))
+        : lines.map((l) => ({ itemId: l.itemId, purchaseItemId: l.lot === FIFO ? null : Number(l.lot), quantity: l.qty }));
+    if (items.length === 0 || (mode === 'BILL' && !detail) || (mode === 'VENDOR' && !vendor)) return null;
+    return {
+      originalPurchaseId: mode === 'BILL' ? detail?.purchase.id ?? null : null,
+      partyId: mode === 'VENDOR' ? vendor?.id ?? null : null,
+      returnDate: date,
+      settlementType: 'REFUND',
+      reason: reason.trim() || null,
+      notes: notes.trim() || null,
+      items,
+    };
+  }, [mode, billLines, lines, detail, vendor, date, reason, notes]);
+  const preview = usePreview<VendorReturnPayload, ReturnResult>({
+    input: payload,
+    fetcher: (p) => api.previewVendorReturn(p),
+  });
 
   const submit = async () => {
     setError(null);
-    const items: VendorReturnItemPayload[] = [];
-    if (mode === 'BILL') {
-      if (!detail) return setError('Select a purchase bill first');
-      for (const l of billLines) {
-        if (l.qty <= 0) continue;
-        if (l.qty > l.remaining + EPS) return setError(`${l.name}: quantity ${l.qty} exceeds remaining ${l.remaining}`);
-        items.push({ itemId: l.itemId, purchaseItemId: l.purchaseItemId, quantity: l.qty });
-      }
-    } else {
-      if (!vendor) return setError('Select a vendor first');
-      for (const l of lines) {
-        if (!(l.qty > 0)) return setError(`${l.name}: quantity must be greater than 0`);
-        if (l.qty > lineRemaining(l) + EPS) return setError(`${l.name}: quantity ${l.qty} exceeds remaining ${lineRemaining(l)}`);
-        items.push({ itemId: l.itemId, purchaseItemId: l.lot === FIFO ? null : Number(l.lot), quantity: l.qty });
-      }
-    }
-    if (items.length === 0) return setError('Enter a return quantity for at least one line');
+    if (mode === 'BILL' && !detail) return setError('Select a purchase bill first');
+    if (mode === 'VENDOR' && !vendor) return setError('Select a vendor first');
+    if (!payload) return setError('Enter a return quantity for at least one line');
+    if (preview.isLoading) return;
+    if (preview.errors.length > 0) return setError(preview.errors[0].message);
     setBusy(true);
     try {
-      const res = await api.createVendorReturn({
-        originalPurchaseId: mode === 'BILL' ? detail?.purchase.id ?? null : null,
-        partyId: mode === 'VENDOR' ? vendor?.id ?? null : null,
-        returnDate: date,
-        settlementType: 'REFUND',
-        reason: reason.trim() || null,
-        notes: notes.trim() || null,
-        items,
-      });
+      const res = await api.createVendorReturn(payload);
       setResult(res);
       refreshAppMetrics();
       onDone?.();
@@ -326,7 +306,11 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
         </div>
       </div>
 
-      <RefundPreview value={value} balance={balance} label="Preview (reduces payable first, rest is cash from vendor)" />
+      <RefundPreview
+        result={preview.data}
+        errors={preview.errors}
+        label="Preview (reduces payable first, rest is cash from vendor)"
+      />
 
       {error && (
         <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
