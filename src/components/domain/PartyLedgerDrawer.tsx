@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { api, errorMessage } from '@/api';
-import type { PartyLedgerView } from '@/types';
+import type { PartyLedgerView, PaymentSettlement } from '@/types';
 import { Drawer } from '../ui/Drawer';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
-import { BillDetailDrawer } from './BillDetailDrawer';
+import { BillDetailDrawer, LedgerRows } from './BillDetailDrawer';
+import { SettlementEditModal } from './SettlementEditModal';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { refreshAppMetrics } from './navParams';
 
 export interface PartyLedgerDrawerProps {
   /** null = closed. */
@@ -17,6 +20,9 @@ export const PartyLedgerDrawer: React.FC<PartyLedgerDrawerProps> = ({ partyId, o
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [editingRow, setEditingRow] = useState<PaymentSettlement | null>(null);
+  const [deletingRow, setDeletingRow] = useState<PaymentSettlement | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
   const [bill, setBill] = useState<{ kind: 'SALE' | 'PURCHASE'; id: number } | null>(null);
 
   useEffect(() => {
@@ -37,6 +43,23 @@ export const PartyLedgerDrawer: React.FC<PartyLedgerDrawerProps> = ({ partyId, o
   useEffect(() => {
     setLedger(null);
   }, [partyId]);
+
+  const afterMoneyChange = () => {
+    setReloadKey((k) => k + 1);
+    refreshAppMetrics();
+  };
+  const billOf = (r: PaymentSettlement) => ledger?.bills.find((b) => b.id === r.transactionId);
+  const doDeleteRow = async () => {
+    if (!deletingRow) return;
+    setRowError(null);
+    try {
+      await api.deleteSettlement(deletingRow.id);
+      setDeletingRow(null);
+      afterMoneyChange();
+    } catch (e) {
+      setRowError(errorMessage(e));
+    }
+  };
 
   /** A ledger row that belongs to a bill opens that bill (id found through the bills list). */
   const openBill = (code: string, type: string) => {
@@ -99,8 +122,53 @@ export const PartyLedgerDrawer: React.FC<PartyLedgerDrawerProps> = ({ partyId, o
               </TableBody>
             </Table>
           )}
+          {ledger.payments.some((p) => p.kind === 'SETTLEMENT') && (
+            <div data-testid="party-settlements">
+              <h3 className="font-semibold mb-1">Payments (edit or delete)</h3>
+              <LedgerRows
+                rows={ledger.payments.filter((p) => p.kind === 'SETTLEMENT')}
+                billCodeOf={(r) => billOf(r)?.transactionCode ?? ''}
+                onEditSettlement={setEditingRow}
+                onDeleteSettlement={(r) => {
+                  setRowError(null);
+                  setDeletingRow(r);
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
+      <SettlementEditModal
+        settlement={editingRow}
+        billCode={editingRow ? billOf(editingRow)?.transactionCode : undefined}
+        maxAmount={
+          editingRow ? (billOf(editingRow)?.balanceDue ?? 0) + editingRow.amountPaid : 0
+        }
+        onClose={() => setEditingRow(null)}
+        onSaved={afterMoneyChange}
+      />
+      <ConfirmDialog
+        isOpen={deletingRow !== null}
+        variant="danger"
+        title="Delete this payment?"
+        message={
+          deletingRow
+            ? `Removes the payment of ₹${deletingRow.amountPaid.toFixed(2)} against ${billOf(deletingRow)?.transactionCode ?? 'this bill'}. The bill balance goes back up and cash records drop by ₹${deletingRow.amountPaid.toFixed(2)}.`
+            : ''
+        }
+        confirmText="Delete payment"
+        onConfirm={doDeleteRow}
+        onCancel={() => {
+          setDeletingRow(null);
+          setRowError(null);
+        }}
+      >
+        {rowError && (
+          <p role="alert" className="mt-2 text-xs text-rose-600 dark:text-rose-400">
+            {rowError}
+          </p>
+        )}
+      </ConfirmDialog>
       <BillDetailDrawer
         kind={bill?.kind ?? 'SALE'}
         billId={bill?.id ?? null}

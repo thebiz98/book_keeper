@@ -172,7 +172,7 @@ export const CreditDuesPage: React.FC = () => {
       render: (d) => (
         <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
           <Button variant="primary" size="xs" onClick={() => setTarget({ party: d, bill: null })}>
-            {isCustomer ? 'Receive on account' : 'Pay on account'}
+            Settle bills
           </Button>
           <Button variant="ghost" size="xs" onClick={() => setLedgerPartyId(d.partyId)}>
             View Ledger

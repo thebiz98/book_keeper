@@ -20,8 +20,8 @@ pub use correction_dto::{
     BillEditGuard, CorrectionTarget, DeleteBillResult, DeleteReturnResult, GuardReason, LotEditLimit,
 };
 pub use dues_dto::{
-    PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView, SettlePaymentPayload,
-    SettlementResult,
+    DeleteSettlementResult, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
+    SettleAllocation, SettleBatchPayload, SettlePaymentPayload, SettlementResult, UpdateSettlementPayload,
 };
 pub use expense_dto::{
     CreateExpenseTypePayload, ExpenseFilter, ExpenseListResponse, ExpensePayload, ExpenseTypeTotal,

@@ -23,6 +23,7 @@ import type {
   PartyLedgerView,
   PartyListRow,
   PartyType,
+  PaymentSettlement,
   PaymentStatus,
   PnLReport,
   PurchaseDetailView,
@@ -182,6 +183,34 @@ export interface SettlePaymentPayload {
   amountPaid: number;
   paymentMode: string | null;
   notes: string | null;
+}
+
+export interface SettleAllocation {
+  transactionId: number;
+  amountPaid: number;
+}
+
+/** D9: 1..=200 unique bills of one party, settled atomically (all or nothing). */
+export interface SettleBatchPayload {
+  partyId: number;
+  transactionType: TransactionType;
+  settlementDate: string;
+  paymentMode: string | null;
+  notes: string | null;
+  allocations: SettleAllocation[];
+}
+
+/** D8: edit of one SETTLEMENT ledger row. */
+export interface UpdateSettlementPayload {
+  amountPaid: number;
+  settlementDate: string;
+  paymentMode: string | null;
+  notes: string | null;
+}
+
+export interface DeleteSettlementResult {
+  removedAmount: number;
+  transactionId: number;
 }
 
 export interface SettlementResult {
@@ -474,6 +503,11 @@ export interface ApiClient {
   // Dues & Ledger
   getPartyDuesSummary(partyType: PartyType): Promise<PartyDueSummary[]>;
   settleBillPayment(payload: SettlePaymentPayload): Promise<SettlementResult>;
+  /** The single settlement core: all allocations commit together or none do. */
+  settleBillsBatch(payload: SettleBatchPayload): Promise<SettlementResult>;
+  /** SETTLEMENT rows only; other kinds are a ValidationError(kind). */
+  updateSettlement(settlementId: number, payload: UpdateSettlementPayload): Promise<PaymentSettlement>;
+  deleteSettlement(settlementId: number): Promise<DeleteSettlementResult>;
   getPartyLedger(partyId: number): Promise<PartyLedgerView>;
 
   // Parties

@@ -1176,8 +1176,17 @@ pub trait AccountingService: Send + Sync {
         party_type: PartyType,
     ) -> Result<Vec<PartyDueSummary>, AppError>;
 
+    /// v1.2 D9: THE settlement core. One BEGIN IMMEDIATE, 1..=200 unique allocations, all or nothing.
+    /// Errors name `allocations[i].amount_paid` / `allocations[i].transaction_id`.
+    fn settle_bills_batch(&self, payload: SettleBatchPayload) -> Result<SettlementResult, AppError>;
+
+    /// v1.2 D8: edit / delete one SETTLEMENT row (any other kind -> ValidationError(kind)); both end in recompute_bill.
+    fn update_settlement(&self, settlement_id: i64, payload: UpdateSettlementPayload) -> Result<PaymentSettlement, AppError>;
+    fn delete_settlement(&self, settlement_id: i64) -> Result<DeleteSettlementResult /* { removed_amount, transaction_id } */, AppError>;
+
     /// Cash settlement (kind Settlement) in its own BEGIN IMMEDIATE transaction:
     /// specific bill or FIFO across the party's oldest open bills.
+    /// v1.2: a wrapper over the batch core (a bill id = a batch of one; None = FIFO allocation builder).
     fn settle_bill_payment(
         &self,
         payload: SettlePaymentPayload,
@@ -2138,6 +2147,7 @@ Schema upgrade cases (`schema_test.rs`): a frozen v4 database upgrades to v5 (`s
 | **TC-DUES-005** | FIFO over-settlement rejected up front | Total outstanding 700 | settle 800 | • `ValidationError`; no rows written. |
 | **TC-DUES-006** | Specific bill over-settlement rejected | Bill due 100 | settle 150 with `transaction_id` | • `ValidationError`; no rows written. |
 | **TC-DUES-007** | Party / type mismatch | Vendor party | settle `transaction_type = SALE` | • `ValidationError`. |
+| **TC-DUES-008..** (v1.2) | Batch settlement and correction | See `accounting_service_test.rs` | `settle_bills_batch`, `update_settlement`, `delete_settlement` | • Atomic rollback, duplicate / wrong party / non-PURCHASE / over-balance rejected, kind guard, delete restores balance and status. |
 
 ---
 

@@ -36,6 +36,40 @@ pub struct SettlePaymentPayload {
     pub notes: Option<String>,
 }
 
+/// One bill's share of a batch settlement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettleAllocation {
+    pub transaction_id: i64,
+    pub amount_paid: f64,
+}
+
+/// D9: settle several bills of one party in a single all-or-nothing transaction (1..=200, unique).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettleBatchPayload {
+    pub party_id: i64,
+    pub transaction_type: TransactionType,
+    pub settlement_date: String, // "YYYY-MM-DD"
+    pub payment_mode: Option<String>,
+    pub notes: Option<String>,
+    pub allocations: Vec<SettleAllocation>,
+}
+
+/// D8: edit of one SETTLEMENT row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateSettlementPayload {
+    pub amount_paid: f64,
+    pub settlement_date: String, // "YYYY-MM-DD"
+    pub payment_mode: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// D8: what a settlement delete removed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeleteSettlementResult {
+    pub removed_amount: f64,
+    pub transaction_id: i64,
+}
+
 /// Result of a settlement: one SETTLEMENT ledger row per bill touched.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SettlementResult {

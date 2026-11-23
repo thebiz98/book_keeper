@@ -1,4 +1,8 @@
-use crate::core::dtos::{PartyDueSummary, PartyLedgerView, SettlePaymentPayload, SettlementResult};
+use crate::core::dtos::{
+    DeleteSettlementResult, PartyDueSummary, PartyLedgerView, SettleBatchPayload, SettlePaymentPayload,
+    SettlementResult, UpdateSettlementPayload,
+};
+use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
 use crate::core::value_objects::{PartyType, TransactionType};
 use crate::data::contracts::unit_of_work::TransactionContext;
@@ -18,6 +22,19 @@ pub trait AccountingService: Send + Sync {
         &self,
         payload: SettlePaymentPayload,
     ) -> Result<SettlementResult, AppError>;
+
+    /// D9: the one SETTLEMENT core. Several bills in one transaction, all or nothing.
+    fn settle_bills_batch(&self, payload: SettleBatchPayload) -> Result<SettlementResult, AppError>;
+
+    /// D8: edits a SETTLEMENT row (amount, date, mode, notes); other kinds are rejected.
+    fn update_settlement(
+        &self,
+        settlement_id: i64,
+        payload: UpdateSettlementPayload,
+    ) -> Result<PaymentSettlement, AppError>;
+
+    /// D8: deletes a SETTLEMENT row and recomputes its bill; other kinds are rejected.
+    fn delete_settlement(&self, settlement_id: i64) -> Result<DeleteSettlementResult, AppError>;
 
     /// Applies a return's value as RETURN_CREDIT inside the caller's transaction.
     /// `target_bill = Some(id)` credits that bill only; `None` credits the party's oldest open
@@ -55,6 +72,22 @@ impl<T: AccountingService + ?Sized> AccountingService for std::sync::Arc<T> {
         payload: SettlePaymentPayload,
     ) -> Result<SettlementResult, AppError> {
         (**self).settle_bill_payment(payload)
+    }
+
+    fn settle_bills_batch(&self, payload: SettleBatchPayload) -> Result<SettlementResult, AppError> {
+        (**self).settle_bills_batch(payload)
+    }
+
+    fn update_settlement(
+        &self,
+        settlement_id: i64,
+        payload: UpdateSettlementPayload,
+    ) -> Result<PaymentSettlement, AppError> {
+        (**self).update_settlement(settlement_id, payload)
+    }
+
+    fn delete_settlement(&self, settlement_id: i64) -> Result<DeleteSettlementResult, AppError> {
+        (**self).delete_settlement(settlement_id)
     }
 
     fn apply_return_credit(

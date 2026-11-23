@@ -43,6 +43,7 @@ function setup() {
       limit: 200,
     }),
     settleBillPayment: { settlementIds: [1], billsTouched: [1] },
+    settleBillsBatch: { settlementIds: [1, 2], billsTouched: [1, 2] },
   });
 }
 
@@ -82,35 +83,45 @@ describe('CreditDuesPage', () => {
     expect(payload.settlementDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it('lump sum sends null transactionId and previews the FIFO split', async () => {
+  it('Settle bills sends one batch payload and previews the FIFO fill', async () => {
     const api = setup();
     render(<CreditDuesPage />);
     await waitFor(() => bodyText().includes('Sharma Traders'));
-    click(buttonByText('Receive on account'));
-    await waitFor(() => !!document.querySelector('[data-testid="fifo-preview"] li'));
+    click(buttonByText('Settle bills'));
+    await waitFor(() => !!document.querySelector('[data-testid="batch-rows"] tbody tr'));
     const input = document.querySelector('input[aria-label="Settlement amount"]')!;
     setInput(input, '150.5');
     await flush();
-    const preview = document.querySelector('[data-testid="fifo-preview"]')!.textContent ?? '';
-    expect(preview).toContain('SAL-1');
-    expect(preview).toContain('SAL-2');
-    expect(preview).toContain('₹100.00 of ₹100.00 - settled');
-    expect(preview).toContain('₹50.50 of ₹200.00');
-    click(buttonByText('Record Settlement', document.querySelector('[role="dialog"]')!));
+    const rows = document.querySelector('[data-testid="batch-rows"]')!;
+    expect((rows.querySelector('input[aria-label="Amount for SAL-1"]') as HTMLInputElement).value).toBe('100');
+    expect((rows.querySelector('input[aria-label="Amount for SAL-2"]') as HTMLInputElement).value).toBe('50.5');
+    click(buttonByText('Settle bills', document.querySelector('[role="dialog"]')!));
     await flush();
-    expect(api.settleBillPayment.mock.calls[0][0]).toMatchObject({ transactionId: null, amountPaid: 150.5 });
+    expect(api.settleBillsBatch).toHaveBeenCalledTimes(1);
+    expect(api.settleBillsBatch.mock.calls[0][0]).toMatchObject({
+      partyId: 7,
+      transactionType: 'SALE',
+      allocations: [
+        { transactionId: 1, amountPaid: 100 },
+        { transactionId: 2, amountPaid: 50.5 },
+      ],
+    });
+    expect(api.settleBillPayment).not.toHaveBeenCalled();
   });
 
   it('rejects an amount above the outstanding balance', async () => {
     const api = setup();
     render(<CreditDuesPage />);
     await waitFor(() => bodyText().includes('Sharma Traders'));
-    click(buttonByText('Receive on account'));
-    await flush();
+    click(buttonByText('Settle bills'));
+    await waitFor(() => !!document.querySelector('[data-testid="batch-rows"] tbody tr'));
     setInput(document.querySelector('input[aria-label="Settlement amount"]')!, '301');
-    click(buttonByText('Record Settlement', document.querySelector('[role="dialog"]')!));
     await flush();
-    expect(api.settleBillPayment).not.toHaveBeenCalled();
+    const save = buttonByText('Settle bills', document.querySelector('[role="dialog"]')!);
+    expect(save.disabled).toBe(true);
+    click(save);
+    await flush();
+    expect(api.settleBillsBatch).not.toHaveBeenCalled();
     expect(bodyText()).toContain('cannot exceed');
   });
 

@@ -23,6 +23,7 @@ import type {
   PartyDueSummary,
   PartyListRow,
   PartyType,
+  PaymentSettlement,
   PurchaseDetailView,
   PurchaseHistoryRow,
   ReturnDetailView,
@@ -646,6 +647,36 @@ export class MockApiClient implements ApiClient {
       settlementIds: [this.id()],
       billsTouched: payload.transactionId ? [payload.transactionId] : [],
     };
+  }
+  async settleBillsBatch(payload: Parameters<ApiClient['settleBillsBatch']>[0]) {
+    const p = this.findParty(payload.partyId);
+    const total = payload.allocations.reduce((a, x) => a + x.amountPaid, 0);
+    p.balanceDue = Math.max(0, p.balanceDue - total);
+    return {
+      settlementIds: payload.allocations.map(() => this.id()),
+      billsTouched: payload.allocations.map((a) => a.transactionId),
+    };
+  }
+  async updateSettlement(
+    settlementId: number,
+    payload: Parameters<ApiClient['updateSettlement']>[1]
+  ): Promise<PaymentSettlement> {
+    return {
+      id: settlementId,
+      settlementDate: payload.settlementDate,
+      partyId: null,
+      kind: 'SETTLEMENT',
+      transactionType: 'SALE',
+      transactionId: null,
+      returnId: null,
+      amountPaid: payload.amountPaid,
+      paymentMode: payload.paymentMode,
+      notes: payload.notes,
+      createdAt: new Date().toISOString(),
+    };
+  }
+  async deleteSettlement(_settlementId: number) {
+    return { removedAmount: 0, transactionId: 0 };
   }
   async getPartyLedger(partyId: number) {
     const p = this.findParty(partyId);
