@@ -7,7 +7,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
-use crate::core::value_objects::{clean_name, clean_optional, LotSource};
+use crate::core::value_objects::{clean_name, clean_optional, ItemType, LotSource};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::InventoryService;
@@ -673,6 +673,7 @@ pub(crate) fn execute_checked<U: UnitOfWork, I: InventoryService>(
                 let item = Item {
                     id: 0,
                     name: row.name.clone(),
+                    item_type: ItemType::Physical,
                     category: row.category.clone(),
                     barcode: row.barcode.clone(),
                     base_unit: row.base_unit.clone(),

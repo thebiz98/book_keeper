@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
+use crate::core::value_objects::ItemType;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub id: i64,
     pub name: String,
+    #[serde(default)]
+    pub item_type: ItemType,
     pub category: Option<String>,
     pub barcode: Option<String>,
     pub base_unit: String,

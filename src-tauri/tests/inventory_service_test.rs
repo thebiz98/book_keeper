@@ -307,7 +307,7 @@ fn startup_repairs_a_drifted_stock_cache() {
     let path = std::env::temp_dir().join(format!("bk_inv_startup_{}.db", uuid::Uuid::new_v4()));
     {
         let app = book_keeper::app_state::build_sqlite_app_state(&path).unwrap();
-        let id = app.item_service.create_item(CreateItemPayload {
+        let id = app.item_service.create_item(CreateItemPayload { item_type: None,
             name: "Pen".into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
             default_sale_price: 10.0, initial_stock: Some(8.0), initial_cost: Some(6.0), bundles: None,
         }).unwrap();
@@ -332,7 +332,7 @@ fn item_create_with_opening_stock_goes_through_inventory_service() {
     let db = TestDb::new();
     let inv = InventoryServiceImpl::new(FifoStrategy, db.clone());
     let items = ItemServiceImpl::new(db.clone(), Arc::new(db.indexer()), inv.clone());
-    let mk = |name: &str, cost: Option<f64>| CreateItemPayload {
+    let mk = |name: &str, cost: Option<f64>| CreateItemPayload { item_type: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0, initial_stock: Some(8.0), initial_cost: cost, bundles: None,
     };

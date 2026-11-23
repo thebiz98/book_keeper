@@ -5,7 +5,7 @@ use crate::core::entities::Item;
 use crate::core::constants::LOW_STOCK_THRESHOLD;
 use crate::core::error::AppError;
 use crate::data::contracts::ItemRepository;
-use crate::data::sqlite::SqliteConn;
+use crate::data::sqlite::{enum_col, enum_to_sql, SqliteConn};
 
 pub struct SqliteItemRepository {
     conn: SqliteConn,
@@ -17,7 +17,7 @@ impl SqliteItemRepository {
     }
 }
 
-const COLS: &str = "id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, is_low_stock, is_active, created_at, updated_at";
+const COLS: &str = "id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, is_low_stock, is_active, created_at, updated_at, item_type";
 
 fn map_item(r: &Row<'_>) -> rusqlite::Result<Item> {
     Ok(Item {
@@ -33,6 +33,7 @@ fn map_item(r: &Row<'_>) -> rusqlite::Result<Item> {
         is_active: r.get(9)?,
         created_at: r.get(10)?,
         updated_at: r.get(11)?,
+        item_type: enum_col(r, 12)?,
     })
 }
 
@@ -110,24 +111,26 @@ impl ItemRepository for SqliteItemRepository {
 
     fn create(&mut self, item: &Item) -> Result<i64, AppError> {
         let id = if item.id > 0 { Some(item.id) } else { None };
+        let t = enum_to_sql(&item.item_type)?;
         self.conn.execute(
-            &format!("INSERT INTO items ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
+            &format!("INSERT INTO items ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"),
             params![
                 id, item.name, item.category, item.barcode, item.base_unit, item.mrp,
                 item.default_sale_price, item.current_stock, item.is_low_stock, item.is_active,
-                item.created_at, item.updated_at
+                item.created_at, item.updated_at, t
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
     fn update(&mut self, item: &Item) -> Result<(), AppError> {
+        let t = enum_to_sql(&item.item_type)?;
         let n = self.conn.execute(
             "UPDATE items SET name=?2, category=?3, barcode=?4, base_unit=?5, mrp=?6, \
-             default_sale_price=?7, is_active=?8, updated_at=?9 WHERE id=?1",
+             default_sale_price=?7, is_active=?8, updated_at=?9, item_type=?10 WHERE id=?1",
             params![
                 item.id, item.name, item.category, item.barcode, item.base_unit, item.mrp,
-                item.default_sale_price, item.is_active, item.updated_at
+                item.default_sale_price, item.is_active, item.updated_at, t
             ],
         )?;
         if n == 0 { Err(not_found(item.id)) } else { Ok(()) }

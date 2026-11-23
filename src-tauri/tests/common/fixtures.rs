@@ -19,6 +19,7 @@ pub fn create_test_item(
     Item {
         id,
         name: name.to_string(),
+        item_type: ItemType::Physical,
         category: category.map(|s| s.to_string()),
         barcode: barcode.map(|s| s.to_string()),
         base_unit: "PCS".to_string(),

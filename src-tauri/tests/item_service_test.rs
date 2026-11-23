@@ -26,7 +26,7 @@ fn setup() -> (Items, InventoryServiceImpl<FifoStrategy>, TestDb) {
 }
 
 fn item_payload(name: &str) -> CreateItemPayload {
-    CreateItemPayload {
+    CreateItemPayload { item_type: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0, initial_stock: None, initial_cost: None, bundles: None,
     }
@@ -40,7 +40,7 @@ fn bundle_payload(item_id: i64, name: &str, units: f64) -> CreateBundlePayload {
 }
 
 fn update_payload(name: &str) -> UpdateItemPayload {
-    UpdateItemPayload {
+    UpdateItemPayload { item_type: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0,
     }

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::core::value_objects::LotSource;
+use crate::core::value_objects::{ItemType, LotSource};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateItemPayload {
@@ -12,6 +12,9 @@ pub struct CreateItemPayload {
     pub initial_stock: Option<f64>,
     pub initial_cost: Option<f64>,
     pub bundles: Option<Vec<CreateBundlePayload>>,
+    /// `None` => `PHYSICAL`. `SERVICE` is rejected in v1.1 (FR-21).
+    #[serde(default)]
+    pub item_type: Option<ItemType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -22,6 +25,9 @@ pub struct UpdateItemPayload {
     pub base_unit: String,
     pub mrp: Option<f64>,
     pub default_sale_price: f64,
+    /// `None` => keep the current type. `SERVICE` is rejected in v1.1 (FR-21).
+    #[serde(default)]
+    pub item_type: Option<ItemType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,6 +66,8 @@ pub struct ItemSearchResult {
     pub category: Option<String>,
     pub barcode: Option<String>,
     pub base_unit: String,
+    #[serde(default)]
+    pub item_type: ItemType,
     pub mrp: Option<f64>,
     pub default_sale_price: f64,
     pub current_stock: f64,

@@ -1,5 +1,6 @@
 pub mod adjustment_reason;
 pub mod allocation_method;
+pub mod item_type;
 pub mod lot_source;
 pub mod outflow_source;
 pub mod party_type;
@@ -15,6 +16,7 @@ pub mod transaction_type;
 
 pub use adjustment_reason::AdjustmentReason;
 pub use allocation_method::AllocationMethod;
+pub use item_type::ItemType;
 pub use lot_source::LotSource;
 pub use outflow_source::OutflowSourceType;
 pub use party_type::PartyType;

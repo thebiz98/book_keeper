@@ -6,7 +6,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
-use crate::core::value_objects::{clean_name, clean_optional, LotSource};
+use crate::core::value_objects::{clean_name, clean_optional, ItemType, LotSource};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::InventoryService;
@@ -228,6 +228,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
                 category: i.category,
                 barcode: i.barcode,
                 base_unit: i.base_unit,
+                item_type: i.item_type,
                 mrp: i.mrp,
                 default_sale_price: i.default_sale_price,
                 current_stock: i.current_stock,
@@ -270,6 +271,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let item = Item {
             id: 0,
             name: clean_name(&payload.name),
+            item_type: ItemType::Physical,
             category: clean_optional(payload.category.as_deref()),
             barcode,
             base_unit: payload.base_unit.trim().to_string(),

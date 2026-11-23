@@ -371,6 +371,9 @@ fn enum_literals_are_screaming_snake_case_and_round_trip() {
     assert_eq!(lit(OutflowSourceType::VendorReturn), "VENDOR_RETURN");
     assert_eq!(lit(ReturnLineType::ReplacementIssued), "REPLACEMENT_ISSUED");
     assert_eq!(lit(AllocationMethod::Fifo), "FIFO");
+    assert_eq!(lit(ItemType::Physical), "PHYSICAL");
+    assert_eq!(lit(ItemType::Service), "SERVICE");
+    assert!(enum_from_sql::<ItemType>("Physical").is_err());
 
     assert_eq!(enum_from_sql::<PaymentKind>("REFUND_IN").unwrap(), PaymentKind::RefundIn);
     assert_eq!(enum_from_sql::<StockCondition>("RESTOCKABLE").unwrap(), StockCondition::Restockable);
