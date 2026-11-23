@@ -1,6 +1,7 @@
 pub mod accounting_service;
 pub mod backup_service;
 pub mod data_reset_service;
+pub mod expense_service;
 pub mod inventory_allocation_strategy;
 pub mod inventory_service;
 pub mod item_import_service;
@@ -17,6 +18,7 @@ pub mod vedbill_import_service;
 pub use accounting_service::AccountingService;
 pub use backup_service::BackupService;
 pub use data_reset_service::DataResetService;
+pub use expense_service::ExpenseService;
 pub use inventory_allocation_strategy::{
     DepletionResult, InventoryAllocationStrategy, OutflowDepletionResult, ReversalResult,
 };

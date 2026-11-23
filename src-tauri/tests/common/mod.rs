@@ -78,6 +78,14 @@ impl TestDb {
         )
     }
 
+    /// Expense type FTS index bound to this test database.
+    pub fn expense_type_index(&self) -> book_keeper::data::sqlite::fts::SqliteFtsIndex {
+        book_keeper::data::sqlite::fts::SqliteFtsIndex::new(
+            self.pool.clone(),
+            &book_keeper::data::sqlite::fts_specs::EXPENSE_TYPE_FTS,
+        )
+    }
+
     /// Production FTS5 indexer bound to this test database.
     pub fn indexer(&self) -> SqliteFts5SearchIndexer {
         SqliteFts5SearchIndexer::new(self.pool.clone())
@@ -121,4 +129,5 @@ pub type VedbillImportServiceImpl<I> =
     book_keeper::services::VedbillImportServiceImpl<TestDb, I, book_keeper::data::vedbill::ZipVedbillReader>;
 pub type ItemServiceImpl<I> = book_keeper::services::ItemServiceImpl<TestDb, I>;
 pub type PartyServiceImpl = book_keeper::services::PartyServiceImpl<TestDb>;
+pub type ExpenseServiceImpl = book_keeper::services::ExpenseServiceImpl<TestDb>;
 pub type ShopSettingServiceImpl = book_keeper::services::ShopSettingServiceImpl<TestDb>;

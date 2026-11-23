@@ -1,5 +1,4 @@
-//! `FtsSpec` constants, one per FTS5 table. Later branches add `EXPENSE_TYPE_FTS` (v6) and
-//! `CHARGE_TYPE_FTS` (v7) here.
+//! `FtsSpec` constants, one per FTS5 table. A later branch adds `CHARGE_TYPE_FTS` (v7) here.
 use super::fts::FtsSpec;
 
 /// Item name/category/barcode plus one extra row per bundle barcode (several rows per key).
@@ -30,4 +29,14 @@ pub static PARTY_FTS: FtsSpec = FtsSpec {
         REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone,''),' ',''),'-',''),'+',''),'(',''),')',''),'.','') \
         FROM parties WHERE is_active = 1 AND id = ?1",
     source_count_sql: "SELECT COUNT(*) FROM parties WHERE is_active = 1",
+};
+
+/// Expense type name (v6). Typeahead for the Expenses form.
+pub static EXPENSE_TYPE_FTS: FtsSpec = FtsSpec {
+    table: "expense_type_search_fts",
+    key_column: "expense_type_id",
+    columns: &["name"],
+    source_all_sql: "SELECT id, name FROM expense_types WHERE is_active = 1",
+    source_one_sql: "SELECT id, name FROM expense_types WHERE is_active = 1 AND id = ?1",
+    source_count_sql: "SELECT COUNT(*) FROM expense_types WHERE is_active = 1",
 };
