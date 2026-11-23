@@ -84,6 +84,8 @@ src/
 │   │   ├── PartySelector.tsx        # Customer/Vendor select with balance pill
 │   │   ├── SettlementModal.tsx      # FIFO bill payment clearing modal
 │   │   ├── StockAdjustmentModal.tsx # Damaged/expired stock write-off modal
+│   │   ├── SetStockDialog.tsx       # Set stock on hand / add unrecorded stock
+│   │   ├── lotCost.ts               # latestLotCost, estimateFifoCost helpers
 │   │   └── DataTable.tsx            # Generic table with search, filter & pagination
 │   │
 │   └── layout/                      # Global Desktop Shell
@@ -397,13 +399,23 @@ interface PaymentStatusBadgeProps {
 * Amount must be > 0 and ≤ outstanding (party total or bill balance); date defaults to today.
 
 #### 5. `StockAdjustmentModal`
-* Fields: item search, Adjustment Date (default today), Quantity (± base units, non-zero), Reason (`DAMAGED`, `EXPIRED`, `THEFT_LOST`, `COUNT_CORRECTION`), Unit Cost (shown only for positive quantity; required when the item has no lot history — detected via `getItemLots`), Notes.
+* Fields: item search, Adjustment Date (default today), Quantity (± base units, non-zero), Reason (`DAMAGED`, `EXPIRED`, `THEFT_LOST`, `COUNT_CORRECTION`, `UNRECORDED_STOCK` "Unrecorded stock (no purchase)"), Unit Cost (shown only for positive quantity; required when the item has no lot history — detected via `getItemLots`), Notes.
 * Negative quantity validated against current stock before submit.
+* Picking `UNRECORDED_STOCK` forces the Increase direction; the Decrease direction hides it. An Increase shows the valuation effect `qty x unit cost` (`data-testid="valuation-effect"`). The unit cost prefill is the cost of the lot with the highest `purchaseItemId` (`latestLotCost`, matches the backend).
 
 #### 6. Returns forms (`ReturnsAdjustmentsPage`)
 * **Customer tab:** pick a bill (search by code / customer) or choose "No receipt". Linked mode lists the bill's lines with `sold`, `already returned`, `returnable` and pre-filled rate (editable down only). Per line: qty, condition. Settlement: `REFUND` (preview "₹X credited to this bill, ₹Y cash to hand back" — a linked return only credits its own bill) or `REPLACEMENT` (linked only; returned lines keep their condition — Restockable for a colour/size swap, Damaged/Scrap for a defective unit — then an "Issue" list where any item can be searched and added with a qty, stock-checked; a non-blocking warning shows the value difference at default prices; no money step). Unlinked mode: item search, qty, rate, condition, unit cost when the item has no lot history; party optional.
 * **Vendor tab:** pick a purchase bill or vendor; lines show `PURCHASE`-source lots (`getItemLots`) with remaining qty; per line qty ≤ remaining, or "FIFO" when no lot chosen. Preview of credit vs cash received.
 * Result toast shows `returnCode`, `creditedAmount`, `cashRefunded`.
+
+#### 8. `SetStockDialog`
+* Props: `{ isOpen, onClose, item: { itemId, name, currentStock, baseUnit }, onDone(result) }`. Modes: "Set counted stock" (default) and "Add quantity".
+* Fields: counted qty (default = current) or add qty; Date (today, max today); Unit cost (shown only when delta > 0; prefilled; "required (no lots yet)" when there are no lots); Notes.
+* Preview `data-testid="set-stock-preview"`: delta > 0 "+N unit, Unrecorded stock, Adds X to stock value" (X = N x cost); delta < 0 "-N unit, Count correction, Estimated write-off about Y (oldest lots first)"; delta = 0 "No change".
+* Footer: `FormActions` `[Cancel]` and `[Save stock]` (FR-22); Ctrl+Enter saves; Esc cancels; Save disabled when delta = 0.
+* Set mode calls `setItemStock`; Add mode calls `createStockAdjustment({reason:'UNRECORDED_STOCK'})`. Result view (`data-testid="set-stock-result"`) shows new stock and value change, with Close.
+* Entry points: Item List row action "Set stock" (PHYSICAL items only); Item edit drawer line "Stock on hand: N unit - [Set stock...]".
+* ApiClient gains `setItemStock(payload: SetItemStockPayload): Promise<SetItemStockResult>`; the mock is a typed stub with no rules (DD-27).
 
 #### 7. `PartySelector` inline create
 * Name + Phone + `FormActions size="xs"` (Cancel / Save). Save is disabled while Name is empty or a create is in flight. Enter saves, Esc and Cancel close and refocus the trigger.
@@ -468,6 +480,7 @@ export interface ApiClient {
   listReturns(filter: ReturnsFilter): Promise<PaginatedResponse<ReturnTransaction>>;
   getReturnDetails(returnId: number): Promise<ReturnDetailResponse>;
   createStockAdjustment(payload: StockAdjustmentPayload): Promise<{ adjustmentId: number; lossValue: number }>;
+  setItemStock(payload: SetItemStockPayload): Promise<SetItemStockResult>;
   listStockAdjustments(itemId?: number, page?: number, limit?: number): Promise<PaginatedResponse<StockAdjustment>>;
 
   // Reports & Settings

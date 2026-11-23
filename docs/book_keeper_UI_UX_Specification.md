@@ -166,7 +166,7 @@ The application maintains a persistent desktop shell across all views.
   - Quick Toggle: `[x] Show Only Low Stock (< 5 units)`.
   - Action Buttons: `[+ Add Item]`, `[Import Items (CSV / Excel)]` — opens the import dialog: file pick → dry-run report (valid rows, row errors, duplicates) → conflict strategy (`Skip` / `Overwrite details` / `Add stock`) → Confirm → summary. *(Export: deferred to v2.)*
 * **Items Table:**
-  - Columns: `Barcode`, `Item Name`, `Category`, `Base Unit`, `Current Stock`, `Stock Status Badge`, `MRP (₹)`, `Default Sale Price (₹)`, `Bundles Configured`, `Actions`.
+  - Columns: `Barcode`, `Item Name`, `Category`, `Base Unit`, `Current Stock`, `Stock Status Badge`, `MRP (₹)`, `Default Sale Price (₹)`, `Bundles Configured`, `Actions` (Edit · Adjust · **Set stock**, PHYSICAL items only).
 * Header row is fixed; the table fills the page height and scrolls inside itself; the pager stays visible below.
 * **Item Details / Edit Drawer:**
   - General Info: Name, Category, Barcode, Base Unit, MRP (₹, optional), Default Selling Price.
@@ -175,8 +175,9 @@ The application maintains a persistent desktop shell across all views.
     - List of bundles (e.g. "Dozen" = 12 PCS, "Box" = 50 PCS).
     - `[+ Add Bundle]` opens the bundle modal with **dynamic suggestions from existing bundles** (no hard-coded presets) + custom names, Multiplier (> 1), Bundle MRP, Bundle Sale Price, Outer Barcode.
     - Edit (any field, including multiplier) / Delete per bundle at any time. Bundles are only an entry shortcut; past bills keep their own record of units, price and the pack label used.
-  - Stock is read-only here (changed only via purchases, sales, returns, adjustments). No archive/delete of items in v1.
+  - Stock on hand: N - `[Set stock...]` opens the Set Stock dialog (unrecorded stock without a purchase; FR-08 rev.). Other stock changes come from purchases, sales, returns, adjustments. No archive/delete of items in v1.
 * **Batch Lot Inspector (Row Expand):**
+  - Unrecorded stock shows as an `Adjustment` lot at the entered cost.
   - Lists the item's lots (`get_item_lots`): Lot Date, Code, Source (`Purchase` / `Adjustment` / `Opening` / `Return`), Vendor, Original Qty, Remaining Qty, Unit Cost; active lots first.
 
 ---
@@ -243,7 +244,7 @@ The application maintains a persistent desktop shell across all views.
   - Value = lot cost × qty. Reduces the bill's (or vendor's oldest) payable first; any remainder is cash received from the supplier.
 * **Tab 3: Standalone Stock Adjustments:**
   - Direct item search (Name/Barcode) without requiring invoice reference.
-  - Fields: `Adjustment Date`, `Quantity` (+ or − base units, non-zero), `Reason` (`DAMAGED`, `EXPIRED`, `THEFT_LOST`, `COUNT_CORRECTION`), `Unit Cost` (positive only; prefilled from latest lot, required if none), `Notes`.
+  - Fields: `Adjustment Date`, `Quantity` (+ or − base units, non-zero), `Reason` (`DAMAGED`, `EXPIRED`, `THEFT_LOST`, `COUNT_CORRECTION`, `UNRECORDED_STOCK` (increase only; adds qty x cost to stock value; never a purchase or income)), `Unit Cost` (positive only; prefilled from latest lot, required if none), `Notes`.
   - Recalculates cached stock and low-stock flag immediately; shows write-off value for negative adjustments.
 * **History sub-lists:** recent returns (`list_returns`) and adjustments (`list_stock_adjustments`).
 
@@ -309,7 +310,12 @@ The application maintains a persistent desktop shell across all views.
    - Quick creation of a Customer or Vendor without leaving the cart: Name (required), Phone (optional), and visible **Save** (primary) and **Cancel** buttons. Enter saves, Esc cancels. Save is disabled until a name is typed.
 3. **Negative Stock Alert:**
    - Inline blocking alert if the cart's total base units for an item would exceed available stock.
-4. **Quick-create rule (FR-22):** every quick-create form shows Save + Cancel in addition to Enter/Esc.
+4. **Set Stock On Hand dialog:**
+   - Opened from the Item List row action "Set stock" or the Item drawer. Modes: Set counted stock (default) / Add quantity.
+   - Fields: counted (or added) quantity, Date, Unit cost (only when stock increases; prefilled from the latest lot, required if none), Notes.
+   - Live preview: increase shows "Unrecorded stock, adds X to stock value"; decrease shows "Count correction, estimated write-off Y"; equal shows "No change" and disables Save.
+   - Visible **Cancel** and **Save stock** buttons; Ctrl+Enter saves, Esc cancels. A result view shows the new stock and value change.
+5. **Quick-create rule (FR-22):** every quick-create form shows Save + Cancel in addition to Enter/Esc.
 
 ---
 
@@ -324,7 +330,7 @@ The application maintains a persistent desktop shell across all views.
 | **FR-05** | Real-Time Low Stock Monitoring (< 5) | **Page 1** (Right Pane) & **Page 5** (Filter) |
 | **FR-06** | Credit & Dues Management | **Page 6** (Khata Ledger & Settlement Modal) |
 | **FR-07** | Returns & Replacements | **Page 9** (Customer Return, Swap, Vendor Return) |
-| **FR-08** | Standalone Stock Adjustments | **Page 9** (Adjustment Tab) & **Page 1** (Quick action) |
+| **FR-08** | Standalone Stock Adjustments | **Page 9** (Adjustment Tab), **Page 5** (Set stock row action & item drawer), **Page 1** (Quick action) |
 | **FR-09** | Financial Aggregations & Reports | **Page 10** (Reports) & **Page 1** (KPI Cards) |
 | **FR-10** | Lists & Operational Views | **Page 1, 2, 4, 5, 6, 7, 8, 9, 10, 11** (sticky headers via shared Table) |
 | **FR-11** | Items Import & Local Backup | **Page 5** (Import dialog) & **Page 12** (Backup, Integrity) |
