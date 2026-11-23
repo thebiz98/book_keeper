@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Users, Plus, Search, Pencil, User, Truck, BookOpen } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import type { PartyListRow, PartyType } from '@/types';
@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { TextInput } from '@/components/ui/TextInput';
 import { Select } from '@/components/ui/Select';
 import { Tabs } from '@/components/ui/Tabs';
+import { FormActions, enterToSubmit } from '@/components/ui/FormActions';
 
 interface PartyForm {
   id: number | null;
@@ -37,6 +38,13 @@ export const PartiesPage: React.FC = () => {
 
   const [form, setForm] = useState<PartyForm | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const savingRef = useRef(false);
+  const formOpen = form !== null;
+
+  useEffect(() => {
+    setFormError(null);
+  }, [formOpen, form?.id]);
 
   const load = useCallback(() => {
     setIsLoading(true);
@@ -58,13 +66,14 @@ export const PartiesPage: React.FC = () => {
   }, [load]);
 
   const handleSave = async () => {
-    if (!form) return;
+    if (!form || savingRef.current) return;
     if (!form.name.trim()) {
-      setError('Party name is required');
+      setFormError('Party name is required');
       return;
     }
+    savingRef.current = true;
     setIsSaving(true);
-    setError(null);
+    setFormError(null);
     const payload = {
       name: form.name.trim(),
       phone: form.phone.trim() || null,
@@ -80,8 +89,9 @@ export const PartiesPage: React.FC = () => {
       setForm(null);
       load();
     } catch (err) {
-      setError(errorMessage(err));
+      setFormError(errorMessage(err));
     } finally {
+      savingRef.current = false;
       setIsSaving(false);
     }
   };
@@ -193,18 +203,16 @@ export const PartiesPage: React.FC = () => {
         title={form?.id == null ? 'Add Party' : 'Edit Party'}
         size="md"
         footer={
-          <>
-            <Button variant="outline" onClick={() => setForm(null)}>
-              Cancel
-            </Button>
-            <Button variant="primary" isLoading={isSaving} onClick={handleSave}>
-              Save
-            </Button>
-          </>
+          <FormActions
+            onSave={() => void handleSave()}
+            onCancel={() => setForm(null)}
+            isSubmitting={isSaving}
+            canSave={!!form?.name.trim()}
+          />
         }
       >
         {form && (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3" onKeyDown={enterToSubmit(() => void handleSave())}>
             <TextInput
               label="Name"
               value={form.name}
@@ -230,6 +238,11 @@ export const PartiesPage: React.FC = () => {
                 { value: 'VENDOR', label: 'Vendor' },
               ]}
             />
+            {formError && (
+              <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">
+                {formError}
+              </p>
+            )}
           </div>
         )}
       </Modal>
