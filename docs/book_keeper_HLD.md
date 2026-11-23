@@ -48,7 +48,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Single payment ledger**: every money event (upfront payment, settlement, return credit, cash refund in/out) is one `PAYMENT_SETTLEMENT` row; bill `paid_amount` / `balance_due` / `payment_status` are cached values derived from it (see Assumption 8).
 * **FR-07: Returns & Replacements**
   * **Customer Sales Return**: Returning sold items. When items are marked **Restockable**, the system restores `remaining_quantity` on the original lots (traced via `SALE_STOCK_ALLOCATION`, latest-depleted first), re-entering inventory at their original cost. `DAMAGED_SCRAP` items are not restocked.
-    * **Linked return** (against a sale line): returned qty ≤ sold − already returned; same item; refund rate ≤ the line's effective rate (defaults to it). Repeated partial returns never over-restore lots.
+    * **Linked return** (against a sale line): returned qty ≤ sold − already returned; same item; refund rate ≤ the line's **net** rate (FR-19; defaults to it). Repeated partial returns never over-restore lots.
     * **Unlinked return** (no receipt): allowed; a Restockable unit re-enters stock as a new `RETURN`-source lot at the item's latest lot cost (user enters cost if the item never had a lot).
   * **Refund settlement (both directions)**: a **linked (tracked) return** reduces only its own bill's `balance_due` (capped at that balance); any remainder is paid out (customer) / received (vendor) as cash — it never moves to other bills. An **unlinked (untracked) return** with a known party is applied to that party's oldest open bills first, remainder in cash; walk-in returns are pure cash refunds.
   * **Replacement / Exchange (no-money swap)**: against a bill, one or more sold units come back — Restockable (e.g. a colour/size swap; goes back to its original lot) or Scrap (defective) — and one or more units of **any** item are issued from stock (FIFO). No money moves and revenue is not reversed; a value difference is shown as a warning only (use a refund + new sale when prices must be settled). Returned units are reversed exactly as in a refund return; issued units' cost becomes replacement COGS on the return date. The original sale is not altered.
@@ -251,7 +251,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 14. **Lot Sources**: Every stock lot is a `PURCHASE_ITEM` under a `PURCHASE_TRANSACTION` whose `source` is `PURCHASE` (real supplier bill), `ADJUSTMENT` (found stock), `OPENING` (import opening stock) or `RETURN` (unlinked restockable customer return). Non-`PURCHASE` headers carry `total_amount = 0`, no party, status `PAID`, and their own code prefix (`ADJ-`, `OPN-`, `RTL-`). All purchase lists, counts, totals, payables and vendor-return pickers include only `source = PURCHASE`.
 15. **FIFO Order**: Lots are consumed in entry order (ascending `PURCHASE_ITEM.id`).
 16. **Expenses are standalone cash-out events** *(2026-11-22)*: An `EXPENSE` row is itself the money event (always cash, paid on `expense_date`); it does not create `PAYMENT_SETTLEMENT` rows, because it has no bill, no party and no due. Assumption 8 still holds for every bill. Cash out for any period = ledger cash out + Σ `EXPENSE.amount` by `expense_date`.
-17. **Bill totals include charges and discounts** *(2026-11-22)*: `total_amount = items_subtotal + charges_total − discounts_total`. Everything that used `total_amount` (status cross-check, dues, ledger caps, receivables/payables) keeps using it unchanged. Reports that need item revenue or item purchase cost use `items_subtotal`.
+17. **Bill totals include charges and discounts** *(2026-11-22)*: `total_amount = items_subtotal + charges_total − discounts_total`. Everything that used `total_amount` (status cross-check, dues, ledger caps, receivables/payables) keeps using it unchanged. Reports that need item revenue or item purchase cost use `items_subtotal`. Dashboard today's sales/purchases and the trend chart use `items_subtotal`.
 18. **Purchase charges are expenses, not cost** *(2026-11-22)*: Purchase charges/discounts never change lot `unit_cost`, FIFO costs or stock valuation. They are P&L lines (Operating Expenses / Other Income) on the purchase's `transaction_date`.
 19. **Edit = reverse then repost** *(2026-11-22)*: A bill edit reverses the old version's effects and posts the new version through the same service code used for creation, inside one transaction, keeping id and code. Back-dated or edited bills follow DD-09: FIFO order is entry order, so re-posted sale lines take the oldest lots available at edit time.
 20. **Unrecorded stock is valued at entered cost** *(2026-11-22)*: `UNRECORDED_STOCK` adjustments create lots at a user-entered cost (prefilled from the latest lot), unlike other positive adjustments (DD-08), because this stock never had a purchase to take a cost from.
@@ -811,7 +811,7 @@ erDiagram
 | **Other Income** *(v1.1)* | sale `charges_total` + purchase `discounts_total` in period |
 | **Operating Expenses** *(v1.1)* | Σ `EXPENSE.amount` + purchase `charges_total` in period |
 | **Period Sales Returns** | `SELECT SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'CUSTOMER' AND settlement_type = 'REFUND' AND return_date BETWEEN ? AND ?;` |
-| **Period Purchases (net)** | `SUM(total_amount) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND transaction_date BETWEEN ? AND ?` − `SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'VENDOR' AND return_date BETWEEN ? AND ?` |
+| **Period Purchases (net)** | `SUM(items_subtotal) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND transaction_date BETWEEN ? AND ?` − `SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'VENDOR' AND return_date BETWEEN ? AND ?` |
 | **Period COGS** | `SELECT SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` **+** `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type = 'REPLACEMENT'` whose return is dated in range |
 | **Period Inventory Losses** | `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type = 'ADJUSTMENT'` dated by adjustment date, + `SUM(ri.cost_amount)` for customer `RETURNED` lines (REFUND or REPLACEMENT returns) with `condition = 'DAMAGED_SCRAP'`, by return date |
 | **Period Profit** *(rev. v1.1)* | Net Sales = Gross (items subtotal) − Sales Discounts − Returns; Gross Profit = Net Sales − COGS; Net Profit = Gross Profit + Other Income − Inventory Losses − Operating Expenses |
@@ -977,7 +977,7 @@ interface SaleHistoryRow {
 
 // Command: get_sale_details
 // Input: { sale_id: number }
-// Returns sale header, line items with bundle details, per-line returned qty, FIFO depletion cost breakdown,
+// Returns sale header, line items with bundle details (incl. per-line `net_unit_price`), per-line returned qty, FIFO depletion cost breakdown, `charges[]`,
 // and the bill's ledger rows.
 ```
 
@@ -1225,7 +1225,7 @@ interface StockAdjustmentPayload {
 interface PnLReport {
   gross_sales: number;
   sales_returns: number;              // customer REFUND returns in period
-  net_sales: number;                  // gross_sales - sales_returns
+  net_sales: number;                  // gross_sales - sales_discounts - sales_returns
   cogs: number;                       // FIFO COGS net of returned units + replacement units issued
   gross_profit: number;               // net_sales - cogs
   inventory_losses: number;           // write-offs + scrap returns
@@ -1236,6 +1236,10 @@ interface PnLReport {
   other_income: number;               // sale charges_total + purchase discounts_total
   operating_expenses: number;         // Σ EXPENSE.amount + purchase charges_total
   expenses_by_type: Array<{ expense_type_name: string; amount: number }>;
+  // v1.1 breakdown (FR-19): other_income = sale_charges_income + purchase_discounts_income
+  sale_charges_income: number;
+  purchase_discounts_income: number;
+  purchase_charges_expense: number;   // part of operating_expenses
 }
 // v1.1: net_sales = gross_sales - sales_discounts - sales_returns; gross_sales = Σ items_subtotal.
 
@@ -1296,8 +1300,8 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // get_next_expense_code -> "EXP-1001"
 
 // --- Charges & discounts (FR-19) — charge_api
-// search_charge_types { query, applies_to: "SALE" | "PURCHASE", limit? } -> ChargeType[]
-// create_charge_type { name, effect: "CHARGE" | "DISCOUNT", applies_to, default_amount? } -> ChargeType
+// search_charge_types { query, applies_to: "SALE" | "PURCHASE", limit? } -> ChargeType[]   // blank query lists applicable types by name; else FTS prefix hits by rank; limit default 8 (1..=50)
+// create_charge_type { payload: { name, effect: "CHARGE" | "DISCOUNT", applies_to, default_amount? } } -> ChargeType   // existing name (case-insensitive) -> ValidationError(name)
 // CreateSalePayload / CreatePurchasePayload gain:
 //   charges: Array<{ charge_type_id: number; amount: number }>   // [] when none
 // Sale/purchase detail + history rows gain items_subtotal, charges_total, discounts_total, charges[]
