@@ -104,6 +104,78 @@ impl SqlitePurchaseRepository {
 }
 
 impl PurchaseRepository for SqlitePurchaseRepository {
+    fn update_header_for_edit(&mut self, h: &PurchaseTransaction) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE purchase_transactions SET supplier_invoice_ref = ?2, transaction_date = ?3, party_id = ?4, \
+             party_name = ?5, payment_mode = ?6, notes = ?7, items_subtotal = ?8, charges_total = ?9, \
+             discounts_total = ?10, total_amount = ?11, updated_at = ?12 WHERE id = ?1",
+            params![
+                h.id, h.supplier_invoice_ref, h.transaction_date, h.party_id, h.party_name, h.payment_mode, h.notes,
+                h.items_subtotal, h.charges_total, h.discounts_total, h.total_amount, h.updated_at
+            ],
+        )?;
+        if n == 0 {
+            return Err(AppError::not_found("PurchaseTransaction", h.id.to_string()));
+        }
+        Ok(())
+    }
+
+    fn update_purchase_item(&mut self, l: &PurchaseItem) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE purchase_items SET item_id = ?2, item_name = ?3, pack_label = ?4, pack_quantity = ?5, \
+             quantity = ?6, unit_cost = ?7, total_amount = ?8, remaining_quantity = ?9 WHERE id = ?1",
+            params![
+                l.id, l.item_id, l.item_name, l.pack_label, l.pack_quantity, l.quantity, l.unit_cost,
+                l.total_amount, l.remaining_quantity
+            ],
+        )?;
+        if n == 0 {
+            return Err(AppError::not_found("PurchaseItem", l.id.to_string()));
+        }
+        Ok(())
+    }
+
+    fn delete_purchase_item(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn.execute("DELETE FROM purchase_items WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    fn delete_transaction(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn.execute("DELETE FROM purchase_transactions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    fn is_lot_referenced(&self, lot_id: i64) -> Result<bool, AppError> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sale_stock_allocations WHERE purchase_item_id = ?1) \
+                 OR EXISTS(SELECT 1 FROM stock_outflow_allocations WHERE purchase_item_id = ?1) \
+                 OR EXISTS(SELECT 1 FROM return_items WHERE purchase_item_id = ?1)",
+            params![lot_id],
+            |r| r.get::<_, bool>(0),
+        )?)
+    }
+
+    fn is_lot_referenced_except_return(&self, lot_id: i64, return_id: i64) -> Result<bool, AppError> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sale_stock_allocations WHERE purchase_item_id = ?1) \
+                 OR EXISTS(SELECT 1 FROM stock_outflow_allocations WHERE purchase_item_id = ?1) \
+                 OR EXISTS(SELECT 1 FROM return_items WHERE purchase_item_id = ?1 AND return_transaction_id <> ?2)",
+            params![lot_id, return_id],
+            |r| r.get::<_, bool>(0),
+        )?)
+    }
+
+    fn find_return_lots_by_note(&self, note: &str, item_id: i64) -> Result<Vec<PurchaseItem>, AppError> {
+        let cols = ITEM_COLS.split(", ").map(|c| format!("pi.{c}")).collect::<Vec<_>>().join(", ");
+        self.query_items(
+            &format!(
+                "SELECT {cols} FROM purchase_items pi JOIN purchase_transactions pt ON pt.id = pi.purchase_transaction_id \
+                 WHERE pt.source = 'RETURN' AND pt.notes = ?1 AND pi.item_id = ?2 ORDER BY pi.id"
+            ),
+            params![note, item_id],
+        )
+    }
+
     fn create_transaction(&mut self, tx: &PurchaseTransaction) -> Result<i64, AppError> {
         self.conn.execute(
             &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"),

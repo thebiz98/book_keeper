@@ -11,4 +11,10 @@ pub trait AllocationRepository {
     fn update_returned_quantity(&mut self, allocation_id: i64, new_returned_qty: f64) -> Result<(), AppError>;
     /// Every allocation (report COGS; F5 replaces this with SQL aggregates).
     fn list_all(&self) -> Result<Vec<SaleStockAllocation>, AppError>;
+    /// FR-20: removes every allocation of a sale line; returns the count.
+    fn delete_by_sale_item_id(&mut self, sale_item_id: i64) -> Result<usize, AppError>;
+    /// Distinct sale lines that drew from the lot.
+    fn sale_item_ids_for_lot(&self, lot_id: i64) -> Result<Vec<i64>, AppError>;
+    /// FR-20 re-cost: sets `unit_cost` on every allocation of the lot.
+    fn update_unit_cost_for_lot(&mut self, lot_id: i64, unit_cost: f64) -> Result<usize, AppError>;
 }

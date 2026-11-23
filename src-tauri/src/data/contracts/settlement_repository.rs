@@ -18,4 +18,23 @@ pub trait SettlementRepository {
     ) -> Result<Vec<(TransactionType, PaymentKind, f64)>, AppError>;
     /// Every ledger row (drawer and cash-flow reports; F5 replaces this with SQL aggregates).
     fn list_all(&self) -> Result<Vec<PaymentSettlement>, AppError>;
+    /// FR-20: deletes the bill's rows of the given kinds and returns them.
+    fn delete_by_transaction(
+        &mut self,
+        tx_type: TransactionType,
+        tx_id: i64,
+        kinds: &[PaymentKind],
+    ) -> Result<Vec<PaymentSettlement>, AppError>;
+    /// FR-20: re-points the bill's rows of the given kinds to another party.
+    fn update_party_for_transaction(
+        &mut self,
+        tx_type: TransactionType,
+        tx_id: i64,
+        party_id: Option<i64>,
+        kinds: &[PaymentKind],
+    ) -> Result<(), AppError>;
+    /// Distinct `return_id`s of the bill's `RETURN_CREDIT` rows.
+    fn return_credit_return_ids(&self, tx_type: TransactionType, tx_id: i64) -> Result<Vec<i64>, AppError>;
+    /// FR-20: deletes every ledger row booked by one return and returns them.
+    fn delete_by_return(&mut self, return_id: i64) -> Result<Vec<PaymentSettlement>, AppError>;
 }

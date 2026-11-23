@@ -100,6 +100,31 @@ impl SqliteSaleRepository {
 }
 
 impl SaleRepository for SqliteSaleRepository {
+    fn update_header_for_edit(&mut self, h: &SaleTransaction) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE sale_transactions SET transaction_date = ?2, party_id = ?3, party_name = ?4, payment_mode = ?5, \
+             notes = ?6, items_subtotal = ?7, charges_total = ?8, discounts_total = ?9, total_amount = ?10, \
+             updated_at = ?11 WHERE id = ?1",
+            params![
+                h.id, h.transaction_date, h.party_id, h.party_name, h.payment_mode, h.notes, h.items_subtotal,
+                h.charges_total, h.discounts_total, h.total_amount, h.updated_at
+            ],
+        )?;
+        if n == 0 {
+            return Err(AppError::not_found("SaleTransaction", h.id.to_string()));
+        }
+        Ok(())
+    }
+
+    fn delete_sale_items(&mut self, sale_id: i64) -> Result<usize, AppError> {
+        Ok(self.conn.execute("DELETE FROM sale_items WHERE sale_transaction_id = ?1", params![sale_id])?)
+    }
+
+    fn delete_transaction(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn.execute("DELETE FROM sale_transactions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     fn create_transaction(&mut self, tx: &SaleTransaction) -> Result<i64, AppError> {
         self.conn.execute(
             &format!("INSERT INTO sale_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"),

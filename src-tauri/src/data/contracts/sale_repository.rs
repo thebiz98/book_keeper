@@ -45,4 +45,13 @@ pub trait SaleRepository {
     fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<SaleItem>, AppError>;
     /// Σ quantity of customer `RETURNED` return lines referencing this sale line.
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError>;
+
+    /// FR-20: rewrites date, party (+ name snapshot), mode, notes, subtotal/charges/discounts,
+    /// total and `updated_at`. Never touches the code, `created_at` or the cached money fields
+    /// (`PaymentService` recomputes those).
+    fn update_header_for_edit(&mut self, h: &SaleTransaction) -> Result<(), AppError>;
+    /// FR-20: removes the bill's lines (allocations must be gone first); returns the count.
+    fn delete_sale_items(&mut self, sale_id: i64) -> Result<usize, AppError>;
+    /// FR-20: removes the header (lines, charges and ledger must be gone first).
+    fn delete_transaction(&mut self, id: i64) -> Result<(), AppError>;
 }

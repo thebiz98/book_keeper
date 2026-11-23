@@ -29,4 +29,16 @@ pub trait ReturnRepository {
         offset: usize,
         limit: usize,
     ) -> Result<Vec<ReturnTransaction>, AppError>;
+
+    /// Returns of `return_type` whose `original_transaction_id` is the bill (polymorphic id, so the
+    /// type always filters), oldest first.
+    fn list_linked(&self, return_type: ReturnType, original_id: i64) -> Result<Vec<ReturnTransaction>, AppError>;
+    /// Code of any newer (higher id) return with the same type and original bill; `None` when the
+    /// return is unlinked or the newest.
+    fn newer_linked_return(&self, r: &ReturnTransaction) -> Result<Option<String>, AppError>;
+    /// `RETURNED` lines of customer returns that reference the sale line, in id order.
+    fn list_customer_returned_items_for_sale_item(&self, sale_item_id: i64) -> Result<Vec<ReturnItem>, AppError>;
+    fn set_return_item_lot(&mut self, return_item_id: i64, lot_id: i64) -> Result<(), AppError>;
+    /// FR-20: deletes the return's lines and header (ledger rows must be gone first).
+    fn delete_return(&mut self, id: i64) -> Result<(), AppError>;
 }

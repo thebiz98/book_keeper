@@ -61,4 +61,20 @@ pub trait PurchaseRepository {
     fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<PurchaseItem>, AppError>;
     /// Σ quantity of vendor `RETURNED` return lines referencing this lot.
     fn get_returned_quantity_for_lot(&self, purchase_item_id: i64) -> Result<f64, AppError>;
+
+    /// FR-20: rewrites date, party (+ name snapshot), invoice ref, mode, notes, subtotal/charges/
+    /// discounts, total and `updated_at`. Never touches the code, source, `created_at` or the
+    /// cached money fields.
+    fn update_header_for_edit(&mut self, h: &PurchaseTransaction) -> Result<(), AppError>;
+    /// FR-20: rewrites every mutable lot column (the table CHECK enforces `0 <= remaining <= quantity`).
+    fn update_purchase_item(&mut self, lot: &PurchaseItem) -> Result<(), AppError>;
+    fn delete_purchase_item(&mut self, id: i64) -> Result<(), AppError>;
+    /// FR-20: removes the header (lots, charges and ledger must be gone first).
+    fn delete_transaction(&mut self, id: i64) -> Result<(), AppError>;
+    /// A sale allocation, an outflow allocation or a return line points at the lot.
+    fn is_lot_referenced(&self, lot_id: i64) -> Result<bool, AppError>;
+    /// Like [`Self::is_lot_referenced`] but ignoring return lines of one return (its own link).
+    fn is_lot_referenced_except_return(&self, lot_id: i64, return_id: i64) -> Result<bool, AppError>;
+    /// `RETURN`-source lots of item `item_id` whose header notes equal `note`, lowest id first.
+    fn find_return_lots_by_note(&self, note: &str, item_id: i64) -> Result<Vec<PurchaseItem>, AppError>;
 }

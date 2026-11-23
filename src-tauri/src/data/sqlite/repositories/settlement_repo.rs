@@ -42,7 +42,76 @@ impl SqliteSettlementRepository {
     }
 }
 
+fn kinds_in(kinds: &[PaymentKind]) -> Result<String, AppError> {
+    let lits = kinds
+        .iter()
+        .map(|k| enum_to_sql(k).map(|s| format!("'{s}'")))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(if lits.is_empty() { "''".to_string() } else { lits.join(",") })
+}
+
 impl SettlementRepository for SqliteSettlementRepository {
+    fn delete_by_transaction(
+        &mut self,
+        tx_type: TransactionType,
+        tx_id: i64,
+        kinds: &[PaymentKind],
+    ) -> Result<Vec<PaymentSettlement>, AppError> {
+        let in_list = kinds_in(kinds)?;
+        let rows = self.query(
+            &format!(
+                "SELECT {COLS} FROM payment_settlements WHERE transaction_type = ?1 AND transaction_id = ?2 \
+                 AND kind IN ({in_list}) ORDER BY id"
+            ),
+            params![enum_to_sql(&tx_type)?, tx_id],
+        )?;
+        self.conn.execute(
+            &format!(
+                "DELETE FROM payment_settlements WHERE transaction_type = ?1 AND transaction_id = ?2 AND kind IN ({in_list})"
+            ),
+            params![enum_to_sql(&tx_type)?, tx_id],
+        )?;
+        Ok(rows)
+    }
+
+    fn update_party_for_transaction(
+        &mut self,
+        tx_type: TransactionType,
+        tx_id: i64,
+        party_id: Option<i64>,
+        kinds: &[PaymentKind],
+    ) -> Result<(), AppError> {
+        let in_list = kinds_in(kinds)?;
+        self.conn.execute(
+            &format!(
+                "UPDATE payment_settlements SET party_id = ?3 WHERE transaction_type = ?1 AND transaction_id = ?2 \
+                 AND kind IN ({in_list})"
+            ),
+            params![enum_to_sql(&tx_type)?, tx_id, party_id],
+        )?;
+        Ok(())
+    }
+
+    fn return_credit_return_ids(&self, tx_type: TransactionType, tx_id: i64) -> Result<Vec<i64>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT return_id FROM payment_settlements WHERE transaction_type = ?1 AND transaction_id = ?2 \
+             AND kind = 'RETURN_CREDIT' AND return_id IS NOT NULL ORDER BY return_id",
+        )?;
+        let rows = stmt
+            .query_map(params![enum_to_sql(&tx_type)?, tx_id], |r| r.get(0))?
+            .collect::<Result<Vec<i64>, _>>()?;
+        Ok(rows)
+    }
+
+    fn delete_by_return(&mut self, return_id: i64) -> Result<Vec<PaymentSettlement>, AppError> {
+        let rows = self.query(
+            &format!("SELECT {COLS} FROM payment_settlements WHERE return_id = ?1 ORDER BY id"),
+            params![return_id],
+        )?;
+        self.conn.execute("DELETE FROM payment_settlements WHERE return_id = ?1", params![return_id])?;
+        Ok(rows)
+    }
+
     fn create_settlement(&mut self, s: &PaymentSettlement) -> Result<i64, AppError> {
         self.conn.execute(
             &format!("INSERT INTO payment_settlements ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"),

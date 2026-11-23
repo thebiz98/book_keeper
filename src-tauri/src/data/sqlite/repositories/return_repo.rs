@@ -57,6 +57,53 @@ impl SqliteReturnRepository {
 }
 
 impl ReturnRepository for SqliteReturnRepository {
+    fn list_linked(&self, return_type: ReturnType, original_id: i64) -> Result<Vec<ReturnTransaction>, AppError> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TX_COLS} FROM return_transactions WHERE return_type = ?1 AND original_transaction_id = ?2 ORDER BY id"
+        ))?;
+        let rows = stmt
+            .query_map(params![enum_to_sql(&return_type)?, original_id], map_tx)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn newer_linked_return(&self, r: &ReturnTransaction) -> Result<Option<String>, AppError> {
+        let Some(orig) = r.original_transaction_id else { return Ok(None) };
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT return_code FROM return_transactions WHERE return_type = ?1 AND original_transaction_id = ?2 \
+                 AND id > ?3 ORDER BY id LIMIT 1",
+                params![enum_to_sql(&r.return_type)?, orig, r.id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    fn list_customer_returned_items_for_sale_item(&self, sale_item_id: i64) -> Result<Vec<ReturnItem>, AppError> {
+        let cols = ITEM_COLS.split(", ").map(|c| format!("ri.{c}")).collect::<Vec<_>>().join(", ");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {cols} FROM return_items ri JOIN return_transactions rt ON rt.id = ri.return_transaction_id \
+             WHERE ri.sale_item_id = ?1 AND ri.line_type = 'RETURNED' AND rt.return_type = 'CUSTOMER' ORDER BY ri.id"
+        ))?;
+        let rows = stmt.query_map(params![sale_item_id], map_item)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn set_return_item_lot(&mut self, return_item_id: i64, lot_id: i64) -> Result<(), AppError> {
+        self.conn.execute(
+            "UPDATE return_items SET purchase_item_id = ?2 WHERE id = ?1",
+            params![return_item_id, lot_id],
+        )?;
+        Ok(())
+    }
+
+    fn delete_return(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn.execute("DELETE FROM return_items WHERE return_transaction_id = ?1", params![id])?;
+        self.conn.execute("DELETE FROM return_transactions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     fn create_return_transaction(&mut self, t: &ReturnTransaction) -> Result<i64, AppError> {
         self.conn.execute(
             &format!("INSERT INTO return_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),

@@ -36,6 +36,25 @@ impl SqliteAllocationRepository {
 }
 
 impl AllocationRepository for SqliteAllocationRepository {
+    fn delete_by_sale_item_id(&mut self, sale_item_id: i64) -> Result<usize, AppError> {
+        Ok(self.conn.execute("DELETE FROM sale_stock_allocations WHERE sale_item_id = ?1", params![sale_item_id])?)
+    }
+
+    fn sale_item_ids_for_lot(&self, lot_id: i64) -> Result<Vec<i64>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT sale_item_id FROM sale_stock_allocations WHERE purchase_item_id = ?1 ORDER BY sale_item_id",
+        )?;
+        let rows = stmt.query_map(params![lot_id], |r| r.get(0))?.collect::<Result<Vec<i64>, _>>()?;
+        Ok(rows)
+    }
+
+    fn update_unit_cost_for_lot(&mut self, lot_id: i64, unit_cost: f64) -> Result<usize, AppError> {
+        Ok(self.conn.execute(
+            "UPDATE sale_stock_allocations SET unit_cost = ?2 WHERE purchase_item_id = ?1",
+            params![lot_id, unit_cost],
+        )?)
+    }
+
     fn create_allocation(&mut self, a: &SaleStockAllocation) -> Result<i64, AppError> {
         self.conn.execute(
             &format!("INSERT INTO sale_stock_allocations ({COLS}) VALUES (?1,?2,?3,?4,?5,?6)"),
