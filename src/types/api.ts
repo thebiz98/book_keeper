@@ -13,6 +13,7 @@ import type {
   Expense,
   ExpenseType,
   ItemBundle,
+  ItemBillRef,
   ItemLot,
   ItemSearchResult,
   ItemType,
@@ -519,6 +520,10 @@ export interface ApiClient {
    * main.rs generate_handler!. It will reject until the backend registers it.
    */
   getItemLots(itemId: number): Promise<ItemLot[]>;
+  /** FR-23: bills (sales) containing the item, newest first, one row per bill. Default limit 10, max 50. */
+  getItemSales(itemId: number, page?: number, limit?: number): Promise<Paginated<ItemBillRef>>;
+  /** FR-23: `source = PURCHASE` bills containing the item. */
+  getItemPurchases(itemId: number, page?: number, limit?: number): Promise<Paginated<ItemBillRef>>;
   listStockAdjustments(
     itemId?: number,
     page?: number,

@@ -73,6 +73,14 @@ export interface ItemLot {
   unitCost: number;
 }
 
+/** FR-23: one bill that contains an item (Item details Sales / Purchases tabs). */
+export interface ItemBillRef {
+  billId: number;
+  transactionCode: string;
+  transactionDate: string;
+  partyName: string | null;
+}
+
 export interface LowStockItem {
   id: number;
   name: string;
