@@ -10,3 +10,4 @@ export * from './Table';
 export * from './Card';
 export * from './Tabs';
 export * from './Tooltip';
+export * from './FormActions';
