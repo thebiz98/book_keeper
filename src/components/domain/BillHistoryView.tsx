@@ -205,7 +205,7 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
         onPageChange={setPage}
       />
 
-      <BillDetailDrawer kind={kind} billId={detailId} onClose={() => setDetailId(null)} />
+      <BillDetailDrawer kind={kind} billId={detailId} onClose={() => setDetailId(null)} onChanged={load} />
 
       {settling && settling.partyId !== null && (
         <SettlementModal

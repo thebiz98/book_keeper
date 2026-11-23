@@ -236,6 +236,6 @@ describe('MockApiClient contract shapes', () => {
       }),
     );
     expect((await c.deletePurchase(pur.purchaseId)).removedCashAmount).toBe(40);
-    has(await c.deleteReturn((await c.createVendorReturn(payload({ returnDate: '2026-11-20', items: [] }))).returnId), ['removedCashAmount', 'removedCreditAmount']);
+    has(await c.deleteReturn((await c.createVendorReturn(payload<Parameters<ApiClient["createVendorReturn"]>[0]>({ returnDate: '2026-11-20', items: [] }))).returnId), ['removedCashAmount', 'removedCreditAmount']);
   });
 });

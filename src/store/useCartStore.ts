@@ -30,6 +30,13 @@ export interface CartState {
   totalBaseUnits: number;
   totalItems: number;
   selectedCustomer: CustomerInput | null;
+  /** FR-20: set while a sale is being edited; null when creating a new one. */
+  editing: { saleId: number; code: string } | null;
+  /**
+   * FR-20: base units per item that the bill being edited already holds. The edit reverses them
+   * first, so they count as available on top of the item's current stock.
+   */
+  editCredit: Record<number, number>;
 
   /**
    * Add a line. Merges into an existing line only when item, unit (bundle) and
@@ -52,8 +59,20 @@ export interface CartState {
   addCharge: (line: Omit<BillChargeLine, 'key'>) => boolean;
   updateChargeAmount: (key: number, amount: number) => boolean;
   removeCharge: (key: number) => void;
+  /** Resets everything, including edit mode. */
   clearCart: () => void;
   setCustomer: (customer: CustomerInput | null) => void;
+  /**
+   * FR-20: replaces the cart with an existing bill's lines and enters edit mode. Lines must
+   * already carry `availableStock = currentStock + credit`.
+   */
+  loadForEdit: (
+    lines: Omit<CartLine, 'lineId'>[],
+    customer: CustomerInput | null,
+    editing: { saleId: number; code: string },
+    credit: Record<number, number>,
+    charges?: Omit<BillChargeLine, 'key'>[]
+  ) => void;
 }
 
 let lineSeq = 0;
@@ -94,6 +113,8 @@ const initialState = {
   totalBaseUnits: 0,
   totalItems: 0,
   selectedCustomer: null as CustomerInput | null,
+  editing: null as { saleId: number; code: string } | null,
+  editCredit: {} as Record<number, number>,
 };
 
 export const useCartStore = create<CartState>((set, get) => ({
@@ -101,7 +122,9 @@ export const useCartStore = create<CartState>((set, get) => ({
 
   addItem: (item, quantity = 1, bundle = null, rate) => {
     if (!validQty(quantity)) return false;
-    if (item.currentStock <= 0) return false;
+    const credit = get().editCredit[item.id] ?? 0;
+    const stock = item.currentStock + credit;
+    if (stock <= 0) return false;
     if (rate !== undefined && !validRate(rate)) return false;
 
     const multiplier = bundle ? bundle.unitsPerBundle : 1;
@@ -109,7 +132,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     const addedBase = quantity * multiplier;
     const { items } = get();
 
-    if (cartBaseQuantity(items, item.id) + addedBase > item.currentStock + STOCK_EPS) {
+    if (cartBaseQuantity(items, item.id) + addedBase > stock + STOCK_EPS) {
       return false;
     }
 
@@ -131,7 +154,7 @@ export const useCartStore = create<CartState>((set, get) => ({
         quantity: q,
         baseQuantity: q * existing.unitsPerBundle,
         lineTotal: round2(q * existing.rate),
-        availableStock: item.currentStock,
+        availableStock: stock,
       };
     } else {
       updated = [
@@ -150,7 +173,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           rate: unitRate,
           mrp: bundle?.mrp ?? item.mrp,
           lineTotal: round2(quantity * unitRate),
-          availableStock: item.currentStock,
+          availableStock: stock,
           defaultSalePrice: item.defaultSalePrice,
         },
       ];
@@ -248,4 +271,18 @@ export const useCartStore = create<CartState>((set, get) => ({
   clearCart: () => set({ ...initialState }),
 
   setCustomer: (customer) => set({ selectedCustomer: customer }),
+
+  loadForEdit: (lines, customer, editing, credit, chargeLines = []) => {
+    const items: CartLine[] = lines.map((l) => ({ ...l, lineId: nextLineId() }));
+    const charges: BillChargeLine[] = chargeLines.map((c) => ({ ...c, key: ++chargeSeq }));
+    set({
+      ...initialState,
+      items,
+      charges,
+      selectedCustomer: customer,
+      editing,
+      editCredit: credit,
+      ...totalsFor(items, charges),
+    });
+  },
 }));

@@ -4,6 +4,7 @@ import type { ReturnTransaction, ReturnType, StockAdjustment } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { DataTable, type DataTableColumn } from './DataTable';
 import { ADJUSTMENT_REASONS } from './StockAdjustmentForm';
+import { ReturnDetailDrawer } from './ReturnDetailDrawer';
 
 const PAGE_SIZE = 10;
 
@@ -13,6 +14,7 @@ export const ReturnsHistoryList: React.FC<{ returnType: ReturnType; reloadKey: n
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const load = useCallback(() => {
     let live = true;
@@ -45,19 +47,23 @@ export const ReturnsHistoryList: React.FC<{ returnType: ReturnType; reloadKey: n
   ];
 
   return (
-    <DataTable
-      columns={columns}
-      items={rows}
-      rowKey={(r) => r.id}
-      isLoading={loading}
-      error={error}
-      onRetry={load}
-      emptyMessage="No returns recorded yet."
-      total={total}
-      page={page}
-      limit={PAGE_SIZE}
-      onPageChange={setPage}
-    />
+    <>
+      <DataTable
+        columns={columns}
+        items={rows}
+        rowKey={(r) => r.id}
+        isLoading={loading}
+        error={error}
+        onRetry={load}
+        emptyMessage="No returns recorded yet."
+        onRowClick={(r) => setDetailId(r.id)}
+        total={total}
+        page={page}
+        limit={PAGE_SIZE}
+        onPageChange={setPage}
+      />
+      <ReturnDetailDrawer returnId={detailId} onClose={() => setDetailId(null)} onChanged={load} />
+    </>
   );
 };
 

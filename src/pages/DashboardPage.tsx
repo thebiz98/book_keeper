@@ -350,7 +350,15 @@ export const DashboardPage: React.FC = () => {
         onClose={() => setAdjustOpen(false)}
         onAdjusted={() => void loadBase()}
       />
-      <BillDetailDrawer kind={detail?.kind ?? 'SALE'} billId={detail?.id ?? null} onClose={() => setDetail(null)} />
+      <BillDetailDrawer
+        kind={detail?.kind ?? 'SALE'}
+        billId={detail?.id ?? null}
+        onClose={() => setDetail(null)}
+        onChanged={() => {
+          void loadBase();
+          void useAppStore.getState().refreshMetrics();
+        }}
+      />
     </div>
   );
 };

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, errorMessage } from '@/api';
 import type {
+  BillEditGuard,
   PaymentSettlement,
   PurchaseDetailView,
   SaleDetailView,
@@ -10,12 +11,19 @@ import { Drawer } from '../ui/Drawer';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { PaymentStatusBadge } from '../common/PaymentStatusBadge';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { Button } from '../ui/Button';
+import { useAppStore } from '@/store/useAppStore';
+import { useCartStore } from '@/store/useCartStore';
+import { queueBillEdit } from '@/pages/billEditHandoff';
 
 export interface BillDetailDrawerProps {
   kind: TransactionType;
   /** null = closed. */
   billId: number | null;
   onClose: () => void;
+  /** Called after the bill was deleted (callers reload their list). */
+  onChanged?: () => void;
 }
 
 /** "Box of 12 x 2 (24 base)" for pack lines, plain base quantity otherwise. */
@@ -60,11 +68,16 @@ export const LedgerRows: React.FC<{ rows: PaymentSettlement[] }> = ({ rows }) =>
     </Table>
   );
 
-export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId, onClose }) => {
+export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId, onClose, onChanged }) => {
   const [sale, setSale] = useState<SaleDetailView | null>(null);
   const [purchase, setPurchase] = useState<PurchaseDetailView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [guard, setGuard] = useState<BillEditGuard | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const setActiveRoute = useAppStore((s) => s.setActiveRoute);
 
   useEffect(() => {
     if (billId === null) return;
@@ -72,7 +85,15 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     setSale(null);
     setPurchase(null);
     setError(null);
+    setGuard(null);
+    setActionError(null);
+    setConfirmDelete(false);
+    setConfirmDiscard(false);
     setLoading(true);
+    api
+      .getBillEditGuard(kind, billId)
+      .then((g) => live && setGuard(g))
+      .catch(() => {}); // the actions simply stay disabled when the pre-check fails
     const p =
       kind === 'SALE'
         ? api.getSaleDetails(billId).then((d) => live && setSale(d))
@@ -83,6 +104,31 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     };
   }, [kind, billId]);
 
+  const startEdit = () => {
+    if (billId === null) return;
+    queueBillEdit({ kind, id: billId });
+    setActiveRoute(kind === 'SALE' ? 'sale' : 'purchase');
+    onClose();
+  };
+  const onEditClick = () => {
+    // The sale cart is global: never silently replace a bill in progress.
+    if (kind === 'SALE' && useCartStore.getState().items.length > 0) setConfirmDiscard(true);
+    else startEdit();
+  };
+  const doDelete = async () => {
+    if (billId === null) return;
+    setActionError(null);
+    try {
+      if (kind === 'SALE') await api.deleteSale(billId);
+      else await api.deletePurchase(billId);
+      setConfirmDelete(false);
+      onChanged?.();
+      onClose();
+    } catch (e) {
+      setActionError(errorMessage(e));
+    }
+  };
+
   const head = sale?.sale ?? purchase?.purchase ?? null;
   const charges = sale?.charges ?? purchase?.charges ?? [];
   const supplierRef = purchase?.purchase.supplierInvoiceRef ?? null;
@@ -92,7 +138,41 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
       isOpen={billId !== null}
       onClose={onClose}
       title={head ? `${kind === 'SALE' ? 'Invoice' : 'Purchase'} ${head.transactionCode}` : 'Bill details'}
+      description={head?.updatedAt ? `Edited ${head.updatedAt.slice(0, 10)}` : undefined}
       width="xl"
+      footer={
+        head && (
+          <div className="flex w-full flex-col gap-2" data-testid="bill-actions">
+            {guard && guard.reasons.length > 0 && (
+              <ul className="text-[11px] text-amber-700 dark:text-amber-400 list-disc pl-4" data-testid="guard-reasons">
+                {guard.reasons.map((r) => (
+                  <li key={r.code}>{r.message}</li>
+                ))}
+              </ul>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="bill-edit"
+                disabled={!guard?.canEdit}
+                onClick={onEditClick}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                data-testid="bill-delete"
+                disabled={!guard?.canDelete}
+                onClick={() => setConfirmDelete(true)}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        )
+      }
     >
       {loading && <p className="text-xs text-slate-500">Loading...</p>}
       {error && (
@@ -235,6 +315,39 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
           </div>
         </div>
       )}
+      {head && (
+        <ConfirmDialog
+          isOpen={confirmDelete}
+          variant="danger"
+          title={`Delete ${head.transactionCode}?`}
+          message={`This removes the bill (${kind === 'SALE' ? sale?.items.length : purchase?.items.length} lines, total ₹${head.totalAmount.toFixed(2)}) and restores stock. ₹${(guard?.removedCashAmount ?? 0).toFixed(2)} ${kind === 'SALE' ? 'cash received for this bill' : 'paid for this bill'} will be removed from ${kind === 'SALE' ? 'cash records' : 'cash out'}. Payments on other bills are unaffected.`}
+          confirmText="Delete"
+          requireText={head.transactionCode}
+          onConfirm={doDelete}
+          onCancel={() => {
+            setConfirmDelete(false);
+            setActionError(null);
+          }}
+        >
+          {actionError && (
+            <p role="alert" className="mt-2 text-xs text-rose-600 dark:text-rose-400">
+              {actionError}
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
+      <ConfirmDialog
+        isOpen={confirmDiscard}
+        variant="warning"
+        title="Discard current cart?"
+        message="A sale is in progress in the billing screen. Editing this bill replaces it."
+        confirmText="Discard and edit"
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          startEdit();
+        }}
+        onCancel={() => setConfirmDiscard(false)}
+      />
     </Drawer>
   );
 };

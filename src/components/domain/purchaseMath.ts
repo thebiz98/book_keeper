@@ -19,6 +19,14 @@ export interface PurchaseLine {
   quantity: number;
   /** Cost per selected unit (per bundle, or per base unit). */
   unitCost: number;
+  /** Edit mode (FR-20): the existing lot this line keeps; absent/null = a new line. */
+  purchaseItemId?: number | null;
+  /** Edit mode: base units already used from the lot; the quantity cannot go below this. */
+  minBaseQty?: number;
+  /** Edit mode: the lot is referenced, so its item cannot change and the line cannot be removed. */
+  locked?: boolean;
+  /** Edit mode: a vendor return used the lot, so the cost is read-only. */
+  costLocked?: boolean;
 }
 
 export const lineBaseQuantity = (l: Pick<PurchaseLine, 'quantity' | 'unitsPerBundle'>) =>
