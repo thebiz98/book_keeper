@@ -7,6 +7,8 @@ import { useAppStore } from '@/store/useAppStore';
 import { useHotkeyAction, useHotkey } from '@/hooks/useHotkeys';
 import type { CreateSalePayload, ItemBundle, ItemSearchResult, SaleSummaryResponse } from '@/types';
 import { CartTable } from '@/components/domain/CartTable';
+import { BillChargesPanel, type BillChargesPanelHandle } from '@/components/domain/BillChargesPanel';
+import { toChargeInputs } from '@/lib/billMath';
 import {
   RapidBillingRow,
   type BillingLineEntry,
@@ -24,11 +26,18 @@ export const NewSalePage: React.FC = () => {
     items,
     selectedCustomer,
     subtotal,
+    charges,
+    chargesTotal,
+    discountsTotal,
+    grandTotal,
     totalBaseUnits,
     totalItems,
     addItem,
     updateQuantity,
     removeItem,
+    addCharge,
+    updateChargeAmount,
+    removeCharge,
     clearCart,
     setCustomer,
   } = useCartStore();
@@ -45,6 +54,7 @@ export const NewSalePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const rowRef = useRef<RapidBillingRowHandle>(null);
+  const chargesRef = useRef<BillChargesPanelHandle>(null);
   const bundleSeq = useRef(0);
 
   const loadCodePreview = useCallback(() => {
@@ -65,12 +75,18 @@ export const NewSalePage: React.FC = () => {
       setError('Add at least one item before completing the sale');
       return;
     }
+    if (grandTotal < 0) {
+      setError('Discounts exceed the bill amount');
+      return;
+    }
     setError(null);
     setIsSummaryOpen(true);
-  }, [items.length]);
+  }, [items.length, grandTotal]);
 
   // Ctrl+Enter (blocked by the registry while a modal is open or a submit is in flight).
   useHotkeyAction('completeBill', openPayment, { scope: 'page' });
+  // Alt+X: add a charge / discount line (FR-19).
+  useHotkeyAction('addCharge', () => chargesRef.current?.open(), { scope: 'page', allowInInputs: true });
   // Esc with nothing pending in the entry row: offer to discard the cart.
   useHotkey(
     'Escape',
@@ -112,7 +128,7 @@ export const NewSalePage: React.FC = () => {
       paymentStatus: values.paymentStatus,
       paidAmount: values.cashReceived,
       paymentMode: 'CASH',
-      charges: [],
+      charges: toChargeInputs(charges),
       notes: notes.trim() || null,
       items: items.map((it) => ({
         itemId: it.itemId,
@@ -200,15 +216,48 @@ export const NewSalePage: React.FC = () => {
         />
       </div>
 
+      <BillChargesPanel
+        ref={chargesRef}
+        side="SALE"
+        lines={charges}
+        onAdd={addCharge}
+        onUpdateAmount={updateChargeAmount}
+        onRemove={removeCharge}
+        onDone={focusSearchSoon}
+      />
+
       {/* Bottom Totals & Checkout Ribbon */}
       <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-6">
           <div className="flex flex-col">
-            <span className="text-xs text-slate-500 font-medium">Subtotal</span>
+            <span className="text-xs text-slate-500 font-medium">{charges.length > 0 ? 'Items Subtotal' : 'Subtotal'}</span>
             <div data-testid="cart-subtotal" className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
               <CurrencyDisplay amount={subtotal} size="xl" />
             </div>
           </div>
+
+          {charges.length > 0 && (
+            <>
+              <div className="flex flex-col text-xs font-mono">
+                <span className="text-slate-500">Charges (+)</span>
+                <span data-testid="cart-charges-total" className="text-emerald-700 dark:text-emerald-400">
+                  <CurrencyDisplay amount={chargesTotal} size="sm" />
+                </span>
+              </div>
+              <div className="flex flex-col text-xs font-mono">
+                <span className="text-slate-500">Discounts (−)</span>
+                <span data-testid="cart-discounts-total" className="text-rose-700 dark:text-rose-400">
+                  <CurrencyDisplay amount={discountsTotal} size="sm" />
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-slate-500 font-medium">Grand Total</span>
+                <div data-testid="cart-grand-total" className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
+                  <CurrencyDisplay amount={grandTotal} size="xl" />
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="h-8 w-px bg-slate-200 dark:bg-slate-800" />
 
@@ -268,7 +317,9 @@ export const NewSalePage: React.FC = () => {
           setIsSummaryOpen(false);
           focusSearchSoon();
         }}
-        grandTotal={subtotal}
+        grandTotal={grandTotal}
+        itemsSubtotal={subtotal}
+        charges={charges}
         customer={selectedCustomer}
         onCustomerChange={setCustomer}
         onSubmit={handleSubmit}

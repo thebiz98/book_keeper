@@ -31,6 +31,7 @@ export const HOTKEYS = {
   inventory: { combos: ['F6'], label: 'Inventory' },
   expenses: { combos: ['F7'], label: 'Expenses' },
   newBundle: { combos: ['Alt+B'], label: 'New Bundle' },
+  addCharge: { combos: ['Alt+X'], label: 'Charge / Discount' },
   newCustomer: { combos: ['Alt+C'], label: 'New Customer' },
   newVendor: { combos: ['Alt+V'], label: 'New Vendor' },
   backup: { combos: ['Ctrl+B'], label: 'Backup' },

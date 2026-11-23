@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CheckCircle2, ArrowRight, Banknote } from 'lucide-react';
 import { errorMessage } from '@/api';
 import { round2 } from '@/lib/money';
+import type { BillChargeLine } from '@/lib/billMath';
 import type { PaymentStatus, SaleSummaryResponse } from '@/types';
 import type { CustomerInput } from '@/types/store';
 import { useBusyLock } from '@/hooks/useHotkeys';
@@ -10,6 +11,7 @@ import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
 import { PartySelector } from './PartySelector';
+import { BillTotalsSummary } from './BillTotalsSummary';
 
 export interface SalePaymentValues {
   paymentStatus: PaymentStatus;
@@ -22,6 +24,9 @@ export interface SaleSummaryModalProps {
   /** Payment mode: Esc / Back returns to the cart without saving. */
   onClose: () => void;
   grandTotal: number;
+  /** Items subtotal and charge lines (FR-19); the breakdown shows above the Grand Total when lines exist. */
+  itemsSubtotal?: number;
+  charges?: BillChargeLine[];
   customer: CustomerInput | null;
   /** Lets the dialog pick / create a customer when PARTIAL or UNPAID needs one. */
   onCustomerChange?: (customer: CustomerInput | null) => void;
@@ -60,6 +65,8 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   isOpen,
   onClose,
   grandTotal,
+  itemsSubtotal,
+  charges,
   customer,
   onCustomerChange,
   onSubmit,
@@ -222,6 +229,12 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
             </span>
           )}
         </div>
+
+        {mode === 'payment' && charges && charges.length > 0 && (
+          <div data-testid="payment-breakdown" className="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
+            <BillTotalsSummary compact itemsSubtotal={itemsSubtotal ?? 0} lines={charges} grandTotal={grandTotal} />
+          </div>
+        )}
 
         <div className="flex flex-col items-center justify-center py-2 text-center bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-100 dark:border-slate-800">
           <span className="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">

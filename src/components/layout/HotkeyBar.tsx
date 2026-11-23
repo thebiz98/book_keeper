@@ -24,6 +24,7 @@ function hintsFor(route: string): Hint[] {
     case 'new-sale':
       return [
         { action: 'completeBill', label: 'Complete Bill' },
+        { action: 'addCharge' },
         { action: 'newBundle' },
         { action: 'newCustomer' },
         { action: 'back' },
@@ -33,6 +34,7 @@ function hintsFor(route: string): Hint[] {
     case 'new-purchase':
       return [
         { action: 'completeBill', label: 'Record Inward' },
+        { action: 'addCharge' },
         { action: 'newBundle' },
         { action: 'newVendor' },
       ];
