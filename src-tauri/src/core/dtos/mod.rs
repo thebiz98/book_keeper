@@ -40,7 +40,8 @@ pub use pagination::{
 pub use payment_dto::{LedgerCashSummary, LedgerTotals, RecordPaymentPayload, RecordRefundPayload};
 pub use purchase_dto::{
     CreatePurchaseItemPayload, CreatePurchasePayload, PurchaseDetailView, PurchaseHistoryFilter,
-    PurchaseHistoryRow, PurchaseItemDetail, PurchaseSummaryResponse,
+    PurchaseHistoryRow, PurchaseItemDetail, PurchaseSummaryResponse, LotPriceBillEffect, LotPriceUpdateResult,
+    UpdateLotPricePayload,
 };
 pub use report_dto::{
     CashFlowReport, CategoryValuation, DashboardMetrics, LowStockItem, PnLReport,

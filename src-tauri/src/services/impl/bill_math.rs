@@ -178,6 +178,31 @@ pub fn sale_payment_split(status: PaymentStatus, total_amount: f64, paid: f64) -
     })
 }
 
+/// FR-25 / V4 payment rule for a lot price edit. `applied = SETTLEMENT + RETURN_CREDIT`,
+/// `upfront_old = UPFRONT`, `old_balance_due` is the bill's balance before the edit. Returns the new
+/// UPFRONT amount, or `BillLocked TOTAL_BELOW_APPLIED` when the new total is below what was applied.
+pub fn lot_price_upfront(
+    new_total: f64,
+    applied: f64,
+    upfront_old: f64,
+    old_balance_due: f64,
+) -> Result<f64, AppError> {
+    let open = new_total - applied;
+    if open < -MONEY_EPS {
+        return Err(AppError::BillLocked {
+            code: "TOTAL_BELOW_APPLIED".to_string(),
+            message: format!(
+                "The new total \u{20b9}{new_total:.2} is below the \u{20b9}{applied:.2} already applied to this bill"
+            ),
+        });
+    }
+    let open = round2(open.max(0.0));
+    if old_balance_due <= MONEY_EPS && applied <= MONEY_EPS {
+        return Ok(round2(new_total));
+    }
+    Ok(round2(upfront_old.min(open)))
+}
+
 /// Purchase payment cross-check (DD-02): returns the upfront amount.
 pub fn purchase_upfront(status: PaymentStatus, total_amount: f64, paid: f64) -> Result<f64, AppError> {
     if paid > total_amount + MONEY_EPS {

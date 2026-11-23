@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, CreatePurchasePayload, DeleteBillResult, Paginated, PurchaseDetailView, PurchaseHistoryRow,
-    PurchaseHistoryFilter, PurchaseItemDetail, PurchaseSummaryResponse, RecordPaymentPayload,
+    PurchaseHistoryFilter, PurchaseItemDetail, PurchaseSummaryResponse, RecordPaymentPayload, LotPriceBillEffect,
+    LotPriceUpdateResult, UpdateLotPricePayload,
 };
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
@@ -11,7 +12,7 @@ use crate::services::r#impl::bill_guard::{
     TOTAL_BELOW_APPLIED,
 };
 use crate::services::r#impl::bill_math::{
-    compute_bill_totals, delete_bill_charges, insert_bill_charges, purchase_upfront, resolve_bill_charges,
+    compute_bill_totals, delete_bill_charges, lot_price_upfront, insert_bill_charges, purchase_upfront, resolve_bill_charges,
     validate_charge_inputs, BillTotals, ResolvedCharge,
 };
 use crate::core::value_objects::{LotSource, PartyType, PaymentKind, PaymentStatus, TransactionType};
@@ -385,6 +386,149 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         self.record_upfront(&mut *tx, purchase_id, r.party_id, &payload, upfront)?;
         tx.commit()?;
         Ok(PurchaseSummaryResponse { purchase_id, transaction_code: old.transaction_code })
+    }
+
+    fn update_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
+        if !payload.unit_price.is_finite() || payload.unit_price < 0.0 {
+            return Err(validation("unit_price", "unit_price must be a non-negative number"));
+        }
+        let mut tx = self.uow.begin_transaction()?;
+        let lot = tx
+            .purchases()
+            .find_purchase_item_by_id(payload.purchase_item_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseItem", payload.purchase_item_id.to_string()))?;
+        let header = tx
+            .purchases()
+            .find_transaction_by_id(lot.purchase_transaction_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseTransaction", lot.purchase_transaction_id.to_string()))?;
+        if header.source == LotSource::Return {
+            return Err(validation("purchase_item_id", "Lots created by customer returns cannot be re-priced"));
+        }
+        let new_total_line = round2(lot.pack_quantity * payload.unit_price);
+        let new_cost = new_total_line / lot.quantity;
+        if (new_cost - lot.unit_cost).abs() <= 1e-9 {
+            let bill = (header.source == LotSource::Purchase).then(|| LotPriceBillEffect {
+                purchase_id: header.id,
+                transaction_code: header.transaction_code.clone(),
+                old_total: header.total_amount,
+                new_total: header.total_amount,
+                old_paid: header.paid_amount,
+                new_paid: header.paid_amount,
+                balance_due: header.balance_due,
+                payment_status: header.payment_status,
+            });
+            return Ok(LotPriceUpdateResult {
+                purchase_item_id: lot.id,
+                old_unit_cost: lot.unit_cost,
+                new_unit_cost: lot.unit_cost,
+                bill,
+            });
+        }
+        let edit = LotEdit {
+            item_id: lot.item_id,
+            item_name: lot.item_name.clone(),
+            pack_label: lot.pack_label.clone(),
+            pack_quantity: lot.pack_quantity,
+            quantity: lot.quantity,
+            unit_cost: new_cost,
+            total_amount: new_total_line,
+        };
+        if header.source != LotSource::Purchase {
+            // OPENING / ADJUSTMENT: re-cost only (the vendor-return lock lives in edit_purchase_lot).
+            self.inventory_service.edit_purchase_lot(&mut *tx, lot.id, &edit)?;
+            if header.source == LotSource::Adjustment {
+                let adj_id = header
+                    .notes
+                    .as_deref()
+                    .and_then(|n| n.strip_prefix("Stock adjustment #"))
+                    .and_then(|n| n.split(':').next())
+                    .and_then(|n| n.trim().parse::<i64>().ok());
+                if let Some(id) = adj_id {
+                    tx.adjustments().update_unit_cost(id, new_cost)?;
+                }
+            }
+            tx.commit()?;
+            return Ok(LotPriceUpdateResult {
+                purchase_item_id: lot.id,
+                old_unit_cost: lot.unit_cost,
+                new_unit_cost: new_cost,
+                bill: None,
+            });
+        }
+        let g = evaluate_purchase_guard(&mut *tx, header.id)?;
+        if let Some(reason) = g.reasons.iter().find(|r| r.blocks_edit) {
+            return Err(locked(reason));
+        }
+        // Stored line totals with this lot's new total, plus the existing charges (never rebuilt from rates).
+        let line_totals: Vec<f64> = tx
+            .purchases()
+            .list_items_by_transaction_id(header.id)?
+            .iter()
+            .map(|l| if l.id == lot.id { new_total_line } else { l.total_amount })
+            .collect();
+        let charges: Vec<ResolvedCharge> = tx
+            .bill_charges()
+            .list_by_transaction(TransactionType::Purchase, header.id)?
+            .into_iter()
+            .map(|c| ResolvedCharge {
+                charge_type_id: c.charge_type_id,
+                charge_name: c.charge_name,
+                effect: c.effect,
+                amount: c.amount,
+            })
+            .collect();
+        let totals = compute_bill_totals(&line_totals, &charges)?;
+        let upfront_new =
+            lot_price_upfront(totals.total_amount, g.applied_amount, g.upfront_amount, header.balance_due)?;
+        self.inventory_service.edit_purchase_lot(&mut *tx, lot.id, &edit)?;
+        let updated = PurchaseTransaction {
+            total_amount: totals.total_amount,
+            items_subtotal: totals.items_subtotal,
+            charges_total: totals.charges_total,
+            discounts_total: totals.discounts_total,
+            updated_at: Some(chrono::Utc::now().to_rfc3339()),
+            ..header.clone()
+        };
+        tx.purchases().update_header_for_edit(&updated)?;
+        self.payment_service
+            .delete_bill_ledger(&mut *tx, TransactionType::Purchase, header.id, &[PaymentKind::Upfront])?;
+        if upfront_new > MONEY_EPS {
+            self.payment_service.record_payment(
+                &mut *tx,
+                RecordPaymentPayload {
+                    party_id: header.party_id,
+                    transaction_type: TransactionType::Purchase,
+                    kind: PaymentKind::Upfront,
+                    return_id: None,
+                    transaction_id: header.id,
+                    settlement_date: header.transaction_date.clone(),
+                    amount_paid: upfront_new,
+                    payment_mode: header.payment_mode.clone(),
+                    notes: Some("Supplier Inward Payment".to_string()),
+                },
+            )?;
+        }
+        self.payment_service.recompute(&mut *tx, TransactionType::Purchase, header.id)?;
+        let after = tx
+            .purchases()
+            .find_transaction_by_id(header.id)?
+            .ok_or_else(|| AppError::not_found("PurchaseTransaction", header.id.to_string()))?;
+        tx.commit()?;
+        Ok(LotPriceUpdateResult {
+            purchase_item_id: lot.id,
+            old_unit_cost: lot.unit_cost,
+            new_unit_cost: new_cost,
+            bill: Some(LotPriceBillEffect {
+                purchase_id: header.id,
+                transaction_code: header.transaction_code,
+                old_total: header.total_amount,
+                new_total: after.total_amount,
+                old_paid: header.paid_amount,
+                new_paid: after.paid_amount,
+                balance_due: after.balance_due,
+                payment_status: after.payment_status,
+            }),
+        })
     }
 
     fn delete_purchase(&self, purchase_id: i64) -> Result<DeleteBillResult, AppError> {
