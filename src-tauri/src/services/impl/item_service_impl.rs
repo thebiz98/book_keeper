@@ -46,6 +46,17 @@ pub enum BarcodeOwner {
 
 /// Pure field validation for an item (create, update, import). `name` is checked trimmed.
 /// `mrp` must be null or > 0 (0 is rejected: the UI sends null for "no MRP").
+/// FR-21: only physical (stocked) items can be saved until service billing exists.
+pub fn validate_item_type(t: ItemType) -> Result<(), AppError> {
+    match t {
+        ItemType::Physical => Ok(()),
+        ItemType::Service => Err(invalid(
+            "item_type",
+            "Service items are not supported yet. Only physical (stocked) items can be saved in this version.",
+        )),
+    }
+}
+
 pub fn validate_item_fields(name: &str, default_sale_price: f64, mrp: Option<f64>) -> Result<(), AppError> {
     if clean_name(name).is_empty() {
         return Err(invalid("name", "Item name cannot be empty"));
@@ -252,6 +263,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
     }
 
     fn create_item(&self, payload: CreateItemPayload) -> Result<i64, AppError> {
+        let item_type = payload.item_type.unwrap_or_default();
+        validate_item_type(item_type)?;
         validate_item_fields(&payload.name, payload.default_sale_price, payload.mrp)?;
         if let Some(bundles) = &payload.bundles {
             for b in bundles {
@@ -271,7 +284,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let item = Item {
             id: 0,
             name: clean_name(&payload.name),
-            item_type: ItemType::Physical,
+            item_type,
             category: clean_optional(payload.category.as_deref()),
             barcode,
             base_unit: payload.base_unit.trim().to_string(),
@@ -321,6 +334,9 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
 
     fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError> {
         validate_item_fields(&payload.name, payload.default_sale_price, payload.mrp)?;
+        if let Some(t) = payload.item_type {
+            validate_item_type(t)?;
+        }
 
         let mut tx = self.uow.begin_transaction()?;
         let mut existing = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
@@ -337,6 +353,9 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         existing.base_unit = payload.base_unit.trim().to_string();
         existing.mrp = payload.mrp; // None clears the MRP
         existing.default_sale_price = payload.default_sale_price;
+        if let Some(t) = payload.item_type {
+            existing.item_type = t;
+        }
         existing.updated_at = chrono::Utc::now().to_rfc3339();
 
         tx.items().update(&existing)?;

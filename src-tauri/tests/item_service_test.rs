@@ -10,7 +10,7 @@ use common::ledger::sale_payload;
 use common::*;
 use book_keeper::core::dtos::*;
 use book_keeper::core::error::AppError;
-use book_keeper::core::value_objects::PaymentStatus;
+use book_keeper::core::value_objects::{ItemType, PaymentStatus};
 use book_keeper::data::contracts::search_indexer::ItemSearchIndexer;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
 use book_keeper::services::contracts::item_service::ItemService;
@@ -347,4 +347,58 @@ fn test_tc_mrp_08_update_item_never_touches_stock() {
     items.update_item(id, u).unwrap();
     let it = stored_item(&db, id);
     assert_eq!((it.current_stock, it.mrp, it.default_sale_price), (12.0, Some(40.0), 20.0));
+}
+
+// ------------------------------- item type (FR-21) -------------------------------
+
+#[test]
+fn test_tc_typ_01_default_item_type_is_physical_everywhere() {
+    let (items, _, db) = setup();
+    let id = items.create_item(item_payload("Pen")).unwrap();
+    assert_eq!(stored_item(&db, id).item_type, ItemType::Physical);
+    let page = items.get_catalog(CatalogFilter::default()).unwrap();
+    assert!(!page.items.is_empty());
+    assert!(page.items.iter().all(|r| r.item_type == ItemType::Physical));
+    assert_eq!(items.search_items_fts("Pen", None).unwrap()[0].item_type, ItemType::Physical);
+}
+
+#[test]
+fn test_tc_typ_02_explicit_physical_is_accepted() {
+    let (items, _, db) = setup();
+    let mut p = item_payload("Pen");
+    p.item_type = Some(ItemType::Physical);
+    let id = items.create_item(p).unwrap();
+    assert_eq!(stored_item(&db, id).item_type, ItemType::Physical);
+}
+
+#[test]
+fn test_tc_typ_03_service_is_rejected_on_create_and_nothing_is_written() {
+    let (items, _, db) = setup();
+    let mut p = item_payload("Svc");
+    p.item_type = Some(ItemType::Service);
+    assert_eq!(field_of(items.create_item(p)), "item_type");
+    assert!(db.begin_read().unwrap().items().find_by_name("Svc").unwrap().is_none());
+}
+
+#[test]
+fn test_tc_typ_04_service_is_rejected_on_update_and_none_keeps_the_type() {
+    let (items, _, db) = setup();
+    let id = items.create_item(item_payload("Pen")).unwrap();
+    let mut u = update_payload("Pen renamed");
+    u.item_type = Some(ItemType::Service);
+    assert_eq!(field_of(items.update_item(id, u)), "item_type");
+    let it = stored_item(&db, id);
+    assert_eq!((it.name.as_str(), it.item_type), ("Pen", ItemType::Physical));
+    items.update_item(id, update_payload("Pen renamed")).unwrap();
+    let it = stored_item(&db, id);
+    assert_eq!((it.name.as_str(), it.item_type), ("Pen renamed", ItemType::Physical));
+}
+
+#[test]
+fn old_frontend_payload_without_item_type_deserializes_to_none() {
+    let p: CreateItemPayload = serde_json::from_str(
+        r#"{"name":"X","category":null,"barcode":null,"base_unit":"PCS","mrp":null,"default_sale_price":1,"initial_stock":null,"initial_cost":null,"bundles":null}"#,
+    )
+    .unwrap();
+    assert_eq!(p.item_type, None);
 }
