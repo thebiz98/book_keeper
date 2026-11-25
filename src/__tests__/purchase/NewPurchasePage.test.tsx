@@ -82,7 +82,7 @@ describe('NewPurchasePage', () => {
     expect(row.textContent).toContain('100 PCS');
     expect(row.textContent).toContain('4.0000'); // 100 per box / 25
     expect(row.textContent).toContain('400.00'); // the line total is the preview's
-    expect(container.querySelector('[data-testid="purchase-total"]')?.textContent).toContain('400.00');
+    expect(container.querySelector('[data-testid="purchase-subtotal"]')?.textContent).toContain('400.00');
   });
 
   it('submits the contract payload (no code, own supplierInvoiceRef, bundle id and qty)', async () => {
@@ -116,7 +116,7 @@ describe('NewPurchasePage', () => {
     const { container, api } = mount({
       previewPurchase: previewWith((p) =>
         p.paymentStatus && p.paymentStatus !== 'PAID' && p.partyId == null
-          ? [{ field: 'party_id', message: 'vendor required for credit' }]
+          ? [{ field: 'party_id', message: 'Pick a vendor to record an unpaid or part-paid purchase' }]
           : []
       ),
     });
@@ -268,11 +268,11 @@ describe('NewPurchasePage', () => {
     };
     await addOne('car');
     await settle();
-    expect(tid('purchase-total').textContent).toContain('500.00');
+    expect(tid('purchase-grand-total').textContent).toContain('500.00');
     await addOne('cash', '30');
     await settle();
-    expect(tid('purchase-total').textContent).toContain('470.00');
-    expect(tid('purchase-items-subtotal').textContent).toBe('400');
+    expect(tid('purchase-grand-total').textContent).toContain('470.00');
+    expect(tid('purchase-subtotal').textContent).toContain('400.00');
 
     click(byText(container, 'button', /Record Inward Stock/));
     await flush();
@@ -282,5 +282,50 @@ describe('NewPurchasePage', () => {
       { chargeTypeId: 4, amount: 100 },
       { chargeTypeId: 3, amount: 30 },
     ]);
+  });
+  it('mirrors New Sale: vendor in the header first, Clear and Record at the bottom right', async () => {
+    const { container } = mount();
+    await flush();
+    const header = container.querySelector('[data-testid="purchase-vendor"]') as HTMLElement;
+    expect(header.parentElement?.firstElementChild).toBe(header);
+    const actions = container.querySelector('[data-testid="purchase-footer-actions"]') as HTMLElement;
+    expect(actions.textContent).toMatch(/Clear[\s\S]*Record Inward Stock/);
+  });
+
+  it('picking an item focuses Quantity (same flow as New Sale)', async () => {
+    const { container } = mount();
+    await flush();
+    const { act } = await import('react');
+    act(() => pickItem(makeItem()));
+    await flush(10);
+    expect(document.activeElement).toBe(container.querySelector('#purchase-qty'));
+  });
+
+  it('a failed preview call is reported above the button instead of a silent click', async () => {
+    const { container, api } = mount({
+      previewPurchase: vi.fn(async (p: PreviewIn) => {
+        if (p.paymentStatus) throw { type: 'DatabaseError', details: { message: 'disk I/O error' } };
+        return fakeBillPreview(p);
+      }),
+    });
+    await flush();
+    await addBoxLine(container);
+    await settle();
+    click(byText(container, 'button', /Record Inward Stock/));
+    await flush();
+    expect(api.createPurchase).not.toHaveBeenCalled();
+    const actions = container.querySelector('[data-testid="purchase-footer-actions"]') as HTMLElement;
+    expect(actions.querySelector('[role="alert"]')?.textContent?.length).toBeGreaterThan(0);
+  });
+
+  it('Clear asks first, then empties the purchase', async () => {
+    const { container } = mount();
+    await flush();
+    await addBoxLine(container);
+    click(byText(container, 'button', /^Clear/));
+    await flush(10);
+    click(byText(document.body, 'button', /Discard Purchase/));
+    await flush(10);
+    expect(container.querySelectorAll('[data-testid="purchase-line"]').length).toBe(0);
   });
 });

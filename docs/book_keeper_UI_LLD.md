@@ -95,7 +95,7 @@ src/
 │       └── HotkeyBar.tsx            # Contextual bottom shortcut legend
 │
 └── pages/                           # Tier 4: Page Views
-    ├── DashboardPage.tsx            # F1: KPI Ribbon, Trend Graph, Low Stock Pane
+    ├── DashboardPage.tsx            # F1: KPI cards, Recent Transactions, Low Stock Pane
     ├── NewSalePage.tsx              # F2: Rapid Counter Billing & Cart
     ├── NewPurchasePage.tsx          # F3: Inward Stock Batch Entry
     ├── InventoryPage.tsx            # F6: Item Master, Lot Inspector & Bundles
@@ -648,6 +648,7 @@ gantt
 * **`EntryField`** (`src/components/ui/EntryField.tsx`): `{ label, required?, htmlFor?, helper?, className?, children }`. A label slot of fixed height (`h-4 leading-4 truncate`, `title={label}`), the control, and a helper slot with `min-h-[14px] text-[10px]`, so a row never changes height. Controls inside it are passed no `label` of their own. `QuantityInput` takes `hideConversion` and the page renders the "2 Box x 10 = 20 PCS" line in the helper slot.
 * **Purchase row** (one line, `items-start`): Item (helper: "Selected: X"), Unit, Quantity (helper: conversion), "Purchase Price / {pack} *" (wider), and the Add Line button under an empty label. Placeholder "Search item by name or barcode...".
 * **Sale header / footer.** Header: `PartySelector` left (`w-80`, `flex-1 max-w-md`), invoice pill and date right. Footer: left = Items / Total Units + Notes; right = a right-aligned stack (`cart-subtotal`; with charges `cart-charges-total`, `cart-discounts-total`, `cart-grand-total`), then Clear and Complete Sale. The payable figure is the largest.
+* **New Purchase mirrors New Sale (2026-11-25, `fix/purchase-symmetry`).** Header: `PartySelector` (VENDOR) left (`data-testid="purchase-vendor"`); supplier invoice #, `Next Inward` pill (`code-preview`) and `#purchase-date` right. Entry row: Item, Quantity, Unit, Purchase Price, Add Line; `chooseItem` focuses `#purchase-qty`. Lines table uses the cart's column order (Quantity, Price / base unit in the MRP slot, Purchase Price in the Rate slot). Footer: left = Lines / Total Base Units + Notes; right (`purchase-footer-actions`) = `BillFooterTotals` (`src/components/domain/BillFooterTotals.tsx`, shared with New Sale; test ids `<prefix>-subtotal`, `-charges-total`, `-discounts-total`, `-grand-total`), payment row, messages, then `[Clear (Esc)]` (ConfirmDialog, `clearDraft()`) and `[Record Inward Stock]` (`record-purchase-btn`). Both pages render their errors / hints in the footer above the buttons. `pending` is only an in-flight preview: a rejected preview fetch reports "Could not check the payment…" instead of leaving Save a silent no-op.
 * **Tests (Vitest):** sentinel opens the modal and keeps the unit (sale, purchase); arrows skip it; no Bundle / New Bundle button; purchase placeholder; Inventory Add bundle; sale header DOM order; subtotal in the same footer block as `complete-sale-btn`.
 
 

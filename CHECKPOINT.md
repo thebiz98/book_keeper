@@ -182,3 +182,9 @@ Manual checklist:
 ## Branch feat/drawer-new-bundle (FR-29, DD-59; frontend only, v1.3 C8)
 - Delivered: the Unit select of every line in the bill edit drawer (purchase and sale) ends with "+ New bundle...". One `BundleCreationModal` per form; Save adds the bundle to every line of that item and selects it on the requesting line only (sale refills the rate from the backend `defaultRate`). Tests: `src/__tests__/billEdit/drawerNewBundle.test.tsx`.
 - Manual: edit a bill, pick "+ New bundle..." on a line, Cancel (unit unchanged); repeat and create (that line switches, totals update from the preview, other lines of the item list the new option).
+
+## Branch fix/purchase-symmetry (owner follow-up 2026-11-25; frontend + two message strings)
+- Fixed: Record Inward Stock looked dead. The refusal (unpaid / partial with "Standard Vendor") was drawn below the footer, off screen, and a failed payment preview left Save pending forever. Messages now sit above the buttons on New Purchase and New Sale.
+- New Purchase laid out like New Sale (vendor left; Item, Qty, Unit, Price; cart column order; shared `BillFooterTotals`; Clear (Esc) + Record bottom right).
+- Sales vs Purchases trend removed from the dashboard; optional collapsed panel on Financial Reports.
+- Manual: New Purchase with Standard Vendor + UNPAID, click Record: the message shows above the button. Pick a vendor: it records. Compare New Sale and New Purchase side by side (light and dark). Dashboard has no chart; Reports > "Sales vs Purchases trend" opens it and 7D / 30D / 1Y switch.

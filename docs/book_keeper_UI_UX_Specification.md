@@ -85,7 +85,7 @@ The application maintains a persistent desktop shell across all views.
   - `[Settle Due (F5)]`
   - `[Stock Adjustment]`
 * **Main Left/Center Pane:**
-  - **Sales vs Purchases Visual Trend:** Interactive graph toggleable by *7D / 30D / 1Y*.
+  - *(2026-11-25: the Sales vs Purchases trend moved to Financial Reports as a collapsed, optional panel; it is not on the dashboard.)*
   - **Recent Transactions Feed:** Table of last 10 sales, purchases and returns (`get_recent_transactions`): Time, Code, Party, Amount, Status (`PAID`/`PARTIAL`/`UNPAID`; none for returns), Quick Action (open details).
 * **Right Contextual Pane — Low Stock Monitor (`current_stock < 5`):**
   - Instant list of items where aggregated stock is strictly under 5 base units.
@@ -147,12 +147,13 @@ The application maintains a persistent desktop shell across all views.
   - Inward Quantity.
   - Inward Unit Cost (₹ per bundle or ₹ per base unit; system auto-normalizes cost per base unit for FIFO storage).
   - Multiplier Preview: E.g., `4 Boxes × 25 = 100 PCS added to stock`.
-* **Inward Batches Table:**
-  - Columns: `#`, `Item Name`, `Packaging`, `Inward Qty`, `Base Units`, `Unit Cost (₹)`, `Line Total (₹)`, `Actions`.
-* **Footer & Settlement:**
-  - Total Purchase Value (₹).
+* **Layout mirrors New Sale (2026-11-25):** header has the Vendor selector on the left and the supplier invoice #, the `Next Inward` code pill and the date on the right. The entry row runs Item, Quantity, Unit, Purchase Price, Add (picking an item focuses Quantity, as on New Sale).
+* **Inward Batches Table** (same column order as the sale cart):
+  - Columns: `#`, `Item Name`, `Packaging`, `Quantity` (base units beneath for a bundle), `Price / base unit` (where the cart shows MRP), `Purchase Price` (where the cart shows Rate), `Line Total`, `Action`.
+* **Footer & Settlement** (same layout as New Sale): left = Lines / Total Base Units + Notes; right = the shared totals stack (Subtotal; with charges Charges / Discounts / Grand Total), the payment row, any message, then `[Clear (Esc)]` and the main action.
   - Payment Status: `PAID` (paid = total), `PARTIAL` (0 < paid < total), `UNPAID` (paid = 0). `PARTIAL`/`UNPAID` require a vendor. Paid can never exceed total.
   - `Paid Amount (₹)` and `Balance Due (₹)` (Vendor Payable).
+  - A refused save (e.g. unpaid with no vendor: "Pick a vendor to record an unpaid or part-paid purchase") shows its message right above the buttons; a click is never silent.
   - Action: `[Record Inward Stock (Ctrl + Enter)]` — creates `PURCHASE_ITEM` FIFO lots with `remaining_quantity = quantity`, records the upfront payment in the ledger, updates cached item stock, and refreshes low-stock flag.
 
 ---
@@ -267,6 +268,7 @@ The application maintains a persistent desktop shell across all views.
      - Inflows: Sale upfront cash, Customer settlements, Vendor refunds received.
      - Outflows: Purchase upfront cash, Vendor settlements, Customer refunds paid.
      - **Net Cash Balance.**
+  4. **Sales vs Purchases trend (optional, 2026-11-25):** collapsed by default under a `Sales vs Purchases trend` toggle; fetched only when opened. Bars per day (per month for 1Y) with *7D / 30D / 1Y*; independent of the date filter.
 * *Export controls: deferred to v2.*
 
 ---

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ShoppingCart, Truck, BookOpen, Wallet, SlidersHorizontal, AlertTriangle, ArrowUpRight } from 'lucide-react';
 import { api, errorMessage } from '@/api';
-import type { DashboardMetrics, LowStockItem, RecentTransaction, TrendDataPoint } from '@/types';
+import type { DashboardMetrics, LowStockItem, RecentTransaction } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
@@ -13,13 +13,6 @@ import { StockAdjustmentModal } from '@/components/domain/StockAdjustmentModal';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { navigateWithParam } from '@/components/domain/navParams';
 
-type Period = '7d' | '30d' | '1y';
-const PERIODS: { id: Period; label: string }[] = [
-  { id: '7d', label: '7D' },
-  { id: '30d', label: '30D' },
-  { id: '1y', label: '1Y' },
-];
-
 interface Section<T> {
   data: T | null;
   error: string | null;
@@ -29,19 +22,14 @@ interface DashData {
   metrics: Section<DashboardMetrics>;
   lowStock: Section<LowStockItem[]>;
   recent: Section<RecentTransaction[]>;
-  trend: Section<TrendDataPoint[]>;
 }
 
-/** Simple SWR: last successful result per period is shown immediately while a refetch runs. */
-const cache: { base: Omit<DashData, 'trend'> | null; trend: Partial<Record<Period, Section<TrendDataPoint[]>>> } = {
-  base: null,
-  trend: {},
-};
+/** Simple SWR: the last result is shown immediately while a refetch runs. */
+const cache: { base: DashData | null } = { base: null };
 
 /** Test hook: drop the in-memory cache. */
 export function resetDashboardCache(): void {
   cache.base = null;
-  cache.trend = {};
 }
 
 async function settle<T>(p: Promise<T>): Promise<Section<T>> {
@@ -63,9 +51,7 @@ const Err: React.FC<{ msg: string; onRetry: () => void }> = ({ msg, onRetry }) =
 
 export const DashboardPage: React.FC = () => {
   const setActiveRoute = useAppStore((s) => s.setActiveRoute);
-  const [period, setPeriod] = useState<Period>('7d');
   const [base, setBase] = useState(cache.base);
-  const [trend, setTrend] = useState<Section<TrendDataPoint[]> | null>(cache.trend['7d'] ?? null);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [detail, setDetail] = useState<{ kind: 'SALE' | 'PURCHASE'; id: number } | null>(null);
   const alive = useRef(true);
@@ -81,37 +67,21 @@ export const DashboardPage: React.FC = () => {
     if (alive.current) setBase(next);
   }, []);
 
-  const loadTrend = useCallback(async (p: Period) => {
-    const sec = await settle(api.getSalesPurchaseTrend(p));
-    cache.trend[p] = sec;
-    if (alive.current) setTrend((cur) => (periodRef.current === p ? sec : cur));
-  }, []);
-
-  const periodRef = useRef<Period>(period);
-  periodRef.current = period;
-
   useEffect(() => {
     alive.current = true;
     void loadBase();
     const onFocus = () => {
       void loadBase();
-      void loadTrend(periodRef.current);
     };
     window.addEventListener('focus', onFocus);
     return () => {
       alive.current = false;
       window.removeEventListener('focus', onFocus);
     };
-  }, [loadBase, loadTrend]);
-
-  useEffect(() => {
-    setTrend(cache.trend[period] ?? null);
-    void loadTrend(period);
-  }, [period, loadTrend]);
+  }, [loadBase]);
 
   const m = base?.metrics.data ?? null;
   const low = base?.lowStock.data ?? null;
-  const maxAmt = Math.max(1, ...(trend?.data ?? []).map((t) => Math.max(t.salesAmount, t.purchaseAmount)));
 
   return (
     <div className="flex flex-col gap-4">
@@ -144,60 +114,6 @@ export const DashboardPage: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 flex flex-col gap-4">
-          <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Sales vs Purchases
-              </h2>
-              <div className="flex rounded-md border border-slate-300 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800 text-xs">
-                {PERIODS.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    data-period={p.id}
-                    aria-pressed={period === p.id}
-                    onClick={() => setPeriod(p.id)}
-                    className={`px-2 py-0.5 rounded font-medium cursor-pointer ${
-                      period === p.id ? 'bg-white dark:bg-slate-900 text-blue-600 shadow-2xs' : 'text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {trend?.error ? (
-              <Err msg={`Could not load trend: ${trend.error}`} onRetry={() => loadTrend(period)} />
-            ) : !trend?.data ? (
-              <p className="py-6 text-center text-xs text-slate-400">Loading...</p>
-            ) : (
-              <div className="flex flex-col gap-1.5" data-testid="trend">
-                {trend.data.map((dp) => (
-                  <div key={dp.date} className="flex items-center gap-3 text-xs">
-                    <span className="w-20 font-mono text-slate-500 text-[11px] shrink-0">
-                      {period === '1y' ? dp.date.slice(0, 7) : dp.date}
-                    </span>
-                    <div className="flex-1 flex flex-col gap-0.5">
-                      <div
-                        style={{ width: `${Math.max(1, (dp.salesAmount / maxAmt) * 100)}%` }}
-                        className="h-1.5 rounded bg-blue-600"
-                        title={`Sales: ₹${dp.salesAmount}`}
-                      />
-                      <div
-                        style={{ width: `${Math.max(1, (dp.purchaseAmount / maxAmt) * 100)}%` }}
-                        className="h-1.5 rounded bg-amber-500"
-                        title={`Purchases: ₹${dp.purchaseAmount}`}
-                      />
-                    </div>
-                    <span className="w-24 text-right font-mono text-[10px]">
-                      <CurrencyDisplay amount={dp.salesAmount} size="sm" />
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">

@@ -26,7 +26,7 @@ import {
 import { SaleSummaryModal, type SalePaymentValues } from '@/components/domain/SaleSummaryModal';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
 import { PartySelector } from '@/components/domain/PartySelector';
-import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
+import { BillFooterTotals } from '@/components/domain/BillFooterTotals';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Button } from '@/components/ui/Button';
 
@@ -277,45 +277,28 @@ export const NewSalePage: React.FC = () => {
         </div>
 
         <div data-testid="sale-footer-actions" className="flex flex-col items-end gap-3 ml-auto">
-          <div className="flex flex-col items-end gap-0.5 text-right">
-            <div className="flex items-baseline gap-3">
-              <span className="text-xs text-slate-500 font-medium">
-                {charges.length > 0 ? 'Items Subtotal' : 'Subtotal'}
-              </span>
-              <div
-                data-testid="cart-subtotal"
-                className={
-                  charges.length > 0
-                    ? 'text-base font-semibold font-mono tabular-nums text-slate-700 dark:text-slate-300'
-                    : 'text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100'
-                }
-              >
-                <CurrencyDisplay amount={totals?.itemsSubtotal ?? 0} size={charges.length > 0 ? 'md' : 'xl'} />
-              </div>
-            </div>
-            {charges.length > 0 && (
-              <>
-                <div className="flex items-baseline gap-3 text-xs font-mono">
-                  <span className="text-slate-500">Charges (+)</span>
-                  <span data-testid="cart-charges-total" className="text-emerald-700 dark:text-emerald-400">
-                    <CurrencyDisplay amount={totals?.chargesTotal ?? 0} size="sm" />
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-3 text-xs font-mono">
-                  <span className="text-slate-500">Discounts (−)</span>
-                  <span data-testid="cart-discounts-total" className="text-rose-700 dark:text-rose-400">
-                    <CurrencyDisplay amount={totals?.discountsTotal ?? 0} size="sm" />
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-3">
-                  <span className="text-xs text-slate-500 font-medium">Grand Total</span>
-                  <div data-testid="cart-grand-total" className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100">
-                    <CurrencyDisplay amount={totals?.totalAmount ?? 0} size="xl" />
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          <BillFooterTotals
+            testIdPrefix="cart"
+            hasCharges={charges.length > 0}
+            itemsSubtotal={totals?.itemsSubtotal ?? 0}
+            chargesTotal={totals?.chargesTotal ?? 0}
+            discountsTotal={totals?.discountsTotal ?? 0}
+            totalAmount={totals?.totalAmount ?? 0}
+          />
+
+          {/* Messages sit right above the buttons so a refused click is never silent. */}
+          {error && (
+            <p role="alert" data-testid="page-error" className="max-w-md text-right text-xs text-rose-600 dark:text-rose-400 font-medium">
+              {error}
+            </p>
+          )}
+          {!preview.isLoading && preview.errors.length > 0 && (
+            <ul data-testid="preview-errors" role="alert" className="max-w-md text-right text-xs text-rose-600 dark:text-rose-400 font-medium">
+              {preview.errors.map((e, i) => (
+                <li key={i}>{e.message}</li>
+              ))}
+            </ul>
+          )}
 
           <div className="flex items-center gap-2">
             <Button
@@ -343,19 +326,6 @@ export const NewSalePage: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {error && (
-        <p role="alert" data-testid="page-error" className="text-xs text-rose-600 dark:text-rose-400 font-medium px-1">
-          {error}
-        </p>
-      )}
-      {!preview.isLoading && preview.errors.length > 0 && (
-        <ul data-testid="preview-errors" role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium px-1">
-          {preview.errors.map((e, i) => (
-            <li key={i}>{e.message}</li>
-          ))}
-        </ul>
-      )}
 
       {/* Payment dialog: payment mode, then result mode */}
       <SaleSummaryModal
