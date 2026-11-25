@@ -80,10 +80,14 @@ const Row: React.FC<{ row: RowSpec; onOpen: (route: string) => void }> = ({ row,
   </li>
 );
 
+export type SummaryGroup = 'cash' | 'today-dues' | 'all';
+
 export const DashboardSummaryCards: React.FC<{
   metrics: DashboardMetrics | null;
   onNavigate: (route: string) => void;
-}> = ({ metrics: m, onNavigate }) => {
+  /** Which cards to draw: the full-width cash row, the Today/Dues pair, or all three. */
+  group?: SummaryGroup;
+}> = ({ metrics: m, onNavigate, group = 'all' }) => {
   const cards: CardSpec[] = [
     {
       id: 'today',
@@ -155,15 +159,18 @@ export const DashboardSummaryCards: React.FC<{
           label: 'Inventory valuation',
           caption: 'stock at cost',
           value: m?.totalStockValuation ?? null,
-          route: 'reports',
+          route: 'inventory',
         },
       ],
     },
   ];
 
+  const shown = cards.filter((c) => (group === 'all' ? true : group === 'cash' ? c.id === 'cash' : c.id !== 'cash'));
+  const gridCols = group === 'cash' ? '' : group === 'today-dues' ? 'md:grid-cols-2' : 'md:grid-cols-3';
+
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="summary-cards">
-      {cards.map((c) => (
+    <div className={cn('grid grid-cols-1 gap-3', gridCols)} data-testid="summary-cards">
+      {shown.map((c) => (
         <section
           key={c.id}
           data-testid={`card-${c.id}`}
@@ -179,7 +186,14 @@ export const DashboardSummaryCards: React.FC<{
               {c.title}
             </h2>
           </header>
-          <ul className="flex flex-1 flex-col divide-y divide-slate-100 dark:divide-slate-800">
+          <ul
+            className={cn(
+              'flex-1 divide-slate-100 dark:divide-slate-800',
+              c.id === 'cash'
+                ? 'grid grid-cols-1 divide-y md:grid-cols-3 md:divide-x md:divide-y-0'
+                : 'flex flex-col divide-y'
+            )}
+          >
             {c.rows.map((r) => (
               <Row key={r.testId} row={r} onOpen={onNavigate} />
             ))}

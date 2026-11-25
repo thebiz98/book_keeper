@@ -110,10 +110,11 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {base?.metrics.error && <Err msg={`Could not load metrics: ${base.metrics.error}`} onRetry={loadBase} />}
-      <DashboardSummaryCards metrics={m} onNavigate={setActiveRoute} />
+      <DashboardSummaryCards metrics={m} onNavigate={setActiveRoute} group="cash" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 flex flex-col gap-4">
+          <DashboardSummaryCards metrics={m} onNavigate={setActiveRoute} group="today-dues" />
           <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
@@ -206,12 +207,11 @@ export const DashboardPage: React.FC = () => {
                 <div key={item.id} className="py-2.5 flex items-center justify-between gap-2">
                   <div className="flex flex-col truncate">
                     <span className="text-xs font-semibold truncate">{item.name}</span>
-                    <span className="text-[10px] text-slate-400">{item.category ?? 'Uncategorized'}</span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
                     <span className="text-[10px] text-slate-400 tabular-nums">
                       {item.currentStock} / {item.lowStockThreshold} {item.baseUnit}
                     </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
                     <StockStatusBadge
                       currentStock={item.currentStock}
                       isLowStock
