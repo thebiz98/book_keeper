@@ -707,3 +707,10 @@ UI only; no backend, schema or IPC change.
 * **Keyboard.** `useGridKeyboardNav`: Up/Down, Enter opens the bill, E edits, Delete opens the confirm; keys inside inputs ignored.
 * **Tests (Vitest).** tab renders; filters call the API with the right args; Edit opens the modal for the row; Delete confirm calls `deleteSettlement` then reloads; OB label; empty state.
 
+
+## Service items (FR-36, FR-37, DD-65..DD-67, `feat/service-items`, v1.4 D2)
+* **Add / edit item.** `ItemEditDrawer` (create) gains a Type segmented control (Physical / Service). Service mode shows Name, Unit, Sale Price, Service cost (optional) and a `ServiceComponentsEditor` (rows: physical-only item typeahead, quantity per unit with the component's base unit, remove; `+ Add component`), plus the backend line "Components Rs x - Misc Rs y - Cost per unit Rs z" from `preview_service_cost` (debounced, display only). Save/Cancel use `FormActions`. On edit the type control is disabled; components load from `get_service_components`. No opening stock, bundles, low-stock level or lots for a service.
+* **Item list.** Service badge next to the name; stock column shows "Can make N" (or "-" with no components) from `can_make`; Adjust, Set stock, Add bundle and lot expansion hidden for services; no low-stock styling.
+* **New Sale and bill edit.** Services are in the search; the unit select has no bundles and no "+ New bundle..." for services. The info line under a row renders `LotDraw.components` (component draws, components cost, misc cost, line cost) from `preview_lot_draw`; all rows send `prior_lines` (item id + base quantity of earlier rows, a pure mapping).
+* **Reports.** P&L shows "Less: Service misc. costs" under COGS (`data-testid="pnl-service-misc"`).
+* **Tests (vitest).** service form (type switch, component rows, backend preview line from the mock), item list service row and hidden actions, sale info line for a service, P&L line.
