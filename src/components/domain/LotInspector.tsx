@@ -38,13 +38,24 @@ export interface LotInspectorProps {
   baseUnit: string;
   /** FR-25: show the Purchase Price edit button (hidden for RETURN lots). */
   editable?: boolean;
+  /** Called after a lot price was saved (the lots reload too), so the caller can refresh its own views. */
+  onChanged?: () => void;
+  /** Reports the price modal opening / closing, so a host drawer can ignore its own close shortcuts. */
+  onModalToggle?: (open: boolean) => void;
 }
 
-export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, editable = false }) => {
+export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, editable = false, onChanged, onModalToggle }) => {
   const [lots, setLots] = useState<ItemLot[] | null>(null);
   const [editing, setEditing] = useState<ItemLot | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const modalOpen = editing !== null;
+  useEffect(() => {
+    onModalToggle?.(modalOpen);
+    return () => onModalToggle?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,7 +150,10 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, ed
         lot={editing}
         baseUnit={baseUnit}
         onClose={() => setEditing(null)}
-        onSaved={() => setReloadKey((k) => k + 1)}
+        onSaved={() => {
+          setReloadKey((k) => k + 1);
+          onChanged?.();
+        }}
       />
     )}
     </>
