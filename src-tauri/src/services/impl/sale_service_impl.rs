@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, BillPaymentPreview, BillPreview, CreateSalePayload, DeleteBillResult, Paginated,
     PreviewSalePayload, RecordPaymentPayload, SaleDetailView, SaleItemDetail, SaleHistoryRow,
-    SaleSummaryResponse, SalesHistoryFilter,
+    SaleSummaryResponse, SalesHistoryFilter, ProfitSummary,
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
 use crate::core::error::AppError;
@@ -500,6 +500,12 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             let allocations = tx.allocations().find_by_sale_item_id(item.id)?;
             let returned_quantity = returned.get(&item.id).copied().unwrap_or(0.0);
             let net_unit_price = net_unit_price(item.unit_price, sale.items_subtotal, sale.discounts_total);
+            // FR-34: cost net of returned units; revenue net of the bill discount share (FR-19 rule).
+            let cost_amount = round2(
+                allocations.iter().map(|a| (a.quantity_depleted - a.returned_quantity) * a.unit_cost).sum(),
+            );
+            let share = net_unit_price_factor(sale.items_subtotal, sale.discounts_total);
+            let profit = round2(item.total_amount * share - cost_amount);
             details.push(SaleItemDetail {
                 sale_item: item,
                 item_name,
@@ -507,8 +513,18 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                 returned_quantity,
                 allocations,
                 net_unit_price,
+                cost_amount,
+                profit,
             });
         }
+        let parts = tx.sales().bill_profit_parts(sale_id)?;
+        let return_adjustment = -round2(parts.refunds + parts.scrap_cost + parts.replacement_cost);
+        let profit_summary = ProfitSummary {
+            lines_profit: round2(parts.total - sale.charges_total - return_adjustment),
+            charges: sale.charges_total,
+            return_adjustment,
+            total: parts.total,
+        };
         let settlements = tx.settlements().list_by_transaction(TransactionType::Sale, sale_id)?;
         let charges = tx.bill_charges().list_by_transaction(TransactionType::Sale, sale_id)?;
         Ok(SaleDetailView {
@@ -517,6 +533,12 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             items: details,
             settlements,
             charges,
+            profit_summary,
         })
     }
+}
+
+/// Share of a line's total kept after the bill discount (`net_unit_price(1.0, ..)`).
+fn net_unit_price_factor(items_subtotal: f64, discounts_total: f64) -> f64 {
+    net_unit_price(1.0, items_subtotal, discounts_total)
 }

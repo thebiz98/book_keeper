@@ -7,12 +7,15 @@ export interface PaymentStatusBadgeProps {
   status: PaymentStatus;
   balanceDue?: number;
   className?: string;
+  /** `sm` = less padding, for dense tables. */
+  size?: 'md' | 'sm';
 }
 
 export const PaymentStatusBadge: React.FC<PaymentStatusBadgeProps> = ({
   status,
   balanceDue,
   className,
+  size = 'md',
 }) => {
   const normStatus = status;
 
@@ -33,7 +36,8 @@ export const PaymentStatusBadge: React.FC<PaymentStatusBadgeProps> = ({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold select-none tabular-nums',
+        'inline-flex items-center gap-1.5 rounded font-semibold select-none tabular-nums',
+        size === 'sm' ? 'px-1 py-0 text-[10px]' : 'px-2 py-0.5 text-xs',
         styles,
         className
       )}

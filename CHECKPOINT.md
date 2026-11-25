@@ -161,3 +161,11 @@ Manual checklist:
 - Dashboard: three cards (Today, Dues, Cash & Stock) side by side, stacked on a narrow window; Cash in hand is the largest figure; hover shows a chevron, Tab shows a focus ring; each row opens its page (history rows only navigate, no date filter); light and dark.
 - Settings: enter Opening cash, Save Profile; the header pill and dashboard change by that amount; a negative value shows the backend message.
 - Make a sale yesterday and an expense today: Cash in hand carries over; a credit sale does not change it.
+
+## Branch feat/history-profit (FR-34, DD-63; no schema, v1.3 C6)
+Delivered: `SalesHistoryFilter.include_profit` -> `SaleHistoryRow.profit` (SQL per bill, P&L sources: allocations net of returns, linked REFUND returns, scrap cost, replacement cost; `NULL` and the old query when absent); `get_sale_details` gains per-line `cost_amount` / `profit` and `profit_summary`; shared SQL consts + `SaleRepository::bill_profit_parts`. UI: compact `BillHistoryView` columns (`DataTable` column `className`), icon actions (View, Edit in drawer via `initialMode="edit"`, Settle, Return), sales-only Columns menu with "Show profit" (`showProfit` in the app store, session only), drawer Cost / Profit columns and reconciliation footer. Updated tests that encoded the old UI: Settle text and the one-line Chg/Disc cell in `history.test.tsx`. New: `tests/history_profit_test.rs` (includes the P&L agreement test), `src/__tests__/pages/historyProfit.test.tsx`.
+Manual checklist:
+- Sales History: narrow Items column, Chg/Disc as two lines, small status badge, centred icon Actions; hover shows tooltips; Tab reaches each icon.
+- Pencil opens the drawer directly in the edit form; on a bill with returns it opens in view mode and shows the reasons.
+- Columns menu -> Show profit: a coloured Profit column appears; restart the app: hidden again. Purchase history has no menu.
+- With profit on, open a bill with a discount, a charge and a return: Cost/Profit per line and the footer add up to the bill profit; the sum of bill profits equals Reports -> P&L net profit for those days (excluding expenses).

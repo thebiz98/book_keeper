@@ -10,6 +10,10 @@ export interface DataTableColumn<T> {
   align?: 'left' | 'center' | 'right';
   mono?: boolean;
   width?: string;
+  /** Extra classes on the body cells of this column (e.g. tighter padding). */
+  className?: string;
+  /** Extra classes on this column's header cell. */
+  headerClassName?: string;
   render: (row: T, index: number) => React.ReactNode;
 }
 
@@ -114,6 +118,7 @@ export function DataTable<T>({
                 <TableHead
                   key={col.key}
                   align={col.align ?? 'left'}
+                  className={col.headerClassName ?? col.className}
                   style={col.width ? { width: col.width } : undefined}
                 >
                   {col.header}
@@ -170,7 +175,7 @@ export function DataTable<T>({
                     className={cn(onRowClick && 'cursor-pointer')}
                   >
                     {columns.map((col) => (
-                      <TableCell key={col.key} align={col.align ?? 'left'} mono={col.mono}>
+                      <TableCell key={col.key} align={col.align ?? 'left'} mono={col.mono} className={col.className}>
                         {col.render(row, rIdx)}
                       </TableCell>
                     ))}

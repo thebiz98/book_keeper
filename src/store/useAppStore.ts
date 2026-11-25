@@ -17,6 +17,9 @@ export interface AppStoreState extends AppState {
    * SettingsPage reacts with `useEffect(() => { if (consumeBackupRequest()) runBackup(); }, [backupRequested])`.
    */
   backupRequested: boolean;
+  /** Sales history "Show profit" (FR-34): session only, never persisted, default off. */
+  showProfit: boolean;
+  setShowProfit: (on: boolean) => void;
 
   loadShopSettings: () => Promise<void>;
   /** Refetch `getDashboardMetrics().cashInHand` into `cashInHand`. */
@@ -38,6 +41,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   lookupOpen: false,
   backupRequested: false,
   cashInHand: 0,
+  showProfit: false,
+
+  setShowProfit: (on: boolean): void => set({ showProfit: on }),
 
   setActiveRoute: (route: string): void => {
     set({ activeRoute: route });

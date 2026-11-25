@@ -79,6 +79,9 @@ pub struct SalesHistoryFilter {
     pub page: Option<usize>,
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Sales only (FR-34): when true each row carries the bill profit; otherwise `profit` is `null`.
+    #[serde(default)]
+    pub include_profit: Option<bool>,
 }
 
 impl SalesHistoryFilter {
@@ -106,6 +109,34 @@ pub struct SaleHistoryRow {
     pub items_subtotal: f64,
     pub charges_total: f64,
     pub discounts_total: f64,
+    /// Bill profit (FR-34); `None` unless the filter asked for it.
+    #[serde(default)]
+    pub profit: Option<f64>,
+}
+
+/// Raw components of one bill's profit (same sources as the P&L), computed in SQL.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BillProfitParts {
+    /// FIFO cost of the units sold and not returned.
+    pub cost_net: f64,
+    /// Customer REFUND returns linked to the bill.
+    pub refunds: f64,
+    /// Cost of scrapped returned units (stays spent).
+    pub scrap_cost: f64,
+    /// FIFO cost of replacement units issued against the bill.
+    pub replacement_cost: f64,
+    /// `round2(total_amount - cost_net - refunds - scrap_cost - replacement_cost)`.
+    pub total: f64,
+}
+
+/// Reconciliation of a sale's profit (FR-34): `lines_profit + charges + return_adjustment == total`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProfitSummary {
+    pub lines_profit: f64,
+    pub charges: f64,
+    /// Refunds, scrapped cost and replacement cost, as a number <= 0.
+    pub return_adjustment: f64,
+    pub total: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -119,6 +150,10 @@ pub struct SaleItemDetail {
     pub allocations: Vec<SaleStockAllocation>,
     /// Sold rate net of the bill-level discount share (FR-19): the refund cap of a linked return.
     pub net_unit_price: f64,
+    /// FIFO cost of the line net of returned units (FR-34).
+    pub cost_amount: f64,
+    /// `line total - bill discount share - cost_amount` (FR-34).
+    pub profit: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,4 +163,5 @@ pub struct SaleDetailView {
     pub items: Vec<SaleItemDetail>,
     pub settlements: Vec<PaymentSettlement>,
     pub charges: Vec<BillCharge>,
+    pub profit_summary: ProfitSummary,
 }

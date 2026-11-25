@@ -89,6 +89,8 @@ export interface HistoryFilter {
   searchQuery?: string | null;
   page?: number | null;
   limit?: number | null;
+  /** Sales history only (FR-34): rows carry the bill profit. */
+  includeProfit?: boolean | null;
 }
 
 export interface ReturnsFilter {

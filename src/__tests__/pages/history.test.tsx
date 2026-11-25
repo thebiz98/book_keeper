@@ -52,9 +52,9 @@ describe('Sales history', () => {
       limit: 25,
     });
     expect(bodyText()).toContain('Ram Snapshot');
-    const rows = document.querySelectorAll('tbody tr');
-    expect(rows[0].textContent).toContain('Settle');
-    expect(rows[1].textContent).not.toContain('Settle');
+    // Actions are icon buttons now (FR-34): the Settle action is found by its accessible name.
+    expect(document.querySelector('[aria-label="Settle SAL-1"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Settle SAL-2"]')).toBeNull();
   });
 
   it('status filter, pager and search hit the server', async () => {
@@ -124,8 +124,11 @@ describe('Bill charges in history (FR-19)', () => {
     render(<SalesHistoryPage />);
     await waitFor(() => !!document.querySelector('[data-testid="adj-cell"]'));
     expect(bodyText()).toContain('Chg / Disc');
-    const cells = Array.from(document.querySelectorAll('[data-testid="adj-cell"]')).map((c) => c.textContent);
-    expect(cells).toEqual(['+₹50.00 / −₹20.00']);
+    // Two lines since FR-34: the charge and the discount, each unbroken.
+    const cells = Array.from(document.querySelectorAll('[data-testid="adj-cell"]')).map((c) =>
+      Array.from(c.children).map((s) => s.textContent)
+    );
+    expect(cells).toEqual([['+₹50.00', '−₹20.00']]);
   });
 
   it('the drawer lists the charge lines and the subtotal breakdown', async () => {

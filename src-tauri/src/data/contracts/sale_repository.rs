@@ -1,4 +1,4 @@
-use crate::core::dtos::{ItemBillRef, SaleHistoryRow, SalesHistoryFilter};
+use crate::core::dtos::{BillProfitParts, ItemBillRef, SaleHistoryRow, SalesHistoryFilter};
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
@@ -45,6 +45,8 @@ pub trait SaleRepository {
     fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<SaleItem>, AppError>;
     /// Σ quantity of customer `RETURNED` return lines referencing this sale line.
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError>;
+    /// FR-34: the components of one bill's profit, from the same SQL as the history `profit` column.
+    fn bill_profit_parts(&self, sale_id: i64) -> Result<BillProfitParts, AppError>;
 
     /// FR-23: distinct bills containing the item, `transaction_date DESC, id DESC`, paged in SQL,
     /// plus the distinct bill count. Served by `idx_sale_items_item_date`.

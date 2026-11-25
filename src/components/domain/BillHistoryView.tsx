@@ -1,7 +1,8 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
-import { Search, Eye, DollarSign, Undo2 } from 'lucide-react';
+import { Search, Eye, Pencil, HandCoins, Undo2, SlidersHorizontal } from 'lucide-react';
 import { api, errorMessage } from '@/api';
+import { useAppStore } from '@/store/useAppStore';
 import type {
   HistoryFilter,
   PaymentStatusFilter,
@@ -12,7 +13,6 @@ import type {
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { PaymentStatusBadge } from '../common/PaymentStatusBadge';
 import { DateRangePicker } from '../common/DateRangePicker';
-import { Button } from '../ui/Button';
 import { DataTable, type DataTableColumn } from './DataTable';
 import { SettlementModal } from './SettlementModal';
 import { BillDetailDrawer } from './BillDetailDrawer';
@@ -27,20 +27,86 @@ export interface BillHistoryViewProps {
   kind: TransactionType;
 }
 
+const ICON_BTN =
+  'p-1 rounded text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer';
+
+interface RowActionProps {
+  label: string;
+  onClick: () => void;
+  hover: string;
+  children: React.ReactNode;
+}
+
+const RowAction: React.FC<RowActionProps> = ({ label, onClick, hover, children }) => (
+  <button type="button" aria-label={label} title={label} onClick={onClick} className={`${ICON_BTN} ${hover}`}>
+    {children}
+  </button>
+);
+
+/** Column menu (sales only): the "Show profit" checkbox (FR-34). */
+const ColumnMenu: React.FC<{ showProfit: boolean; onChange: (on: boolean) => void }> = ({ showProfit, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-label="Columns"
+        title="Columns"
+        aria-expanded={open}
+        data-testid="column-menu"
+        onClick={() => setOpen((o) => !o)}
+        className={`${ICON_BTN} hover:text-blue-600 border border-slate-200 dark:border-slate-700 p-1.5`}
+      >
+        <SlidersHorizontal className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[150px] rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-md p-2">
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              aria-label="Show profit"
+              checked={showProfit}
+              onChange={(e) => onChange(e.target.checked)}
+            />
+            Show profit
+          </label>
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** Shared server-side sales / purchase history ledger (Pages 7 and 8). */
 export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
   const isSale = kind === 'SALE';
   const [range, setRange] = useState({ startDate: '', endDate: '' });
   const [status, setStatus] = useState<PaymentStatusFilter>('ALL');
   const [page, setPage] = useState(1);
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<{ id: number; mode: 'view' | 'edit' } | null>(null);
   const [settling, setSettling] = useState<Row | null>(null);
+  const storeShowProfit = useAppStore((s) => s.showProfit);
+  const setShowProfit = useAppStore((s) => s.setShowProfit);
+  const showProfit = isSale && storeShowProfit;
 
   const live = useLiveSearch<{ items: Row[]; total: number }>({
     initial: { items: [], total: 0 },
     emptyBehavior: 'fetch',
     debounceMs: LIST_SEARCH_DEBOUNCE_MS,
-    deps: [range.startDate, range.endDate, status, page, isSale],
+    deps: [range.startDate, range.endDate, status, page, isSale, showProfit],
     onQueryCommit: () => setPage(1),
     fetcher: (q) => {
       const filter: HistoryFilter = {
@@ -50,6 +116,7 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
         searchQuery: q || null,
         page,
         limit: HISTORY_PAGE_SIZE,
+        ...(showProfit ? { includeProfit: true } : {}),
       };
       return isSale ? api.getSalesHistory(filter) : api.getPurchasesHistory(filter);
     },
@@ -63,16 +130,19 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
   const load = useCallback(() => void live.refresh(), [live.refresh]);
 
   const partyLabel = isSale ? 'Customer' : 'Vendor';
+  const tight = 'px-2';
   const columns: DataTableColumn<Row>[] = [
     {
       key: 'code',
       header: isSale ? 'Invoice Code' : 'Purchase Code',
       mono: true,
+      className: `${tight} whitespace-nowrap`,
       render: (r) => <span className="font-semibold text-blue-600 dark:text-blue-400">{r.transactionCode}</span>,
     },
     {
       key: 'date',
       header: isSale ? 'Date & Time' : 'Date',
+      className: `${tight} whitespace-nowrap`,
       render: (r) => (
         <span className="text-xs text-slate-500">
           {r.transactionDate}
@@ -83,14 +153,24 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
     {
       key: 'party',
       header: partyLabel,
+      className: tight,
       render: (r) => r.partyName ?? (isSale ? 'Walk-in Customer' : '-'),
     },
     ...(isSale
-      ? [{ key: 'lines', header: 'Items', align: 'center' as const, render: (r: Row) => r.lineCount }]
+      ? [
+          {
+            key: 'lines',
+            header: 'Items',
+            align: 'center' as const,
+            className: 'w-14 px-1 text-center',
+            render: (r: Row) => r.lineCount,
+          },
+        ]
       : [
           {
             key: 'ref',
             header: 'Supplier Bill Ref',
+            className: tight,
             render: (r: Row) => (r as PurchaseHistoryRow).supplierInvoiceRef ?? '-',
           },
         ]),
@@ -98,46 +178,84 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
       key: 'adj',
       header: 'Chg / Disc',
       align: 'right',
+      className: tight,
       render: (r) =>
         r.chargesTotal || r.discountsTotal ? (
-          <span className="font-mono text-xs" data-testid="adj-cell">
-            +₹{r.chargesTotal.toFixed(2)} / −₹{r.discountsTotal.toFixed(2)}
+          <span className="flex flex-col items-end font-mono text-xs leading-tight" data-testid="adj-cell">
+            {r.chargesTotal > 0 && <span className="whitespace-nowrap">{`+₹${r.chargesTotal.toFixed(2)}`}</span>}
+            {r.discountsTotal > 0 && <span className="whitespace-nowrap">{`−₹${r.discountsTotal.toFixed(2)}`}</span>}
           </span>
         ) : (
           '—'
         ),
     },
-    { key: 'total', header: 'Total', align: 'right', render: (r) => <CurrencyDisplay amount={r.totalAmount} /> },
-    { key: 'paid', header: 'Paid', align: 'right', render: (r) => <CurrencyDisplay amount={r.paidAmount} /> },
+    {
+      key: 'total',
+      header: 'Total',
+      align: 'right',
+      className: tight,
+      render: (r) => <CurrencyDisplay amount={r.totalAmount} />,
+    },
+    {
+      key: 'paid',
+      header: 'Paid',
+      align: 'right',
+      className: tight,
+      render: (r) => <CurrencyDisplay amount={r.paidAmount} />,
+    },
     {
       key: 'due',
       header: 'Balance Due',
       align: 'right',
+      className: tight,
       render: (r) => <CurrencyDisplay amount={r.balanceDue} colored />,
     },
-    { key: 'status', header: 'Status', align: 'center', render: (r) => <PaymentStatusBadge status={r.paymentStatus} /> },
+    ...(showProfit
+      ? [
+          {
+            key: 'profit',
+            header: 'Profit',
+            align: 'right' as const,
+            className: tight,
+            render: (r: Row) => {
+              const p = (r as SaleHistoryRow).profit;
+              return p == null ? '-' : <CurrencyDisplay amount={p} colored />;
+            },
+          },
+        ]
+      : []),
+    {
+      key: 'status',
+      header: 'Status',
+      align: 'center',
+      className: 'px-1',
+      render: (r) => <PaymentStatusBadge status={r.paymentStatus} size="sm" />,
+    },
     {
       key: 'actions',
       header: 'Actions',
-      align: 'right',
+      align: 'center',
+      className: 'px-1',
       render: (r) => (
-        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <Button variant="ghost" size="xs" leftIcon={<Eye size={12} />} onClick={() => setDetailId(r.id)}>
-            View
-          </Button>
+        <div className="flex items-center justify-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <RowAction label={`View ${r.transactionCode}`} hover="hover:text-blue-600" onClick={() => setDetail({ id: r.id, mode: 'view' })}>
+            <Eye className="h-3.5 w-3.5" />
+          </RowAction>
+          <RowAction label={`Edit ${r.transactionCode}`} hover="hover:text-blue-600" onClick={() => setDetail({ id: r.id, mode: 'edit' })}>
+            <Pencil className="h-3.5 w-3.5" />
+          </RowAction>
           {r.balanceDue > 0 && r.partyId !== null && (
-            <Button variant="secondary" size="xs" leftIcon={<DollarSign size={12} />} onClick={() => setSettling(r)}>
-              Settle
-            </Button>
+            <RowAction label={`Settle ${r.transactionCode}`} hover="hover:text-emerald-600" onClick={() => setSettling(r)}>
+              <HandCoins className="h-3.5 w-3.5" />
+            </RowAction>
           )}
-          <Button
-            variant="ghost"
-            size="xs"
-            leftIcon={<Undo2 size={12} />}
+          <RowAction
+            label={`Return ${r.transactionCode}`}
+            hover="hover:text-amber-600"
             onClick={() => navigateWithParam('returns', 'returnBill', `${kind}:${r.id}`)}
           >
-            Return
-          </Button>
+            <Undo2 className="h-3.5 w-3.5" />
+          </RowAction>
         </div>
       ),
     },
@@ -186,6 +304,7 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
             setPage(1);
           }}
         />
+        {isSale && <ColumnMenu showProfit={storeShowProfit} onChange={setShowProfit} />}
       </div>
 
       <DataTable
@@ -198,14 +317,21 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
         error={error}
         onRetry={load}
         emptyMessage={isSale ? 'No sales invoices match the filters.' : 'No purchases match the filters.'}
-        onRowClick={(r) => setDetailId(r.id)}
+        onRowClick={(r) => setDetail({ id: r.id, mode: 'view' })}
         total={total}
         page={page}
         limit={HISTORY_PAGE_SIZE}
         onPageChange={setPage}
       />
 
-      <BillDetailDrawer kind={kind} billId={detailId} onClose={() => setDetailId(null)} onChanged={load} />
+      <BillDetailDrawer
+        kind={kind}
+        billId={detail?.id ?? null}
+        initialMode={detail?.mode}
+        showProfit={showProfit}
+        onClose={() => setDetail(null)}
+        onChanged={load}
+      />
 
       {settling && settling.partyId !== null && (
         <SettlementModal
