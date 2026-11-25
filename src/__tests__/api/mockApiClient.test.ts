@@ -26,7 +26,7 @@ describe('MockApiClient contract shapes', () => {
       'getNextReturnCode', 'createCustomerReturn', 'createVendorReturn', 'getReturnDetails',
       'listReturns', 'createStockAdjustment', 'setItemStock', 'getItemLots', 'previewLotDraw', 'getItemSales', 'getItemPurchases', 'listStockAdjustments',
       'getDashboardMetrics', 'getLowStockAlerts', 'getSalesPurchaseTrend', 'getRecentTransactions',
-      'getPnLReport', 'getStockValuationReport', 'getCashFlowReport',
+      'getPnLReport', 'getStockValuationReport', 'getCashFlowReport', 'getItemProfitReport', 'getInventorySpeedReport',
       'getShopSettings', 'updateShopSettings', 'backupDatabase', 'verifyDatabaseIntegrity',
       'validateItemsImport', 'executeItemsImport',
       'searchExpenseTypes', 'listExpenseTypes', 'createExpenseType', 'updateExpenseType',

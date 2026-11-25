@@ -644,3 +644,74 @@ export interface ExpenseTypeTotal {
   expenseTypeName: string;
   amount: number;
 }
+
+
+// ---- Item profit and inventory speed (FR-38, FR-39, DD-68) ----
+
+export interface ReportSort {
+  field: string;
+  dir: 'ASC' | 'DESC';
+}
+
+export interface ItemProfitFilter {
+  fromDate: string;
+  toDate: string;
+  search?: string | null;
+  sort?: ReportSort | null;
+  page?: number | null;
+  pageSize?: number | null;
+}
+
+export interface ItemProfitRow {
+  itemId: number;
+  name: string;
+  baseUnit: string;
+  qtySold: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  marginPct: number | null;
+}
+
+export interface ItemProfitReport {
+  rows: ItemProfitRow[];
+  totals: { revenue: number; cost: number; profit: number; marginPct: number | null };
+  /** items profit + charges - replacement cost = bills profit (FR-38). */
+  reconciliation: { itemsProfit: number; charges: number; replacementCost: number; billsProfit: number };
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
+export type SpeedClass = 'FAST' | 'NORMAL' | 'SLOW' | 'DEAD';
+
+export interface InventorySpeedFilter {
+  fromDate: string;
+  toDate: string;
+  /** ALL / absent, FAST, NORMAL, SLOW or DEAD. */
+  class?: string | null;
+  search?: string | null;
+  sort?: ReportSort | null;
+  page?: number | null;
+  pageSize?: number | null;
+}
+
+export interface InventorySpeedRow {
+  itemId: number;
+  name: string;
+  baseUnit: string;
+  unitsOut: number;
+  unitsPerDay: number;
+  stock: number;
+  daysOfCover: number | null;
+  class: SpeedClass;
+}
+
+export interface InventorySpeedReport {
+  rows: InventorySpeedRow[];
+  counts: { fast: number; normal: number; slow: number; dead: number };
+  days: number;
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}

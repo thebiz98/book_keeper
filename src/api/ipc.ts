@@ -195,6 +195,10 @@ export class TauriClient implements ApiClient {
     invokeCmd('get_pnl_report', { fromDate, toDate });
   getStockValuationReport: ApiClient['getStockValuationReport'] = () =>
     invokeCmd('get_stock_valuation_report');
+  getItemProfitReport: ApiClient['getItemProfitReport'] = (filter) =>
+    invokeCmd('get_item_profit_report', { filter });
+  getInventorySpeedReport: ApiClient['getInventorySpeedReport'] = (filter) =>
+    invokeCmd('get_inventory_speed_report', { filter });
   getCashFlowReport: ApiClient['getCashFlowReport'] = (fromDate, toDate) =>
     invokeCmd('get_cash_flow_report', { fromDate, toDate });
 

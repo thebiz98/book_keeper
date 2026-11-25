@@ -6,6 +6,10 @@
 import type {
   AdjustmentReason,
   CashFlowReport,
+  InventorySpeedFilter,
+  InventorySpeedReport,
+  ItemProfitFilter,
+  ItemProfitReport,
   ChargeAppliesTo,
   ChargeEffect,
   ChargeType,
@@ -728,6 +732,10 @@ export interface ApiClient {
   getPnLReport(fromDate: string, toDate: string): Promise<PnLReport>;
   getStockValuationReport(): Promise<StockValuationReport>;
   getCashFlowReport(fromDate: string, toDate: string): Promise<CashFlowReport>;
+  /** Item-wise profit (FR-38). Read-only; sorting, search and paging run in the backend. */
+  getItemProfitReport(filter: ItemProfitFilter): Promise<ItemProfitReport>;
+  /** Fast / slow / dead stock (FR-39, DD-68). Read-only. */
+  getInventorySpeedReport(filter: InventorySpeedFilter): Promise<InventorySpeedReport>;
 
   // Settings & System
   getShopSettings(): Promise<ShopSettings>;

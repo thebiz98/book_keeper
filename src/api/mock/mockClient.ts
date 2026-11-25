@@ -12,6 +12,10 @@ import type {
   ApiClient,
   BillCharge,
   CashFlowReport,
+  InventorySpeedFilter,
+  InventorySpeedReport,
+  ItemProfitFilter,
+  ItemProfitReport,
   ChargeType,
   Expense,
   ExpenseType,
@@ -1068,6 +1072,26 @@ export class MockApiClient implements ApiClient {
         itemsCount: this.items.filter((i) => i.category === category).length,
         valuation: 10000,
       })),
+    };
+  }
+  async getItemProfitReport(filter: ItemProfitFilter): Promise<ItemProfitReport> {
+    return {
+      rows: [],
+      totals: { revenue: 0, cost: 0, profit: 0, marginPct: null },
+      reconciliation: { itemsProfit: 0, charges: 0, replacementCost: 0, billsProfit: 0 },
+      totalCount: 0,
+      page: filter.page ?? 1,
+      pageSize: filter.pageSize ?? 50,
+    };
+  }
+  async getInventorySpeedReport(filter: InventorySpeedFilter): Promise<InventorySpeedReport> {
+    return {
+      rows: [],
+      counts: { fast: 0, normal: 0, slow: 0, dead: 0 },
+      days: 30,
+      totalCount: 0,
+      page: filter.page ?? 1,
+      pageSize: filter.pageSize ?? 50,
     };
   }
   async getCashFlowReport(): Promise<CashFlowReport> {
