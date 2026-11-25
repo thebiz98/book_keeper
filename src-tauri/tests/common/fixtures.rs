@@ -31,6 +31,7 @@ pub fn create_test_item(
         created_at: "2026-11-20T10:00:00Z".to_string(),
         updated_at: "2026-11-20T10:00:00Z".to_string(),
         low_stock_threshold: 5.0,
+        service_cost: None,
     }
 }
 
@@ -201,6 +202,7 @@ pub fn create_test_sale_item(
         quantity,
         unit_price,
         total_amount: quantity * unit_price,
+        service_cost_total: None,
     }
 }
 

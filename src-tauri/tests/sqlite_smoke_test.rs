@@ -12,7 +12,7 @@ fn sqlite_end_to_end_smoke() {
 
     let item_id = state
         .item_service
-        .create_item(CreateItemPayload { item_type: None, low_stock_threshold: None,
+        .create_item(CreateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,
             name: "Lux Soap".to_string(),
             category: Some("Toiletries".to_string()),
             barcode: Some("8901234567890".to_string()),
@@ -84,7 +84,7 @@ fn sales_history_honours_start_end_date_filter() {
     use book_keeper::core::dtos::SalesHistoryFilter;
     let path = std::env::temp_dir().join(format!("bk_hist_{}.db", uuid::Uuid::new_v4()));
     let state = build_sqlite_app_state(&path).expect("build state");
-    let item_id = state.item_service.create_item(CreateItemPayload { item_type: None, low_stock_threshold: None,
+    let item_id = state.item_service.create_item(CreateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,
         name: "Pencil".into(), category: None, barcode: None, base_unit: "pcs".into(), mrp: None,
         default_sale_price: 5.0, initial_stock: None, initial_cost: None, bundles: None,
     }).expect("item");
