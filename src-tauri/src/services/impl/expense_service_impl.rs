@@ -33,7 +33,7 @@ fn validation(field: &str, message: impl Into<String>) -> AppError {
     AppError::ValidationError { field: field.to_string(), message: message.into() }
 }
 
-fn valid_type_name(raw: &str) -> Result<String, AppError> {
+pub(crate) fn valid_type_name(raw: &str) -> Result<String, AppError> {
     let name = clean_name(raw);
     if name.is_empty() {
         return Err(validation("name", "Expense type name cannot be empty"));
@@ -44,13 +44,13 @@ fn valid_type_name(raw: &str) -> Result<String, AppError> {
     Ok(name)
 }
 
-struct Checked {
-    date: String,
-    amount: f64,
-    notes: Option<String>,
+pub(crate) struct Checked {
+    pub date: String,
+    pub amount: f64,
+    pub notes: Option<String>,
 }
 
-fn check_payload(p: &ExpensePayload) -> Result<Checked, AppError> {
+pub(crate) fn check_payload(p: &ExpensePayload) -> Result<Checked, AppError> {
     check_entry_date_now("expense_date", &p.expense_date)?;
     let positive = p.amount.is_finite() && p.amount > 0.0;
     let amount = round2(p.amount);
@@ -72,6 +72,51 @@ fn active_type(
         .find_type_by_id(id)?
         .filter(|t| t.is_active)
         .ok_or_else(|| AppError::NotFound { entity: "ExpenseType".into(), id: id.to_string() })
+}
+
+/// Finds the type by name (case-insensitive) or creates it inside the caller's transaction.
+/// `(type, created)`. The caller reindexes after commit when `created` (R5, DD-47).
+pub(crate) fn get_or_create_type_in_tx(
+    tx: &mut dyn crate::data::contracts::unit_of_work::TransactionContext,
+    raw_name: &str,
+) -> Result<(ExpenseType, bool), AppError> {
+    let name = valid_type_name(raw_name)?;
+    if let Some(existing) = tx.expenses().find_type_by_name(&name)? {
+        return Ok((existing, false));
+    }
+    let row = ExpenseType { id: 0, name, is_active: true, created_at: chrono::Utc::now().to_rfc3339() };
+    let id = tx.expenses().create_type(&row)?;
+    let created = tx
+        .expenses()
+        .find_type_by_id(id)?
+        .ok_or_else(|| AppError::NotFound { entity: "ExpenseType".into(), id: id.to_string() })?;
+    Ok((created, true))
+}
+
+/// Validates and inserts one expense inside the caller's transaction (used by `create_expense`
+/// and the expenses import).
+pub(crate) fn create_expense_in_tx(
+    tx: &mut dyn crate::data::contracts::unit_of_work::TransactionContext,
+    payload: &ExpensePayload,
+) -> Result<Expense, AppError> {
+    let c = check_payload(payload)?;
+    let t = active_type(tx, payload.expense_type_id)?;
+    let code = tx.expenses().get_next_expense_code()?;
+    let row = Expense {
+        id: 0,
+        expense_code: code,
+        expense_date: c.date,
+        expense_type_id: t.id,
+        expense_type_name: t.name,
+        amount: c.amount,
+        notes: c.notes,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        updated_at: None,
+    };
+    let id = tx.expenses().create(&row)?;
+    tx.expenses()
+        .find_by_id(id)?
+        .ok_or_else(|| AppError::NotFound { entity: "Expense".into(), id: id.to_string() })
 }
 
 fn is_unique_violation(e: &AppError) -> bool {
@@ -104,31 +149,24 @@ impl<U: UnitOfWork> ExpenseService for ExpenseServiceImpl<U> {
     fn create_expense_type(&self, payload: CreateExpenseTypePayload) -> Result<ExpenseType, AppError> {
         let name = valid_type_name(&payload.name)?;
         let mut tx = self.uow.begin_transaction()?;
-        if let Some(existing) = tx.expenses().find_type_by_name(&name)? {
-            tx.rollback()?;
-            return Ok(existing);
-        }
-        let row = ExpenseType { id: 0, name: name.clone(), is_active: true, created_at: chrono::Utc::now().to_rfc3339() };
-        let id = match tx.expenses().create_type(&row) {
-            Ok(id) => id,
+        match get_or_create_type_in_tx(&mut *tx, &name) {
+            Ok((existing, false)) => {
+                tx.rollback()?;
+                Ok(existing)
+            }
+            Ok((created, true)) => {
+                tx.commit()?;
+                sync_after_commit(&*self.type_index, created.id, "expense type");
+                Ok(created)
+            }
             Err(e) if is_unique_violation(&e) => {
                 // Lost a race against another creator: return the winner.
                 drop(tx);
                 let mut rd = self.uow.begin_read()?;
-                return rd
-                    .expenses()
-                    .find_type_by_name(&name)?
-                    .ok_or(e);
+                rd.expenses().find_type_by_name(&name)?.ok_or(e)
             }
-            Err(e) => return Err(e),
-        };
-        let created = tx.expenses().find_type_by_id(id)?.ok_or_else(|| AppError::NotFound {
-            entity: "ExpenseType".into(),
-            id: id.to_string(),
-        })?;
-        tx.commit()?;
-        sync_after_commit(&*self.type_index, id, "expense type");
-        Ok(created)
+            Err(e) => Err(e),
+        }
     }
 
     fn update_expense_type(&self, id: i64, payload: CreateExpenseTypePayload) -> Result<ExpenseType, AppError> {
@@ -153,26 +191,9 @@ impl<U: UnitOfWork> ExpenseService for ExpenseServiceImpl<U> {
     }
 
     fn create_expense(&self, payload: ExpensePayload) -> Result<Expense, AppError> {
-        let c = check_payload(&payload)?;
+        check_payload(&payload)?;
         let mut tx = self.uow.begin_transaction()?;
-        let t = active_type(&mut *tx, payload.expense_type_id)?;
-        let code = tx.expenses().get_next_expense_code()?;
-        let row = Expense {
-            id: 0,
-            expense_code: code,
-            expense_date: c.date,
-            expense_type_id: t.id,
-            expense_type_name: t.name,
-            amount: c.amount,
-            notes: c.notes,
-            created_at: chrono::Utc::now().to_rfc3339(),
-            updated_at: None,
-        };
-        let id = tx.expenses().create(&row)?;
-        let stored = tx.expenses().find_by_id(id)?.ok_or_else(|| AppError::NotFound {
-            entity: "Expense".into(),
-            id: id.to_string(),
-        })?;
+        let stored = create_expense_in_tx(&mut *tx, &payload)?;
         tx.commit()?;
         Ok(stored)
     }

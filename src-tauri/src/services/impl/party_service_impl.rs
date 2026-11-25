@@ -37,7 +37,7 @@ fn check_opening(input: &OpeningBalanceInput) -> Result<(f64, String), AppError>
 
 /// Creates, updates or removes the party's opening bill inside the caller's transaction (FR-35).
 /// The bill has no lines and no lots; `recompute_bill` sets paid / balance / status from the ledger.
-fn apply_opening_balance(
+pub(crate) fn apply_opening_balance(
     tx: &mut dyn TransactionContext,
     party: &Party,
     input: &OpeningBalanceInput,
@@ -137,6 +137,26 @@ fn apply_opening_balance(
             };
             recompute_bill(tx, TransactionType::Purchase, bill_id)
         }
+    }
+}
+
+/// Dry-run twin of `apply_opening_balance` for imports (FR-41): the same amount / date checks
+/// and, for a party that already has an opening bill, the "not below what is settled" check.
+/// Reads only. `party` is `None` for a party that does not exist yet.
+pub(crate) fn check_opening_update(
+    tx: &mut dyn TransactionContext,
+    party: Option<&Party>,
+    input: &OpeningBalanceInput,
+) -> Result<(), AppError> {
+    let (amount, _) = check_opening(input)?;
+    let Some(party) = party else { return Ok(()) };
+    let (tx_type, bill_id) = match party.party_type {
+        PartyType::Customer => (TransactionType::Sale, tx.sales().find_opening_for_party(party.id)?.map(|h| h.id)),
+        PartyType::Vendor => (TransactionType::Purchase, tx.purchases().find_opening_for_party(party.id)?.map(|h| h.id)),
+    };
+    match bill_id {
+        Some(id) => check_not_below_applied(tx, tx_type, id, amount),
+        None => Ok(()),
     }
 }
 

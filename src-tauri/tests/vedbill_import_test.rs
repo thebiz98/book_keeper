@@ -190,3 +190,16 @@ fn real_backup_from_env() {
     }
     assert_eq!(count(&db, "SELECT COUNT(*) FROM items i WHERE ABS(i.current_stock - COALESCE((SELECT SUM(remaining_quantity) FROM purchase_items p WHERE p.item_id=i.id),0)) > 0.000001"), 0);
 }
+
+#[test]
+fn vedbill_services_import_as_service_items_without_stock_or_components() {
+    use book_keeper::core::value_objects::ItemType;
+    let (db, svc) = setup();
+    svc.execute_vedbill_import(sample().to_str().unwrap(), ConflictStrategy::Skip).unwrap();
+    let bilty = item(&db, "BILTY CHARGE");
+    assert_eq!(bilty.item_type, ItemType::Service);
+    assert_eq!((bilty.current_stock, bilty.is_low_stock, bilty.service_cost), (0.0, false, None));
+    assert_eq!(item(&db, "WHITE GLUE 20").item_type, ItemType::Physical);
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM service_components"), 0);
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM purchase_items WHERE item_id = (SELECT id FROM items WHERE name = 'BILTY CHARGE')"), 0);
+}

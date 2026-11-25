@@ -7,6 +7,7 @@ use crate::services::contracts::charge_type_service::ChargeTypeService;
 use crate::services::contracts::data_reset_service::DataResetService;
 use crate::services::contracts::expense_service::ExpenseService;
 use crate::services::contracts::item_import_service::ItemImportService;
+use crate::services::contracts::record_import_service::RecordImportService;
 use crate::services::contracts::inventory_allocation_strategy::InventoryAllocationStrategy;
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::item_service::ItemService;
@@ -41,6 +42,7 @@ pub struct AppState {
     pub charge_type_service: Arc<dyn ChargeTypeService>,
     pub item_import_service: Arc<dyn ItemImportService>,
     pub vedbill_import_service: Arc<dyn VedbillImportService>,
+    pub record_import_service: Arc<dyn RecordImportService>,
     pub backup_service: Arc<dyn BackupService>,
     pub shop_setting_service: Arc<dyn ShopSettingService>,
     pub data_reset_service: Arc<dyn DataResetService>,
@@ -208,6 +210,11 @@ fn build_sqlite_app_state_full(
         crate::services::VedbillImportServiceImpl::new(uow.clone(), inventory_service.clone(), vedbill_reader)
             .with_indexer(search_indexer.clone()),
     );
+    let record_import_service: Arc<dyn RecordImportService> = Arc::new(crate::services::RecordImportServiceImpl::new(
+        uow.clone(),
+        party_index.clone(),
+        expense_type_index.clone(),
+    ));
     let backup_service: Arc<dyn BackupService> = Arc::new(BackupServiceImpl::new(db_path));
     let shop_setting_service: Arc<dyn ShopSettingService> =
         Arc::new(ShopSettingServiceImpl::new(uow.clone()));
@@ -263,6 +270,7 @@ fn build_sqlite_app_state_full(
         charge_type_service,
         item_import_service,
         vedbill_import_service,
+        record_import_service,
         backup_service,
         shop_setting_service,
         data_reset_service,
