@@ -372,3 +372,16 @@ Dashboard: KPI tile "Today's Expenses" (`kpi-expenses`), cash sub-text "After to
 * **Page 9.** A return row opens the Return Details drawer with `[Delete return]` (typed confirmation of the return code). Disabled with reasons when a newer return exists on the same bill, restocked units were consumed, or the return's lot was used.
 * **§4 delete confirmation.** Title "Delete SAL-1001?". Body: line count, total, "₹X cash received for this bill will be removed from cash records" (purchase: "paid ... removed from cash out"), and "Settlements on other bills are unaffected". Typed field: type the bill code. Buttons: Cancel / Delete (danger).
 * **Traceability.** FR-20 -> Pages 2, 3, 4, 6, 7, 8, 9.
+
+
+## Dashboard and lookup layout (FR-40, DD-69, v1.4)
+```
++-------------------------------------------------------------+
+| Cash & Stock:  Cash in hand | Today's expenses | Inv. value  |
++--------------------------------------------+----------------+
+| Today (sales, purchases) | Dues (rcv, pay) | Low stock      |
++--------------------------------------------+ (stock/level,  |
+| Recent transactions                        |  Inward)       |
++--------------------------------------------+----------------+
+```
+Item lookup (F4): a larger dialog (`lg`); the search field stays at the top, the selected item card sits under it, and only the results list scrolls. Reports: the Sales vs Purchases trend is a two-line chart (blue Sales, orange Purchases) with a legend, hover/keyboard tooltip and a Table toggle.
