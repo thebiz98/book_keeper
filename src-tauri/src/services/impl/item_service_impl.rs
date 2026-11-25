@@ -61,6 +61,33 @@ pub fn validate_service_cost(cost: Option<f64>) -> Result<Option<f64>, AppError>
     }
 }
 
+/// FR-36 rule for ONE component line, pure so the import dry run can call it for items that are
+/// not saved yet: quantity per unit finite and > 0, not the service itself, a physical and active
+/// item, listed once. `None` = fine.
+pub fn component_rule_violation(
+    service_id: Option<i64>,
+    item: &Item,
+    quantity_per_unit: f64,
+    already_listed: bool,
+) -> Option<String> {
+    if !quantity_per_unit.is_finite() || quantity_per_unit <= 0.0 {
+        return Some("Quantity per unit must be a number greater than 0".to_string());
+    }
+    if Some(item.id) == service_id {
+        return Some("A service cannot be its own component".to_string());
+    }
+    if item.item_type != ItemType::Physical {
+        return Some(format!("Component '{}' is a service; only physical items can be components", item.name));
+    }
+    if !item.is_active {
+        return Some(format!("Component '{}' is inactive", item.name));
+    }
+    if already_listed {
+        return Some(format!("Component '{}' is listed more than once", item.name));
+    }
+    None
+}
+
 /// FR-36: every component is an active physical item other than the service itself, listed once,
 /// with a finite quantity per unit > 0. Returns the rows to store, in the given order.
 pub fn validate_components(
@@ -70,24 +97,13 @@ pub fn validate_components(
 ) -> Result<Vec<(i64, f64)>, AppError> {
     let mut out: Vec<(i64, f64)> = Vec::with_capacity(components.len());
     for c in components {
-        if !c.quantity_per_unit.is_finite() || c.quantity_per_unit <= 0.0 {
-            return Err(invalid("components", "Quantity per unit must be a number greater than 0"));
-        }
-        if Some(c.component_item_id) == service_id {
-            return Err(invalid("components", "A service cannot be its own component"));
-        }
         let item = tx
             .items()
             .find_by_id(c.component_item_id)?
             .ok_or_else(|| not_found("Item", c.component_item_id))?;
-        if item.item_type != ItemType::Physical {
-            return Err(invalid("components", format!("Component '{}' is a service; only physical items can be components", item.name)));
-        }
-        if !item.is_active {
-            return Err(invalid("components", format!("Component '{}' is inactive", item.name)));
-        }
-        if out.iter().any(|(id, _)| *id == c.component_item_id) {
-            return Err(invalid("components", format!("Component '{}' is listed more than once", item.name)));
+        let listed = out.iter().any(|(id, _)| *id == c.component_item_id);
+        if let Some(message) = component_rule_violation(service_id, &item, c.quantity_per_unit, listed) {
+            return Err(invalid("components", message));
         }
         out.push((c.component_item_id, c.quantity_per_unit));
     }

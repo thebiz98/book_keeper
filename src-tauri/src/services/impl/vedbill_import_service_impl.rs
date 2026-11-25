@@ -1,7 +1,7 @@
 //! VedBill backup -> Book Keeper inventory (item master + opening stock lots).
 //!
 //! Mapping rules (confirmed with the shop owner):
-//! - Every VedBill item becomes an item; services too (with no stock).
+//! - Every VedBill item becomes an item; a service becomes a SERVICE item (no stock, no components).
 //! - Stock = the VedBill lots, copied one to one: each lot with quantity > 0 becomes an OPENING
 //!   lot with the same quantity, cost and date (oldest first, so FIFO order is kept).
 //! - Lots with quantity <= 0 (oversold) are dropped.
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use crate::core::dtos::{ConflictStrategy, ImportRowError, ImportRowWarning, ImportSummary, ImportValidationReport};
 use crate::core::error::AppError;
-use crate::core::value_objects::clean_name;
+use crate::core::value_objects::{clean_name, ItemType};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::data::contracts::vedbill_reader::{VedbillBackupReader, VedbillLot, VedbillSnapshot};
@@ -129,7 +129,7 @@ pub(crate) fn map_snapshot(snap: &VedbillSnapshot) -> (Vec<ImportRow>, Vec<Impor
         let mut lots = Vec::new();
         let is_service = it.item_type.as_deref().map(|t| t.eq_ignore_ascii_case("SERVICE")).unwrap_or(false);
         if is_service {
-            warn("Service in VedBill; imported as an item with no stock.".into());
+            warn("Service in VedBill; imported as a SERVICE item (no stock, no components).".into());
         } else {
             let source = lots_by_item.get(it.legacy_id.as_str()).cloned().unwrap_or_default();
             let negatives: Vec<f64> = source.iter().map(|l| l.remaining_qty).filter(|q| *q < 0.0).collect();
@@ -191,6 +191,8 @@ pub(crate) fn map_snapshot(snap: &VedbillSnapshot) -> (Vec<ImportRow>, Vec<Impor
             lots,
             bundle: None,
             low_stock_threshold: None,
+            item_type: Some(if is_service { ItemType::Service } else { ItemType::Physical }),
+            service_cost: None,
         });
     }
 

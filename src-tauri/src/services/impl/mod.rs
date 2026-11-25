@@ -8,6 +8,7 @@ pub mod data_reset_service_impl;
 pub mod expense_service_impl;
 pub mod fifo_strategy;
 pub mod inventory_service_impl;
+pub mod import_core;
 pub mod import_template_writer;
 pub mod item_import_service_impl;
 pub mod item_service_impl;
