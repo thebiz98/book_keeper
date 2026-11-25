@@ -1,4 +1,3 @@
-import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '../testUtils';
 import { installApi, flush, waitFor, click, setInput, fakeBillPreview } from '../pages/helpers';
