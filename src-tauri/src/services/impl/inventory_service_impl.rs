@@ -4,7 +4,7 @@ use crate::core::dtos::{
     ItemBillRef, ItemLot, PageRequest, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult,
 };
-use crate::core::money::round2;
+use crate::core::money::{check_entry_date_now, round2};
 use crate::core::entities::{
     Item, PurchaseItem, PurchaseTransaction, ReturnTransaction, StockAdjustment, StockOutflowAllocation,
 };
@@ -215,7 +215,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
         if !payload.quantity.is_finite() || payload.quantity == 0.0 {
             return Err(validation("quantity", "Adjustment quantity must be finite and non-zero"));
         }
-        require_date("adjustment_date", &payload.adjustment_date)?;
+        check_entry_date_now("adjustment_date", &payload.adjustment_date)?;
         if let Some(c) = payload.unit_cost {
             if !c.is_finite() || c < 0.0 {
                 return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {c})")));
@@ -264,7 +264,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
         if !p.counted_quantity.is_finite() || p.counted_quantity < 0.0 {
             return Err(validation("counted_quantity", "Counted stock must be a finite number, 0 or more"));
         }
-        require_date("adjustment_date", &p.adjustment_date)?;
+        check_entry_date_now("adjustment_date", &p.adjustment_date)?;
         if let Some(c) = p.unit_cost {
             if !c.is_finite() || c < 0.0 {
                 return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {c})")));

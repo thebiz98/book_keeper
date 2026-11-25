@@ -40,3 +40,21 @@ pub fn check_date(field: &str, date: &str) -> Result<(), crate::core::error::App
         }
     })
 }
+
+/// Validates an entry date (FR-28, DD-58): a valid `YYYY-MM-DD` that is not after `today`
+/// (ISO dates compare lexically). Report filters keep using `check_date`.
+pub fn check_entry_date(field: &str, date: &str, today: &str) -> Result<(), crate::core::error::AppError> {
+    check_date(field, date)?;
+    if date > today {
+        return Err(crate::core::error::AppError::ValidationError {
+            field: field.to_string(),
+            message: "Date cannot be in the future".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// `check_entry_date` against the service clock (`core::clock::today_local`).
+pub fn check_entry_date_now(field: &str, date: &str) -> Result<(), crate::core::error::AppError> {
+    check_entry_date(field, date, &crate::core::clock::today_local())
+}
