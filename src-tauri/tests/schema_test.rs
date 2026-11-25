@@ -925,7 +925,12 @@ fn frozen_v9_fixture_matches_the_migrated_schema() {
         let mut st = c
             .prepare("SELECT name FROM pragma_table_info('sale_items') UNION ALL SELECT name FROM pragma_table_info('purchase_items') UNION ALL SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%_items_item_date' ORDER BY 1")
             .unwrap();
-        st.query_map([], |r| r.get::<_, String>(0)).unwrap().map(|x| x.unwrap()).collect()
+        // Columns added by later migrations (v12 `service_cost_total`) are checked by their own frozen test.
+        st.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .filter(|n| n != "service_cost_total")
+            .collect()
     };
     assert_eq!(shape(&from_fixtures), shape(&migrated));
     drop(from_fixtures);
