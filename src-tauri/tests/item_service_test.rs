@@ -80,7 +80,8 @@ fn test_tc_bun_001_create_bundle_returns_full_bundle_and_indexes() {
     assert!(b.id > 0);
     assert_eq!((b.item_id, b.bundle_name.as_str(), b.units_per_bundle), (id, "Box of 10", 10.0));
     assert_eq!(b.default_bundle_price, Some(90.0));
-    assert_eq!(stored_bundles(&db, id), vec![b.clone()]);
+    assert_eq!(b.default_rate, 90.0); // DD-56: the bundle's own price wins
+    assert_eq!(stored_bundles(&db, id), vec![b.bundle.clone()]);
     // Search by the bundle barcode finds the parent and flags the bundle.
     let hits = db.indexer().search("BX-1").unwrap();
     assert_eq!(hits[0].item_id, id);
@@ -99,7 +100,8 @@ fn test_tc_bun_002_update_bundle_any_field_stays_on_item() {
         })
         .unwrap();
     assert_eq!((up.id, up.item_id, up.bundle_name.as_str(), up.units_per_bundle), (b.id, id, "Carton", 24.0));
-    assert_eq!(stored_bundles(&db, id), vec![up]);
+    assert_eq!(up.default_rate, 250.0);
+    assert_eq!(stored_bundles(&db, id), vec![up.bundle]);
     assert_eq!(db.indexer().search("CT-9").unwrap()[0].matched_bundle_id, Some(b.id));
     // Missing bundle.
     assert!(matches!(items.update_bundle(999, bundle_update("X", 5.0)), Err(AppError::NotFound { .. })));
@@ -460,4 +462,15 @@ fn tc_low_07_update_item_keeps_or_changes_threshold_and_catalog_follows_flag() {
             .unwrap();
         assert_eq!(page.total, 0, "threshold 0 means never low");
     }
+}
+
+#[test]
+fn test_tc_bun_default_rate_falls_back_to_item_price_times_units() {
+    // DD-56: the suggested pack rate is the backend's, on save and on search rows.
+    let (items, _, _db) = setup();
+    let id = items.create_item(item_payload("Pen")).unwrap(); // default_sale_price 10
+    let b = items.create_bundle(bundle_payload(id, "Box", 12.5)).unwrap();
+    assert_eq!(b.default_rate, 125.0);
+    let hit = items.search_items_fts("Pen", None).unwrap().remove(0);
+    assert_eq!(hit.bundles[0].default_rate, 125.0);
 }

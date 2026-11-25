@@ -1,8 +1,7 @@
 use crate::core::dtos::{
-    BundleSuggestion, CreateBundlePayload, CatalogFilter, CreateItemPayload, ItemSearchResult, Paginated, UpdateBundlePayload,
-    UpdateItemPayload,
+    BundleSuggestion, CreateBundlePayload, CatalogFilter, CreateItemPayload, ItemSearchResult, Paginated, SavedBundle,
+    UpdateBundlePayload, UpdateItemPayload,
 };
-use crate::core::entities::ItemBundle;
 use crate::core::error::AppError;
 
 pub trait ItemService: Send + Sync {
@@ -17,8 +16,8 @@ pub trait ItemService: Send + Sync {
     fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError>;
     /// Sets the per-item low stock level (0 = never) and returns the refreshed row with bundles.
     fn update_low_stock_threshold(&self, item_id: i64, threshold: f64) -> Result<ItemSearchResult, AppError>;
-    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<ItemBundle, AppError>;
-    fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<ItemBundle, AppError>;
+    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<SavedBundle, AppError>;
+    fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<SavedBundle, AppError>;
     fn delete_bundle(&self, bundle_id: i64) -> Result<(), AppError>;
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError>;
 }
@@ -48,11 +47,11 @@ impl<T: ItemService + ?Sized> ItemService for std::sync::Arc<T> {
         (**self).update_low_stock_threshold(item_id, threshold)
     }
 
-    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<ItemBundle, AppError> {
+    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<SavedBundle, AppError> {
         (**self).create_bundle(payload)
     }
 
-    fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<ItemBundle, AppError> {
+    fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<SavedBundle, AppError> {
         (**self).update_bundle(bundle_id, payload)
     }
 

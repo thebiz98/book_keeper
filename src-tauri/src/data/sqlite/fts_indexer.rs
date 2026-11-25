@@ -141,13 +141,8 @@ fn load_results(conn: &Connection, ids: Vec<i64>, clean_q: &str) -> Result<Vec<I
                 }
             }
         }
-        res.bundles.push(ItemBundleSearchResult {
-            bundle_id: b.id,
-            bundle_name: b.bundle_name,
-            units_per_bundle: b.units_per_bundle,
-            bundle_price: b.default_bundle_price,
-            barcode: b.barcode,
-        });
+        let price = res.default_sale_price;
+        res.bundles.push(ItemBundleSearchResult::from_bundle(b, price));
     }
     Ok(ids.into_iter().filter_map(|id| by_id.remove(&id)).collect())
 }

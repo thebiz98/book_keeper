@@ -94,7 +94,53 @@ pub struct ItemBundleSearchResult {
     pub units_per_bundle: f64,
     #[serde(alias = "default_bundle_price")]
     pub bundle_price: Option<f64>,
+    /// Suggested sale rate per pack: `bundle_price`, else `round2(default_sale_price x units_per_bundle)`.
+    #[serde(default)]
+    pub default_rate: f64,
     pub barcode: Option<String>,
+}
+
+/// Suggested sale rate per pack: the bundle's own price, else `round2(item price x units)`.
+pub fn bundle_default_rate(b: &crate::core::entities::ItemBundle, item_default_sale_price: f64) -> f64 {
+    b.default_bundle_price
+        .unwrap_or_else(|| crate::core::money::round2(item_default_sale_price * b.units_per_bundle))
+}
+
+/// `create_bundle` / `update_bundle` result: the saved bundle plus its suggested rate (DD-56).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedBundle {
+    #[serde(flatten)]
+    pub bundle: crate::core::entities::ItemBundle,
+    pub default_rate: f64,
+}
+
+impl SavedBundle {
+    pub fn new(bundle: crate::core::entities::ItemBundle, item_default_sale_price: f64) -> Self {
+        let default_rate = bundle_default_rate(&bundle, item_default_sale_price);
+        Self { bundle, default_rate }
+    }
+}
+
+impl std::ops::Deref for SavedBundle {
+    type Target = crate::core::entities::ItemBundle;
+    fn deref(&self) -> &Self::Target {
+        &self.bundle
+    }
+}
+
+impl ItemBundleSearchResult {
+    /// Search/catalog row of a bundle (DD-56: the suggested rate is computed here, not in the UI).
+    pub fn from_bundle(b: crate::core::entities::ItemBundle, item_default_sale_price: f64) -> Self {
+        let default_rate = bundle_default_rate(&b, item_default_sale_price);
+        Self {
+            bundle_id: b.id,
+            bundle_name: b.bundle_name,
+            units_per_bundle: b.units_per_bundle,
+            bundle_price: b.default_bundle_price,
+            default_rate,
+            barcode: b.barcode,
+        }
+    }
 }
 
 /// Lot inspector row (any source): the lot joined with its header (code, source, date, vendor).

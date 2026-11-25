@@ -150,14 +150,18 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
         check_range(from_date, to_date)?;
         let mut tx = self.uow.begin_read()?;
         let (s, expenses, net) = cash_position(&mut *tx, from_date, to_date)?;
+        let (a, b, c) = (round2(s.sale_upfront), round2(s.sale_settlement), round2(s.vendor_refund_in));
+        let (d, e, f) = (round2(s.purchase_upfront), round2(s.purchase_settlement), round2(s.customer_refund_out));
         Ok(CashFlowReport {
-            sales_cash_inflow: round2(s.sale_upfront),
-            customer_settlements_inflow: round2(s.sale_settlement),
-            vendor_refunds_inflow: round2(s.vendor_refund_in),
-            purchase_cash_outflow: round2(s.purchase_upfront),
-            vendor_settlements_outflow: round2(s.purchase_settlement),
-            refunds_cash_outflow: round2(s.customer_refund_out),
+            sales_cash_inflow: a,
+            customer_settlements_inflow: b,
+            vendor_refunds_inflow: c,
+            purchase_cash_outflow: d,
+            vendor_settlements_outflow: e,
+            refunds_cash_outflow: f,
             expenses_cash_outflow: expenses,
+            total_inflow: round2(a + b + c),
+            total_outflow: round2(d + e + f + expenses),
             net_cash_balance: net,
         })
     }

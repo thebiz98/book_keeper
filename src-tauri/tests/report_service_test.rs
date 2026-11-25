@@ -224,6 +224,10 @@ fn test_tc_rep_005_cash_flow_buckets_from_ledger() {
     assert_eq!(c.vendor_settlements_outflow, 100.0);
     assert_eq!(c.refunds_cash_outflow, 50.0);
     assert_eq!(c.net_cash_balance, 290.0); // in 740 - out 450, RETURN_CREDIT excluded
+    // DD-56: the totals are the backend's, and agree with the net.
+    assert_eq!(c.total_inflow, 740.0);
+    assert_eq!(c.total_outflow, 450.0);
+    assert_eq!(c.total_inflow - c.total_outflow, c.net_cash_balance);
 }
 
 #[test]

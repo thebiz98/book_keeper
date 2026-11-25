@@ -29,7 +29,7 @@ pub use expense_dto::{
 };
 pub use item_dto::{
     BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, ItemBillRef, ItemBundleSearchResult, ItemLot,
-    ItemSearchResult, UpdateBundlePayload, UpdateItemPayload,
+    ItemSearchResult, SavedBundle, UpdateBundlePayload, UpdateItemPayload,
 };
 pub use import_dto::{
     ConflictStrategy, ExpectedColumn, HeaderIssue, HeaderIssueKind, ImportDuplicate, ImportRowError, ImportRowWarning,
