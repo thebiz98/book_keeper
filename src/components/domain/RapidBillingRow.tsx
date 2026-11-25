@@ -7,11 +7,9 @@ import React, {
 } from 'react';
 import { Plus, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { round2 } from '@/lib/money';
-import type { ItemBundle, ItemBundleSearchResult, ItemSearchResult } from '@/types';
+import type { ItemBundleSearchResult, SavedBundle, ItemSearchResult } from '@/types';
 import type { BundleInput } from '@/types/store';
 import { useEscapeLayer, useHotkeyAction } from '@/hooks/useHotkeys';
-import { cartBaseQuantity, STOCK_EPS, type CartLine } from '@/store/useCartStore';
 import { Button } from '../ui/Button';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { ItemSearchTypeahead } from './ItemSearchTypeahead';
@@ -26,8 +24,6 @@ export interface BillingLineEntry {
 }
 
 export interface RapidBillingRowProps {
-  /** Current cart lines, used to show stock net of what is already in the cart. */
-  cart?: CartLine[];
   /** Commit a line. Return `false` to report a rejection (the row stays filled). */
   onAddLine?: (entry: BillingLineEntry) => boolean | void;
   /** Enter on an empty search box. */
@@ -35,7 +31,7 @@ export interface RapidBillingRowProps {
   /** Alt+B / Bundle button. The selected item (if any) is passed so the modal can preselect it. */
   onOpenBundleModal?: (item: ItemSearchResult | null) => void;
   /** A bundle just created through the modal; it is added to the unit list and selected. */
-  newBundle?: { bundle: ItemBundle; seq: number } | null;
+  newBundle?: { bundle: SavedBundle; seq: number } | null;
   autoFocus?: boolean;
   className?: string;
 }
@@ -61,7 +57,7 @@ function toBundleInput(b: ItemBundleSearchResult, mrp: number | null): BundleInp
 
 function defaultRate(item: ItemSearchResult, bundle: ItemBundleSearchResult | null): number {
   if (!bundle) return item.defaultSalePrice;
-  return bundle.bundlePrice ?? round2(item.defaultSalePrice * bundle.unitsPerBundle);
+  return bundle.defaultRate;
 }
 
 const inputClass =
@@ -69,7 +65,7 @@ const inputClass =
 
 export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRowProps>(
   (
-    { cart = [], onAddLine, onCompleteBill, onOpenBundleModal, newBundle, autoFocus = false, className },
+    { onAddLine, onCompleteBill, onOpenBundleModal, newBundle, autoFocus = false, className },
     ref
   ) => {
     const [item, setItem] = useState<ItemSearchResult | null>(null);
@@ -90,10 +86,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
 
     const selectedBundle =
       unit === BASE ? null : bundles.find((b) => String(b.bundleId) === unit) ?? null;
-    const units = selectedBundle ? selectedBundle.unitsPerBundle : 1;
 
-    const inCart = item ? cartBaseQuantity(cart, item.itemId) : 0;
-    const available = item ? item.currentStock - inCart : 0;
     const mrpShown = item
       ? selectedBundle
         ? bundleMrp[selectedBundle.bundleId] ?? null
@@ -136,6 +129,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
         bundleName: b.bundleName,
         unitsPerBundle: b.unitsPerBundle,
         bundlePrice: b.defaultBundlePrice,
+        defaultRate: b.defaultRate,
         barcode: b.barcode,
       };
       setBundles((prev) => (prev.some((x) => x.bundleId === b.id) ? prev : [...prev, row]));
@@ -193,16 +187,6 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
         rateRef.current?.focus();
         return;
       }
-      const base = parsedQty * units;
-      if (inCart + base > item.currentStock + STOCK_EPS) {
-        setError(
-          `Negative stock: ${item.name} has ${fmtQty(Math.max(available, 0))} ${item.baseUnit} available, ` +
-            `${fmtQty(base)} ${item.baseUnit} requested`
-        );
-        qtyRef.current?.focus();
-        qtyRef.current?.select();
-        return;
-      }
       const ok = onAddLine?.({
         item,
         quantity: parsedQty,
@@ -210,7 +194,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
         rate: parsedRate,
       });
       if (ok === false) {
-        setError(`Cannot add "${item.name}": insufficient stock or invalid values`);
+        setError(`Cannot add "${item.name}": invalid quantity or rate`);
         return;
       }
       clearEntry(true);
@@ -368,8 +352,8 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
             className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-mono text-slate-600 dark:text-slate-300 pl-1"
           >
             <span className="font-sans font-semibold text-slate-900 dark:text-slate-100">{item.name}</span>
-            <span className={available <= STOCK_EPS ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
-              Available: {fmtQty(Math.max(available, 0))} {item.baseUnit}
+            <span>
+              Available: {fmtQty(item.currentStock)} {item.baseUnit}
             </span>
             <span>|</span>
             <span>

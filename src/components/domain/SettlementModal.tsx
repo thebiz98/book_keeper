@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
 import { todayLocal } from '@/lib/dates';
 import type { TransactionType } from '@/types';
 import { Modal } from '../ui/Modal';
@@ -58,9 +57,6 @@ const SingleBillSettlement: React.FC<SettlementModalProps> = ({
 
   const validation = (): string | null => {
     if (!(amount > 0)) return 'Settlement amount must be greater than 0';
-    if (round2(amount) > round2(totalDue)) {
-      return `Settlement amount cannot exceed the outstanding balance (₹${round2(totalDue).toFixed(2)})`;
-    }
     if (!date) return 'Settlement date is required';
     return null;
   };
@@ -78,7 +74,7 @@ const SingleBillSettlement: React.FC<SettlementModalProps> = ({
         partyId,
         transactionType,
         transactionId,
-        amountPaid: round2(amount),
+        amountPaid: amount,
         paymentMode,
         notes: notes.trim() || null,
         settlementDate: date,
@@ -92,7 +88,7 @@ const SingleBillSettlement: React.FC<SettlementModalProps> = ({
     }
   };
 
-  const remainingBalance = Math.max(0, round2(totalDue - amount));
+  const remainingBalance = totalDue - amount; // display only
 
   return (
     <Modal

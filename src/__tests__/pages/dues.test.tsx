@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { CreditDuesPage } from '@/pages/CreditDuesPage';
-import { allocateFifo } from '@/components/domain/openBills';
 import type { PartyDueSummary, SaleHistoryRow } from '@/types';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText } from './helpers';
 
@@ -44,6 +43,11 @@ function setup() {
     }),
     settleBillPayment: { settlementIds: [1], billsTouched: [1] },
     settleBillsBatch: { settlementIds: [1, 2], billsTouched: [1, 2] },
+    // DD-56: the split and the over-limit refusal are the backend's; canned here.
+    previewSettlementAllocation: async (_p: number, _t: string, amount: number) => {
+      if (amount > 300) throw { type: 'ValidationError', details: { field: 'amount_paid', message: 'Settlement amount exceeds total outstanding dues' } };
+      return [{ transactionId: 1, amountPaid: 100 }, { transactionId: 2, amountPaid: amount - 100 }];
+    },
   });
 }
 
@@ -91,7 +95,7 @@ describe('CreditDuesPage', () => {
     await waitFor(() => !!document.querySelector('[data-testid="batch-rows"] tbody tr'));
     const input = document.querySelector('input[aria-label="Settlement amount"]')!;
     setInput(input, '150.5');
-    await flush();
+    await waitFor(() => (document.querySelector('input[aria-label="Amount for SAL-2"]') as HTMLInputElement).value === '50.5');
     const rows = document.querySelector('[data-testid="batch-rows"]')!;
     expect((rows.querySelector('input[aria-label="Amount for SAL-1"]') as HTMLInputElement).value).toBe('100');
     expect((rows.querySelector('input[aria-label="Amount for SAL-2"]') as HTMLInputElement).value).toBe('50.5');
@@ -116,13 +120,13 @@ describe('CreditDuesPage', () => {
     click(buttonByText('Settle bills'));
     await waitFor(() => !!document.querySelector('[data-testid="batch-rows"] tbody tr'));
     setInput(document.querySelector('input[aria-label="Settlement amount"]')!, '301');
-    await flush();
+    await waitFor(() => bodyText().includes('exceeds total outstanding'));
     const save = buttonByText('Settle bills', document.querySelector('[role="dialog"]')!);
     expect(save.disabled).toBe(true);
     click(save);
     await flush();
     expect(api.settleBillsBatch).not.toHaveBeenCalled();
-    expect(bodyText()).toContain('cannot exceed');
+    expect(bodyText()).toContain('exceeds total outstanding');
   });
 
   it('shows the error instead of "all settled" when loading fails', async () => {
@@ -138,13 +142,3 @@ describe('CreditDuesPage', () => {
   });
 });
 
-describe('allocateFifo', () => {
-  it('applies oldest first and stops when the amount runs out', () => {
-    const bills = [bill(1, '2026-01-01', 100, 'PARTIAL'), bill(2, '2026-01-02', 200, 'UNPAID')];
-    const out = allocateFifo(bills, 120);
-    expect(out.map((r) => [r.bill.id, r.applied, r.remainingAfter])).toEqual([
-      [1, 100, 0],
-      [2, 20, 180],
-    ]);
-  });
-});

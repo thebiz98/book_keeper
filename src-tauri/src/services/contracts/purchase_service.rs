@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    BillEditGuard, CreatePurchasePayload, LotPriceUpdateResult, UpdateLotPricePayload, DeleteBillResult, Paginated, PurchaseDetailView,
+    BillEditGuard, BillPreview, CreatePurchasePayload, PreviewPurchasePayload, LotPriceUpdateResult, UpdateLotPricePayload, DeleteBillResult, Paginated, PurchaseDetailView,
     PurchaseHistoryFilter, PurchaseHistoryRow, PurchaseSummaryResponse,
 };
 use crate::core::error::AppError;
@@ -30,6 +30,17 @@ pub trait PurchaseService: Send + Sync {
     /// FR-25: changes one lot's Purchase Price in a single transaction (bill + payment rule for
     /// PURCHASE lots, re-cost only for OPENING / ADJUSTMENT, RETURN rejected).
     fn update_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError>;
+
+    /// DD-56: dry run of `create_purchase` (`purchase_id = None`) / `update_purchase` in a transaction
+    /// that is dropped. Business errors come back in `BillPreview.errors`; the payment is optional.
+    fn preview_purchase(
+        &self,
+        purchase_id: Option<i64>,
+        payload: PreviewPurchasePayload,
+    ) -> Result<BillPreview, AppError>;
+
+    /// DD-56: dry run of `update_lot_purchase_price`; fails with the same error the command would.
+    fn preview_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError>;
 }
 
 impl<T: PurchaseService + ?Sized> PurchaseService for std::sync::Arc<T> {
@@ -70,5 +81,17 @@ impl<T: PurchaseService + ?Sized> PurchaseService for std::sync::Arc<T> {
 
     fn update_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
         (**self).update_lot_purchase_price(payload)
+    }
+
+    fn preview_purchase(
+        &self,
+        purchase_id: Option<i64>,
+        payload: PreviewPurchasePayload,
+    ) -> Result<BillPreview, AppError> {
+        (**self).preview_purchase(purchase_id, payload)
+    }
+
+    fn preview_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
+        (**self).preview_lot_purchase_price(payload)
     }
 }

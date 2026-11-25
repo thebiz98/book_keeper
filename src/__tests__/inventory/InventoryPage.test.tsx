@@ -4,7 +4,7 @@ import { act } from 'react';
 import { byText, click, flush, inputByLabel, installApi, key, makeItem, typeInto } from './testHelpers';
 import { InventoryPage } from '@/pages/InventoryPage';
 
-const dozen = { bundleId: 7, bundleName: 'Dozen', unitsPerBundle: 12, bundlePrice: 500, barcode: 'B-1' };
+const dozen = { bundleId: 7, bundleName: 'Dozen', unitsPerBundle: 12, bundlePrice: 500, defaultRate: 500, barcode: 'B-1' };
 const rows = [
   makeItem({ itemId: 1, name: 'Classmate Notebook', bundles: [dozen], mrp: 50, currentStock: 3, isLowStock: true }),
   makeItem({ itemId: 2, name: 'Gel Pen', category: 'Pens', mrp: null, bundles: [], currentStock: 0 }),
@@ -373,7 +373,11 @@ describe('Bundles sub-table', () => {
 
 describe('Set stock entry points (DD-40)', () => {
   const stockApi = {
-    getItemLots: vi.fn().mockResolvedValue([]), setItemStock: vi.fn().mockResolvedValue({
+    getItemLots: vi.fn().mockResolvedValue([]),
+    previewSetItemStock: vi.fn().mockResolvedValue({
+      adjustmentId: null, delta: 5, reason: 'UNRECORDED_STOCK', previousStock: 3, newStock: 8, unitCost: 4, valueChange: 20,
+    }),
+    setItemStock: vi.fn().mockResolvedValue({
       adjustmentId: 1, delta: 5, reason: 'UNRECORDED_STOCK', previousStock: 3, newStock: 8, unitCost: 4, valueChange: 20,
     }),
   };
@@ -394,7 +398,7 @@ describe('Set stock entry points (DD-40)', () => {
     const input = container.querySelector('input[type="number"]') as HTMLInputElement;
     typeInto(input, '8');
     typeInto(container.querySelectorAll('input[type="number"]')[1], '4');
-    await flush();
+    for (let i = 0; i < 3; i++) await flush(120); // the stock preview comes back
     click(byText(container, 'button', /Save stock/));
     await flush();
     expect(api.setItemStock).toHaveBeenCalledTimes(1);

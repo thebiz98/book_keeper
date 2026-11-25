@@ -106,5 +106,9 @@ pub struct CashFlowReport {
     pub vendor_settlements_outflow: f64,   // PURCHASE·SETTLEMENT
     pub refunds_cash_outflow: f64,         // SALE·REFUND_OUT
     pub expenses_cash_outflow: f64,        // Σ expenses by date (FR-18)
+    /// Σ of the three inflow lines (DD-56: the UI no longer sums).
+    pub total_inflow: f64,
+    /// Σ of the four outflow lines, expenses included.
+    pub total_outflow: f64,
     pub net_cash_balance: f64,             // inflows - outflows - expenses
 }

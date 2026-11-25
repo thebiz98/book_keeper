@@ -2,7 +2,7 @@ use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, CreatePurchasePayload, DeleteBillResult, Paginated, PurchaseDetailView, PurchaseHistoryRow,
     PurchaseHistoryFilter, PurchaseItemDetail, PurchaseSummaryResponse, RecordPaymentPayload, LotPriceBillEffect,
-    LotPriceUpdateResult, UpdateLotPricePayload,
+    LotPriceUpdateResult, UpdateLotPricePayload, BillPaymentPreview, BillPreview, PreviewPurchasePayload,
 };
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
@@ -12,8 +12,8 @@ use crate::services::r#impl::bill_guard::{
     TOTAL_BELOW_APPLIED,
 };
 use crate::services::r#impl::bill_math::{
-    compute_bill_totals, delete_bill_charges, lot_price_upfront, insert_bill_charges, purchase_upfront, resolve_bill_charges,
-    validate_charge_inputs, BillTotals, ResolvedCharge,
+    bill_preview, compute_bill_totals, delete_bill_charges, lot_price_upfront, insert_bill_charges, purchase_upfront, resolve_bill_charges,
+    validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
 };
 use crate::core::value_objects::{LotSource, PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
@@ -158,10 +158,13 @@ fn price_purchase(
     tx: &mut dyn TransactionContext,
     payload: &CreatePurchasePayload,
     r: &ResolvedPurchase,
+    applied: f64,
+    fig: &mut BillFigures,
 ) -> Result<(Vec<ResolvedCharge>, BillTotals), AppError> {
     let charges = resolve_bill_charges(tx, TransactionType::Purchase, &payload.charges)?;
     let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
     let totals = compute_bill_totals(&line_totals, &charges)?;
+    fig.set_totals(&line_totals, totals, applied);
     Ok((charges, totals))
 }
 
@@ -225,25 +228,32 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
     }
 }
 
-impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for PurchaseServiceImpl<I, P, U> {
-    fn get_next_purchase_code(&self) -> Result<String, AppError> {
-        // Display-only preview: the code is assigned for real inside create_purchase's write transaction.
-        let mut tx = self.uow.begin_read()?;
-        tx.purchases().get_next_transaction_code(LotSource::Purchase)
-    }
-
-    fn create_purchase(&self, payload: CreatePurchasePayload) -> Result<PurchaseSummaryResponse, AppError> {
-        validate_purchase_shape(&payload)?;
+/// The create / edit / lot-price bodies of the purchase commands, run inside the caller's
+/// transaction. The real commands commit afterwards; the previews drop the transaction (DD-56).
+/// `with_payment = false` (preview only) skips the payment check and books no upfront cash. `fig`
+/// records the totals reached, even when a later check fails.
+impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<I, P, U> {
+    fn create_purchase_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        payload: &CreatePurchasePayload,
+        with_payment: bool,
+        fig: &mut BillFigures,
+    ) -> Result<(PurchaseSummaryResponse, PurchaseTransaction), AppError> {
+        validate_purchase_shape(payload)?;
         if payload.items.iter().any(|i| i.purchase_item_id.is_some()) {
             return Err(validation("purchase_item_id", "purchase_item_id is only valid when editing a purchase"));
         }
-        let mut tx = self.uow.begin_transaction()?;
 
-        let r = resolve_purchase(&mut *tx, &payload, None)?;
+        let r = resolve_purchase(tx, payload, None)?;
         // Charges (FR-19), totals and the payment cross-check (DD-02).
-        let (charges, totals) = price_purchase(&mut *tx, &payload, &r)?;
+        let (charges, totals) = price_purchase(tx, payload, &r, 0.0, fig)?;
         let total_amount = totals.total_amount;
-        let upfront = check_purchase_payment(payload.payment_status, round2(payload.paid_amount), total_amount, r.party_id)?;
+        let upfront = if with_payment {
+            check_purchase_payment(payload.payment_status, round2(payload.paid_amount), total_amount, r.party_id)?
+        } else {
+            0.0
+        };
 
         // Header: paid 0 / balance = total; the ledger fixes both below.
         let pur_code = tx.purchases().get_next_transaction_code(LotSource::Purchase)?;
@@ -268,40 +278,45 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             updated_at: None,
         };
         let purchase_id = tx.purchases().create_transaction(&purchase_tx)?;
-        insert_bill_charges(&mut *tx, TransactionType::Purchase, purchase_id, &charges)?;
+        insert_bill_charges(tx, TransactionType::Purchase, purchase_id, &charges)?;
 
         // Lots and stock cache. Lot unit_cost = line_total / base_qty, unaffected by bill-level
         // charges and discounts (DD-38).
         for l in &r.lines {
-            self.inventory_service.add_stock_for_purchase(&mut *tx, &new_lot(purchase_id, l))?;
+            self.inventory_service.add_stock_for_purchase(tx, &new_lot(purchase_id, l))?;
         }
-        self.record_upfront(&mut *tx, purchase_id, r.party_id, &payload, upfront)?;
-        tx.commit()?;
-        Ok(PurchaseSummaryResponse { purchase_id, transaction_code: pur_code })
+        self.record_upfront(tx, purchase_id, r.party_id, payload, upfront)?;
+        let header = tx
+            .purchases()
+            .find_transaction_by_id(purchase_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseTransaction", purchase_id.to_string()))?;
+        Ok((PurchaseSummaryResponse { purchase_id, transaction_code: pur_code }, header))
     }
 
-    fn update_purchase(
+    fn update_purchase_in_tx(
         &self,
+        tx: &mut dyn TransactionContext,
         purchase_id: i64,
-        payload: CreatePurchasePayload,
-    ) -> Result<PurchaseSummaryResponse, AppError> {
-        validate_purchase_shape(&payload)?;
-        let mut tx = self.uow.begin_transaction()?;
+        payload: &CreatePurchasePayload,
+        with_payment: bool,
+        fig: &mut BillFigures,
+    ) -> Result<(PurchaseSummaryResponse, PurchaseTransaction), AppError> {
+        validate_purchase_shape(payload)?;
         let old = tx
             .purchases()
             .find_transaction_by_id(purchase_id)?
             .ok_or_else(|| AppError::not_found("PurchaseTransaction", purchase_id.to_string()))?;
-        let g = evaluate_purchase_guard(&mut *tx, purchase_id)?;
+        let g = evaluate_purchase_guard(tx, purchase_id)?;
         if let Some(reason) = g.reasons.iter().find(|r| r.blocks_edit) {
             return Err(locked(reason));
         }
 
         // Reverse what is not kept in place: charges and the upfront cash. Later settlements stay.
-        delete_bill_charges(&mut *tx, TransactionType::Purchase, purchase_id)?;
+        delete_bill_charges(tx, TransactionType::Purchase, purchase_id)?;
         self.payment_service
-            .delete_bill_ledger(&mut *tx, TransactionType::Purchase, purchase_id, &[PaymentKind::Upfront])?;
+            .delete_bill_ledger(tx, TransactionType::Purchase, purchase_id, &[PaymentKind::Upfront])?;
 
-        let r = resolve_purchase(&mut *tx, &payload, old.party_id)?;
+        let r = resolve_purchase(tx, payload, old.party_id)?;
         let party_changed = r.party_id != old.party_id;
         if party_changed && !g.can_change_party {
             return Err(locked_with(
@@ -315,7 +330,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
                 "Payments were recorded later for this bill, so it needs a vendor",
             ));
         }
-        let (charges, totals) = price_purchase(&mut *tx, &payload, &r)?;
+        let (charges, totals) = price_purchase(tx, payload, &r, g.applied_amount, fig)?;
         let total_amount = totals.total_amount;
         if total_amount + MONEY_EPS < g.applied_amount {
             return Err(locked_with(
@@ -324,7 +339,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             ));
         }
         let open = round2((total_amount - g.applied_amount).max(0.0));
-        let upfront = check_purchase_payment(payload.payment_status, round2(payload.paid_amount), open, r.party_id)?;
+        let upfront = if with_payment {
+            check_purchase_payment(payload.payment_status, round2(payload.paid_amount), open, r.party_id)?
+        } else {
+            0.0
+        };
 
         // Lots: kept lines update in place (ids kept: allocations point at them), the rest are
         // removed (if unreferenced) or created.
@@ -342,12 +361,12 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             }
         }
         for lot in old_lots.iter().filter(|o| !kept.contains(&o.id)) {
-            self.inventory_service.remove_purchase_lot(&mut *tx, lot.id)?;
+            self.inventory_service.remove_purchase_lot(tx, lot.id)?;
         }
         for l in &r.lines {
             match l.purchase_item_id {
                 Some(lid) => self.inventory_service.edit_purchase_lot(
-                    &mut *tx,
+                    tx,
                     lid,
                     &LotEdit {
                         item_id: l.item.id,
@@ -359,7 +378,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
                         total_amount: l.line_total,
                     },
                 )?,
-                None => self.inventory_service.add_stock_for_purchase(&mut *tx, &new_lot(purchase_id, l))?,
+                None => self.inventory_service.add_stock_for_purchase(tx, &new_lot(purchase_id, l))?,
             }
         }
 
@@ -378,21 +397,23 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             ..old.clone()
         };
         tx.purchases().update_header_for_edit(&header)?;
-        insert_bill_charges(&mut *tx, TransactionType::Purchase, purchase_id, &charges)?;
+        insert_bill_charges(tx, TransactionType::Purchase, purchase_id, &charges)?;
         if party_changed {
-            self.payment_service.repoint_bill_party(&mut *tx, TransactionType::Purchase, purchase_id, r.party_id)?;
+            self.payment_service.repoint_bill_party(tx, TransactionType::Purchase, purchase_id, r.party_id)?;
         }
-        self.payment_service.recompute(&mut *tx, TransactionType::Purchase, purchase_id)?;
-        self.record_upfront(&mut *tx, purchase_id, r.party_id, &payload, upfront)?;
-        tx.commit()?;
-        Ok(PurchaseSummaryResponse { purchase_id, transaction_code: old.transaction_code })
+        self.payment_service.recompute(tx, TransactionType::Purchase, purchase_id)?;
+        self.record_upfront(tx, purchase_id, r.party_id, payload, upfront)?;
+        let after = tx
+            .purchases()
+            .find_transaction_by_id(purchase_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseTransaction", purchase_id.to_string()))?;
+        Ok((PurchaseSummaryResponse { purchase_id, transaction_code: old.transaction_code }, after))
     }
 
-    fn update_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
+    fn update_lot_price_in_tx(&self, tx: &mut dyn TransactionContext, payload: &UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
         if !payload.unit_price.is_finite() || payload.unit_price < 0.0 {
             return Err(validation("unit_price", "unit_price must be a non-negative number"));
         }
-        let mut tx = self.uow.begin_transaction()?;
         let lot = tx
             .purchases()
             .find_purchase_item_by_id(payload.purchase_item_id)?
@@ -435,7 +456,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         };
         if header.source != LotSource::Purchase {
             // OPENING / ADJUSTMENT: re-cost only (the vendor-return lock lives in edit_purchase_lot).
-            self.inventory_service.edit_purchase_lot(&mut *tx, lot.id, &edit)?;
+            self.inventory_service.edit_purchase_lot(tx, lot.id, &edit)?;
             if header.source == LotSource::Adjustment {
                 let adj_id = header
                     .notes
@@ -447,7 +468,6 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
                     tx.adjustments().update_unit_cost(id, new_cost)?;
                 }
             }
-            tx.commit()?;
             return Ok(LotPriceUpdateResult {
                 purchase_item_id: lot.id,
                 old_unit_cost: lot.unit_cost,
@@ -455,7 +475,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
                 bill: None,
             });
         }
-        let g = evaluate_purchase_guard(&mut *tx, header.id)?;
+        let g = evaluate_purchase_guard(tx, header.id)?;
         if let Some(reason) = g.reasons.iter().find(|r| r.blocks_edit) {
             return Err(locked(reason));
         }
@@ -480,7 +500,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         let totals = compute_bill_totals(&line_totals, &charges)?;
         let upfront_new =
             lot_price_upfront(totals.total_amount, g.applied_amount, g.upfront_amount, header.balance_due)?;
-        self.inventory_service.edit_purchase_lot(&mut *tx, lot.id, &edit)?;
+        self.inventory_service.edit_purchase_lot(tx, lot.id, &edit)?;
         let updated = PurchaseTransaction {
             total_amount: totals.total_amount,
             items_subtotal: totals.items_subtotal,
@@ -491,10 +511,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
         };
         tx.purchases().update_header_for_edit(&updated)?;
         self.payment_service
-            .delete_bill_ledger(&mut *tx, TransactionType::Purchase, header.id, &[PaymentKind::Upfront])?;
+            .delete_bill_ledger(tx, TransactionType::Purchase, header.id, &[PaymentKind::Upfront])?;
         if upfront_new > MONEY_EPS {
             self.payment_service.record_payment(
-                &mut *tx,
+                tx,
                 RecordPaymentPayload {
                     party_id: header.party_id,
                     transaction_type: TransactionType::Purchase,
@@ -508,12 +528,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
                 },
             )?;
         }
-        self.payment_service.recompute(&mut *tx, TransactionType::Purchase, header.id)?;
+        self.payment_service.recompute(tx, TransactionType::Purchase, header.id)?;
         let after = tx
             .purchases()
             .find_transaction_by_id(header.id)?
             .ok_or_else(|| AppError::not_found("PurchaseTransaction", header.id.to_string()))?;
-        tx.commit()?;
         Ok(LotPriceUpdateResult {
             purchase_item_id: lot.id,
             old_unit_cost: lot.unit_cost,
@@ -529,6 +548,74 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
                 payment_status: after.payment_status,
             }),
         })
+    }
+
+}
+
+impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for PurchaseServiceImpl<I, P, U> {
+    fn get_next_purchase_code(&self) -> Result<String, AppError> {
+        // Display-only preview: the code is assigned for real inside create_purchase's write transaction.
+        let mut tx = self.uow.begin_read()?;
+        tx.purchases().get_next_transaction_code(LotSource::Purchase)
+    }
+
+    fn create_purchase(&self, payload: CreatePurchasePayload) -> Result<PurchaseSummaryResponse, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let (summary, _) = self.create_purchase_in_tx(&mut *tx, &payload, true, &mut BillFigures::default())?;
+        tx.commit()?;
+        Ok(summary)
+    }
+
+    fn update_purchase(
+        &self,
+        purchase_id: i64,
+        payload: CreatePurchasePayload,
+    ) -> Result<PurchaseSummaryResponse, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let (summary, _) =
+            self.update_purchase_in_tx(&mut *tx, purchase_id, &payload, true, &mut BillFigures::default())?;
+        tx.commit()?;
+        Ok(summary)
+    }
+
+    fn preview_purchase(
+        &self,
+        purchase_id: Option<i64>,
+        payload: PreviewPurchasePayload,
+    ) -> Result<BillPreview, AppError> {
+        let (payload, with_payment) = payload.into_command();
+        let mut tx = self.uow.begin_transaction()?;
+        let mut fig = BillFigures::default();
+        let outcome = match purchase_id {
+            Some(id) => self.update_purchase_in_tx(&mut *tx, id, &payload, with_payment, &mut fig),
+            None => self.create_purchase_in_tx(&mut *tx, &payload, with_payment, &mut fig),
+        };
+        tx.rollback()?; // never committed
+        bill_preview(
+            fig,
+            outcome.map(|(_, h)| {
+                with_payment.then_some(BillPaymentPreview {
+                    paid_amount: h.paid_amount,
+                    balance_due: h.balance_due,
+                    change_amount: 0.0,
+                    payment_status: h.payment_status,
+                })
+            }),
+        )
+    }
+
+    fn update_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.update_lot_price_in_tx(&mut *tx, &payload)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    fn preview_lot_purchase_price(&self, payload: UpdateLotPricePayload) -> Result<LotPriceUpdateResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.update_lot_price_in_tx(&mut *tx, &payload);
+        tx.rollback()?; // never committed
+        result
     }
 
     fn delete_purchase(&self, purchase_id: i64) -> Result<DeleteBillResult, AppError> {

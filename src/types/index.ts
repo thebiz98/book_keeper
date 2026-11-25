@@ -34,11 +34,19 @@ export interface ItemBundle {
   barcode: string | null;
 }
 
+/** create_bundle / update_bundle result: the saved bundle plus the backend's suggested rate (DD-56). */
+export interface SavedBundle extends ItemBundle {
+  /** Suggested sale rate per pack: the bundle price, else item price x units (backend-computed). */
+  defaultRate: number;
+}
+
 export interface ItemBundleSearchResult {
   bundleId: number;
   bundleName: string;
   unitsPerBundle: number;
   bundlePrice: number | null;
+  /** Suggested sale rate per pack (backend-computed, DD-56). */
+  defaultRate: number;
   barcode: string | null;
 }
 
@@ -431,6 +439,10 @@ export interface CashFlowReport {
   refundsCashOutflow: number;
   /** Σ store expenses dated in the range (FR-18). */
   expensesCashOutflow: number;
+  /** Σ of the three inflow lines (backend-computed, DD-56). */
+  totalInflow: number;
+  /** Σ of the four outflow lines, expenses included. */
+  totalOutflow: number;
   netCashBalance: number;
 }
 

@@ -4,24 +4,39 @@ import { render } from '../testUtils';
 import { SetStockDialog } from '@/components/domain/SetStockDialog';
 import { todayLocal } from '@/lib/dates';
 import { installApi, flush, click, setInput, buttonByText, bodyText } from '../pages/helpers';
-import type { ItemLot } from '@/types';
+import type { SetItemStockPayload, SetItemStockResult } from '@/types';
 
-const lot = (id: number, date: string, cost: number, remaining: number): ItemLot => ({
-  purchaseItemId: id, purchaseTransactionId: id, transactionCode: `PUR-${id}`, source: 'PURCHASE',
-  transactionDate: date, vendorName: null, packLabel: null, packQuantity: remaining, quantity: remaining, remainingQuantity: remaining, unitCost: cost,
-});
+// DD-56: the delta, the default cost (latest lot), the FIFO loss and the value change are the backend's
+// preview. These tests canned its answers and check what the dialog sends and shows.
 
 const ITEM = { itemId: 9, name: 'Gel Pen', currentStock: 10, baseUnit: 'PCS' };
-const RESULT = {
+const RESULT: SetItemStockResult = {
   adjustmentId: 1, delta: 5, reason: 'UNRECORDED_STOCK', previousStock: 10, newStock: 15, unitCost: 6, valueChange: 30,
 };
+const UP: SetItemStockResult = { ...RESULT, adjustmentId: null };
+const DOWN: SetItemStockResult = {
+  adjustmentId: null, delta: -6, reason: 'COUNT_CORRECTION', previousStock: 14, newStock: 8, unitCost: null, valueChange: -34,
+};
+const SAME: SetItemStockResult = {
+  adjustmentId: null, delta: 0, reason: null, previousStock: 10, newStock: 10, unitCost: null, valueChange: 0,
+};
 
-const open = async (lots: ItemLot[], extra: Record<string, unknown> = {}, item = ITEM) => {
+const settle = async () => {
+  for (let i = 0; i < 3; i++) await flush(120);
+};
+
+const open = async (extra: Record<string, unknown> = {}, item = ITEM) => {
   const onClose = vi.fn();
   const onDone = vi.fn();
-  const api = installApi({ getItemLots: lots, setItemStock: RESULT, createStockAdjustment: { adjustmentId: 2, lossValue: 0 }, ...extra });
+  const api = installApi({
+    previewSetItemStock: async () => UP,
+    setItemStock: RESULT,
+    previewStockAdjustment: async () => ({ previousStock: 10, newStock: 13, unitCost: 6, lossValue: 0, valueChange: 18 }),
+    createStockAdjustment: { adjustmentId: 2, lossValue: 0 },
+    ...extra,
+  });
   render(<SetStockDialog isOpen item={item} onClose={onClose} onDone={onDone} />);
-  await flush();
+  await settle();
   return { api, onClose, onDone };
 };
 
@@ -33,43 +48,60 @@ describe('SetStockDialog', () => {
     document.body.innerHTML = '';
   });
 
-  it('prefills the unit cost from the lot with the highest purchaseItemId', async () => {
-    await open([lot(2, '2026-10-01', 6, 5), lot(1, '2026-11-05', 5, 5)]);
+  it("shows the unit cost the backend used (the latest-lot default) and sends none until one is typed", async () => {
+    const { api } = await open();
     setInput(nums()[0], '15');
-    await flush();
+    await settle();
     expect((nums()[1] as HTMLInputElement).value).toBe('6');
+    expect(api.previewSetItemStock.mock.calls.at(-1)![0]).toMatchObject({ countedQuantity: 15, unitCost: null });
   });
 
-  it('set up: previews the value, posts setItemStock and shows the result', async () => {
-    const { api, onDone } = await open([lot(2, '2026-10-01', 6, 5), lot(1, '2026-11-05', 5, 5)]);
+  it('set up: shows the previewed value, posts setItemStock and shows the result', async () => {
+    const { api, onDone } = await open();
     setInput(nums()[0], '15');
-    await flush();
+    await settle();
     expect(preview()).toContain('+5');
     expect(preview()).toContain('₹30.00');
     click(buttonByText('Save stock'));
     await flush();
     expect(api.setItemStock.mock.calls[0][0]).toEqual({
-      itemId: 9, countedQuantity: 15, unitCost: 6, adjustmentDate: todayLocal(), notes: null,
+      itemId: 9, countedQuantity: 15, unitCost: null, adjustmentDate: todayLocal(), notes: null,
     });
     expect(document.querySelector('[data-testid="set-stock-result"]')!.textContent).toContain('15');
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
-  it('requires a unit cost when there are no lots', async () => {
-    const { api } = await open([]);
+  it('a typed unit cost is sent', async () => {
+    const { api } = await open();
     setInput(nums()[0], '15');
-    await flush();
-    expect(bodyText()).toContain('required (no lots yet)');
+    await settle();
+    setInput(nums()[1], '4.5');
+    await settle();
+    expect(api.previewSetItemStock.mock.calls.at(-1)![0]).toMatchObject({ unitCost: 4.5 });
     click(buttonByText('Save stock'));
     await flush();
-    expect(bodyText()).toContain('Unit cost is required');
+    expect(api.setItemStock.mock.calls[0][0]).toMatchObject({ unitCost: 4.5 });
+  });
+
+  it('shows the backend refusal (no lots, no cost) and does not save', async () => {
+    const { api } = await open({
+      previewSetItemStock: async () => {
+        throw { type: 'ValidationError', details: { field: 'unit_cost', message: 'unit cost required: item has no prior lot' } };
+      },
+    });
+    setInput(nums()[0], '15');
+    await settle();
+    expect(bodyText()).toContain('unit cost required');
+    expect((buttonByText('Save stock') as HTMLButtonElement).disabled).toBe(true);
+    click(buttonByText('Save stock'));
+    await flush();
     expect(api.setItemStock).not.toHaveBeenCalled();
   });
 
-  it('set down: previews a FIFO count correction and sends no unit cost', async () => {
-    const { api } = await open([lot(1, '2026-10-01', 5, 4), lot(2, '2026-10-02', 7, 10)], {}, { ...ITEM, currentStock: 14 });
+  it('set down: shows the backend write-off for a count correction and sends no unit cost', async () => {
+    const { api } = await open({ previewSetItemStock: async () => DOWN }, { ...ITEM, currentStock: 14 });
     setInput(nums()[0], '8');
-    await flush();
+    await settle();
     expect(preview()).toContain('Count correction');
     expect(preview()).toContain('₹34.00');
     click(buttonByText('Save stock'));
@@ -78,7 +110,7 @@ describe('SetStockDialog', () => {
   });
 
   it('equal count shows "No change" and disables Save', async () => {
-    const { api } = await open([lot(1, '2026-10-01', 5, 10)]);
+    const { api } = await open({ previewSetItemStock: async (_p: SetItemStockPayload) => SAME });
     expect(preview()).toContain('No change');
     const save = buttonByText('Save stock');
     expect(save.disabled).toBe(true);
@@ -88,22 +120,22 @@ describe('SetStockDialog', () => {
   });
 
   it('add mode posts an UNRECORDED_STOCK adjustment', async () => {
-    const { api } = await open([lot(2, '2026-10-01', 6, 5), lot(1, '2026-11-05', 5, 5)]);
+    const { api } = await open();
     setInput(document.querySelector('select')!, 'ADD');
     await flush();
     setInput(nums()[0], '3');
-    await flush();
+    await settle();
     click(buttonByText('Save stock'));
     await flush();
     expect(api.createStockAdjustment.mock.calls[0][0]).toMatchObject({
-      quantity: 3, reason: 'UNRECORDED_STOCK', unitCost: 6, itemId: 9,
+      quantity: 3, reason: 'UNRECORDED_STOCK', unitCost: null, itemId: 9,
     });
     expect(api.setItemStock).not.toHaveBeenCalled();
     expect(document.querySelector('[data-testid="set-stock-result"]')!.textContent).toContain('13');
   });
 
   it('Cancel closes without any write', async () => {
-    const { api, onClose } = await open([lot(1, '2026-10-01', 5, 10)]);
+    const { api, onClose } = await open();
     click(buttonByText('Cancel'));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(api.setItemStock).not.toHaveBeenCalled();

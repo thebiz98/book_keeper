@@ -34,3 +34,8 @@ pub async fn delete_settlement(state: State<'_, AppState>, settlement_id: i64) -
     let svc = state.accounting_service.clone();
     super::run_blocking(move || svc.delete_settlement(settlement_id)).await
 }
+#[tauri::command]
+pub async fn preview_settlement_allocation(state: State<'_, AppState>, party_id: i64, transaction_type: crate::core::value_objects::TransactionType, amount: f64) -> Result<Vec<SettleAllocation>, AppError> {
+    let svc = state.accounting_service.clone();
+    super::run_blocking(move || svc.preview_settlement_allocation(party_id, transaction_type, amount)).await
+}

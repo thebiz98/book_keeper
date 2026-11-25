@@ -33,3 +33,9 @@ pub async fn delete_sale(state: State<'_, AppState>, sale_id: i64) -> Result<Del
     let svc = state.sale_service.clone();
     super::run_blocking(move || svc.delete_sale(sale_id)).await
 }
+/// DD-56: dry run of create/update sale (transaction dropped); errors come back as data.
+#[tauri::command]
+pub async fn preview_sale(state: State<'_, AppState>, payload: PreviewSalePayload, sale_id: Option<i64>) -> Result<BillPreview, AppError> {
+    let svc = state.sale_service.clone();
+    super::run_blocking(move || svc.preview_sale(sale_id, payload)).await
+}

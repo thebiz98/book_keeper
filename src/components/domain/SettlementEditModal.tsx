@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
 import { todayLocal } from '@/lib/dates';
 import type { PaymentSettlement } from '@/types';
 import { Modal } from '../ui/Modal';
@@ -14,7 +13,8 @@ export interface SettlementEditModalProps {
   /** Display code of the bill the row is booked against. */
   billCode?: string;
   /** Highest allowed amount: the bill's balance plus this row's current amount. */
-  maxAmount: number;
+  /** Unused: the cap is enforced by the backend on save (DD-56). */
+  maxAmount?: number;
   onClose: () => void;
   /** Called after a successful save; the caller reloads and refreshes the app metrics. */
   onSaved: () => void;
@@ -24,7 +24,6 @@ export interface SettlementEditModalProps {
 export const SettlementEditModal: React.FC<SettlementEditModalProps> = ({
   settlement,
   billCode,
-  maxAmount,
   onClose,
   onSaved,
 }) => {
@@ -44,13 +43,8 @@ export const SettlementEditModal: React.FC<SettlementEditModalProps> = ({
     setError(null);
   }, [settlement]);
 
-  const problem = !(amount > 0)
-    ? 'Amount must be greater than 0'
-    : round2(amount) > round2(maxAmount)
-      ? `Amount cannot exceed ₹${round2(maxAmount).toFixed(2)} (the bill's balance plus this payment)`
-      : !date
-        ? 'Date is required'
-        : null;
+  // Format checks only; the cap against the bill's balance is the backend's (shown if save is refused).
+  const problem = !(amount > 0) ? 'Amount must be greater than 0' : !date ? 'Date is required' : null;
 
   const save = async () => {
     if (!settlement || problem || saving) return;
@@ -58,7 +52,7 @@ export const SettlementEditModal: React.FC<SettlementEditModalProps> = ({
     setError(null);
     try {
       await api.updateSettlement(settlement.id, {
-        amountPaid: round2(amount),
+        amountPaid: amount,
         settlementDate: date,
         paymentMode: mode,
         notes: notes.trim() || null,

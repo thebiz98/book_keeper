@@ -622,3 +622,11 @@ gantt
 * **CSS** (`src/index.css`): screen `#print-root{display:none}`. Print: `@page{size:A4;margin:12mm}`, `body > *:not(#print-root){display:none}`, light colours forced (white background, black text) even in the dark theme, `thead{display:table-header-group}` so the header repeats, `tr{break-inside:avoid}`.
 * **Entry points:** `BillDetailDrawer` footer **Print** (Ctrl+P while the drawer is open, `preventDefault`) for both kinds; `SaleSummaryModal` result step **Print bill (P)**. Settings Shop Profile card help text: "Printed at the top of bills".
 * **Out of scope:** thermal receipts, logos/footers/templates, direct PDF export, printing returns.
+
+
+## Previews (DD-56, `refactor/backend-previews`)
+* **No business rule in the UI.** Money, payment status, settlement split, refund split, FIFO and stock all come from `preview_*` commands (LLD 17). The UI keeps format checks (empty, not a number), formatting and the mapping of stored rows to form rows.
+* **`usePreview<TIn, TOut>({ input, fetcher, debounceMs = 80, enabled })`** returns `{ data, errors, isLoading }`. Only the latest request applies (same guard as `useLiveSearch`), it survives a StrictMode remount, and a thrown `AppError` becomes `errors`. No ad-hoc `setTimeout` for previews.
+* **Screens:** New Sale / cart / `SaleSummaryModal` and sale edit (`preview_sale`, `sale_id` in edit); New Purchase and purchase edit (`preview_purchase`); `LotPriceEditModal` (`preview_lot_purchase_price`); `BatchSettlementForm` and `SettlementModal` lump sum (`preview_settlement_allocation`); `ReturnFormCustomer` / `ReturnFormVendor` (`preview_*_return`); `SetStockDialog` / `StockAdjustmentForm` (`preview_set_item_stock` / `preview_stock_adjustment`).
+* **Payment dialog:** shows `errors`; Enter is blocked while errors exist or a preview is pending.
+* **Removed TS rule copies:** `billTotals`, `purchaseMath` rules, `lotPriceEffect.ts`, `allocateFifo`, `creditSplit`, `lotCost.ts`.

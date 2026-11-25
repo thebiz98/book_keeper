@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePreview } from '@/hooks/usePreview';
 import { Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
 import { todayLocal } from '@/lib/dates';
 import type {
   CustomerReturnItemPayload,
+  CustomerReturnPayload,
   ItemSearchResult,
   Party,
   ReturnResult,
@@ -21,12 +22,10 @@ import { ItemSearchTypeahead } from './ItemSearchTypeahead';
 import { PartySelector } from './PartySelector';
 import {
   BillPicker,
-  EPS,
   FieldLabel,
   RefundPreview,
   ReturnResultPanel,
   inputCls,
-  usePartyBalance,
 } from './ReturnFormShared';
 import { refreshAppMetrics } from './navParams';
 
@@ -162,73 +161,59 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
         : [...xs, { itemId: it.itemId, name: it.name, baseUnit: it.baseUnit, qty: 1, price: it.defaultSalePrice }]
     );
 
-  const returnedValue =
-    mode === 'BILL'
-      ? round2(lines.reduce((s, l) => s + (l.qty > 0 ? l.qty * l.rate : 0), 0))
-      : round2(freeLines.reduce((s, l) => s + l.qty * l.rate, 0));
-  const issuedValue = round2(issue.reduce((s, x) => s + x.qty * x.price, 0));
-
-  const freeBalance = usePartyBalance('CUSTOMER', mode === 'FREE' ? customer?.id ?? null : null);
-  const balance = mode === 'BILL' ? detail?.sale.balanceDue ?? 0 : customer ? freeBalance : 0;
+  // DD-56: the return as the command would take it. The refund value, the credited/cash split, the
+  // issued value and every refusal (over-return, rate above the sold rate, missing cost ...) come
+  // from `preview_customer_return`; nothing here decides them.
+  const payload = useMemo<CustomerReturnPayload | null>(() => {
+    const items: CustomerReturnItemPayload[] =
+      mode === 'BILL'
+        ? lines
+            .filter((l) => l.qty > 0)
+            .map((l) => ({
+              itemId: l.itemId,
+              saleItemId: l.saleItemId,
+              quantity: l.qty,
+              unitPrice: l.rate,
+              condition: l.condition,
+              unitCostOverride: null,
+            }))
+        : freeLines.map((l) => ({
+            itemId: l.itemId,
+            saleItemId: null,
+            quantity: l.qty,
+            unitPrice: l.rate,
+            condition: l.condition,
+            unitCostOverride: l.hasLots === true ? null : l.cost > 0 ? l.cost : null,
+          }));
+    if (items.length === 0 || (mode === 'BILL' && !detail)) return null;
+    return {
+      originalSaleId: mode === 'BILL' ? detail?.sale.id ?? null : null,
+      partyId: mode === 'FREE' ? customer?.id ?? null : null,
+      returnDate: date,
+      settlementType: settlement,
+      reason: reason.trim() || null,
+      notes: notes.trim() || null,
+      items,
+      replacementItems:
+        settlement === 'REPLACEMENT' ? issue.map((x) => ({ itemId: x.itemId, quantity: x.qty })) : [],
+    };
+  }, [mode, lines, freeLines, detail, customer, date, settlement, reason, notes, issue]);
+  const preview = usePreview<CustomerReturnPayload, ReturnResult>({
+    input: payload,
+    fetcher: (p) => api.previewCustomerReturn(p),
+  });
+  const returnedValue = preview.data?.totalAmount ?? 0;
+  const issuedValue = preview.data?.issuedValue ?? 0;
 
   const submit = async () => {
     setError(null);
-    let items: CustomerReturnItemPayload[] = [];
-    if (mode === 'BILL') {
-      if (!detail) return setError('Select a bill first');
-      for (const l of lines) {
-        if (l.qty <= 0) continue;
-        if (l.qty > returnable(l) + EPS) {
-          return setError(`${l.name}: quantity ${l.qty} exceeds returnable ${returnable(l)}`);
-        }
-        if (l.rate > l.soldRate + EPS) {
-          return setError(`${l.name}: rate ${l.rate} exceeds the sold rate ${l.soldRate}`);
-        }
-        if (l.rate < 0) return setError(`${l.name}: rate cannot be negative`);
-        items.push({
-          itemId: l.itemId,
-          saleItemId: l.saleItemId,
-          quantity: l.qty,
-          unitPrice: l.rate,
-          condition: l.condition,
-          unitCostOverride: null,
-        });
-      }
-    } else {
-      for (const l of freeLines) {
-        if (!(l.qty > 0)) return setError(`${l.name}: quantity must be greater than 0`);
-        if (l.hasLots === false && !(l.cost > 0)) {
-          return setError(`${l.name}: unit cost is required (item has no stock history)`);
-        }
-        items.push({
-          itemId: l.itemId,
-          saleItemId: null,
-          quantity: l.qty,
-          unitPrice: l.rate,
-          condition: l.condition,
-          unitCostOverride: l.hasLots === true ? null : l.cost > 0 ? l.cost : null,
-        });
-      }
-    }
-    if (items.length === 0) return setError('Enter a return quantity for at least one line');
-    if (settlement === 'REPLACEMENT') {
-      if (mode !== 'BILL') return setError('Replacements need the original bill');
-      if (issue.length === 0) return setError('Add at least one item to issue as a replacement');
-      if (issue.some((x) => !(x.qty > 0))) return setError('Replacement quantities must be greater than 0');
-    }
+    if (mode === 'BILL' && !detail) return setError('Select a bill first');
+    if (!payload) return setError('Enter a return quantity for at least one line');
+    if (preview.isLoading) return; // wait for the backend's verdict on exactly what is on screen
+    if (preview.errors.length > 0) return setError(preview.errors[0].message);
     setBusy(true);
     try {
-      const res = await api.createCustomerReturn({
-        originalSaleId: mode === 'BILL' ? detail?.sale.id ?? null : null,
-        partyId: mode === 'FREE' ? customer?.id ?? null : null,
-        returnDate: date,
-        settlementType: settlement,
-        reason: reason.trim() || null,
-        notes: notes.trim() || null,
-        items,
-        replacementItems:
-          settlement === 'REPLACEMENT' ? issue.map((x) => ({ itemId: x.itemId, quantity: x.qty })) : [],
-      });
+      const res = await api.createCustomerReturn(payload);
       setResult(res);
       refreshAppMetrics();
       onDone?.();
@@ -471,7 +456,7 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
       </div>
 
       {settlement === 'REFUND' ? (
-        <RefundPreview value={returnedValue} balance={balance} />
+        <RefundPreview result={preview.data} errors={preview.errors} />
       ) : (
         <div className="flex flex-col gap-2" data-testid="replacement-section">
           <FieldLabel>Items to issue</FieldLabel>
@@ -499,7 +484,12 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
               </button>
             </div>
           ))}
-          {issue.length > 0 && Math.abs(issuedValue - returnedValue) > 0.005 && (
+          {preview.errors.length > 0 && (
+            <p role="alert" data-testid="return-preview-error" className="text-xs text-rose-600 dark:text-rose-400">
+              {preview.errors[0].message}
+            </p>
+          )}
+          {issue.length > 0 && preview.data != null && (
             <p data-testid="value-difference" className="text-xs text-amber-700 dark:text-amber-400">
               Value difference: returned <CurrencyDisplay amount={returnedValue} size="sm" /> vs issued{' '}
               <CurrencyDisplay amount={issuedValue} size="sm" />. No money moves in a replacement; do a Refund plus a new

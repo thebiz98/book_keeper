@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { usePreview } from '@/hooks/usePreview';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
 import { todayLocal } from '@/lib/dates';
-import type { AdjustmentReason, StockAdjustmentResult } from '@/types';
-import { latestLotCost } from './lotCost';
+import type { AdjustmentReason, StockAdjustmentPayload, StockAdjustmentPreview, StockAdjustmentResult } from '@/types';
 import { Button } from '../ui/Button';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
@@ -38,9 +37,8 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
   const [direction, setDirection] = useState<'DECREASE' | 'INCREASE'>('DECREASE');
   const [quantity, setQuantity] = useState(1);
   const [reason, setReason] = useState<AdjustmentReason>('DAMAGED');
-  const [unitCost, setUnitCost] = useState(0);
-  const [hasLots, setHasLots] = useState<boolean | null>(null);
-  const [lotsError, setLotsError] = useState<string | null>(null);
+  /** Typed unit cost; null = not typed, the backend uses the latest lot cost. */
+  const [typedCost, setTypedCost] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,52 +50,44 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
   }, [initial?.itemId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    setHasLots(null);
-    setLotsError(null);
-    setUnitCost(0);
-    if (!item) return;
-    let live = true;
-    api
-      .getItemLots(item.itemId)
-      .then((lots) => {
-        if (!live) return;
-        setHasLots(lots.length > 0);
-        const c = latestLotCost(lots);
-        if (c !== null) setUnitCost(c);
-      })
-      .catch((e) => {
-        if (!live) return;
-        setHasLots(false);
-        setLotsError(errorMessage(e));
-      });
-    return () => {
-      live = false;
-    };
-  }, [item?.itemId]); // eslint-disable-line react-hooks/exhaustive-deps
+    setTypedCost(null);
+  }, [item?.itemId]);
 
   const increase = direction === 'INCREASE';
   const delta = increase ? quantity : -quantity;
 
+  // DD-56: the default unit cost, the stock value added / the FIFO write-off and every refusal
+  // (more than the stock, no cost for an item without lots ...) come from `preview_stock_adjustment`.
+  const payload = useMemo<StockAdjustmentPayload | null>(
+    () =>
+      item && quantity > 0 && date
+        ? {
+            adjustmentDate: date,
+            itemId: item.itemId,
+            quantity: delta,
+            reason,
+            unitCost: increase && typedCost !== null && typedCost > 0 ? typedCost : null,
+            notes: notes.trim() || null,
+          }
+        : null,
+    [item, quantity, date, delta, reason, increase, typedCost, notes]
+  );
+  const preview = usePreview<StockAdjustmentPayload, StockAdjustmentPreview>({
+    input: payload,
+    fetcher: (p) => api.previewStockAdjustment(p),
+  });
+  const view = preview.data;
+
   const submit = async () => {
     if (!item) return setError('Select an item first');
-    if (!(quantity > 0)) return setError('Quantity must be greater than 0');
-    if (!date) return setError('Adjustment date is required');
-    if (item.currentStock + delta < 0) {
-      return setError(`Resulting stock cannot be negative (current ${item.currentStock} ${item.baseUnit})`);
-    }
-    if (increase && !(unitCost > 0)) return setError('Unit cost is required for stock increases');
+    if (!payload) return setError('Enter a quantity greater than 0');
+    if (preview.isLoading) return;
+    if (preview.errors.length > 0) return setError(preview.errors[0].message);
     setBusy(true);
     setError(null);
     try {
-      const res = await api.createStockAdjustment({
-        adjustmentDate: date,
-        itemId: item.itemId,
-        quantity: delta,
-        reason,
-        unitCost: increase ? round2(unitCost) : null,
-        notes: notes.trim() || null,
-      });
-      setAddedValue(increase ? round2(quantity * unitCost) : null);
+      const res = await api.createStockAdjustment(payload);
+      setAddedValue(increase ? view?.valueChange ?? null : null);
       setResult(res);
       onAdjusted?.(res);
     } catch (e) {
@@ -152,7 +142,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
             <div className="font-semibold">{item.name}</div>
             <div className="text-xs text-slate-500">
               Current stock: {item.currentStock} {item.baseUnit}
-              {item.currentStock + delta !== item.currentStock && ` -> ${round2(item.currentStock + delta)}`}
+              {view != null && view.newStock !== view.previousStock && ` -> ${view.newStock}`}
             </div>
           </div>
           {!initial && (
@@ -222,16 +212,25 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
       {increase && (
         <div>
           <NumericInput
-            label={`Unit Cost (₹)${hasLots === false ? ' * required (no lots yet)' : ''}`}
-            value={unitCost}
-            onChange={setUnitCost}
+            label="Unit Cost (₹)"
+            value={typedCost ?? view?.unitCost ?? 0}
+            onChange={setTypedCost}
             min={0}
           />
           <p data-testid="valuation-effect" className="text-[11px] text-slate-500 mt-1">
-            Adds <CurrencyDisplay amount={round2(quantity * unitCost)} /> to stock value
+            Adds <CurrencyDisplay amount={view?.valueChange ?? 0} /> to stock value
           </p>
-          {lotsError && <p className="text-[11px] text-amber-600 mt-1">Could not load lots: {lotsError}</p>}
         </div>
+      )}
+      {preview.errors.length > 0 && (
+        <p role="alert" data-testid="adjustment-preview-error" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
+          {preview.errors[0].message}
+        </p>
+      )}
+      {!increase && view != null && preview.errors.length === 0 && (
+        <p data-testid="writeoff-effect" className="text-[11px] text-slate-500">
+          Write-off value: <CurrencyDisplay amount={view.lossValue} />
+        </p>
       )}
 
       <div className="flex flex-col gap-1">

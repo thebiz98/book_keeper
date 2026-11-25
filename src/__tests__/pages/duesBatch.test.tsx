@@ -3,7 +3,7 @@ import { render } from '../testUtils';
 import { CreditDuesPage } from '@/pages/CreditDuesPage';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { PartyLedgerDrawer } from '@/components/domain/PartyLedgerDrawer';
-import { amountFromRows, rowsFromAmount } from '@/components/domain/BatchSettlementForm';
+import { amountFromRows, rowsFromAllocations } from '@/components/domain/BatchSettlementForm';
 import type { PartyDueSummary, SaleDetailView, SaleHistoryRow } from '@/types';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText } from './helpers';
 
@@ -26,6 +26,11 @@ function setupDues() {
         ? { items: BILLS, total: 3, page: 1, limit: 200 }
         : { items: [], total: 0, page: 1, limit: 200 },
     settleBillsBatch: { settlementIds: [1], billsTouched: [1] },
+    // DD-56: the oldest-first split is the backend's; canned for the 250 case.
+    previewSettlementAllocation: async () => [
+      { transactionId: 1, amountPaid: 100 },
+      { transactionId: 2, amountPaid: 150 },
+    ],
   });
 }
 
@@ -40,9 +45,12 @@ async function openBatch() {
   await waitFor(() => !!rowInput('SAL-3'));
 }
 
-describe('rowsFromAmount / amountFromRows', () => {
-  it('fills oldest-first and sums back', () => {
-    const rows = rowsFromAmount(BILLS, 250);
+describe('rowsFromAllocations / amountFromRows', () => {
+  it('maps the backend split to rows and sums back', () => {
+    const rows = rowsFromAllocations(BILLS, [
+      { transactionId: 1, amountPaid: 100 },
+      { transactionId: 2, amountPaid: 150 },
+    ]);
     expect(rows[1]).toEqual({ checked: true, amount: 100 });
     expect(rows[2]).toEqual({ checked: true, amount: 150 });
     expect(rows[3]).toEqual({ checked: false, amount: 0 });
@@ -62,23 +70,21 @@ describe('Settle bills form (D9)', () => {
     expect(tick('SAL-1').checked && tick('SAL-2').checked && tick('SAL-3').checked).toBe(true);
   });
 
-  it('typing the amount re-runs the oldest-first fill', async () => {
-    setupDues();
+  it('typing the amount shows the backend split of that amount', async () => {
+    const api = setupDues();
     await openBatch();
     setInput(amountInput(), '250');
-    await flush();
+    await waitFor(() => rowInput('SAL-2').value === '150');
+    expect(api.previewSettlementAllocation).toHaveBeenLastCalledWith(7, 'SALE', 250);
     expect(rowInput('SAL-1').value).toBe('100');
     expect(rowInput('SAL-2').value).toBe('150');
     expect(tick('SAL-3').checked).toBe(false);
     expect(rowInput('SAL-3').value).toBe('0');
   });
 
-  it('editing a row (capped at its balance) and unticking update the amount', async () => {
+  it('editing a row and unticking update the amount (the sum of the entered rows)', async () => {
     setupDues();
     await openBatch();
-    setInput(rowInput('SAL-2'), '999');
-    await flush();
-    expect(amountInput().value).toBe('600'); // capped at the 200 balance, not 999
     click(tick('SAL-3'));
     await flush();
     expect(amountInput().value).toBe('300');
@@ -178,10 +184,10 @@ describe('BillDetailDrawer settlement actions and Settle (D8, D11)', () => {
     click(document.querySelector('[data-testid="settlement-edit-12"]')!);
     await waitFor(() => !!document.querySelector('[data-testid="settlement-edit"]'));
     const box = document.querySelector('[data-testid="settlement-edit"]')!;
-    // Cap = balance 250 + this payment 150 = 400.
+    // The cap against the bill is the backend's: no client-side message while typing.
     setInput(box.querySelector('input[aria-label="Settlement amount"]')!, '401');
     await flush();
-    expect(bodyText()).toContain('cannot exceed ₹400.00');
+    expect(bodyText()).not.toContain('cannot exceed');
     setInput(box.querySelector('input[aria-label="Settlement amount"]')!, '400');
     await flush();
     click(buttonByText('Save', document.querySelector('[data-testid="settlement-edit"]')!));

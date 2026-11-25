@@ -1,14 +1,25 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { CheckCircle, Trash2 } from 'lucide-react';
 import { api } from '@/api';
 import { todayLocal } from '@/lib/dates';
 import { useCartStore } from '@/store/useCartStore';
 import { useAppStore } from '@/store/useAppStore';
 import { useHotkeyAction, useHotkey } from '@/hooks/useHotkeys';
-import type { BillEditGuard, CreateSalePayload, ItemBundle, ItemSearchResult, SaleSummaryResponse } from '@/types';
+import type {
+  BillEditGuard,
+  BillPreview,
+  CreateSalePayload,
+  SavedBundle,
+  ItemSearchResult,
+  PaymentStatus,
+  PreviewSalePayload,
+  SaleSummaryResponse,
+} from '@/types';
 import { errorMessage } from '@/api';
 import { takeBillEdit } from '@/pages/billEditHandoff';
-import { editStockCredit, saleLineToCart } from '@/lib/billEditDraft';
+import { saleLineToCart } from '@/lib/billEditDraft';
+import { usePreview } from '@/hooks/usePreview';
+import type { CartLine } from '@/store/useCartStore';
 import { CartTable } from '@/components/domain/CartTable';
 import { BillChargesPanel, type BillChargesPanelHandle } from '@/components/domain/BillChargesPanel';
 import { toChargeInputs } from '@/lib/billMath';
@@ -24,15 +35,21 @@ import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Button } from '@/components/ui/Button';
 
+/** Cart lines as the command's item lines: a pure mapping (loose lines are sent in base units). */
+function toSaleItems(items: CartLine[]): CreateSalePayload['items'] {
+  return items.map((it) => ({
+    itemId: it.itemId,
+    bundleId: it.bundleId ?? null,
+    bundleQuantity: it.bundleId != null ? it.quantity : it.quantity * it.unitsPerBundle,
+    unitPrice: it.bundleId != null ? it.rate : it.rate / it.unitsPerBundle,
+  }));
+}
+
 export const NewSalePage: React.FC = () => {
   const {
     items,
     selectedCustomer,
-    subtotal,
     charges,
-    chargesTotal,
-    discountsTotal,
-    grandTotal,
     totalBaseUnits,
     totalItems,
     addItem,
@@ -55,12 +72,34 @@ export const NewSalePage: React.FC = () => {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
   const [bundleItem, setBundleItem] = useState<ItemSearchResult | null>(null);
-  const [newBundle, setNewBundle] = useState<{ bundle: ItemBundle; seq: number } | null>(null);
+  const [newBundle, setNewBundle] = useState<{ bundle: SavedBundle; seq: number } | null>(null);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** FR-20: money already applied to the bill being edited / its old upfront payment. */
-  const [editMoney, setEditMoney] = useState<{ applied: number; upfront: number }>({ applied: 0, upfront: 0 });
+  /** FR-20: the stored payment status and old upfront payment of the bill being edited (dialog prefill). */
+  const [editPayment, setEditPayment] = useState<{ status: PaymentStatus; upfront: number } | null>(null);
   const [isCancelEditOpen, setIsCancelEditOpen] = useState(false);
+
+  // DD-56: every figure shown before Save comes from the backend. The bill without a payment gives
+  // the line totals, charges, total and the stock check; the payment dialog adds its own preview.
+  const bill = useMemo<PreviewSalePayload | null>(
+    () =>
+      items.length === 0
+        ? null
+        : {
+            transactionDate: invoiceDate || todayLocal(),
+            partyId: selectedCustomer?.id ?? null,
+            paymentMode: 'CASH',
+            charges: toChargeInputs(charges),
+            notes: notes.trim() || null,
+            items: toSaleItems(items),
+          },
+    [items, charges, selectedCustomer, invoiceDate, notes]
+  );
+  const preview = usePreview<PreviewSalePayload, BillPreview>({
+    input: bill,
+    fetcher: (p) => api.previewSale(p, editing?.saleId ?? null),
+  });
+  const totals = preview.data;
 
   const rowRef = useRef<RapidBillingRowHandle>(null);
   const chargesRef = useRef<BillChargesPanelHandle>(null);
@@ -93,26 +132,24 @@ export const NewSalePage: React.FC = () => {
           loadCodePreview();
           return;
         }
-        const credit = editStockCredit(detail.items.map((i) => ({ itemId: i.saleItem.itemId, quantity: i.saleItem.quantity })));
         const lines = [];
         for (const it of detail.items) {
           const found = (await api.searchItemsFts(it.saleItem.itemName, 8).catch(() => [])).find(
             (r) => r.itemId === it.saleItem.itemId
           );
-          lines.push(saleLineToCart(it.saleItem, found ?? null, (found?.currentStock ?? 0) + (credit[it.saleItem.itemId] ?? 0)));
+          lines.push(saleLineToCart(it.saleItem, found ?? null));
         }
         if (!live) return;
         loadForEdit(
           lines,
           detail.party ? { id: detail.party.id, name: detail.party.name, phone: detail.party.phone } : null,
           { saleId: detail.sale.id, code: detail.sale.transactionCode },
-          credit,
           detail.charges.map((c) => ({ chargeTypeId: c.chargeTypeId, name: c.chargeName, effect: c.effect, amount: c.amount }))
         );
         setInvoiceCode(detail.sale.transactionCode);
         setInvoiceDate(detail.sale.transactionDate);
         setNotes(detail.sale.notes ?? '');
-        setEditMoney({ applied: guard.appliedAmount, upfront: guard.upfrontAmount });
+        setEditPayment({ status: detail.sale.paymentStatus, upfront: guard.upfrontAmount });
       } catch (e) {
         if (live) {
           setError(errorMessage(e));
@@ -132,13 +169,15 @@ export const NewSalePage: React.FC = () => {
       setError('Add at least one item before completing the sale');
       return;
     }
-    if (grandTotal < 0) {
-      setError('Discounts exceed the bill amount');
+    // The backend preview says what is wrong (discounts above the bill, stock, ...). While it is
+    // still pending the dialog opens and runs its own preview, which blocks saving the same way.
+    if (!preview.isLoading && preview.errors.length > 0) {
+      setError(preview.errors[0].message);
       return;
     }
     setError(null);
     setIsSummaryOpen(true);
-  }, [items.length, grandTotal]);
+  }, [items.length, preview.isLoading, preview.errors]);
 
   // Ctrl+Enter (blocked by the registry while a modal is open or a submit is in flight).
   useHotkeyAction('completeBill', openPayment, { scope: 'page' });
@@ -163,37 +202,27 @@ export const NewSalePage: React.FC = () => {
         baseUnit: entry.item.baseUnit,
         defaultSalePrice: entry.item.defaultSalePrice,
         mrp: entry.item.mrp,
-        currentStock: entry.item.currentStock,
       },
       entry.quantity,
       entry.bundle,
       entry.rate
     );
-    setError(ok ? null : `Cannot add "${entry.item.name}": out of stock or insufficient quantity`);
+    setError(ok ? null : `Cannot add "${entry.item.name}": invalid quantity or rate`);
     return ok;
   };
 
   const handleUpdateQuantity = (lineId: string, qty: number): boolean => {
     const ok = updateQuantity(lineId, qty);
-    setError(ok ? null : 'Not enough stock for that quantity');
+    setError(ok ? null : 'Enter a quantity greater than 0');
     return ok;
   };
 
   const handleSubmit = async (values: SalePaymentValues): Promise<SaleSummaryResponse> => {
+    if (!bill) throw new Error('The cart is empty');
     const payload: CreateSalePayload = {
-      transactionDate: invoiceDate || todayLocal(),
-      partyId: selectedCustomer?.id ?? null,
+      ...bill,
       paymentStatus: values.paymentStatus,
       paidAmount: values.cashReceived,
-      paymentMode: 'CASH',
-      charges: toChargeInputs(charges),
-      notes: notes.trim() || null,
-      items: items.map((it) => ({
-        itemId: it.itemId,
-        bundleId: it.bundleId ?? null,
-        bundleQuantity: it.bundleId != null ? it.quantity : it.baseQuantity,
-        unitPrice: it.bundleId != null ? it.rate : it.rate / it.unitsPerBundle,
-      })),
     };
     const res = editing ? await api.updateSale(editing.saleId, payload) : await api.createSale(payload);
     void refreshMetrics();
@@ -276,7 +305,6 @@ export const NewSalePage: React.FC = () => {
       <RapidBillingRow
         ref={rowRef}
         autoFocus
-        cart={items}
         onAddLine={handleAddLine}
         onCompleteBill={openPayment}
         onOpenBundleModal={(item) => {
@@ -290,6 +318,7 @@ export const NewSalePage: React.FC = () => {
       <div className="flex-1 min-h-[220px]">
         <CartTable
           items={items}
+          lineTotals={totals?.lineTotals}
           onUpdateQuantity={handleUpdateQuantity}
           onRemoveItem={removeItem}
           onFocusSearch={() => rowRef.current?.focusSearch()}
@@ -312,7 +341,7 @@ export const NewSalePage: React.FC = () => {
           <div className="flex flex-col">
             <span className="text-xs text-slate-500 font-medium">{charges.length > 0 ? 'Items Subtotal' : 'Subtotal'}</span>
             <div data-testid="cart-subtotal" className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-              <CurrencyDisplay amount={subtotal} size="xl" />
+              <CurrencyDisplay amount={totals?.itemsSubtotal ?? 0} size="xl" />
             </div>
           </div>
 
@@ -321,19 +350,19 @@ export const NewSalePage: React.FC = () => {
               <div className="flex flex-col text-xs font-mono">
                 <span className="text-slate-500">Charges (+)</span>
                 <span data-testid="cart-charges-total" className="text-emerald-700 dark:text-emerald-400">
-                  <CurrencyDisplay amount={chargesTotal} size="sm" />
+                  <CurrencyDisplay amount={totals?.chargesTotal ?? 0} size="sm" />
                 </span>
               </div>
               <div className="flex flex-col text-xs font-mono">
                 <span className="text-slate-500">Discounts (−)</span>
                 <span data-testid="cart-discounts-total" className="text-rose-700 dark:text-rose-400">
-                  <CurrencyDisplay amount={discountsTotal} size="sm" />
+                  <CurrencyDisplay amount={totals?.discountsTotal ?? 0} size="sm" />
                 </span>
               </div>
               <div className="flex flex-col">
                 <span className="text-xs text-slate-500 font-medium">Grand Total</span>
                 <div data-testid="cart-grand-total" className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-                  <CurrencyDisplay amount={grandTotal} size="xl" />
+                  <CurrencyDisplay amount={totals?.totalAmount ?? 0} size="xl" />
                 </div>
               </div>
             </>
@@ -389,6 +418,13 @@ export const NewSalePage: React.FC = () => {
           {error}
         </p>
       )}
+      {!preview.isLoading && preview.errors.length > 0 && (
+        <ul data-testid="preview-errors" role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium px-1">
+          {preview.errors.map((e, i) => (
+            <li key={i}>{e.message}</li>
+          ))}
+        </ul>
+      )}
 
       {/* Payment dialog: payment mode, then result mode */}
       <SaleSummaryModal
@@ -397,8 +433,9 @@ export const NewSalePage: React.FC = () => {
           setIsSummaryOpen(false);
           focusSearchSoon();
         }}
-        grandTotal={grandTotal}
-        itemsSubtotal={subtotal}
+        bill={bill}
+        totals={totals}
+        saleId={editing?.saleId ?? null}
         charges={charges}
         customer={selectedCustomer}
         onCustomerChange={setCustomer}
@@ -406,8 +443,8 @@ export const NewSalePage: React.FC = () => {
         onDone={handleDone}
         invoiceCode={invoiceCode}
         mode={editing ? 'edit' : 'create'}
-        appliedAmount={editMoney.applied}
-        initialCash={editMoney.upfront}
+        initialStatus={editPayment?.status}
+        initialCash={editPayment?.upfront}
       />
 
       <ConfirmDialog

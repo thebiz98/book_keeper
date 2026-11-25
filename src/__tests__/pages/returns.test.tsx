@@ -61,8 +61,15 @@ const purchaseDetail = (): PurchaseDetailView =>
     ],
   }) as unknown as PurchaseDetailView;
 
-const result = { returnId: 1, returnCode: 'RET-1', creditedAmount: 100, cashRefunded: 50 };
+const result = { returnId: 1, returnCode: 'RET-1', creditedAmount: 100, cashRefunded: 50, totalAmount: 150, issuedValue: 0 };
 
+/** Lets the debounced preview come back. */
+const settle = async () => {
+  for (let i = 0; i < 3; i++) await flush(120);
+};
+
+// DD-56: values, the credited/cash split and every refusal are the backend's preview. These tests
+// assert that the forms send the right preview input and show what comes back.
 describe('ReturnFormCustomer', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -71,16 +78,19 @@ describe('ReturnFormCustomer', () => {
   it('sends a linked payload, shows the credited/cash preview and the result', async () => {
     const api = installApi({
       getSaleDetails: async () => saleDetail(),
+      previewCustomerReturn: async () => result,
       createCustomerReturn: async () => result,
     });
     render(<ReturnFormCustomer initialBillId={5} />);
     await waitFor(() => bodyText().includes('Notebook'));
     setInput(document.querySelector('input[aria-label="Return quantity for Notebook"]')!, '3');
-    await flush();
+    await settle();
     const preview = document.querySelector('[data-testid="refund-preview"]')!.textContent ?? '';
     expect(preview).toContain('Preview');
     expect(preview).toContain('₹100.00 credited');
     expect(preview).toContain('₹50.00 cash');
+    expect(preview).toContain('₹150.00'); // the preview's total value
+    expect(api.previewCustomerReturn.mock.calls.at(-1)![0]).toMatchObject({ originalSaleId: 5, items: [{ quantity: 3 }] });
     click(buttonByText('Record Return'));
     await flush();
     expect(api.createCustomerReturn.mock.calls[0][0]).toEqual({
@@ -105,26 +115,37 @@ describe('ReturnFormCustomer', () => {
     expect(document.querySelector('[data-testid="net-rate-hint"]')!.textContent).toContain('net of bill discount');
   });
 
-  it('caps the quantity at the returnable amount', async () => {
-    const api = installApi({ getSaleDetails: async () => saleDetail(), createCustomerReturn: async () => result });
+  it('shows the backend refusal and does not save', async () => {
+    const api = installApi({
+      getSaleDetails: async () => saleDetail(),
+      previewCustomerReturn: async () => {
+        throw { type: 'ValidationError', details: { field: 'quantity', message: 'Cannot return 7 of sale line 11: sold 10, already returned 4' } };
+      },
+      createCustomerReturn: async () => result,
+    });
     render(<ReturnFormCustomer initialBillId={5} />);
     await waitFor(() => bodyText().includes('Notebook'));
     setInput(document.querySelector('input[aria-label="Return quantity for Notebook"]')!, '7');
+    await settle();
+    expect(bodyText()).toContain('already returned 4');
     click(buttonByText('Record Return'));
     await flush();
     expect(api.createCustomerReturn).not.toHaveBeenCalled();
-    expect(bodyText()).toContain('exceeds returnable 6');
   });
 
-  it('builds a replacement payload and warns about the value difference', async () => {
-    const api = installApi({ getSaleDetails: async () => saleDetail(), createCustomerReturn: async () => result });
+  it('builds a replacement payload and shows the issued value the backend reports', async () => {
+    const api = installApi({
+      getSaleDetails: async () => saleDetail(),
+      previewCustomerReturn: async () => ({ ...result, totalAmount: 100, issuedValue: 10, creditedAmount: 0, cashRefunded: 0 }),
+      createCustomerReturn: async () => result,
+    });
     render(<ReturnFormCustomer initialBillId={5} />);
     await waitFor(() => bodyText().includes('Notebook'));
     setInput(document.querySelector('input[aria-label="Return quantity for Notebook"]')!, '2');
     click(document.querySelectorAll('input[name="settlement"]')[1]);
     await flush();
     click(document.querySelector('[data-testid="replacement-section"] [data-testid="pick-item"]')!);
-    await flush();
+    await settle();
     expect(document.querySelector('[data-testid="value-difference"]')).not.toBeNull();
     click(buttonByText('Record Return'));
     await flush();
@@ -134,17 +155,28 @@ describe('ReturnFormCustomer', () => {
     expect(p.items[0].saleItemId).toBe(11);
   });
 
-  it('no-receipt mode asks for unit cost when the item has no lots', async () => {
-    const api = installApi({ getItemLots: [], createCustomerReturn: async () => result });
+  it('no-receipt mode sends the entered unit cost; a missing cost is the backend refusal', async () => {
+    let refuse = true;
+    const api = installApi({
+      getItemLots: [],
+      previewCustomerReturn: async () => {
+        if (refuse) throw { type: 'ValidationError', details: { field: 'unit_cost', message: 'unit cost required: item has no prior lot' } };
+        return result;
+      },
+      createCustomerReturn: async () => result,
+    });
     render(<ReturnFormCustomer />);
     click(document.querySelectorAll('input[name="return-mode"]')[1]);
     await flush();
     click(document.querySelector('[data-testid="pick-item"]')!);
-    await flush();
+    await settle();
     click(buttonByText('Record Return'));
     await flush();
-    expect(bodyText()).toContain('unit cost is required');
+    expect(bodyText()).toContain('unit cost required');
+    expect(api.createCustomerReturn).not.toHaveBeenCalled();
+    refuse = false;
     setInput(document.querySelector('input[aria-label="Unit cost for Gel Pen"]')!, '4');
+    await settle();
     click(buttonByText('Record Return'));
     await flush();
     const p = api.createCustomerReturn.mock.calls[0][0];
@@ -158,17 +190,28 @@ describe('ReturnFormVendor', () => {
     document.body.innerHTML = '';
   });
 
-  it('sends a REFUND payload without unitCost, capped by remaining', async () => {
-    const api = installApi({ getPurchaseDetails: async () => purchaseDetail(), createVendorReturn: async () => result });
+  it('sends a REFUND payload without unitCost; the backend refuses more than remaining', async () => {
+    const api = installApi({
+      getPurchaseDetails: async () => purchaseDetail(),
+      previewVendorReturn: async (p: { items: { quantity: number }[] }) => {
+        if (p.items[0].quantity > 6) {
+          throw { type: 'ValidationError', details: { field: 'quantity', message: 'Cannot return 7 from lot 21: only 6 remaining' } };
+        }
+        return { ...result, totalAmount: 60 };
+      },
+      createVendorReturn: async () => result,
+    });
     render(<ReturnFormVendor initialBillId={8} />);
     await waitFor(() => bodyText().includes('Notebook'));
     const qty = document.querySelector('input[aria-label="Return quantity for Notebook"]')!;
     setInput(qty, '7');
+    await settle();
+    expect(bodyText()).toContain('only 6 remaining');
     click(buttonByText('Record Vendor Return'));
     await flush();
     expect(api.createVendorReturn).not.toHaveBeenCalled();
-    expect(bodyText()).toContain('exceeds remaining 6');
     setInput(qty, '2');
+    await settle();
     click(buttonByText('Record Vendor Return'));
     await flush();
     const p = api.createVendorReturn.mock.calls[0][0];

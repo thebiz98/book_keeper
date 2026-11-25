@@ -1,5 +1,7 @@
-import { round2 } from '@/lib/money';
-import type { PaymentStatus } from '@/types';
+/**
+ * The purchase entry line and display-only unit conversions. Line totals, bill totals and the
+ * payment rules are the backend's (`preview_purchase`, DD-56); nothing here decides money.
+ */
 
 /** Float noise guard for base-unit quantities (decimals allowed). */
 export function round6(n: number): number {
@@ -21,7 +23,7 @@ export interface PurchaseLine {
   unitCost: number;
   /** Edit mode (FR-20): the existing lot this line keeps; absent/null = a new line. */
   purchaseItemId?: number | null;
-  /** Edit mode: base units already used from the lot; the quantity cannot go below this. */
+  /** Edit mode: base units already used from the lot (shown as a hint; the backend enforces it). */
   minBaseQty?: number;
   /** Edit mode: the lot is referenced, so its item cannot change and the line cannot be removed. */
   locked?: boolean;
@@ -29,43 +31,10 @@ export interface PurchaseLine {
   costLocked?: boolean;
 }
 
+/** Display: the line's quantity in base units. */
 export const lineBaseQuantity = (l: Pick<PurchaseLine, 'quantity' | 'unitsPerBundle'>) =>
   round6(l.quantity * l.unitsPerBundle);
 
+/** Display: the line's cost per base unit. */
 export const lineCostPerBase = (l: Pick<PurchaseLine, 'unitCost' | 'unitsPerBundle'>) =>
   l.unitCost / l.unitsPerBundle;
-
-export const lineTotal = (l: Pick<PurchaseLine, 'quantity' | 'unitCost'>) =>
-  round2(l.quantity * l.unitCost);
-
-export const purchaseTotal = (lines: PurchaseLine[]) =>
-  round2(lines.reduce((acc, l) => acc + lineTotal(l), 0));
-
-/** Mirrors the backend cross-check (DD-21). Returns an error message or null. */
-export function validatePayment(
-  status: PaymentStatus,
-  total: number,
-  paid: number,
-  vendorId: number | null
-): string | null {
-  const t = round2(total);
-  const p = round2(paid);
-  if (!Number.isFinite(p) || p < 0) return 'Paid amount cannot be negative';
-  if (p > t) return 'Paid amount cannot exceed the purchase total';
-  if ((status === 'PARTIAL' || status === 'UNPAID') && vendorId === null) {
-    return 'Select a vendor for partial or unpaid purchases';
-  }
-  if (status === 'PAID' && p !== t) return 'PAID requires paid amount equal to the total';
-  if (status === 'PARTIAL' && !(p > 0 && p < t)) {
-    return 'PARTIAL requires a paid amount greater than 0 and less than the total';
-  }
-  if (status === 'UNPAID' && p !== 0) return 'UNPAID requires a paid amount of 0';
-  return null;
-}
-
-/** Paid amount actually sent for a status (PAID = total, UNPAID = 0, PARTIAL = entered). */
-export function effectivePaid(status: PaymentStatus, total: number, entered: number): number {
-  if (status === 'PAID') return round2(total);
-  if (status === 'UNPAID') return 0;
-  return round2(entered);
-}

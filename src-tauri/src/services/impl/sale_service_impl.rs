@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use crate::core::dtos::{
-    BillEditGuard, CreateSalePayload, DeleteBillResult, Paginated, RecordPaymentPayload, SaleDetailView,
-    SaleItemDetail, SaleHistoryRow, SaleSummaryResponse, SalesHistoryFilter,
+    BillEditGuard, BillPaymentPreview, BillPreview, CreateSalePayload, DeleteBillResult, Paginated,
+    PreviewSalePayload, RecordPaymentPayload, SaleDetailView, SaleItemDetail, SaleHistoryRow,
+    SaleSummaryResponse, SalesHistoryFilter,
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
 use crate::core::error::AppError;
@@ -12,8 +13,8 @@ use crate::services::r#impl::bill_guard::{
     TOTAL_BELOW_APPLIED,
 };
 use crate::services::r#impl::bill_math::{
-    compute_bill_totals, delete_bill_charges, insert_bill_charges, net_unit_price, resolve_bill_charges,
-    sale_payment_split, validate_charge_inputs, BillTotals, ResolvedCharge,
+    bill_preview, compute_bill_totals, delete_bill_charges, insert_bill_charges, net_unit_price,
+    resolve_bill_charges, sale_payment_split, validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
 };
 use crate::core::value_objects::{PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
@@ -159,10 +160,13 @@ fn price_sale(
     tx: &mut dyn TransactionContext,
     payload: &CreateSalePayload,
     r: &ResolvedSale,
+    applied: f64,
+    fig: &mut BillFigures,
 ) -> Result<(Vec<ResolvedCharge>, BillTotals), AppError> {
     let charges = resolve_bill_charges(tx, TransactionType::Sale, &payload.charges)?;
     let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
     let totals = compute_bill_totals(&line_totals, &charges)?;
+    fig.set_totals(&line_totals, totals, applied);
     Ok((charges, totals))
 }
 
@@ -248,25 +252,31 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
     }
 }
 
-impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for SaleServiceImpl<I, P, U> {
-    fn get_next_sale_code(&self) -> Result<String, AppError> {
-        // Display-only preview: the code is assigned for real inside create_sale's write transaction.
-        let mut tx = self.uow.begin_read()?;
-        tx.sales().get_next_transaction_code()
-    }
+/// The create and edit bodies of the sale commands, run inside the caller's transaction. The real
+/// commands commit afterwards; the previews drop the transaction (DD-56). `with_payment = false`
+/// (preview only) skips the payment check and books no upfront cash. `fig` records the totals
+/// reached, even when a later check fails.
+impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P, U> {
+    fn create_sale_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        payload: &CreateSalePayload,
+        with_payment: bool,
+        fig: &mut BillFigures,
+    ) -> Result<SaleSummaryResponse, AppError> {
+        validate_sale_shape(payload)?;
 
-    fn create_sale(&self, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError> {
-        validate_sale_shape(&payload)?;
-        let mut tx = self.uow.begin_transaction()?;
-
-        // Party, lines, aggregated stock check across all lines of one item (DD-10).
-        let r = resolve_sale(&mut *tx, &payload, None)?;
-        self.inventory_service.validate_stock_availability(&mut *tx, &r.requirements)?;
-
-        // Charges (FR-19), totals and the payment cross-check (DD-02).
-        let (charges, totals) = price_sale(&mut *tx, &payload, &r)?;
+        // Party and lines; charges and totals (FR-19), then the aggregated stock check across all
+        // lines of one item (DD-10) and the payment cross-check (DD-02).
+        let r = resolve_sale(tx, payload, None)?;
+        let (charges, totals) = price_sale(tx, payload, &r, 0.0, fig)?;
+        self.inventory_service.validate_stock_availability(tx, &r.requirements)?;
         let total_amount = totals.total_amount;
-        let (upfront, change) = check_sale_payment(payload.payment_status, round2(payload.paid_amount), total_amount, r.party_id)?;
+        let (upfront, change) = if with_payment {
+            check_sale_payment(payload.payment_status, round2(payload.paid_amount), total_amount, r.party_id)?
+        } else {
+            (0.0, 0.0)
+        };
 
         // Header: paid 0 / balance = total; the ledger fixes both below.
         let sale_code = tx.sales().get_next_transaction_code()?;
@@ -289,40 +299,45 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             updated_at: None,
         };
         let sale_id = tx.sales().create_transaction(&sale_tx)?;
-        insert_bill_charges(&mut *tx, TransactionType::Sale, sale_id, &charges)?;
-        self.post_sale_lines(&mut *tx, sale_id, &r.lines)?;
-        self.record_upfront(&mut *tx, sale_id, r.party_id, &payload, upfront)?;
+        insert_bill_charges(tx, TransactionType::Sale, sale_id, &charges)?;
+        self.post_sale_lines(tx, sale_id, &r.lines)?;
+        self.record_upfront(tx, sale_id, r.party_id, payload, upfront)?;
 
         // Respond from the header as the ledger left it.
         let header = tx.sales().find_transaction_by_id(sale_id)?.ok_or_else(|| AppError::NotFound {
             entity: "SaleTransaction".to_string(),
             id: sale_id.to_string(),
         })?;
-        tx.commit()?;
         Ok(summary(&header, change))
     }
 
-    fn update_sale(&self, sale_id: i64, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError> {
-        validate_sale_shape(&payload)?;
-        let mut tx = self.uow.begin_transaction()?;
+    fn update_sale_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        sale_id: i64,
+        payload: &CreateSalePayload,
+        with_payment: bool,
+        fig: &mut BillFigures,
+    ) -> Result<SaleSummaryResponse, AppError> {
+        validate_sale_shape(payload)?;
         let old = tx
             .sales()
             .find_transaction_by_id(sale_id)?
             .ok_or_else(|| AppError::not_found("SaleTransaction", sale_id.to_string()))?;
-        let g = evaluate_sale_guard(&mut *tx, sale_id)?;
+        let g = evaluate_sale_guard(tx, sale_id)?;
         if let Some(reason) = g.reasons.iter().find(|r| r.blocks_edit) {
             return Err(locked(reason));
         }
 
         // Reverse the old version: stock, lines, charges, upfront cash. Later settlements stay.
-        self.inventory_service.reverse_sale_bill_stock(&mut *tx, sale_id)?;
+        self.inventory_service.reverse_sale_bill_stock(tx, sale_id)?;
         tx.sales().delete_sale_items(sale_id)?;
-        delete_bill_charges(&mut *tx, TransactionType::Sale, sale_id)?;
+        delete_bill_charges(tx, TransactionType::Sale, sale_id)?;
         self.payment_service
-            .delete_bill_ledger(&mut *tx, TransactionType::Sale, sale_id, &[PaymentKind::Upfront])?;
+            .delete_bill_ledger(tx, TransactionType::Sale, sale_id, &[PaymentKind::Upfront])?;
 
         // Repost through the create rules.
-        let r = resolve_sale(&mut *tx, &payload, old.party_id)?;
+        let r = resolve_sale(tx, payload, old.party_id)?;
         let party_changed = r.party_id != old.party_id;
         if party_changed && !g.can_change_party {
             return Err(locked_with(
@@ -336,8 +351,8 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                 "Payments were recorded later for this bill, so it needs a customer",
             ));
         }
-        self.inventory_service.validate_stock_availability(&mut *tx, &r.requirements)?;
-        let (charges, totals) = price_sale(&mut *tx, &payload, &r)?;
+        let (charges, totals) = price_sale(tx, payload, &r, g.applied_amount, fig)?;
+        self.inventory_service.validate_stock_availability(tx, &r.requirements)?;
         let total_amount = totals.total_amount;
         if total_amount + MONEY_EPS < g.applied_amount {
             return Err(locked_with(
@@ -346,7 +361,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             ));
         }
         let open = round2((total_amount - g.applied_amount).max(0.0));
-        let (upfront, change) = check_sale_payment(payload.payment_status, round2(payload.paid_amount), open, r.party_id)?;
+        let (upfront, change) = if with_payment {
+            check_sale_payment(payload.payment_status, round2(payload.paid_amount), open, r.party_id)?
+        } else {
+            (0.0, 0.0)
+        };
 
         let header = SaleTransaction {
             transaction_date: payload.transaction_date.clone(),
@@ -362,20 +381,63 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             ..old.clone()
         };
         tx.sales().update_header_for_edit(&header)?;
-        insert_bill_charges(&mut *tx, TransactionType::Sale, sale_id, &charges)?;
-        self.post_sale_lines(&mut *tx, sale_id, &r.lines)?;
+        insert_bill_charges(tx, TransactionType::Sale, sale_id, &charges)?;
+        self.post_sale_lines(tx, sale_id, &r.lines)?;
         if party_changed {
-            self.payment_service.repoint_bill_party(&mut *tx, TransactionType::Sale, sale_id, r.party_id)?;
+            self.payment_service.repoint_bill_party(tx, TransactionType::Sale, sale_id, r.party_id)?;
         }
-        self.payment_service.recompute(&mut *tx, TransactionType::Sale, sale_id)?;
-        self.record_upfront(&mut *tx, sale_id, r.party_id, &payload, upfront)?;
+        self.payment_service.recompute(tx, TransactionType::Sale, sale_id)?;
+        self.record_upfront(tx, sale_id, r.party_id, payload, upfront)?;
 
         let header = tx.sales().find_transaction_by_id(sale_id)?.ok_or_else(|| AppError::NotFound {
             entity: "SaleTransaction".to_string(),
             id: sale_id.to_string(),
         })?;
-        tx.commit()?;
         Ok(summary(&header, change))
+    }
+}
+
+impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for SaleServiceImpl<I, P, U> {
+    fn get_next_sale_code(&self) -> Result<String, AppError> {
+        // Display-only preview: the code is assigned for real inside create_sale's write transaction.
+        let mut tx = self.uow.begin_read()?;
+        tx.sales().get_next_transaction_code()
+    }
+
+    fn create_sale(&self, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.create_sale_in_tx(&mut *tx, &payload, true, &mut BillFigures::default())?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    fn update_sale(&self, sale_id: i64, payload: CreateSalePayload) -> Result<SaleSummaryResponse, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.update_sale_in_tx(&mut *tx, sale_id, &payload, true, &mut BillFigures::default())?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    fn preview_sale(&self, sale_id: Option<i64>, payload: PreviewSalePayload) -> Result<BillPreview, AppError> {
+        let (payload, with_payment) = payload.into_command();
+        let mut tx = self.uow.begin_transaction()?;
+        let mut fig = BillFigures::default();
+        let outcome = match sale_id {
+            Some(id) => self.update_sale_in_tx(&mut *tx, id, &payload, with_payment, &mut fig),
+            None => self.create_sale_in_tx(&mut *tx, &payload, with_payment, &mut fig),
+        };
+        tx.rollback()?; // never committed
+        bill_preview(
+            fig,
+            outcome.map(|s| {
+                with_payment.then_some(BillPaymentPreview {
+                    paid_amount: s.paid_amount,
+                    balance_due: s.balance_due,
+                    change_amount: s.change_amount,
+                    payment_status: s.payment_status,
+                })
+            }),
+        )
     }
 
     fn delete_sale(&self, sale_id: i64) -> Result<DeleteBillResult, AppError> {

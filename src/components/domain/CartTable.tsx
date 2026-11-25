@@ -12,6 +12,8 @@ export interface CartTableProps {
   onRemoveItem?: (lineId: string) => void;
   /** Called when focus should return to the search box (e.g. last row removed). */
   onFocusSearch?: () => void;
+  /** Line totals from the backend preview, by line index; "-" while the preview is pending. */
+  lineTotals?: ReadonlyArray<number | null | undefined>;
   readOnly?: boolean;
   className?: string;
 }
@@ -23,7 +25,7 @@ const fmtQty = (n: number) => String(Number(n.toFixed(3)));
 export function packDisplay(item: CartLine): string {
   const isPack = item.bundleId != null || (item.bundleName != null && item.unitsPerBundle > 1);
   if (!isPack) return `${fmtQty(item.quantity)} ${item.baseUnit}`;
-  return `${fmtQty(item.quantity)} × ${item.bundleName ?? 'Pack'} = ${fmtQty(item.baseQuantity)} ${item.baseUnit}`;
+  return `${fmtQty(item.quantity)} × ${item.bundleName ?? 'Pack'} = ${fmtQty(item.quantity * item.unitsPerBundle)} ${item.baseUnit}`;
 }
 
 const QtyCell: React.FC<{
@@ -85,6 +87,7 @@ export const CartTable: React.FC<CartTableProps> = ({
   onUpdateQuantity,
   onRemoveItem,
   onFocusSearch,
+  lineTotals,
   readOnly = false,
   className,
 }) => {
@@ -167,7 +170,7 @@ export const CartTable: React.FC<CartTableProps> = ({
         </TableHeader>
         <TableBody>
           {items.map((item, index) => {
-            const lineTotal = item.lineTotal ?? item.quantity * item.rate;
+            const lineTotal = lineTotals?.[index];
             return (
               <TableRow
                 key={item.lineId}
@@ -205,7 +208,7 @@ export const CartTable: React.FC<CartTableProps> = ({
                   <CurrencyDisplay amount={item.rate} size="sm" />
                 </TableCell>
                 <TableCell align="right" mono className="font-semibold text-slate-900 dark:text-slate-100">
-                  <CurrencyDisplay amount={lineTotal} size="sm" />
+                  {lineTotal != null ? <CurrencyDisplay amount={lineTotal} size="sm" /> : "—"}
                 </TableCell>
                 {!readOnly && (
                   <TableCell className="text-center">

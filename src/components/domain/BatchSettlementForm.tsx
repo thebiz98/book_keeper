@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
+import { usePreview } from '@/hooks/usePreview';
 import { todayLocal } from '@/lib/dates';
-import type { TransactionType } from '@/types';
+import type { SettleAllocation, TransactionType } from '@/types';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
 import { FormActions, enterToSubmit } from '../ui/FormActions';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
-import { allocateFifo, fetchOpenBills, type OpenBill } from './openBills';
+import { fetchOpenBills, type OpenBill } from './openBills';
 
 export interface BatchRow {
   checked: boolean;
@@ -15,9 +15,9 @@ export interface BatchRow {
 }
 export type BatchRows = Record<number, BatchRow>;
 
-/** Amount -> rows: oldest-first fill, bills that get nothing are unticked. */
-export function rowsFromAmount(bills: OpenBill[], amount: number): BatchRows {
-  const applied = new Map(allocateFifo(bills, amount).map((r) => [r.bill.id, r.applied]));
+/** The backend's split (`preview_settlement_allocation`) as rows; bills it gives nothing are unticked. */
+export function rowsFromAllocations(bills: OpenBill[], allocations: SettleAllocation[]): BatchRows {
+  const applied = new Map(allocations.map((a) => [a.transactionId, a.amountPaid]));
   const rows: BatchRows = {};
   for (const b of bills) {
     const a = applied.get(b.id) ?? 0;
@@ -26,9 +26,9 @@ export function rowsFromAmount(bills: OpenBill[], amount: number): BatchRows {
   return rows;
 }
 
-/** Rows -> amount: the sum of the ticked rows. */
+/** Rows -> amount: the sum of the ticked rows the user entered (display; the backend validates on save). */
 export function amountFromRows(rows: BatchRows): number {
-  return round2(Object.values(rows).reduce((s, r) => s + (r.checked ? r.amount : 0), 0));
+  return Object.values(rows).reduce((s, r) => s + (r.checked ? r.amount : 0), 0);
 }
 
 export interface BatchSettlementFormProps {
@@ -68,10 +68,12 @@ export const BatchSettlementForm: React.FC<BatchSettlementFormProps> = ({
     fetchOpenBills(transactionType, partyId)
       .then((b) => {
         if (!live) return;
-        const full = round2(b.reduce((s, x) => s + x.balanceDue, 0));
+        // Start by settling every open bill in full.
+        const all: BatchRows = {};
+        for (const x of b) all[x.id] = { checked: true, amount: x.balanceDue };
         setBills(b);
-        setAmount(full);
-        setRows(rowsFromAmount(b, full));
+        setAmount(amountFromRows(all));
+        setRows(all);
         setLoaded(true);
       })
       .catch((e) => live && setBillsError(errorMessage(e)));
@@ -80,39 +82,44 @@ export const BatchSettlementForm: React.FC<BatchSettlementFormProps> = ({
     };
   }, [transactionType, partyId]);
 
-  const outstanding = round2(bills.reduce((s, b) => s + b.balanceDue, 0));
+  const outstanding = bills.reduce((s, b) => s + b.balanceDue, 0); // display
+
+  /** Set while the Amount box drives the rows; typing it asks the backend for the oldest-first split. */
+  const [typed, setTyped] = useState<number | null>(null);
+  const splitInput = useMemo(() => (typed !== null && typed > 0 && loaded ? { partyId, transactionType, amount: typed } : null), [typed, loaded, partyId, transactionType]);
+  const split = usePreview<{ partyId: number; transactionType: TransactionType; amount: number }, SettleAllocation[]>({
+    input: splitInput,
+    fetcher: (i) => api.previewSettlementAllocation(i.partyId, i.transactionType, i.amount),
+  });
+  useEffect(() => {
+    if (typed !== null && split.data) setRows(rowsFromAllocations(bills, split.data));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [split.data]);
 
   const onAmount = (v: number) => {
     setAmount(v);
-    setRows(rowsFromAmount(bills, v));
+    setTyped(v);
+    if (!(v > 0)) setRows(rowsFromAllocations(bills, []));
   };
   const onRow = (bill: OpenBill, patch: Partial<BatchRow>) => {
     const cur = rows[bill.id] ?? { checked: false, amount: 0 };
     let next = { ...cur, ...patch };
     if (patch.amount !== undefined) {
-      next.amount = round2(Math.min(Math.max(0, patch.amount), bill.balanceDue));
-      next.checked = next.amount > 0;
+      next.checked = patch.amount > 0;
     } else if (patch.checked !== undefined) {
       next = patch.checked ? { checked: true, amount: bill.balanceDue } : { checked: false, amount: 0 };
     }
     const nextRows = { ...rows, [bill.id]: next };
+    setTyped(null);
     setRows(nextRows);
     setAmount(amountFromRows(nextRows));
   };
 
   const ticked = bills.filter((b) => rows[b.id]?.checked);
-  const rowInvalid = ticked.some((b) => {
-    const a = rows[b.id].amount;
-    return !(a > 0) || round2(a) > round2(b.balanceDue);
-  });
-  const overTotal = round2(amount) > outstanding;
-  const message = overTotal
-    ? `Amount cannot exceed the total outstanding (₹${outstanding.toFixed(2)})`
-    : rowInvalid
-      ? 'Every ticked bill needs an amount above 0 and within its balance'
-      : null;
   const total = amountFromRows(rows);
-  const canSave = loaded && total > 0 && !rowInvalid && !overTotal && !!date && ticked.length <= 200;
+  const rowInvalid = ticked.some((b) => !(rows[b.id].amount > 0)); // format check
+  const message = typed !== null ? (split.errors[0]?.message ?? null) : rowInvalid ? 'Every ticked bill needs an amount above 0' : null;
+  const canSave = loaded && total > 0 && !rowInvalid && !split.isLoading && split.errors.length === 0 && !!date;
 
   const save = async () => {
     if (!canSave || saving) return;
@@ -125,7 +132,7 @@ export const BatchSettlementForm: React.FC<BatchSettlementFormProps> = ({
         settlementDate: date,
         paymentMode,
         notes: notes.trim() || null,
-        allocations: ticked.map((b) => ({ transactionId: b.id, amountPaid: round2(rows[b.id].amount) })),
+        allocations: ticked.map((b) => ({ transactionId: b.id, amountPaid: rows[b.id].amount })),
       });
       onSettled?.(total);
       onClose();
@@ -153,7 +160,7 @@ export const BatchSettlementForm: React.FC<BatchSettlementFormProps> = ({
         <div className="text-right">
           <span className="text-xs text-slate-500 dark:text-slate-400">Remaining After Payment</span>
           <div className="text-xl font-bold font-mono">
-            <CurrencyDisplay amount={Math.max(0, round2(outstanding - total))} size="xl" />
+            <CurrencyDisplay amount={outstanding - total} size="xl" />
           </div>
         </div>
       </div>

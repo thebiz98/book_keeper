@@ -2,33 +2,34 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useCartStore } from '@/store/useCartStore';
 import type { ItemInput, BundleInput } from '@/store/useCartStore';
 
+// DD-56: the cart holds what was entered. Line totals, bill totals and stock checks are the backend's
+// (`preview_sale`), so there is nothing money- or stock-related to assert here.
+
 const pencil: ItemInput = {
   id: 1,
   name: 'Pencil',
   baseUnit: 'PCS',
   defaultSalePrice: 10,
   mrp: 12,
-  currentStock: 50,
 };
 const box10: BundleInput = { id: 5, bundleName: 'Box of 10', unitsPerBundle: 10, salePrice: 90 };
-const box12: BundleInput = { id: 6, bundleName: 'Box of 12', unitsPerBundle: 12, salePrice: 100 };
 
 const s = () => useCartStore.getState();
 
-describe('useCartStore (F6 rules)', () => {
+describe('useCartStore (entry rules only)', () => {
   beforeEach(() => s().clearCart());
 
   describe('addItem', () => {
-    it('adds a loose line with a line id, quantity 1 and base price', () => {
+    it('adds a loose line with a line id, quantity 1 and the base price as the rate', () => {
       expect(s().addItem(pencil)).toBe(true);
-      expect(s().items[0]).toMatchObject({ itemId: 1, quantity: 1, baseQuantity: 1, rate: 10, lineTotal: 10 });
+      expect(s().items[0]).toMatchObject({ itemId: 1, quantity: 1, rate: 10, unitsPerBundle: 1 });
       expect(s().items[0].lineId).toBeTruthy();
-      expect(s().subtotal).toBe(10);
+      expect(s().totalItems).toBe(1);
     });
 
     it('supports decimal quantity and explicit rate override', () => {
       expect(s().addItem(pencil, 2.5, null, 8)).toBe(true);
-      expect(s().items[0]).toMatchObject({ quantity: 2.5, rate: 8, lineTotal: 20 });
+      expect(s().items[0]).toMatchObject({ quantity: 2.5, rate: 8 });
     });
 
     it('merges only when item, unit and rate are all the same', () => {
@@ -45,36 +46,25 @@ describe('useCartStore (F6 rules)', () => {
 
       s().addItem(pencil, 1, box10); // same bundle + same rate merges
       expect(s().items).toHaveLength(3);
-      expect(s().items[2]).toMatchObject({ quantity: 2, baseQuantity: 20, bundleId: 5 });
+      expect(s().items[2]).toMatchObject({ quantity: 2, unitsPerBundle: 10, bundleId: 5 });
     });
 
-    it('keeps quantity * unitsPerBundle === baseQuantity after merging', () => {
-      s().addItem(pencil, 1, box12);
-      s().addItem(pencil, 2, box12);
-      const line = s().items[0];
-      expect(line.quantity).toBe(3);
-      expect(line.baseQuantity).toBe(36);
-    });
-
-    it('checks stock aggregated across lines of the same item', () => {
-      s().addItem(pencil, 1, box10); // 10
-      s().addItem(pencil, 3, box10, 85); // +30 => 40, separate line (rate differs)
-      expect(s().addItem(pencil, 11, null)).toBe(false); // 40 + 11 > 50
-      expect(s().addItem(pencil, 10, null)).toBe(true); // exactly 50
-      expect(s().addItem(pencil, 1e-12, null)).toBe(true); // within 1e-9 epsilon
-    });
-
-    it('rejects zero, negative and NaN quantity and out-of-stock items', () => {
+    it('rejects zero, negative and NaN quantity and a negative or NaN rate (format checks)', () => {
       expect(s().addItem(pencil, 0)).toBe(false);
       expect(s().addItem(pencil, -1)).toBe(false);
       expect(s().addItem(pencil, NaN)).toBe(false);
-      expect(s().addItem({ ...pencil, currentStock: 0 })).toBe(false);
+      expect(s().addItem(pencil, 1, null, -2)).toBe(false);
+      expect(s().addItem(pencil, 1, null, NaN)).toBe(false);
       expect(s().items).toHaveLength(0);
     });
 
-    it('uses bundle price, falling back to base price times units', () => {
+    it('does not check stock: that is the backend preview', () => {
+      expect(s().addItem(pencil, 100000)).toBe(true);
+    });
+
+    it('uses the bundle price as the rate, falling back to base price times units', () => {
       s().addItem(pencil, 2, box10);
-      expect(s().items[0]).toMatchObject({ rate: 90, lineTotal: 180 });
+      expect(s().items[0].rate).toBe(90);
       s().addItem(pencil, 1, { id: 9, bundleName: 'Pack of 5', unitsPerBundle: 5 });
       expect(s().items[1].rate).toBe(50);
     });
@@ -88,51 +78,31 @@ describe('useCartStore (F6 rules)', () => {
       expect(s().updateQuantity(id, -3)).toBe(false);
       expect(s().updateQuantity(id, NaN)).toBe(false);
       expect(s().items[0].quantity).toBe(2);
-    });
-
-    it('rechecks aggregated stock including other lines', () => {
-      s().addItem(pencil, 40);
-      s().addItem(pencil, 1, null, 9);
-      const second = s().items[1].lineId;
-      expect(s().updateQuantity(second, 10)).toBe(true);
-      expect(s().updateQuantity(second, 11)).toBe(false);
-      expect(s().items[1].quantity).toBe(10);
+      expect(s().updateQuantity(id, 7)).toBe(true);
+      expect(s().items[0].quantity).toBe(7);
     });
   });
 
   describe('setBundle', () => {
-    it('sets bundleId, multiplier and rate', () => {
+    it('sets bundleId, multiplier and the suggested rate', () => {
       s().addItem(pencil, 2);
       const id = s().items[0].lineId;
       expect(s().setBundle(id, box10)).toBe(true);
-      expect(s().items[0]).toMatchObject({ bundleId: 5, unitsPerBundle: 10, baseQuantity: 20, rate: 90, lineTotal: 180 });
+      expect(s().items[0]).toMatchObject({ bundleId: 5, unitsPerBundle: 10, rate: 90 });
+      expect(s().totalBaseUnits).toBe(20);
       expect(s().setBundle(id, null)).toBe(true);
-      expect(s().items[0]).toMatchObject({ bundleId: undefined, unitsPerBundle: 1, baseQuantity: 2, rate: 10 });
-    });
-
-    it('refuses and keeps the previous unit when stock would be exceeded', () => {
-      s().addItem({ ...pencil, currentStock: 15 }, 10);
-      const id = s().items[0].lineId;
-      expect(s().setBundle(id, box12)).toBe(false);
-      expect(s().items[0]).toMatchObject({ bundleId: undefined, baseQuantity: 10 });
+      expect(s().items[0]).toMatchObject({ bundleId: undefined, unitsPerBundle: 1, rate: 10 });
     });
   });
 
-  describe('rate, remove, rounding', () => {
-    it('updateRate rejects negative/NaN and rounds line totals with round2', () => {
+  describe('rate, remove, clear', () => {
+    it('updateRate rejects negative/NaN', () => {
       s().addItem(pencil, 3);
       const id = s().items[0].lineId;
       expect(s().updateRate(id, -1)).toBe(false);
       expect(s().updateRate(id, NaN)).toBe(false);
       expect(s().updateRate(id, 3.33)).toBe(true);
-      expect(s().items[0].lineTotal).toBe(9.99);
-      expect(s().subtotal).toBe(9.99);
-    });
-
-    it('subtotal is rounded across lines', () => {
-      s().addItem(pencil, 1, null, 0.1);
-      s().addItem({ ...pencil, id: 2 }, 1, null, 0.2);
-      expect(s().subtotal).toBe(0.3);
+      expect(s().items[0].rate).toBe(3.33);
     });
 
     it('removes by line id, leaving other lines of the same item', () => {
@@ -144,13 +114,13 @@ describe('useCartStore (F6 rules)', () => {
       expect(s().totalItems).toBe(1);
     });
 
-    it('clearCart resets customer and totals', () => {
+    it('clearCart resets customer and lines', () => {
       s().addItem(pencil, 1);
       s().setCustomer({ id: 3, name: 'A' });
       s().clearCart();
       expect(s().items).toEqual([]);
       expect(s().selectedCustomer).toBeNull();
-      expect(s().subtotal).toBe(0);
+      expect(s().totalItems).toBe(0);
     });
   });
 
@@ -158,69 +128,47 @@ describe('useCartStore (F6 rules)', () => {
     const transport = { chargeTypeId: 1, name: 'Transport', effect: 'CHARGE' as const, amount: 50 };
     const discount = { chargeTypeId: 2, name: 'Cash Discount', effect: 'DISCOUNT' as const, amount: 20 };
 
-    it('recomputes the grand total on add, update and remove', () => {
-      s().addItem(pencil, 2, null, 100);
+    it('adds, updates and removes lines; totals are not kept here', () => {
       expect(s().addCharge(transport)).toBe(true);
       expect(s().addCharge(discount)).toBe(true);
-      expect(s()).toMatchObject({ subtotal: 200, chargesTotal: 50, discountsTotal: 20, grandTotal: 230 });
+      expect(s().charges.map((c) => c.amount)).toEqual([50, 20]);
       const key = s().charges[1].key;
       expect(s().updateChargeAmount(key, 30)).toBe(true);
-      expect(s().grandTotal).toBe(220);
+      expect(s().charges[1].amount).toBe(30);
       s().removeCharge(key);
-      expect(s()).toMatchObject({ discountsTotal: 0, grandTotal: 250 });
+      expect(s().charges).toHaveLength(1);
     });
 
-    it('recomputes the grand total when an item changes', () => {
-      s().addItem(pencil, 1, null, 100);
-      s().addCharge(transport);
-      const id = s().items[0].lineId;
-      s().updateQuantity(id, 3);
-      expect(s().grandTotal).toBe(350);
-    });
-
-    it('rejects invalid amounts and clears with the cart', () => {
+    it('rejects amounts that are not a positive number and clears with the cart', () => {
       expect(s().addCharge({ ...transport, amount: 0 })).toBe(false);
       expect(s().addCharge({ ...transport, amount: Number.NaN })).toBe(false);
       expect(s().addCharge({ ...transport, amount: -5 })).toBe(false);
       expect(s().charges).toHaveLength(0);
       s().addCharge(transport);
       s().clearCart();
-      expect(s()).toMatchObject({ charges: [], chargesTotal: 0, grandTotal: 0 });
+      expect(s().charges).toEqual([]);
     });
   });
 
   describe('edit mode (FR-20)', () => {
     const line = (over = {}) => ({
-      itemId: 1, name: 'Pencil', baseUnit: 'PCS', unitsPerBundle: 1, quantity: 5, baseQuantity: 5, rate: 10,
-      lineTotal: 50, availableStock: 52, ...over,
+      itemId: 1, name: 'Pencil', baseUnit: 'PCS', unitsPerBundle: 1, quantity: 5, rate: 10, ...over,
     });
 
-    it('loadForEdit sets lines, customer, editing and the credit', () => {
-      s().loadForEdit([line()], { id: 3, name: 'Ram' }, { saleId: 9, code: 'SAL-1009' }, { 1: 2 });
+    it('loadForEdit sets lines, customer, editing and charges', () => {
+      s().loadForEdit([line()], { id: 3, name: 'Ram' }, { saleId: 9, code: 'SAL-1009' }, [
+        { chargeTypeId: 1, name: 'Transport', effect: 'CHARGE', amount: 50 },
+      ]);
       expect(s().editing).toEqual({ saleId: 9, code: 'SAL-1009' });
-      expect(s().editCredit).toEqual({ 1: 2 });
       expect(s().selectedCustomer?.id).toBe(3);
       expect(s().items[0].lineId).toBeTruthy();
-      expect(s().subtotal).toBe(50);
-    });
-
-    it('addItem allows current stock plus the credit and rejects above it', () => {
-      s().loadForEdit([], null, { saleId: 9, code: 'SAL-1009' }, { 1: 5 });
-      expect(s().addItem({ ...pencil, currentStock: 50 }, 55)).toBe(true);
-      expect(s().addItem({ ...pencil, currentStock: 50 }, 1)).toBe(false);
-    });
-
-    it('an item sold out today can still be added back up to its credit', () => {
-      s().loadForEdit([], null, { saleId: 9, code: 'SAL-1009' }, { 1: 3 });
-      expect(s().addItem({ ...pencil, currentStock: 0 }, 3)).toBe(true);
-      expect(s().addItem({ ...pencil, currentStock: 0 }, 1)).toBe(false);
+      expect(s().charges).toHaveLength(1);
     });
 
     it('clearCart resets edit mode', () => {
-      s().loadForEdit([line()], null, { saleId: 9, code: 'SAL-1009' }, { 1: 5 });
+      s().loadForEdit([line()], null, { saleId: 9, code: 'SAL-1009' });
       s().clearCart();
       expect(s().editing).toBeNull();
-      expect(s().editCredit).toEqual({});
       expect(s().items).toHaveLength(0);
     });
   });

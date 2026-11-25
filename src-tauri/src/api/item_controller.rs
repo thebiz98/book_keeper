@@ -2,7 +2,6 @@ use crate::app_state::AppState;
 use tauri::State;
 use crate::core::error::AppError;
 use crate::core::dtos::*;
-use crate::core::entities::ItemBundle;
 
 #[tauri::command]
 pub async fn search_items_fts(state: State<'_, AppState>, query: String, limit: Option<usize>) -> Result<Vec<ItemSearchResult>, AppError> {
@@ -39,12 +38,12 @@ pub async fn update_item_low_stock_threshold(
     super::run_blocking(move || svc.update_low_stock_threshold(item_id, threshold)).await
 }
 #[tauri::command]
-pub async fn create_bundle(state: State<'_, AppState>, payload: CreateBundlePayload) -> Result<ItemBundle, AppError> {
+pub async fn create_bundle(state: State<'_, AppState>, payload: CreateBundlePayload) -> Result<SavedBundle, AppError> {
     let svc = state.item_service.clone();
     super::run_blocking(move || svc.create_bundle(payload)).await
 }
 #[tauri::command]
-pub async fn update_bundle(state: State<'_, AppState>, bundle_id: i64, payload: UpdateBundlePayload) -> Result<ItemBundle, AppError> {
+pub async fn update_bundle(state: State<'_, AppState>, bundle_id: i64, payload: UpdateBundlePayload) -> Result<SavedBundle, AppError> {
     let svc = state.item_service.clone();
     super::run_blocking(move || svc.update_bundle(bundle_id, payload)).await
 }

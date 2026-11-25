@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Package } from 'lucide-react';
 import { api } from '@/api';
 import { errorMessage } from '@/api/errors';
-import type { BundleSuggestion, ItemBundle } from '@/types';
+import type { BundleSuggestion, ItemBundle, SavedBundle } from '@/types';
 import { Modal } from '../ui/Modal';
 import { FormActions, enterToSubmit } from '../ui/FormActions';
 import { TextInput } from '../ui/TextInput';
@@ -11,8 +11,8 @@ import { parseOptional, validationField } from './formUtils';
 export interface BundleCreationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Receives the full persisted ItemBundle (create or update). */
-  onBundleCreated?: (bundle: ItemBundle) => void;
+  /** Receives the persisted bundle with its backend-suggested rate (create or update). */
+  onBundleCreated?: (bundle: SavedBundle) => void;
   initialItemId?: number;
   baseUnit?: string;
   /** When set the modal edits this bundle (updateBundle) instead of creating one. */

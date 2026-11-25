@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::core::dtos::{
     BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult,
-    ItemSearchResult, PageRequest, Paginated, UpdateBundlePayload,
+    ItemSearchResult, PageRequest, Paginated, SavedBundle, UpdateBundlePayload,
     UpdateItemPayload,
 };
 use crate::core::entities::{Item, ItemBundle};
@@ -244,13 +244,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let ids: Vec<i64> = items.iter().map(|i| i.id).collect();
         let mut by_item: std::collections::HashMap<i64, Vec<ItemBundleSearchResult>> = std::collections::HashMap::new();
         for b in tx.bundles().find_by_item_ids(&ids)? {
-            by_item.entry(b.item_id).or_default().push(ItemBundleSearchResult {
-                bundle_id: b.id,
-                bundle_name: b.bundle_name,
-                units_per_bundle: b.units_per_bundle,
-                bundle_price: b.default_bundle_price,
-                barcode: b.barcode,
-            });
+            let price = items.iter().find(|i| i.id == b.item_id).map_or(0.0, |i| i.default_sale_price);
+            by_item.entry(b.item_id).or_default().push(ItemBundleSearchResult::from_bundle(b, price));
         }
         let rows = items
             .into_iter()
@@ -396,20 +391,14 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
             .bundles()
             .find_by_item_id(item_id)?
             .into_iter()
-            .map(|b| ItemBundleSearchResult {
-                bundle_id: b.id,
-                bundle_name: b.bundle_name,
-                units_per_bundle: b.units_per_bundle,
-                bundle_price: b.default_bundle_price,
-                barcode: b.barcode,
-            })
+            .map(|b| ItemBundleSearchResult::from_bundle(b, item.default_sale_price))
             .collect();
         tx.commit()?;
         // The threshold is not indexed: no reindex needed.
         Ok(to_search_result(item, bundles))
     }
 
-    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<ItemBundle, AppError> {
+    fn create_bundle(&self, payload: CreateBundlePayload) -> Result<SavedBundle, AppError> {
         let item_id = payload.item_id.ok_or_else(|| invalid("item_id", "item_id is required for creating a bundle"))?;
         let p = UpdateBundlePayload {
             bundle_name: payload.bundle_name,
@@ -427,10 +416,10 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         tx.commit()?;
 
         self.reindex(&item, &bundles)?;
-        Ok(bundle)
+        Ok(SavedBundle::new(bundle, item.default_sale_price))
     }
 
-    fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<ItemBundle, AppError> {
+    fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<SavedBundle, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let existing = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| not_found("ItemBundle", bundle_id))?;
         let item = tx.items().find_by_id(existing.item_id)?.ok_or_else(|| not_found("Item", existing.item_id))?;
@@ -441,7 +430,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         tx.commit()?;
 
         self.reindex(&item, &bundles)?;
-        Ok(bundle)
+        Ok(SavedBundle::new(bundle, item.default_sale_price))
     }
 
     fn delete_bundle(&self, bundle_id: i64) -> Result<(), AppError> {

@@ -5,7 +5,7 @@ import { NewSalePage } from '@/pages/NewSalePage';
 import { useCartStore } from '@/store/useCartStore';
 import { __resetHotkeys } from '@/hooks/useHotkeys';
 import type { ChargeType } from '@/types';
-import { installApi, waitFor, click, setInput, bodyText } from './helpers';
+import { installApi, waitFor, click, setInput, bodyText, fakeBillPreview } from './helpers';
 
 const TRANSPORT: ChargeType = {
   id: 1, name: 'Transport', effect: 'CHARGE', appliesTo: 'BOTH', defaultAmount: 50, isActive: true, createdAt: '',
@@ -30,6 +30,11 @@ function makeApi() {
     listParties: [],
     searchParties: [],
     getDashboardMetrics: { liveCashInDrawer: 0 },
+    // DD-56: the screen shows what the backend preview returns (a test double stands in for it).
+    previewSale: async (p: Parameters<typeof fakeBillPreview>[0] & { charges: { amount: number }[] }) =>
+      p.charges.some((c) => c.amount === 250)
+        ? fakeBillPreview(p, { errors: [{ field: 'charges', message: 'Discounts (₹250.00) exceed the bill amount (₹200.00)' }] })
+        : fakeBillPreview(p),
     createSale: {
       saleId: 1, transactionCode: 'SAL-0002', totalAmount: 230, paidAmount: 230, balanceDue: 0, changeAmount: 0, paymentStatus: 'PAID',
     },
@@ -53,7 +58,7 @@ describe('NewSalePage charges (FR-19)', () => {
     __resetHotkeys();
     useCartStore.getState().clearCart();
     useCartStore.getState().addItem(
-      { id: 1, name: 'Pencil', baseUnit: 'PCS', defaultSalePrice: 100, mrp: null, currentStock: 50 },
+      { id: 1, name: 'Pencil', baseUnit: 'PCS', defaultSalePrice: 100, mrp: null },
       2,
       null,
       100
@@ -64,10 +69,9 @@ describe('NewSalePage charges (FR-19)', () => {
     makeApi();
     render(<NewSalePage />);
     await addCharge('tr');
-    await waitFor(() => !!tid('cart-grand-total'));
+    await waitFor(() => !!tid('cart-grand-total') && tid('cart-grand-total')!.textContent!.includes('250.00'));
     expect(tid('cart-subtotal')!.textContent).toContain('200.00');
     expect(tid('cart-charges-total')!.textContent).toContain('50.00');
-    expect(tid('cart-grand-total')!.textContent).toContain('250.00');
     await addCharge('cash', '20');
     await waitFor(() => tid('cart-grand-total')!.textContent!.includes('230.00'));
     expect(tid('cart-discounts-total')!.textContent).toContain('20.00');
@@ -81,8 +85,11 @@ describe('NewSalePage charges (FR-19)', () => {
     click(tid('complete-sale-btn')!);
     await waitFor(() => !!tid('payment-breakdown'));
     expect(tid('payment-breakdown')!.textContent).toContain('Transport');
-    expect(tid('grand-total')!.textContent).toContain('230.00');
-    expect((tid('cash-received-input') as HTMLInputElement).value).toBe('230');
+    await waitFor(() => tid('grand-total')!.textContent!.includes('230.00'));
+    await waitFor(() => (tid('cash-received-input') as HTMLInputElement).value === '230');
+    // The confirm button waits for the backend preview of exactly what is on screen.
+    await waitFor(() => !(tid('confirm-btn') as HTMLButtonElement).disabled);
+    expect(api.previewSale.mock.calls.at(-1)![0]).toMatchObject({ paymentStatus: 'PAID', paidAmount: 230 });
     click(tid('confirm-btn')!);
     await waitFor(() => api.createSale.mock.calls.length === 1);
     const payload = api.createSale.mock.calls[0][0] as { charges: unknown[]; paidAmount: number };
@@ -91,16 +98,17 @@ describe('NewSalePage charges (FR-19)', () => {
       { chargeTypeId: 3, amount: 20 },
     ]);
     expect(payload.paidAmount).toBe(230);
-    expect(bodyText()).not.toContain('Discounts exceed');
+    expect(bodyText()).not.toContain('exceed the bill amount');
   });
 
   it('blocks the payment dialog when discounts exceed the bill', async () => {
     makeApi();
     render(<NewSalePage />);
     await addCharge('cash', '250');
+    await waitFor(() => !!tid('preview-errors'));
     click(tid('complete-sale-btn')!);
     await waitFor(() => !!tid('page-error'));
-    expect(tid('page-error')!.textContent).toContain('Discounts exceed');
+    expect(tid('page-error')!.textContent).toContain('exceed the bill amount');
     expect(tid('payment-breakdown')).toBeNull();
   });
 });
