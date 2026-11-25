@@ -24,6 +24,8 @@ import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { QuantityInput } from '@/components/common/QuantityInput';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
+import { EntryField } from '@/components/ui/EntryField';
+import { NEW_BUNDLE, NEW_BUNDLE_LABEL } from '@/lib/bundleSentinel';
 import { TextInput } from '@/components/ui/TextInput';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import {
@@ -144,13 +146,14 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
   const unitsPerBundle = selectedBundle ? selectedBundle.unitsPerBundle : 1;
   const packLabel = selectedBundle ? selectedBundle.bundleName : (selectedItem?.baseUnit ?? '');
 
-  const unitOptions = selectedItem
+  const unitOptions: { value: string | number; label: string }[] = selectedItem
     ? [
         { value: BASE, label: `${selectedItem.baseUnit} (base unit)` },
         ...selectedItem.bundles.map((b) => ({
           value: b.bundleId,
           label: `${b.bundleName} (× ${b.unitsPerBundle})`,
         })),
+        { value: NEW_BUNDLE, label: NEW_BUNDLE_LABEL },
       ]
     : [{ value: BASE, label: 'Select an item first' }];
 
@@ -441,41 +444,62 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       {/* Inward Line Item Entry Row */}
       <div
         onKeyDown={onDraftKeyDown}
-        className="p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-start gap-2 text-xs"
+        className="p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap lg:flex-nowrap items-start gap-2 text-xs"
       >
-        <div className="flex-1 min-w-[220px] flex flex-col gap-1">
-          <span className="font-semibold text-slate-700 dark:text-slate-300">Item *</span>
+        <EntryField
+          label="Item"
+          required
+          className="flex-1 min-w-[220px]"
+          helper={
+            selectedItem && (
+              <span data-testid="selected-item" title={selectedItem.name}>
+                Selected: <b className="text-slate-800 dark:text-slate-200">{selectedItem.name}</b> (
+                {selectedItem.baseUnit})
+              </span>
+            )
+          }
+        >
           <div ref={searchWrapRef} data-purchase-search data-testid="purchase-item-search">
             <ItemSearchTypeahead
               onSelectItem={chooseItem}
               onCreate={(q) => setQuickName(q)}
               autoFocus
-              placeholder="Search catalog item by name, barcode or category..."
+              placeholder="Search item by name or barcode…"
             />
           </div>
-          {selectedItem && (
-            <span data-testid="selected-item" className="text-[11px] text-slate-500">
-              Selected: <b className="text-slate-800 dark:text-slate-200">{selectedItem.name}</b> (
-              {selectedItem.baseUnit})
-            </span>
-          )}
-        </div>
+        </EntryField>
 
-        <div className="w-44">
-          <Select
-            label="Unit"
-            hotkey="Alt+B new"
+        <EntryField label="Unit" htmlFor="purchase-unit" className="w-44 shrink-0">
+          <Select<string | number>
+            id="purchase-unit"
             value={unitChoice}
-            onChange={(v) => setUnitChoice(Number(v))}
+            onChange={(v) => {
+              // The sentinel opens the modal; the unit stays as it was (FR-29).
+              if (v === NEW_BUNDLE) latest.current.bundle();
+              else setUnitChoice(Number(v));
+            }}
             options={unitOptions}
             disabled={!selectedItem}
             aria-label="Unit"
           />
-        </div>
+        </EntryField>
 
-        <div className="w-36 flex flex-col gap-1">
-          <span className="font-semibold text-slate-700 dark:text-slate-300">Quantity *</span>
+        <EntryField
+          label="Quantity"
+          required
+          htmlFor="purchase-qty"
+          className="w-36 shrink-0"
+          helper={
+            selectedBundle && unitsPerBundle > 1 ? (
+              <span className="font-mono tabular-nums">
+                {quantity} {selectedBundle.bundleName} × {unitsPerBundle} ={' '}
+                {Math.round(quantity * unitsPerBundle * 1e6) / 1e6} {selectedItem?.baseUnit}
+              </span>
+            ) : null
+          }
+        >
           <QuantityInput
+            id="purchase-qty"
             quantity={quantity}
             onChange={setQuantity}
             baseUnit={selectedItem?.baseUnit ?? 'PCS'}
@@ -483,14 +507,20 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
             bundleName={selectedBundle?.bundleName}
             min={0.001}
             allowDecimals
+            hideConversion
             disabled={!selectedItem}
           />
-        </div>
+        </EntryField>
 
-        <div className="w-32">
+        <EntryField
+          label={`Purchase Price / ${packLabel || 'unit'}`}
+          required
+          htmlFor="purchase-price"
+          className="w-52 shrink-0"
+        >
           <TextInput
             ref={costRef}
-            label={`Purchase Price (₹ / ${packLabel || 'unit'}) *`}
+            id="purchase-price"
             type="number"
             min={0}
             step="any"
@@ -500,32 +530,19 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
             className="text-right font-mono"
             disabled={!selectedItem}
           />
-        </div>
+        </EntryField>
 
-        <div className="flex flex-col gap-1">
-          <span className="invisible">.</span>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="md"
-              disabled={!selectedItem}
-              onClick={() => latest.current.bundle()}
-              hotkey="Alt+B"
-            >
-              New Bundle
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="md"
-              onClick={handleAddLine}
-              leftIcon={<Plus className="h-4 w-4" />}
-            >
-              Add Line
-            </Button>
-          </div>
-        </div>
+        <EntryField label="" className="shrink-0">
+          <Button
+            type="button"
+            variant="primary"
+            size="md"
+            onClick={handleAddLine}
+            leftIcon={<Plus className="h-4 w-4" />}
+          >
+            Add Line
+          </Button>
+        </EntryField>
 
         {draftError && (
           <p role="alert" className="basis-full text-xs text-rose-600 dark:text-rose-400 font-medium">

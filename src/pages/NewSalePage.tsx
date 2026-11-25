@@ -185,6 +185,17 @@ export const NewSalePage: React.FC = () => {
     <div className="flex flex-col gap-4">
       {/* Top Invoice Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div className="w-80 flex-1 max-w-md">
+          <PartySelector
+            partyType="CUSTOMER"
+            selectedPartyId={selectedCustomer?.id ?? null}
+            onSelectParty={(party) =>
+              setCustomer(party ? { id: party.id, name: party.name, phone: party.phone } : null)
+            }
+            allowWalkIn
+          />
+        </div>
+
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800">
             <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">
@@ -207,17 +218,6 @@ export const NewSalePage: React.FC = () => {
               className="bg-transparent font-mono font-medium text-slate-800 dark:text-slate-200 focus:outline-none"
             />
           </div>
-        </div>
-
-        <div className="w-72">
-          <PartySelector
-            partyType="CUSTOMER"
-            selectedPartyId={selectedCustomer?.id ?? null}
-            onSelectParty={(party) =>
-              setCustomer(party ? { id: party.id, name: party.name, phone: party.phone } : null)
-            }
-            allowWalkIn
-          />
         </div>
       </div>
 
@@ -256,47 +256,12 @@ export const NewSalePage: React.FC = () => {
       />
 
       {/* Bottom Totals & Checkout Ribbon */}
-      <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-6">
-          <div className="flex flex-col">
-            <span className="text-xs text-slate-500 font-medium">{charges.length > 0 ? 'Items Subtotal' : 'Subtotal'}</span>
-            <div data-testid="cart-subtotal" className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-              <CurrencyDisplay amount={totals?.itemsSubtotal ?? 0} size="xl" />
-            </div>
-          </div>
-
-          {charges.length > 0 && (
-            <>
-              <div className="flex flex-col text-xs font-mono">
-                <span className="text-slate-500">Charges (+)</span>
-                <span data-testid="cart-charges-total" className="text-emerald-700 dark:text-emerald-400">
-                  <CurrencyDisplay amount={totals?.chargesTotal ?? 0} size="sm" />
-                </span>
-              </div>
-              <div className="flex flex-col text-xs font-mono">
-                <span className="text-slate-500">Discounts (−)</span>
-                <span data-testid="cart-discounts-total" className="text-rose-700 dark:text-rose-400">
-                  <CurrencyDisplay amount={totals?.discountsTotal ?? 0} size="sm" />
-                </span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-xs text-slate-500 font-medium">Grand Total</span>
-                <div data-testid="cart-grand-total" className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-                  <CurrencyDisplay amount={totals?.totalAmount ?? 0} size="xl" />
-                </div>
-              </div>
-            </>
-          )}
-
-          <div className="h-8 w-px bg-slate-200 dark:bg-slate-800" />
-
+      <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-2 min-w-[200px] flex-1 max-w-sm">
           <div className="flex flex-col text-xs text-slate-500 font-mono">
             <span>Items: {totalItems}</span>
             <span>Total Units: {Number(totalBaseUnits.toFixed(3))}</span>
           </div>
-        </div>
-
-        <div className="flex-1 min-w-[160px] max-w-sm">
           <input
             type="text"
             aria-label="Notes"
@@ -307,29 +272,71 @@ export const NewSalePage: React.FC = () => {
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="md"
-            disabled={items.length === 0}
-            onClick={() => setIsClearConfirmOpen(true)}
-            hotkey="Esc"
-            leftIcon={<Trash2 className="h-4 w-4" />}
-          >
-            Clear
-          </Button>
+        <div data-testid="sale-footer-actions" className="flex flex-col items-end gap-3 ml-auto">
+          <div className="flex flex-col items-end gap-0.5 text-right">
+            <div className="flex items-baseline gap-3">
+              <span className="text-xs text-slate-500 font-medium">
+                {charges.length > 0 ? 'Items Subtotal' : 'Subtotal'}
+              </span>
+              <div
+                data-testid="cart-subtotal"
+                className={
+                  charges.length > 0
+                    ? 'text-base font-semibold font-mono tabular-nums text-slate-700 dark:text-slate-300'
+                    : 'text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100'
+                }
+              >
+                <CurrencyDisplay amount={totals?.itemsSubtotal ?? 0} size={charges.length > 0 ? 'md' : 'xl'} />
+              </div>
+            </div>
+            {charges.length > 0 && (
+              <>
+                <div className="flex items-baseline gap-3 text-xs font-mono">
+                  <span className="text-slate-500">Charges (+)</span>
+                  <span data-testid="cart-charges-total" className="text-emerald-700 dark:text-emerald-400">
+                    <CurrencyDisplay amount={totals?.chargesTotal ?? 0} size="sm" />
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-3 text-xs font-mono">
+                  <span className="text-slate-500">Discounts (−)</span>
+                  <span data-testid="cart-discounts-total" className="text-rose-700 dark:text-rose-400">
+                    <CurrencyDisplay amount={totals?.discountsTotal ?? 0} size="sm" />
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-3">
+                  <span className="text-xs text-slate-500 font-medium">Grand Total</span>
+                  <div data-testid="cart-grand-total" className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100">
+                    <CurrencyDisplay amount={totals?.totalAmount ?? 0} size="xl" />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
-          <Button
-            variant="primary"
-            size="lg"
-            data-testid="complete-sale-btn"
-            disabled={items.length === 0}
-            onClick={openPayment}
-            hotkey="Ctrl+Enter"
-            leftIcon={<CheckCircle className="h-5 w-5" />}
-          >
-            Complete Sale
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="md"
+              disabled={items.length === 0}
+              onClick={() => setIsClearConfirmOpen(true)}
+              hotkey="Esc"
+              leftIcon={<Trash2 className="h-4 w-4" />}
+            >
+              Clear
+            </Button>
+
+            <Button
+              variant="primary"
+              size="lg"
+              data-testid="complete-sale-btn"
+              disabled={items.length === 0}
+              onClick={openPayment}
+              hotkey="Ctrl+Enter"
+              leftIcon={<CheckCircle className="h-5 w-5" />}
+            >
+              Complete Sale
+            </Button>
+          </div>
         </div>
       </div>
 

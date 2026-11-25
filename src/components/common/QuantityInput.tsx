@@ -13,6 +13,10 @@ export interface QuantityInputProps {
   min?: number;
   /** Fractional quantities (e.g. 2.5 KG). Default true. */
   allowDecimals?: boolean;
+  /** The caller shows the bundle conversion line itself (e.g. in a fixed helper slot). */
+  hideConversion?: boolean;
+  id?: string;
+  'aria-label'?: string;
 }
 
 export const QuantityInput: React.FC<QuantityInputProps> = ({
@@ -26,6 +30,9 @@ export const QuantityInput: React.FC<QuantityInputProps> = ({
   disabled = false,
   min = 1,
   allowDecimals = true,
+  hideConversion = false,
+  id,
+  'aria-label': ariaLabel,
 }) => {
   const isBundle = unitsPerBundle > 1 && bundleName;
   const totalBaseUnits = Math.round(quantity * unitsPerBundle * 1e6) / 1e6;
@@ -50,6 +57,8 @@ export const QuantityInput: React.FC<QuantityInputProps> = ({
     <div className={cn('flex flex-col gap-0.5', className)}>
       <div className="relative flex items-center">
         <input
+          id={id}
+          aria-label={ariaLabel}
           type="number"
           min={min}
           step={allowDecimals ? 'any' : 1}
@@ -67,7 +76,7 @@ export const QuantityInput: React.FC<QuantityInputProps> = ({
         </span>
       </div>
 
-      {isBundle && (
+      {isBundle && !hideConversion && (
         <span className="text-[10px] text-slate-500 dark:text-slate-400 tabular-nums font-mono">
           {quantity} {bundleName} × {unitsPerBundle} = {totalBaseUnits} {baseUnit}
         </span>

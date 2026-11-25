@@ -98,23 +98,24 @@ The application maintains a persistent desktop shell across all views.
 
 ### Page 2: New Sale / Counter Billing (`F2`)
 * **Purpose:** High-speed retail checkout with 100% keyboard navigation and strict negative-stock prevention.
-* **Header Controls:**
-  - Auto-generated Invoice Code (`SAL-XXXX`).
-  - Date Picker (defaults to current date, editable for delayed entries).
-  - Customer Selector: Typeahead matching Name/Phone or defaults to "Walk-in Customer". Displays previous outstanding balance if customer selected.
+* **Header Controls (v1.3, FR-30):**
+  - Left: Customer Selector: Typeahead matching Name/Phone or defaults to "Walk-in Customer". Displays previous outstanding balance if customer selected.
+  - Right: Auto-generated Invoice Code (`SAL-XXXX`) and Date Picker (defaults to current date, editable for delayed entries).
+  - Wireframe: `[ Customer ................ ]            [Next Invoice SAL-0042] [Date]`
 * **Rapid Item Entry Row (Sequential Focus Cycle):**
   1. **Item Search Input (FTS5):** Type 2-3 characters or scan barcode (item or bundle barcode). Press `Enter` to select top item and auto-populate base price and optional MRP. Pressing `Enter` with the field **empty** completes the bill (opens the Payment dialog).
   2. **Available Stock & Price Indicator:** Real-time stock and pricing display (e.g., `Available: 28 PCS | Rate: ₹15.00 | MRP: ₹20.00`), net of quantity of this item already in the cart. Displays bold error if stock is 0.
   3. **Quantity Input:** Defaults to `1`. Press `Enter` to accept or type custom quantity.
   4. **Packaging / Unit Selector:** Defaults to base unit (or the last unit used for this item); arrow keys switch to a bundle (`Box of 10`, `Dozen`). Bundle barcode scans pre-select that bundle.
-     - Inline Shortcut: `Alt + B` opens quick modal to add a new bundle definition on the fly.
+     - The last option of the dropdown is **"+ New bundle..."** (only when an item is selected); it, or `Alt + B`, opens the quick modal to add a bundle on the fly. Cancel keeps the previous unit. There is no separate Bundle button (v1.3, FR-29).
   5. **Unit Rate (₹):** Pre-populated with default base or bundle price; editable.
   6. **Add Trigger (`Enter`):** Appends line item to Cart Table (blocked with the inline Negative Stock Alert if cart total for the item would exceed stock) and resets cursor to Search Input.
 * **Cart Line Items Table:**
   - Columns: `#`, `Item Name`, `Packaging / Unit` (e.g. `2 × Box of 10`), `Quantity (Base Units)`, `MRP (₹)`, `Rate (₹)`, `Line Total (₹)`, `Remove [Del]`.
-* **Checkout Footer:**
-  - Totals: Total line items, total base units, Subtotal (₹).
-  - Remarks / Notes field.
+* **Checkout Footer (v1.3, FR-30):**
+  - Left: Items / Total Units and the Remarks / Notes field.
+  - Right, right-aligned stack directly above the actions: Items Subtotal (₹); when charges exist Charges (+), Discounts (−) and Grand Total. The payable figure is the largest.
+  - Wireframe: `[Items: 3 | Units: 12 | Notes ....]      Items Subtotal 1,200.00 / Charges (+) / Discounts (-) / GRAND TOTAL  then  [Clear] [Complete Sale]`
   - Primary Action: `[Complete Sale (Enter on empty search / Ctrl + Enter)]` — opens the Payment dialog (Page 3). Nothing is saved until the dialog is confirmed.
   - Discard Action: `[Cancel Bill (Esc)]` with confirmation when the cart is not empty.
 
@@ -142,8 +143,8 @@ The application maintains a persistent desktop shell across all views.
   - Inward Date.
   - Supplier / Vendor Selector (Search or `+ Add Vendor` / `Alt + V`).
   - Supplier Invoice Reference / DC Number (stored on the purchase).
-* **Inward Line Item Entry Row:**
-  - Item Search / Selection.
+* **Inward Line Item Entry Row (v1.3, FR-30: one line; fixed one-line labels above equal-height fields; helper text in a reserved line below):**
+  - Item Search / Selection (placeholder "Search item by name or barcode...").
   - Packaging / Unit Selector (`Base Unit` or `Bundle`).
   - Inward Quantity.
   - Inward Unit Cost (₹ per bundle or ₹ per base unit; system auto-normalizes cost per base unit for FIFO storage).
