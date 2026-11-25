@@ -668,5 +668,5 @@ gantt
 * Cards: **Today** (Sales "n bills" -> sales-history, Purchases "n batches" -> purchase-history), **Dues** (Receivables "customers owe you", Payables "you owe vendors" -> dues), **Cash & Stock** (Cash in hand = hero row, larger and coloured; Today's expenses -> expenses; Inventory valuation -> reports). The history pages have no date hand-off param, so the rows only navigate.
 * Test ids kept: `kpi-sales`, `kpi-purchases`, `kpi-valuation`, `kpi-receivables`, `kpi-payables`, `kpi-expenses`, `kpi-cash` (on the row button). `kpi-profit` is gone.
 * Store: `liveCashInDrawer` -> `cashInHand`; unused `salesCash`, `purchaseCash`, `resetCashDrawer` removed. The header pill reads "Cash in hand".
-* Settings: a "Cash" card with an "Opening cash" numeric field, help "Cash already in the drawer when you started using Book Keeper", saved with the shop settings, then `refreshMetrics()`. The backend validates.
+* Settings: an "Opening cash (₹)" numeric field in the Shop Profile card (below a divider), help "Cash already in the drawer when you started using Book Keeper", saved by "Save Profile" with the shop settings, then `refreshMetrics()`. The backend validates and its message is shown on failure.
 * Tests (Vitest): three cards with grouped rows; no profit tile; row clicks navigate; header "Cash in hand"; Settings saves opening cash.

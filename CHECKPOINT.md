@@ -154,3 +154,10 @@ Manual checklist:
 - Pick an item with 2+ lots: prices show as "Rate-free" info line; raise the quantity past the first lot and the highlight moves; the cost matches the later bill COGS.
 - Add the same item twice: the second line draws after the first line units.
 - Quantity above stock shows "short by N" in rose; more than 4 distinct prices shows "+N more" with a tooltip; light and dark.
+
+## Branch feat/dashboard-cash (FR-32, FR-33, DD-61, DD-62; schema v10, v1.3 C5)
+Delivered: migration v10 `shop_settings.opening_cash` (frozen fixture `v10.sql`, upgrade test); `cash_in_hand = opening_cash + cash_position(0000-01-01, today).net` (`cash_in_hand_at`), `DashboardMetrics.today_net_profit` removed, `live_cash_in_drawer` -> `cash_in_hand`, `calculate_live_cash_drawer` -> `calculate_cash_in_hand`. UI: `DashboardSummaryCards` (3 grouped cards of linked rows), header pill "Cash in hand", Settings "Opening cash (₹)" in the Shop Profile card, store `cashInHand` (dead `salesCash` / `purchaseCash` / `resetCashDrawer` etc. removed). Updated tests that encoded the old meaning: drawer tests in accounting, dues batch, report service and e2e files (cash now all-time), `kpi-profit` assertions. New: `src/__tests__/pages/cashInHand.test.tsx`, dashboard card tests, `tests/report_service_test.rs` cash cases.
+Manual checklist:
+- Dashboard: three cards (Today, Dues, Cash & Stock) side by side, stacked on a narrow window; Cash in hand is the largest figure; hover shows a chevron, Tab shows a focus ring; each row opens its page (history rows only navigate, no date filter); light and dark.
+- Settings: enter Opening cash, Save Profile; the header pill and dashboard change by that amount; a negative value shows the backend message.
+- Make a sale yesterday and an expense today: Cash in hand carries over; a credit sale does not change it.

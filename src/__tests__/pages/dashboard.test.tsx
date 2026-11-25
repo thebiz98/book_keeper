@@ -3,17 +3,17 @@ import { render } from '../testUtils';
 import { DashboardPage, resetDashboardCache } from '@/pages/DashboardPage';
 import { installApi, flush, waitFor, click, bodyText } from './helpers';
 import type { DashboardMetrics } from '@/types';
+import { useAppStore } from '@/store/useAppStore';
 
 const metrics: DashboardMetrics = {
   todaySalesAmount: 1234,
   todaySalesCount: 7,
   todayPurchaseAmount: 500,
   todayPurchaseCount: 2,
-  todayNetProfit: 321,
   totalStockValuation: 9999,
   customerReceivables: 777,
   vendorPayables: 444,
-  liveCashInDrawer: 888,
+  cashInHand: 888,
   todayExpensesAmount: 350,
 };
 
@@ -39,7 +39,7 @@ describe('DashboardPage', () => {
     const api = installApi({ ...base, getDashboardMetrics: metrics });
     render(<DashboardPage />);
     await waitFor(() => bodyText().includes('₹1,234.00'));
-    for (const v of ['₹500.00', '₹321.00', '₹9,999.00', '₹777.00', '₹444.00', '₹888.00', '7 bills', '2 batches']) {
+    for (const v of ['₹500.00', '₹9,999.00', '₹777.00', '₹444.00', '₹888.00', '7 bills', '2 batches']) {
       expect(bodyText()).toContain(v);
     }
     expect(document.querySelector('[data-testid="kpi-expenses"]')!.textContent).toContain('₹350.00');
@@ -73,6 +73,46 @@ describe('DashboardPage', () => {
     render(<DashboardPage />);
     await waitFor(() => bodyText().includes('disk I/O error'));
     expect(document.querySelector('[data-testid="kpi-sales"]')!.textContent).not.toContain('₹0.00');
-    expect(document.querySelector('[data-testid="kpi-sales"]')!.textContent).toContain('-');
+    expect(document.querySelector('[data-testid="kpi-sales"]')!.textContent).toContain('–');
+  });
+
+  it('groups the figures into three cards with no profit tile', async () => {
+    installApi({ ...base, getDashboardMetrics: metrics });
+    render(<DashboardPage />);
+    await waitFor(() => bodyText().includes('₹1,234.00'));
+    const card = (id: string) => document.querySelector(`[data-testid="card-${id}"]`)!;
+    const inCard = (id: string) => Array.from(card(id).querySelectorAll('[data-testid^="kpi-"]')).map((e) => e.getAttribute('data-testid'));
+    expect(document.querySelectorAll('[data-testid^="card-"]')).toHaveLength(3);
+    expect(inCard('today')).toEqual(['kpi-sales', 'kpi-purchases']);
+    expect(inCard('dues')).toEqual(['kpi-receivables', 'kpi-payables']);
+    expect(inCard('cash')).toEqual(['kpi-cash', 'kpi-expenses', 'kpi-valuation']);
+    expect(document.querySelector('[data-testid="kpi-profit"]')).toBeNull();
+    expect(bodyText()).not.toMatch(/net profit/i);
+    expect(card('dues').textContent).toContain('customers owe you');
+    expect(card('dues').textContent).toContain('you owe vendors');
+    expect(document.querySelector('[data-testid="kpi-cash"]')!.textContent).toContain('Cash in hand');
+    expect(document.querySelector('[data-testid="kpi-cash"]')!.textContent).toContain('₹888.00');
+    // Rows are real buttons (keyboard focusable).
+    expect(document.querySelector('[data-testid="kpi-sales"]')!.tagName).toBe('BUTTON');
+  });
+
+  it('each row opens the page its figure comes from', async () => {
+    installApi({ ...base, getDashboardMetrics: metrics });
+    render(<DashboardPage />);
+    await waitFor(() => bodyText().includes('₹1,234.00'));
+    const expected: Record<string, string> = {
+      'kpi-sales': 'sales-history',
+      'kpi-purchases': 'purchase-history',
+      'kpi-receivables': 'dues',
+      'kpi-payables': 'dues',
+      'kpi-expenses': 'expenses',
+      'kpi-valuation': 'reports',
+      'kpi-cash': 'reports',
+    };
+    for (const [id, route] of Object.entries(expected)) {
+      useAppStore.setState({ activeRoute: 'dashboard' });
+      click(document.querySelector(`[data-testid="${id}"]`)!);
+      expect(useAppStore.getState().activeRoute, id).toBe(route);
+    }
   });
 });
