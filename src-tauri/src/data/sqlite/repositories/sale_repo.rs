@@ -1,7 +1,7 @@
 //! SQLite implementation of `SaleRepository`.
 use rusqlite::{params, types::Value, OptionalExtension, Row};
 
-use crate::core::dtos::{ItemBillRef, SaleHistoryRow, SalesHistoryFilter};
+use crate::core::dtos::{BillProfitParts, ItemBillRef, SaleHistoryRow, SalesHistoryFilter};
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
@@ -53,6 +53,33 @@ fn opt_id(id: i64) -> Option<i64> {
 
 fn lim(n: usize) -> i64 {
     n.min(i64::MAX as usize) as i64
+}
+
+// ---- FR-34 bill profit -------------------------------------------------------------------------
+// Bill profit = total_amount (items subtotal + charges - discounts)
+//             - cost_net          FIFO cost of units sold and not returned ((depleted - returned) * unit_cost;
+//                                 restocked units give their cost back, scrapped units are re-added below)
+//             - refunds           linked CUSTOMER REFUND returns (a REPLACEMENT return does not reduce revenue)
+//             - scrap_cost        cost_amount of linked DAMAGED_SCRAP returned lines (stays spent)
+//             - replacement_cost  FIFO cost of replacement units issued against the bill.
+// These are the P&L sources (`cogs_sales`, `returns`, `loss_scrap`, `cogs_repl` in report_repo.rs PNL_SQL)
+// restricted to one bill. Correlated on the alias `t` (sale_transactions).
+const PROFIT_COST_NET: &str = "COALESCE((SELECT SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost) \
+     FROM sale_stock_allocations a JOIN sale_items si ON si.id = a.sale_item_id \
+     WHERE si.sale_transaction_id = t.id), 0.0)";
+const PROFIT_REFUNDS: &str = "COALESCE((SELECT SUM(r.total_amount) FROM return_transactions r \
+     WHERE r.return_type = 'CUSTOMER' AND r.settlement_type = 'REFUND' AND r.original_transaction_id = t.id), 0.0)";
+const PROFIT_SCRAP: &str = "COALESCE((SELECT SUM(ri.cost_amount) FROM return_items ri \
+     JOIN return_transactions r ON r.id = ri.return_transaction_id \
+     JOIN sale_items si ON si.id = ri.sale_item_id \
+     WHERE r.return_type = 'CUSTOMER' AND ri.line_type = 'RETURNED' AND ri.condition = 'DAMAGED_SCRAP' \
+       AND si.sale_transaction_id = t.id), 0.0)";
+const PROFIT_REPLACEMENT: &str = "COALESCE((SELECT SUM(o.quantity_depleted * o.unit_cost) \
+     FROM stock_outflow_allocations o JOIN return_transactions r ON r.id = o.source_id \
+     WHERE o.source_type = 'REPLACEMENT' AND r.return_type = 'CUSTOMER' AND r.original_transaction_id = t.id), 0.0)";
+
+fn profit_expr() -> String {
+    format!("ROUND(t.total_amount - {PROFIT_COST_NET} - {PROFIT_REFUNDS} - {PROFIT_SCRAP} - {PROFIT_REPLACEMENT}, 2)")
 }
 
 pub struct SqliteSaleRepository {
@@ -262,10 +289,12 @@ impl SaleRepository for SqliteSaleRepository {
         let mut page_vals = vals;
         page_vals.push(Value::Integer(lim(limit)));
         page_vals.push(Value::Integer(lim(offset)));
+        let profit_col = if filter.include_profit == Some(true) { profit_expr() } else { "NULL".to_string() };
         let sql = format!(
             "SELECT t.id, t.transaction_code, t.transaction_date, t.created_at, t.party_id, t.party_name, \
              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_transaction_id = t.id), \
-             t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total \
+             t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total, \
+             {profit_col} \
              FROM sale_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -286,6 +315,7 @@ impl SaleRepository for SqliteSaleRepository {
                     items_subtotal: r.get(11)?,
                     charges_total: r.get(12)?,
                     discounts_total: r.get(13)?,
+                    profit: r.get(14)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -304,6 +334,26 @@ impl SaleRepository for SqliteSaleRepository {
             .query_map(params![sale_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    fn bill_profit_parts(&self, sale_id: i64) -> Result<BillProfitParts, AppError> {
+        let sql = format!(
+            "SELECT {PROFIT_COST_NET}, {PROFIT_REFUNDS}, {PROFIT_SCRAP}, {PROFIT_REPLACEMENT}, {} \
+             FROM sale_transactions t WHERE t.id = ?1",
+            profit_expr()
+        );
+        self.conn
+            .query_row(&sql, params![sale_id], |r| {
+                Ok(BillProfitParts {
+                    cost_net: r.get(0)?,
+                    refunds: r.get(1)?,
+                    scrap_cost: r.get(2)?,
+                    replacement_cost: r.get(3)?,
+                    total: r.get(4)?,
+                })
+            })
+            .optional()?
+            .ok_or_else(|| AppError::not_found("SaleTransaction", sale_id.to_string()))
     }
 
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError> {
