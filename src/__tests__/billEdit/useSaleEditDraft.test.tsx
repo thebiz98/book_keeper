@@ -30,7 +30,6 @@ describe('useSaleEditDraft', () => {
     expect(d.paymentStatus).toBe('PAID');
     expect(out.current.dirty).toBe(false);
     expect(useCartStore.getState().items).toHaveLength(1); // a sale in progress is untouched
-    expect(useCartStore.getState().editing).toBeNull();
     useCartStore.getState().clearCart();
   });
 

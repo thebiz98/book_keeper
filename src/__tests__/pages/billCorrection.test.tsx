@@ -2,11 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '../testUtils';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { ReturnDetailDrawer } from '@/components/domain/ReturnDetailDrawer';
-import { NewSalePage } from '@/pages/NewSalePage';
 import { useAppStore } from '@/store/useAppStore';
 import { useCartStore } from '@/store/useCartStore';
-import { queueBillEdit, takeBillEdit } from '@/pages/billEditHandoff';
-import { __resetHotkeys } from '@/hooks/useHotkeys';
 import type { BillEditGuard, SaleDetailView } from '@/types';
 import { installApi, flush, waitFor, click, setInput, bodyText, fakeBillPreview } from './helpers';
 
@@ -42,7 +39,6 @@ describe('BillDetailDrawer actions (FR-20)', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     useCartStore.getState().clearCart();
-    takeBillEdit();
   });
 
   it('enables Edit and Delete from the guard; Edit opens the form in the drawer without navigating', async () => {
@@ -134,61 +130,5 @@ describe('ReturnDetailDrawer (FR-20)', () => {
     await flush();
     expect(api.deleteReturn).toHaveBeenCalledWith(3);
     expect(onChanged).toHaveBeenCalled();
-  });
-});
-
-describe('NewSalePage edit mode (FR-20)', () => {
-  beforeEach(() => {
-    document.body.innerHTML = '';
-    useCartStore.getState().clearCart();
-    __resetHotkeys();
-  });
-
-  it('prefills from the queued bill, shows the banner and submits updateSale', async () => {
-    const api = installApi({
-      getSaleDetails: saleDetail(),
-      getBillEditGuard: guard(),
-      searchItemsFts: [PEN],
-      getNextSaleCode: 'SAL-9999',
-      listParties: [],
-      searchParties: [],
-      searchChargeTypes: [],
-      getDashboardMetrics: { liveCashInDrawer: 0 },
-      previewSale: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p),
-      updateSale: { saleId: 5, transactionCode: 'SAL-1005', totalAmount: 100, paidAmount: 100, balanceDue: 0, changeAmount: 0, paymentStatus: 'PAID' },
-    });
-    queueBillEdit({ kind: 'SALE', id: 5 });
-    render(<NewSalePage />);
-    await waitFor(() => !!document.querySelector('[data-testid="edit-banner"]'));
-    expect(bodyText()).toContain('Editing SAL-1005');
-    expect(document.querySelector('[data-testid="invoice-preview"]')?.textContent).toBe('SAL-1005');
-    expect(useCartStore.getState().items[0]).toMatchObject({ itemId: 1, quantity: 2, rate: 50 });
-    expect(api.getNextSaleCode).not.toHaveBeenCalled();
-    click(document.querySelector('[data-testid="complete-sale-btn"]')!);
-    await waitFor(() => bodyText().includes('Update bill'));
-    // The edit previews carry the sale id so the backend runs the edit rules.
-    await waitFor(() => !(document.querySelector('[data-testid="confirm-btn"]') as HTMLButtonElement).disabled);
-    expect(api.previewSale.mock.calls.at(-1)![1]).toBe(5);
-    click(document.querySelector('[data-testid="confirm-btn"]')!);
-    await flush();
-    expect(api.updateSale).toHaveBeenCalledTimes(1);
-    expect(api.updateSale.mock.calls[0][0]).toBe(5);
-    expect(api.updateSale.mock.calls[0][1]).toMatchObject({ transactionDate: '2026-11-20', paidAmount: 100, items: [{ itemId: 1, bundleQuantity: 2 }] });
-    expect(bodyText()).toContain('Updated SAL-1005');
-  });
-
-  it('a blocked bill stays in create mode with the reason', async () => {
-    installApi({
-      getSaleDetails: saleDetail(),
-      getBillEditGuard: guard({ canEdit: false, reasons: [{ code: 'LINKED_RETURNS', message: 'Has returns.', blocksEdit: true, blocksDelete: true }] }),
-      getNextSaleCode: 'SAL-9999',
-      listParties: [],
-      searchParties: [],
-    });
-    queueBillEdit({ kind: 'SALE', id: 5 });
-    render(<NewSalePage />);
-    await waitFor(() => bodyText().includes('Has returns.'));
-    expect(document.querySelector('[data-testid="edit-banner"]')).toBeNull();
-    expect(useCartStore.getState().editing).toBeNull();
   });
 });

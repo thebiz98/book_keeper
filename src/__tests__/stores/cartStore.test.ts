@@ -149,27 +149,4 @@ describe('useCartStore (entry rules only)', () => {
       expect(s().charges).toEqual([]);
     });
   });
-
-  describe('edit mode (FR-20)', () => {
-    const line = (over = {}) => ({
-      itemId: 1, name: 'Pencil', baseUnit: 'PCS', unitsPerBundle: 1, quantity: 5, rate: 10, ...over,
-    });
-
-    it('loadForEdit sets lines, customer, editing and charges', () => {
-      s().loadForEdit([line()], { id: 3, name: 'Ram' }, { saleId: 9, code: 'SAL-1009' }, [
-        { chargeTypeId: 1, name: 'Transport', effect: 'CHARGE', amount: 50 },
-      ]);
-      expect(s().editing).toEqual({ saleId: 9, code: 'SAL-1009' });
-      expect(s().selectedCustomer?.id).toBe(3);
-      expect(s().items[0].lineId).toBeTruthy();
-      expect(s().charges).toHaveLength(1);
-    });
-
-    it('clearCart resets edit mode', () => {
-      s().loadForEdit([line()], null, { saleId: 9, code: 'SAL-1009' });
-      s().clearCart();
-      expect(s().editing).toBeNull();
-      expect(s().items).toHaveLength(0);
-    });
-  });
 });

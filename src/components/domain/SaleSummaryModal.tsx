@@ -32,8 +32,6 @@ export interface SaleSummaryModalProps {
   bill: PreviewSalePayload | null;
   /** The no-payment preview of the same bill (totals, open amount); null while it is pending. */
   totals: BillPreview | null;
-  /** FR-20: the sale being replaced; the preview then runs the edit rules. */
-  saleId?: number | null;
   /** Charge/discount lines (names only; amounts shown are the backend's) for the breakdown. */
   charges?: BillChargeLine[];
   customer: CustomerInput | null;
@@ -45,11 +43,6 @@ export interface SaleSummaryModalProps {
   onDone: (result: SaleSummaryResponse) => void;
   /** Display-only code preview shown while paying. */
   invoiceCode?: string;
-  /** FR-20: 'edit' reads "Update bill" and pays against what is still open. */
-  mode?: 'create' | 'edit';
-  /** Edit: the bill's stored status and old upfront amount, prefilled in the dialog. */
-  initialStatus?: PaymentStatus;
-  initialCash?: number;
 }
 
 const STATUSES: PaymentStatus[] = ['PAID', 'PARTIAL', 'UNPAID'];
@@ -59,18 +52,13 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   onClose,
   bill,
   totals,
-  saleId = null,
   charges,
   customer,
   onCustomerChange,
   onSubmit,
   onDone,
   invoiceCode,
-  mode: billMode = 'create',
-  initialStatus,
-  initialCash = 0,
 }) => {
-  const editing = billMode === 'edit';
   const [status, setStatus] = useState<PaymentStatus>('PAID');
   const [cashStr, setCashStr] = useState('');
   /** True once the cashier typed in the cash box: the PAID prefill then stops following the total. */
@@ -82,8 +70,6 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   const cashRef = useRef<HTMLInputElement>(null);
   const doneBtnRef = useRef<HTMLButtonElement>(null);
   const submittingRef = useRef(false);
-  const initialRef = useRef({ status: initialStatus, cash: initialCash });
-  initialRef.current = { status: initialStatus, cash: initialCash };
   const openAmountRef = useRef(totals?.openAmount ?? 0);
   openAmountRef.current = totals?.openAmount ?? 0;
 
@@ -92,10 +78,9 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   // Reset only when the dialog opens: never while the cashier is typing.
   useEffect(() => {
     if (!isOpen) return;
-    const st = (editing && initialRef.current.status) || 'PAID';
-    setStatus(st);
-    setCashTouched(st === 'PARTIAL');
-    setCashStr(st === 'PAID' ? String(openAmountRef.current) : st === 'PARTIAL' ? String(initialRef.current.cash) : '0');
+    setStatus('PAID');
+    setCashTouched(false);
+    setCashStr(String(openAmountRef.current));
     setError(null);
     setResult(null);
     setSubmitting(false);
@@ -128,7 +113,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   );
   const preview = usePreview<PreviewSalePayload, BillPreview>({
     input: payInput,
-    fetcher: (p) => api.previewSale(p, saleId),
+    fetcher: (p) => api.previewSale(p, null),
   });
   const payment = preview.data?.payment ?? null;
   const previewErrors = preview.errors;
@@ -227,7 +212,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={mode === 'payment' ? () => { if (!submittingRef.current) onClose(); } : finish}
-      title={mode === 'payment' ? (editing ? 'Update bill' : 'Payment') : editing ? 'Bill updated' : 'Sale Complete'}
+      title={mode === 'payment' ? 'Payment' : 'Sale Complete'}
       description={mode === 'payment' ? 'Nothing is saved until you confirm.' : undefined}
       size="md"
       closeOnBackdrop={false}
@@ -248,7 +233,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
               isLoading={submitting}
               hotkey="Enter"
             >
-              {editing ? 'Update bill' : 'Confirm Sale'}
+              Confirm Sale
             </Button>
           </>
         ) : (
@@ -259,7 +244,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
             onClick={finish}
             className="inline-flex items-center justify-center font-medium rounded-md transition-colors select-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 px-3 py-1.5 text-sm gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer"
           >
-            <span>{editing ? 'Done' : 'Next Customer'}</span>
+            <span>Next Customer</span>
             <kbd className="px-1 py-0.5 rounded bg-black/10 dark:bg-white/10 text-[10px] font-mono font-semibold uppercase">
               Enter
             </kbd>
@@ -302,17 +287,6 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
             <CurrencyDisplay amount={result?.totalAmount ?? totals?.totalAmount ?? 0} size="hero" />
           </div>
         </div>
-
-        {mode === 'payment' && editing && (
-          <div data-testid="edit-payment-info" className="flex items-center justify-between text-xs font-mono rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
-            <span>
-              Already received later: <CurrencyDisplay amount={totals?.appliedAmount ?? 0} size="sm" />
-            </span>
-            <span>
-              Due now: <CurrencyDisplay amount={totals?.openAmount ?? 0} size="sm" />
-            </span>
-          </div>
-        )}
 
         {mode === 'payment' ? (
           <>
@@ -425,7 +399,7 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
         ) : (
           <div data-testid="sale-result" className="flex flex-col gap-2 text-sm">
             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-semibold">
-              <CheckCircle2 className="h-5 w-5" /> {editing ? 'Updated' : 'Saved as'} {result?.transactionCode}
+              <CheckCircle2 className="h-5 w-5" /> Saved as {result?.transactionCode}
             </div>
             <dl className="grid grid-cols-2 gap-y-1 font-mono">
               <dt className="text-slate-500">Paid</dt>
