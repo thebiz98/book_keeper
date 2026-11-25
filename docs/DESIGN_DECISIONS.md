@@ -373,3 +373,40 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - Every sales / purchase aggregate, list, picker, trend, profit and print path excludes flagged bills. Dues, ledger and settlement include them. A test enumerates the excluding queries.
 - Created / updated / removed inside `create_party` / `update_party` (one `BEGIN IMMEDIATE`). The amount cannot go below the settled amount. Bill edit and delete (FR-20) reject opening bills.
 - *Why:* reusing the bill shape gives settlement, the oldest-first fill, ledger rows and dues for free. A bare number on the party would need a second dues model.
+
+**DD-65 — Service components are a relation table; service lines draw through the existing allocations (2026-11-25, v1.4 FR-36/FR-37).**
+- `service_components (service_item_id, component_item_id, quantity_per_unit)` is the bill of materials: one row per pair, unique, no self-reference. Item type rules (service → physical only) live in the item service. Schema **v12** also adds `items.service_cost` and `sale_items.service_cost_total`.
+- A service sale line writes ordinary `sale_stock_allocations` rows against the components' lots. COGS, bill profit, edit/delete reversal and lot re-cost then work unchanged, because they already go through allocations. Code that assumed `lot.item_id = line.item_id` is reviewed (lot draw preview, item history, return reversal).
+- *Why:* a JSON list on the item can't be indexed or joined ("which services use this paper?", "Can make N"). A separate service-allocation table would duplicate the FIFO audit.
+
+**DD-66 — Service cost is a floor over the real FIFO cost (2026-11-25, v1.4 FR-37).**
+- Line cost = `C + max(0, service_cost_total − C)`, where C is the net FIFO cost of the components drawn. Only the **target** (`service_cost_total = round2(service_cost × qty)`) is stored. Misc. cost is derived in SQL, so a lot re-cost or a partial reversal can't leave a stale stored difference.
+- Misc. cost is shown as its own P&L line under COGS, never folded into FIFO COGS, so inventory figures still reconcile to lots.
+- *Why (owner, 2026-11-25):* "use per item FIFO purchase price, but if I define the service cost more than the sum of unit prices, add that difference as a miscellaneous cost". The floor means the service is never costed below what it really took from stock.
+
+**DD-67 — Services are not returnable (2026-11-25, v1.4 FR-37, owner decision).**
+- Return pickers omit service lines and the return service rejects them (also as replacement issues). Corrections go through bill edit/delete.
+- *Why:* consumed components (printed paper) can't be restocked, and a refund-only path would need a new cost rule for no real use.
+
+**DD-68 — Item analytics are computed on request (2026-11-25, v1.4 FR-38/FR-39).**
+- Item profit and inventory speed are single aggregate queries over existing tables and indexes. No per-day analytics table.
+- Inventory speed counts units out from `sale_stock_allocations` joined to the lot's item. One path then covers direct sales and service consumption, net of returned units.
+- Class: rank items with units out > 0; top 20% Fast, bottom 20% Slow (`ceil(0.2 × n)`, at least 1, top wins when n is small), the rest Normal; units out 0 with stock > 0 is Dead.
+- *Why:* at shop scale (thousands of items, tens of thousands of lines a year) the indexed aggregate runs in milliseconds. A cache would have to be kept correct through every FR-20 edit, delete and return, which is exactly the kind of drift the project avoids.
+
+**DD-69 — Dashboard: cash first, lookup with a fixed search field (2026-11-25, v1.4 FR-40).**
+- Cash & Stock is a full-width row above Today and Dues. Low stock moves into the right column beside them. Inventory valuation links to Inventory.
+- The item lookup's suggestions render inline in their own scroll area below a fixed search field. They no longer render as an absolute dropdown inside a scrolling modal body, which made the body (and the field) scroll.
+- The trend becomes an SVG line chart (time on x, ₹ on y from 0, one axis). It is hand-built because the app has no chart library, and two series don't justify adding one. Colours: categorical slots 1–2 (blue / orange), selected per theme and validated for CVD. Light orange is under 3:1 contrast, so the tooltip and a table view are required.
+
+**DD-70 — One import pattern for every importable entity (2026-11-25, v1.4 FR-41).**
+- Each kind (items, service components, parties, expenses) has a template writer, a pure parser/validator returning the existing `ImportValidationReport`, and an execute step in one `BEGIN IMMEDIATE` transaction through the normal service code (FR-35 opening bills, FTS sync, code sequences). The parsing core (CSV/XLSX via `csv` / `calamine`, header matching, date and number parsing) is shared.
+- No import of sale / purchase history: replaying FIFO over imported bills is a migration project, not an import.
+
+**DD-71 — Entity review outcomes (2026-11-25, v1.4).**
+- **Doc drift fixed in the HLD:** the ERD now shows `items/parties.updated_at`, return name snapshots, `is_opening_balance`, `opening_cash`, `backup_directory` and `CODE_SEQUENCE`. `balance_due` is documented with `RETURN_CREDIT`. The stale "cash in hand = today" query row is corrected.
+- **Real redundancy removed:** `idx_sale_items_item (item_id)` duplicates the prefix of `idx_sale_items_item_date`; v12 drops it.
+- **Deliberate caches kept** (each has one writer and is recomputed on every change): `current_stock`, `is_low_stock`, bill `items_subtotal / charges_total / discounts_total`, `paid_amount / balance_due / payment_status`, line `transaction_date`, return `total_amount`.
+- **Kept as is:** purchase headers carry two markers (`source`, `is_opening_balance`). An opening bill is always `source = PURCHASE`. A rebuild to merge them is not worth the migration risk. Polymorphic references (`payment_settlements.transaction_id`, `bill_charges.transaction_id`, `stock_outflow_allocations.source_id`, `return_transactions.original_transaction_id`) stay without SQL FKs, guarded by the services.
+- **Cash in hand is not stored** (see HLD §6.2 "Derived, not stored").
+- **Recommended later, not scheduled:** a read-only "Verify data" check that recomputes every cache above and reports orphans of the polymorphic references; integer paise (DD-55).

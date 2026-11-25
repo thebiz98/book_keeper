@@ -166,7 +166,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **FR-21: Item Type — Physical vs Service** *(added 2026-11-22, DD-42; entity only in v1.1)*
   * Every item has an `item_type`: `PHYSICAL` (stocked goods, the default) or `SERVICE` (e.g. photo printing, lamination).
   * A `SERVICE` item has a price but no stock: no lots, no FIFO, no stock check, no low-stock flag, excluded from stock valuation.
-  * **v1.1 scope:** the column, entity, DTOs and validation only. All items are created as `PHYSICAL`; the backend rejects `SERVICE` on create/update until service billing is designed. Service billing (including services that consume stock items, such as photo printing using paper) is a separate, later design.
+  * **v1.1 scope:** the column, entity, DTOs and validation only. All items are created as `PHYSICAL`; the backend rejects `SERVICE` on create/update until service billing is designed. Service billing (including services that consume stock items, such as photo printing using paper) is a separate, later design. *(v1.4: designed in FR-36 / FR-37; the backend accepts `SERVICE` from schema v12.)*
 * **FR-22: Explicit Submit on Quick-Create Forms** *(added 2026-11-22, DD-44)*
   * Every quick-create form (new customer / vendor, new bundle, new expense type, new charge type) shows a visible **Save** (primary) and **Cancel** button, in addition to Enter-to-submit and Escape-to-cancel. The user should never have to guess that Enter commits.
 
@@ -242,6 +242,42 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Correction:** in the Party dialog the amount and date can be changed. The new amount must be ≥ what is already settled against it, or it is rejected with the settled amount named. Setting it to 0 removes the bill when nothing is settled. Opening bills cannot be edited through bill edit (FR-20). Their drawer is read-only with Settle.
   * At most one opening bill per party.
 
+* **FR-36: Service Items with Components** *(added 2026-11-25, v1.4, DD-65/DD-66; FR-21 rev.)*
+  * In Inventory, **Add item** has a **Type** choice: *Physical* (today's form) or *Service*. Choosing Service opens the **Service** dialog: Name, Unit (e.g. PRINT), **Sale Price** per unit, **Service cost** per unit (optional, ≥ 0) and a **Components** table. Each component row is an active *physical* item plus the **quantity used per one unit** of the service, in that item's base unit (> 0). Example: "Photo print 4×6" uses 1 SHEET of "Photo paper 4×6".
+  * A service may have no components (pure labour, e.g. lamination charge). A component appears once per service and can't be the service itself.
+  * The dialog shows a backend preview (DD-56) of the components' current FIFO cost for one unit and, when a Service cost is entered, the **misc. cost** it implies (Service cost − components' cost, never below 0).
+  * A service has no stock: no lots, opening stock, bundles, purchase lines, stock adjustment, set stock or low-stock flag. It is excluded from stock valuation. The Item List shows a *Service* badge. The stock column shows **"Can make N"**, the smallest of ⌊component stock ÷ quantity per unit⌋ (backend). A service with no components shows "—".
+  * The type is fixed once the item is created. Components, Sale Price and Service cost are edited from the item's Edit drawer, and changes apply only to sales saved after the edit. Inline item creation on New Sale / New Purchase (FR-24) still creates physical items only.
+* **FR-37: Selling Services** *(added 2026-11-25, v1.4, DD-66/DD-67)*
+  * Services appear in the sale item search and the bill edit form. Quantity is in service units (base unit, no bundles).
+  * Saving a sale line for a service consumes `quantity × quantity per unit` of each component from its lots by FIFO, in the same transaction, and records the draw as allocations of that sale line. If any component lacks stock, the sale is rejected and the error names the component (no negative stock, §3.2-6). The same lots serve the bill's physical lines and its service lines in line order.
+  * **Line cost** = components' FIFO cost **C** + **misc. cost**, where misc. cost = `max(0, round2(service_cost × quantity) − C)`. If no Service cost is set, or the components cost more, the line cost is just C. So the service's cost is never below what it really took from stock. Misc. cost is a costing figure only: it moves no cash and no stock.
+  * The sale entry info line (FR-31) shows, for a service, each component's draw, the components' cost, the misc. cost and the line cost from the backend dry run, counting earlier cart lines that use the same items.
+  * **Services are not returnable.** The Returns screen doesn't offer service lines, and the backend rejects a return line or replacement issue for a service. A wrong service sale is corrected by bill edit or delete (FR-20), which put the components back on their lots. A repost costs the line again at the FIFO and Service cost in force at edit time (Assumption 19).
+  * Bill profit and line profit (FR-34) and the P&L count misc. cost. The P&L shows it as its own line, *Less: Service misc. costs*, under COGS.
+  * Printing (FR-27) shows a service line like any other line.
+* **FR-38: Item-wise Profit Report** *(added 2026-11-25, v1.4, DD-68)*
+  * Reports has an **Item profit** panel for the selected period. For every item sold in it (physical and service), one row shows: quantity sold (net of returns), net revenue, cost, profit and margin %. The list is sortable by each column and searchable by name, has a totals row and is paged. A row opens Item details.
+  * Basis: sale lines of sale bills dated in the period (opening bills excluded). Revenue = line total less its share of bill discounts (FR-34 rule), less the refund value of linked returns of that line. Cost = net FIFO allocation cost (restocked units give their cost back, scrapped units keep it) + misc. cost. Units consumed as service components count toward the service, never toward the component.
+  * The footer reconciles with bill profit (FR-34) for the same bills: Σ item profit + bill charges − replacement issue cost = Σ bill profit. All figures come from one backend query (DD-56).
+* **FR-39: Inventory Speed (Fast / Slow Movers)** *(added 2026-11-25, v1.4, DD-68)*
+  * Reports has an **Inventory speed** panel for a selected period (default last 30 days). For each physical item it shows: **units out** (units sold net of customer returns, plus units consumed by services), **units per day** (units out ÷ days in the period), **stock now**, and **days of cover** (stock ÷ units per day; "—" when nothing moved).
+  * **Class:** among items with units out > 0, ranked by units out, the top 20% (at least one item) are **Fast** and the bottom 20% are **Slow**. The rest are **Normal**. Items with no units out but stock on hand are **Dead stock**. Items with neither are not listed.
+  * Tabs All / Fast / Slow / Dead, sortable columns, search, paging. A row opens Item details.
+  * Computed on request from the existing tables (no analytics table; DD-68).
+* **FR-40: Dashboard Layout and Item Lookup** *(added 2026-11-25, v1.4, DD-69; FR-32 rev.)*
+  * The **Cash & Stock** card becomes a full-width row at the top (Cash in hand, Today's expenses, Inventory valuation side by side). Below it, **Today** and **Dues** sit side by side in the left two-thirds with Recent transactions under them, and **Low stock** moves up into the right column next to them.
+  * **Inventory valuation** links to Inventory (not Reports). Cash in hand → Reports (cash flow) and Today's expenses → Expenses are unchanged.
+  * Low-stock rows show `stock / level unit` without the hidden category ("Uncategorized", FR-24).
+  * **Sales vs Purchases trend** (Reports): a real time-series chart. **Time on the x axis** (day / week / month buckets of the chosen period, oldest on the left) and **money (₹) on the y axis** from 0. Two 2px lines with markers: Sales (blue) and Purchases (orange), colours checked for colour-blind separation in light and dark themes. A legend, a hover crosshair with a tooltip listing both amounts for that date, and a "Table" toggle that shows the same numbers as rows. It replaces the horizontal bar list.
+  * **Item lookup** (F4, header search): a larger dialog. The search field is fixed at the top and never scrolls away. The suggestions fill the dialog below it in their own scrolling list, so the dialog body itself doesn't scroll. Picking an item shows its stock, rate and MRP under the field. Keyboard navigation is unchanged.
+* **FR-41: Imports — Parties, Expenses, Services** *(added 2026-11-25, v1.4, DD-70; FR-11 rev.)*
+  * Every import uses the existing flow: download a template (CSV or Excel), pick a file, get a **dry-run** report (row errors and warnings, nothing written), then **Import**, which is all-or-nothing per file.
+  * **Items** (Inventory → Import): the template gains `item_type` (`PHYSICAL` default, or `SERVICE`) and `service_cost`. Service rows can't carry opening stock or bundles. Components come from a **Components** sheet in the Excel template (`service_name, component_name, quantity_per_unit`) or a separate **Service components** CSV import. Names match existing items or items in the same file. On *update*, a service's component list is replaced.
+  * **Parties** (Parties → Import): `name, type (CUSTOMER/VENDOR), phone, notes, opening_balance, as_of_date`. A duplicate is the same name and type, ignoring case; the strategy is *skip* or *update*. An opening balance creates or updates the `OB-` bill under FR-35's rules, and an amount below what is already settled is a row error.
+  * **Expenses** (Expenses → Import): `date, expense_type, amount, notes`. A missing expense type is created (case-insensitive match). Rows only insert. A row identical to another in the file or the database (date, type, amount, notes) is a warning, not an error.
+  * Dates follow FR-28 (no future dates). Sale / purchase history import stays out of scope (§3.2).
+
 ### 2.2. Non-Functional Requirements (NFR)
 
 * **NFR-01: Zero External Server Overhead**
@@ -313,6 +349,14 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 38. **Compact history columns, icon actions, optional bill Profit column and item-level profit (FR-34).**
 39. **Party opening balance as an `OB-` opening bill (FR-35)**, schema v11.
 
+### 3.1d. In Scope — v1.4 additions (2026-11-25)
+40. **Service items with components, a Service cost and "Can make N" (FR-36)**, schema v12.
+41. **Selling services: component FIFO draw, misc. cost, not returnable (FR-37).**
+42. **Item-wise profit report (FR-38).**
+43. **Inventory speed: fast, slow and dead stock (FR-39).**
+44. **Dashboard: Cash & Stock row on top, low stock moved up, valuation → Inventory, larger item lookup (FR-40).**
+45. **Imports of parties (with opening balance), expenses, and services with components (FR-41).**
+
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
    *(v1.2: A4 printing of sale and purchase bills via the system print dialog is in scope, FR-27. Still out: thermal receipts, logos/footers/templates, direct PDF export, printing returns.)*
@@ -325,9 +369,9 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 8. **Multi-Store / Multi-Branch**: Centralized inventory across multiple physical locations.
 9. **Multi-User Role-Based Access Control (RBAC)**: User roles, permissions, and shift-management logins.
 10. **Exports**: CSV/Excel exports of catalog, registers, daybook, P&L.
-11. **Parties import, VedBill migration, restore from backup.** *(Opening dues entered per party moved into scope in v1.3, FR-35.)*
+11. **Restore from backup; import of sale / purchase history.** *(Opening dues entered per party moved into scope in v1.3, FR-35. Parties and expenses import moved into scope in v1.4, FR-41. VedBill inventory migration exists.)*
 12. **Archiving / soft-deletion of Items and Parties (FR-17).**
-13. **Service billing (FR-21)**: Selling `SERVICE` items, and services that consume stock items (e.g. photo printing using paper). Only the entity field exists in v1.1.
+13. ~~**Service billing (FR-21)**~~ — *moved into scope by FR-36/FR-37 (v1.4).* Still out: bundles of a service, returns of a service, services as components of other services, and a component's item history listing the service bills that consumed it.
 14. **Expense extras**: Expenses on credit / unpaid expense bills, expense vendors and payables, recurring expenses, expense attachments, and archiving expense types.
 15. **Charge/discount extras**: Percentage discounts, per-line (item-level) discounts, tax-as-a-charge, landed-cost allocation of purchase charges into lot costs, and archiving charge types.
 16. **Bulk low-stock level editing** (set one level for many items or a category at once) and a global default other than 5.
@@ -361,6 +405,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 20. **Unrecorded stock is valued at entered cost** *(2026-11-22)*: `UNRECORDED_STOCK` adjustments create lots at a user-entered cost (prefilled from the latest lot), unlike other positive adjustments (DD-08), because this stock never had a purchase to take a cost from.
 21. **Today is the shop computer's local date** *(2026-11-25, FR-28)*: the backend takes "today" from the local clock (injectable in tests). An entry dated after it is rejected.
 22. **Opening bills are dues, not trade** *(2026-11-25, FR-35)*: an `OB-` bill carries a party balance that existed before the app. It takes part in dues, settlement and the ledger. It takes no part in sales, purchases, P&L, profit, stock or cash. Its settlements are ordinary cash events.
+23. **A service sells stock it consumes** *(2026-11-25, FR-36/FR-37)*: a service line depletes its components by FIFO like a sale of those items, and its cost is `max(components' FIFO cost, service_cost × qty)`. The difference is a costing figure (misc. cost), not cash, so overheads already entered as Expenses would be counted twice if they are also in the Service cost; the owner chooses what goes into it.
 
 ---
 
@@ -438,6 +483,23 @@ erDiagram
         string phone
         string address
         string tax_id
+        string backup_directory "Optional backup folder"
+        decimal opening_cash "Cash when the app started (v10)"
+    }
+
+    CODE_SEQUENCE {
+        string prefix PK "SAL-, PUR-, OB-, EXP- ..."
+        int last_value "High-water mark (v6)"
+    }
+
+    ITEM ||--o{ SERVICE_COMPONENT : "service uses"
+    ITEM ||--o{ SERVICE_COMPONENT : "consumed as component"
+
+    SERVICE_COMPONENT {
+        int id PK
+        int service_item_id FK "SERVICE item"
+        int component_item_id FK "PHYSICAL item"
+        decimal quantity_per_unit "Component base units per 1 service unit"
     }
 
     PARTY ||--o{ PURCHASE_TRANSACTION : "supplies"
@@ -482,11 +544,13 @@ erDiagram
         string base_unit "Smallest unit: PCS, SHEET, KG"
         decimal mrp "Optional printed MRP"
         decimal default_sale_price "Default base rate"
+        decimal service_cost "SERVICE only: cost per unit, optional (v12)"
         decimal current_stock "Cached total in base units"
         decimal low_stock_threshold "Per-item level, default 5"
         boolean is_low_stock "1 if stock under its threshold"
         boolean is_active "1 if active, 0 if archived"
         datetime created_at "Creation timestamp"
+        datetime updated_at "Last edit"
     }
 
     EXPENSE_TYPE {
@@ -546,6 +610,7 @@ erDiagram
         string notes "Remarks"
         boolean is_active "1 if active, 0 if archived"
         datetime created_at "Creation timestamp"
+        datetime updated_at "Last edit"
     }
 
     PURCHASE_TRANSACTION {
@@ -564,6 +629,7 @@ erDiagram
         decimal total_amount "subtotal + charges - discounts"
         decimal paid_amount "Paid upfront"
         decimal balance_due "Remaining payable"
+        boolean is_opening_balance "1 for an OB- opening bill (v11)"
         string notes "Remarks"
         datetime created_at "Creation timestamp"
         datetime updated_at "Last edit (FR-20)"
@@ -597,6 +663,7 @@ erDiagram
         decimal total_amount "subtotal + charges - discounts"
         decimal paid_amount "Paid upfront"
         decimal balance_due "Remaining due"
+        boolean is_opening_balance "1 for an OB- opening bill (v11)"
         string notes "Remarks"
         datetime created_at "Creation timestamp"
         datetime updated_at "Last edit (FR-20)"
@@ -612,6 +679,7 @@ erDiagram
         decimal quantity "Base units depleted via FIFO"
         decimal unit_price "Effective price per base unit"
         decimal total_amount "Line total"
+        decimal service_cost_total "SERVICE lines: service_cost x qty snapshot (v12)"
         string transaction_date "Copy of header date (v9)"
     }
 
@@ -639,6 +707,7 @@ erDiagram
         date return_date "Date"
         string return_type "CUSTOMER or VENDOR"
         int party_id FK "Optional Party"
+        string party_name "Snapshot (DD-30)"
         int original_transaction_id FK "Optional sale/purchase link"
         string settlement_type "REFUND or REPLACEMENT"
         decimal total_amount "Total value"
@@ -651,6 +720,7 @@ erDiagram
         int id PK
         int return_transaction_id FK
         int item_id FK
+        string item_name "Snapshot (DD-30)"
         int sale_item_id FK "Customer return link (optional)"
         int purchase_item_id FK "Vendor return lot (optional)"
         string line_type "RETURNED or REPLACEMENT_ISSUED"
@@ -697,17 +767,19 @@ erDiagram
 | :--- | :--- | :--- | :--- |
 | `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Unique item identifier. |
 | `name` | TEXT | NOT NULL, UNIQUE | Product name (e.g., "Apsara Platinum Pencil"). |
-| `item_type` | TEXT | NOT NULL DEFAULT 'PHYSICAL', CHECK IN ('PHYSICAL','SERVICE') | *(v1.1, FR-21)* Stocked good or service. Only `PHYSICAL` accepted by services in v1.1. |
+| `item_type` | TEXT | NOT NULL DEFAULT 'PHYSICAL', CHECK IN ('PHYSICAL','SERVICE') | *(v1.1, FR-21)* Stocked good or service. Only `PHYSICAL` accepted by services until v1.4 (FR-36). Fixed once the item is created. |
 | `category` | TEXT | NULLABLE | Product category (e.g., "Stationery", "Snacks"). |
 | `barcode` | TEXT | NULLABLE, INDEXED | Base unit barcode / SKU for instant scanner lookup. |
 | `base_unit` | TEXT | NOT NULL DEFAULT 'PCS' | Smallest indivisible unit ('PCS', 'SHEET', 'KG', 'LTR'). |
 | `mrp` | REAL | NULLABLE | Optional printed Maximum Retail Price in ₹. |
 | `default_sale_price`| REAL | NOT NULL DEFAULT 0.0 | Suggested selling price per base unit in ₹. |
+| `service_cost` | REAL | NULLABLE, CHECK (≥ 0) | *(v1.4, schema v12, FR-36)* `SERVICE` only (NULL for `PHYSICAL`): intended cost per service unit. The line cost is never below the components' FIFO cost (FR-37). |
 | `current_stock` | REAL | NOT NULL DEFAULT 0.0 | Cached sum of all active batch quantities (in base units). |
 | `low_stock_threshold` | REAL | NOT NULL DEFAULT 5, CHECK (≥ 0) | *(v1.1, FR-05)* Per-item low stock level in base units; `0` = never low. |
 | `is_low_stock` | INTEGER | NOT NULL DEFAULT 0 | Fast-lookup flag: `1` if `item_type = 'PHYSICAL' AND current_stock < low_stock_threshold`, else `0`. |
 | `is_active` | INTEGER | NOT NULL DEFAULT 1 | Soft-delete status: `1` active, `0` archived. |
 | `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
+| `updated_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Last edit time. |
 
 #### 2. `ITEM_BUNDLE`
 *Packaging tiers and multi-UOM definitions for items (Box, Dozen, Rim, Carton).*
@@ -756,7 +828,8 @@ erDiagram
 | `discounts_total` | REAL | NOT NULL DEFAULT 0.0 | *(v1.1)* Σ `BILL_CHARGE` amounts with effect `DISCOUNT`. |
 | `total_amount` | REAL | NOT NULL | Payable: `items_subtotal + charges_total − discounts_total` in ₹ (≥ 0). |
 | `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount paid upfront in ₹. |
-| `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining payable in ₹ (`total_amount - paid_amount`). |
+| `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining payable in ₹ (`total_amount − paid_amount − Σ RETURN_CREDIT`, Assumption 8). |
+| `is_opening_balance` | INTEGER | NOT NULL DEFAULT 0, CHECK IN (0,1); partial UNIQUE (`party_id`) WHERE 1 | *(v1.3, schema v11, FR-35)* `1` for an `OB-` opening bill (no lines, `source = PURCHASE`). |
 | `updated_at` | TEXT (ISO) | NULLABLE | *(v1.1, FR-20)* Last edit time; NULL if never edited. |
 | `supplier_invoice_ref` | TEXT | NULLABLE | Supplier's own invoice / DC number. |
 | `notes` | TEXT | NULLABLE | Remarks. |
@@ -794,7 +867,8 @@ erDiagram
 | `discounts_total` | REAL | NOT NULL DEFAULT 0.0 | *(v1.1)* Σ `BILL_CHARGE` amounts with effect `DISCOUNT`. |
 | `total_amount` | REAL | NOT NULL | Receivable: `items_subtotal + charges_total − discounts_total` in ₹ (≥ 0). |
 | `paid_amount` | REAL | NOT NULL DEFAULT 0.0 | Amount received upfront in ₹. |
-| `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining due in ₹ (`total_amount - paid_amount`). |
+| `balance_due` | REAL | NOT NULL DEFAULT 0.0 | Remaining due in ₹ (`total_amount − paid_amount − Σ RETURN_CREDIT`, Assumption 8). |
+| `is_opening_balance` | INTEGER | NOT NULL DEFAULT 0, CHECK IN (0,1); partial UNIQUE (`party_id`) WHERE 1 | *(v1.3, schema v11, FR-35)* `1` for an `OB-` opening bill (no lines). |
 | `updated_at` | TEXT (ISO) | NULLABLE | *(v1.1, FR-20)* Last edit time; NULL if never edited. |
 | `notes` | TEXT | NULLABLE | Customer or delivery notes. |
 | `created_at` | TEXT (ISO) | NOT NULL DEFAULT (CURRENT_TIMESTAMP) | Creation timestamp. |
@@ -812,7 +886,10 @@ erDiagram
 | `quantity` | REAL | NOT NULL | Base units (pack quantity × multiplier at entry time) depleted via FIFO. |
 | `unit_price` | REAL | NOT NULL | Effective selling rate per base unit in ₹. |
 | `total_amount` | REAL | NOT NULL | Line total in ₹. |
-| `transaction_date` | TEXT (ISO) | NOT NULL DEFAULT '' | *(v1.2, schema v9, FR-23)* Copy of the header's `transaction_date`, always equal to it. Index `idx_sale_items_item_date (item_id, transaction_date DESC, sale_transaction_id DESC)`. |
+| `service_cost_total` | REAL | NULLABLE, CHECK (≥ 0) | *(v1.4, schema v12, FR-37)* Service lines only: `round2(item.service_cost × quantity)` at save time; NULL for physical lines or when no Service cost is set. Misc. cost is derived, `max(0, service_cost_total − Σ net allocation cost)`, so a lot re-cost (FR-25) can never leave it stale. |
+| `transaction_date` | TEXT (ISO) | NOT NULL DEFAULT '' | *(v1.2, schema v9, FR-23)* Copy of the header's `transaction_date`, always equal to it. Index `idx_sale_items_item_date (item_id, transaction_date DESC, sale_transaction_id DESC)`. *(v12 drops the older `idx_sale_items_item (item_id)`, a prefix duplicate of this index.)* |
+
+*(v1.4)* A service line's `SALE_STOCK_ALLOCATION` rows point at its **components'** lots, so the lot's `item_id` differs from the line's. Line cost = Σ net allocation cost + misc. cost.
 
 #### 9. `SALE_STOCK_ALLOCATION`
 *FIFO audit bridge recording exact batch depletion and cost allocation.*
@@ -913,6 +990,21 @@ erDiagram
 
 `next_code = max(MAX(code number in the table), last_value) + 1`, upserted inside the caller's write transaction, so deletes (FR-20) need no extra bookkeeping. DD-34's `Transactions` reset clears the transaction prefixes' rows.
 
+#### 19. `SERVICE_COMPONENT` *(v1.4, schema v12, FR-36)*
+*Bill of materials: the physical items one unit of a service consumes.*
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | INTEGER | PRIMARY KEY AUTOINCREMENT | Row identifier. |
+| `service_item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)` | The service (`item_type = SERVICE`, checked by the service layer). |
+| `component_item_id` | INTEGER | NOT NULL, FK -> `ITEM(id)`, INDEXED | A physical item it consumes (`item_type = PHYSICAL`). |
+| `quantity_per_unit` | REAL | NOT NULL, CHECK (> 0) | Component base units used by one service unit. |
+
+`UNIQUE (service_item_id, component_item_id)`, `CHECK (service_item_id <> component_item_id)`. Edits replace the service's rows. Past sales are not affected, because their draw is stored as allocations.
+
+#### Derived, not stored *(v1.4 review, DD-71)*
+* **Cash in hand** is never stored. It is `opening_cash + ledger cash in − ledger cash out − expenses` up to a date (FR-33), so its value on any past day can be recomputed. A stored running balance would break on every back-dated entry or edit.
+* **Item profit, inventory speed and "Can make N"** are computed on request (DD-68). No analytics table.
+
 ---
 
 ## 7. Operational Query & Calculation Matrix
@@ -935,12 +1027,16 @@ erDiagram
 | **Period Purchases (net)** | `SUM(items_subtotal) FROM PURCHASE_TRANSACTION WHERE source = 'PURCHASE' AND transaction_date BETWEEN ? AND ?` − `SUM(total_amount) FROM RETURN_TRANSACTION WHERE return_type = 'VENDOR' AND return_date BETWEEN ? AND ?` |
 | **Period COGS** | `SELECT SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost) FROM SALE_STOCK_ALLOCATION a JOIN SALE_ITEM si ON a.sale_item_id = si.id JOIN SALE_TRANSACTION st ON si.sale_transaction_id = st.id WHERE st.transaction_date BETWEEN ? AND ?;` **+** `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type = 'REPLACEMENT'` whose return is dated in range |
 | **Period Inventory Losses** | `SUM(o.quantity_depleted * o.unit_cost)` over `STOCK_OUTFLOW_ALLOCATION` with `source_type = 'ADJUSTMENT'` dated by adjustment date, + `SUM(ri.cost_amount)` for customer `RETURNED` lines (REFUND or REPLACEMENT returns) with `condition = 'DAMAGED_SCRAP'`, by return date |
-| **Period Profit** *(rev. v1.1)* | Net Sales = Gross (items subtotal) − Sales Discounts − Returns; Gross Profit = Net Sales − COGS; Net Profit = Gross Profit + Other Income − Inventory Losses − Operating Expenses |
+| **Period Profit** *(rev. v1.1, v1.4)* | Net Sales = Gross (items subtotal) − Sales Discounts − Returns; Gross Profit = Net Sales − COGS − Service misc. costs; Net Profit = Gross Profit + Other Income − Inventory Losses − Operating Expenses |
 | **FIFO Depletion Query** | `SELECT id, remaining_quantity, unit_cost FROM PURCHASE_ITEM WHERE item_id = ? AND remaining_quantity > 0 ORDER BY id ASC;` |
 | **Linked Return Reversal** | `SELECT * FROM SALE_STOCK_ALLOCATION WHERE sale_item_id = ? AND quantity_depleted > returned_quantity ORDER BY id DESC;` then per row `UPDATE ... SET returned_quantity = returned_quantity + ?` and, if restockable, `UPDATE PURCHASE_ITEM SET remaining_quantity = remaining_quantity + ? WHERE id = ?;` |
 | **Stock Outflow Depletion** (neg. adjustment, replacement, vendor return) | FIFO depletion loop deducting from oldest `PURCHASE_ITEM.remaining_quantity`, inserting `STOCK_OUTFLOW_ALLOCATION` rows |
 | **Dynamic Bundle Presets & Sizes** | `SELECT bundle_name, units_per_bundle, COUNT(*) as usage_count FROM ITEM_BUNDLE GROUP BY bundle_name, units_per_bundle ORDER BY usage_count DESC;` |
-| **Cash Flow / Drawer (period)** | From `PAYMENT_SETTLEMENT` where `settlement_date BETWEEN ? AND ?`: cash in = Σ(SALE·UPFRONT + SALE·SETTLEMENT + PURCHASE·REFUND_IN); cash out = Σ(PURCHASE·UPFRONT + PURCHASE·SETTLEMENT + SALE·REFUND_OUT) **+ Σ EXPENSE.amount by `expense_date`** *(v1.1)*; `RETURN_CREDIT` excluded. Live drawer (cash in hand) = today's cash in − today's cash out (i.e. today's sales cash − purchase cash − refunds − expenses). |
+| **Cash Flow / Drawer (period)** | From `PAYMENT_SETTLEMENT` where `settlement_date BETWEEN ? AND ?`: cash in = Σ(SALE·UPFRONT + SALE·SETTLEMENT + PURCHASE·REFUND_IN); cash out = Σ(PURCHASE·UPFRONT + PURCHASE·SETTLEMENT + SALE·REFUND_OUT) **+ Σ EXPENSE.amount by `expense_date`** *(v1.1)*; `RETURN_CREDIT` excluded. *(rev. v1.3, FR-33)* **Cash in hand** = `opening_cash` + cash in − cash out over **every date up to today** (not today only). |
+| **Service misc. cost** *(v1.4, FR-37)* | Per service line: `MAX(0, si.service_cost_total − Σ (a.quantity_depleted − a.returned_quantity) × a.unit_cost)`; period total over sale bills by `transaction_date`; P&L line under COGS |
+| **Item profit** *(v1.4, FR-38)* | Group sale lines of non-opening sale bills in range by `si.item_id`: net revenue (line total − discount share − linked refund value), cost (net allocations + misc. cost), profit, margin. Served by `idx_sale_tx_date` → lines → `idx_sale_alloc_sale_item` |
+| **Inventory speed** *(v1.4, FR-39)* | Units out per physical item = `SUM(a.quantity_depleted − a.returned_quantity)` over `SALE_STOCK_ALLOCATION a JOIN PURCHASE_ITEM pi ON a.purchase_item_id = pi.id JOIN SALE_ITEM si ON a.sale_item_id = si.id` with `si.transaction_date BETWEEN ? AND ?`, grouped by `pi.item_id` (one path covers direct sales and service consumption); left-joined to `ITEM.current_stock`; rank → Fast / Normal / Slow; units out 0 with stock > 0 → Dead |
+| **Can make N** *(v1.4, FR-36)* | `MIN(FLOOR(c.current_stock / sc.quantity_per_unit))` over `SERVICE_COMPONENT sc JOIN ITEM c ON c.id = sc.component_item_id` per service |
 
 ---
 
@@ -1516,6 +1612,35 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 //   amount < settled -> ValidationError(opening_balance.amount); amount 0 + nothing settled -> bill removed
 ```
 
+#### 11. v1.4 Additions (summary — exact payloads live in the LLD)
+
+```typescript
+// --- Services (FR-36) — item_api                                          (schema v12)
+// create_item / update_item payload: item_type 'PHYSICAL' | 'SERVICE'; SERVICE adds
+//   service_cost?: number | null, components: [{ component_item_id, quantity_per_unit }]
+//   SERVICE rejects opening stock, bundles; update rejects an item_type change
+// Item / ItemSearchResult gain item_type, service_cost, can_make: number | null (services)
+// get_service_components { item_id } -> [{ component_item_id, name, base_unit, quantity_per_unit, current_stock }]
+// preview_service_cost { components, service_cost }  -> { components_cost, misc_cost, unit_cost }   // read-only
+
+// --- Selling services (FR-37) — sale_api / inventory_api
+// create_sale / update_sale accept SERVICE lines (no pack); draw components by FIFO
+// preview_lot_draw { item_id, quantity, prior_lines: [{ item_id, quantity }] }  // replaces prior_quantity
+//   service -> { components: [{ item_id, name, draw lots, draw_cost, shortfall }], components_cost, misc_cost, line_cost }
+// customer return / replacement with a SERVICE line -> ValidationError("Services cannot be returned")
+// PnLReport gains service_misc_costs
+
+// --- Reports (FR-38 / FR-39) — report_api (read-only)
+// get_item_profit_report { from_date, to_date, search?, sort, page } -> { rows, totals, reconciliation, total_count }
+// get_inventory_speed_report { from_date, to_date, class?: 'ALL'|'FAST'|'SLOW'|'DEAD', search?, sort, page }
+//   -> { rows: [{ item_id, name, base_unit, units_out, units_per_day, stock, days_of_cover, class }], counts, total_count }
+
+// --- Imports (FR-41) — import_api (validate_* never writes; execute_* is all-or-nothing)
+// validate/execute_items_import: template gains item_type, service_cost; XLSX sheet "Components"
+// validate/execute_service_components_import, validate/execute_parties_import { strategy: 'SKIP'|'UPDATE' },
+// validate/execute_expenses_import, write_import_template { kind: 'ITEMS'|'SERVICE_COMPONENTS'|'PARTIES'|'EXPENSES', format }
+```
+
 ### 9.4. Atomic Transaction & Concurrency Controls
 * All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`, and the v1.1 commands `create/update/delete_expense`, `create_expense_type`, `create_charge_type`, `update/delete_sale`, `update/delete_purchase`, `delete_return`, `update_item_low_stock_threshold`, `set_item_stock`, and the v1.2 commands `update_lot_purchase_price`, `settle_bills_batch`, `update_settlement`, `delete_settlement`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
 * No operation updates or deletes a committed transaction row except through the cached-value updates defined above (`paid_amount`, `balance_due`, `payment_status`, `remaining_quantity`, `returned_quantity`, `current_stock`, `is_low_stock`) **and the FR-20 / FR-25 / FR-26 correction operations** (`update_*` / `delete_*`, lot price, settlement edit/delete), which reverse and repost all dependent rows in the same transaction.
@@ -1578,3 +1703,14 @@ Owner requests of 2026-11-25. Same rules as §10/§11 (own branch, phased commit
 | 4 | `feat/dashboard-cash` (C5) | Dashboard grouped cards, net profit tile removed, all-time cash in hand, opening cash setting | FR-32, FR-33 | **v10** `shop_settings.opening_cash` | 2 |
 | 5 | `feat/history-profit` (C6) | Compact history columns, icon actions, Profit column toggle, item-level profit in the drawer | FR-34 | — | 4 |
 | 6 | `feat/party-opening-balance` (C7) | Opening balance on party create/edit as an `OB-` bill | FR-35 | **v11** opening-bill marker on both bill headers (+ one-per-party index) | 2, 5 |
+
+## 13. v1.4 Delivery Plan (2026-11-25)
+
+Owner requests of 2026-11-25. Same rules as §12 (own branch, phased commits, LLD / UI LLD first, frozen-fixture migration tests, full gate, DD-56). Branches go **strictly one after another**, each cut from local `main` after the previous merge. Only D2 migrates.
+
+| Order | Branch | Feature | Requirements | Schema migration | Depends on |
+|---|---|---|---|---|---|
+| 1 | `feat/dashboard-layout` (D1) | Cash & Stock row on top, low stock moved up, valuation → Inventory, larger item lookup with a fixed search field | FR-40 | — | — |
+| 2 | `feat/service-items` (D2) | Service create/edit with components and Service cost, Can make N, selling services, component FIFO, misc. cost in profit and P&L, not returnable | FR-36, FR-37 | **v12** `service_components`, `items.service_cost`, `sale_items.service_cost_total`, drop `idx_sale_items_item` | 1 |
+| 3 | `feat/item-analytics` (D3) | Item profit and Inventory speed panels on Reports | FR-38, FR-39 | — | 2 |
+| 4 | `feat/imports` (D4) | Items template with services and components, parties import, expenses import | FR-41 | — | 2 |
