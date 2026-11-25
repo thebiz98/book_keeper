@@ -69,6 +69,24 @@ export interface ItemSearchResult {
   matchedBundleId: number | null;
 }
 
+/** One open lot in a sale-row lot draw (FR-31). `drawQuantity` is the part of the entered quantity taken from it. */
+export interface LotDrawLot {
+  purchaseItemId: number;
+  transactionCode: string;
+  source: LotSource;
+  unitCost: number;
+  remainingQuantity: number;
+  drawQuantity: number;
+}
+
+/** Read-only FIFO draw for the sale entry row (FR-31, DD-60). */
+export interface LotDraw {
+  lots: LotDrawLot[];
+  drawCost: number;
+  available: number;
+  shortfall: number;
+}
+
 export interface ItemLot {
   purchaseItemId: number;
   purchaseTransactionId: number;
