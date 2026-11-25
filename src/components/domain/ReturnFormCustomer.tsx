@@ -47,6 +47,8 @@ interface BillLine {
   qty: number;
   rate: number;
   condition: StockCondition;
+  /** FR-45: the item was deleted; the line can't be returned until it is restored. */
+  deleted?: boolean;
 }
 
 interface FreeLine {
@@ -116,6 +118,7 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
             qty: 0,
             rate: it.netUnitPrice,
             condition: 'RESTOCKABLE',
+            deleted: it.itemDeleted === true,
           }))
         );
       })
@@ -295,7 +298,14 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
                 <TableBody>
                   {lines.map((l, i) => (
                     <TableRow key={l.saleItemId} >
-                      <TableCell className="py-1 font-medium">{l.name}</TableCell>
+                      <TableCell className="py-1 font-medium">
+                        {l.name}
+                        {l.deleted && (
+                          <div className="text-[10px] font-normal text-rose-600" data-testid="return-line-deleted">
+                            Deleted. Restore the item first.
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right font-mono">{l.sold}</TableCell>
                       <TableCell className="text-right font-mono">{l.returned}</TableCell>
                       <TableCell className="text-right font-mono">{returnable(l)}</TableCell>
@@ -310,6 +320,7 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
                       <TableCell>
                         <NumericInput
                           aria-label={`Return quantity for ${l.name}`}
+                          disabled={l.deleted}
                           value={l.qty}
                           onChange={(v) => patchLine(i, { qty: v })}
                           min={0}

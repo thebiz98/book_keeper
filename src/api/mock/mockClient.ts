@@ -8,6 +8,9 @@
  * which rejects with a ValidationError-shaped AppError for UI error testing.
  */
 import type {
+  DeleteMode,
+  DeletedItemRow,
+  ItemDeletePreview,
   ItemBillRef,
   ApiClient,
   BillCharge,
@@ -94,6 +97,7 @@ function toSearchResult(i: MockItem, matchedBundleId: number | null = null): Ite
     currentStock: i.currentStock,
     isLowStock: i.isLowStock,
     lowStockThreshold: i.lowStockThreshold,
+    isActive: i.isActive,
     bundles: i.bundles.map((b) => ({
       bundleId: b.id,
       bundleName: b.bundleName,
@@ -593,6 +597,52 @@ export class MockApiClient implements ApiClient {
     const item = this.items.find((i) => i.id === itemId);
     if (!item) throw notFound('Item', itemId);
     return toSearchResult(item);
+  }
+  async previewItemDelete(itemId: number): Promise<ItemDeletePreview> {
+    const item = this.items.find((i) => i.id === itemId);
+    if (!item) throw notFound('Item', itemId);
+    return {
+      itemId,
+      name: item.name,
+      itemType: item.itemType,
+      stock: item.currentStock,
+      baseUnit: item.baseUnit,
+      stockValue: item.currentStock * item.costPrice,
+      blockingServices: [],
+      canDelete: item.isActive,
+      reason: item.isActive ? null : `'${item.name}' is already deleted.`,
+      mode: 'SOFT',
+      reasonsUsed: [],
+    };
+  }
+  async deleteItem(itemId: number): Promise<{ mode: DeleteMode }> {
+    const item = this.items.find((i) => i.id === itemId);
+    if (!item) throw notFound('Item', itemId);
+    item.isActive = false;
+    item.updatedAt = nowIso();
+    return { mode: 'SOFT' };
+  }
+  async restoreItem(itemId: number) {
+    const item = this.items.find((i) => i.id === itemId);
+    if (!item) throw notFound('Item', itemId);
+    item.isActive = true;
+    item.updatedAt = nowIso();
+  }
+  async listDeletedItems(search?: string | null, page?: number, pageSize?: number) {
+    const q = (search ?? '').trim().toLowerCase();
+    const rows: DeletedItemRow[] = this.items
+      .filter((i) => !i.isActive && i.name.toLowerCase().includes(q))
+      .map((i) => ({
+        itemId: i.id,
+        name: i.name,
+        itemType: i.itemType,
+        category: i.category,
+        baseUnit: i.baseUnit,
+        currentStock: i.currentStock,
+        stockValue: i.currentStock * i.costPrice,
+        deletedAt: i.updatedAt,
+      }));
+    return paginate(rows, page, pageSize);
   }
   async listCategories() {
     return [...new Set(this.items.map((i) => i.category).filter((c): c is string => !!c))].sort();

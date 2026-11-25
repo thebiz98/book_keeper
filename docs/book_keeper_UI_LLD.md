@@ -768,7 +768,7 @@ UI only; no backend, schema or IPC change.
 * **Item drawer.** `ItemEditDrawer` edit mode shows a danger **Delete item** button left of `FormActions` (`item-delete-button`) opening `DeleteConfirmDialog` with `previewItemDelete`; all figures come from the preview. After delete: drawer closes, Inventory refreshes, toast "Deleted '<name>'. Restore it from Deleted items."
 * **Inventory.** Toolbar **Deleted items** opens `DeletedRecordsDialog`: Name, Type, Category, Stock, Stock value, Deleted on, Restore.
 * **Create form.** On `DeletedNameClash` (`ITEM_NAME_DELETED`) the Name field shows the message plus an inline **Restore '<name>'** button (`item-restore-clash`): `restoreItem(existing_id)`, then the item opens in edit.
-* **Details drawer of a deleted item.** "Deleted" badge, edit actions hidden, **Restore** button (`item-details-restore`).
+* **Details drawer of a deleted item.** "Deleted" badge, edit actions hidden, lots read-only, and **no Restore button**: Restore lives only in the Deleted items list (owner).
 * **Pickers.** Returns line pickers disable deleted items; New Sale / Purchase search never returns them (FTS).
 * **Tests (Vitest).** delete confirm from a mocked preview (allowed / blocked); Deleted items dialog search and restore; ITEM_NAME_DELETED restore action; deleted item details read-only.
 

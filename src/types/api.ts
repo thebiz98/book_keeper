@@ -26,6 +26,9 @@ import type {
   ServiceComponentView,
   ServiceCostPreview,
   ItemSearchResult,
+  ItemDeletePreview,
+  DeletedItemRow,
+  DeleteMode,
   ItemType,
   LowStockItem,
   Party,
@@ -638,6 +641,12 @@ export interface ApiClient {
   /** One item by id, same row shape as the catalog (NotFound when missing). Read-only. */
   getItem(itemId: number): Promise<ItemSearchResult>;
   listCategories(): Promise<string[]>;
+  /** FR-45 (DD-56): dry run of a delete; writes nothing. */
+  previewItemDelete(itemId: number): Promise<ItemDeletePreview>;
+  /** FR-45: HARD for a never-used item (removed permanently), otherwise SOFT (Deleted items). */
+  deleteItem(itemId: number): Promise<{ mode: DeleteMode }>;
+  restoreItem(itemId: number): Promise<void>;
+  listDeletedItems(search?: string | null, page?: number, pageSize?: number): Promise<Paginated<DeletedItemRow>>;
   createItem(payload: CreateItemPayload): Promise<number>;
   updateItem(itemId: number, payload: UpdateItemPayload): Promise<void>;
   /** Sets the per-item low stock level (>= 0; 0 = never) and returns the refreshed row. */

@@ -117,6 +117,8 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({ item, onCl
   const [tab, setTab] = useState<TabId>('lots');
   const [viewBill, setViewBill] = useState<{ kind: TransactionType; id: number } | null>(null);
   const itemId = item?.itemId ?? null;
+  // FR-45: a deleted item opens read-only (from past bills and reports); Restore lives only in Deleted items.
+  const deleted = item?.isActive === false;
 
   useEffect(() => {
     setTab('lots');
@@ -157,14 +159,25 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({ item, onCl
                   <CurrencyDisplay amount={item.defaultSalePrice} size="sm" />
                 </Stat>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onEdit(item)}
-                leftIcon={<Pencil className="h-3.5 w-3.5" />}
-              >
-                Edit
-              </Button>
+              {deleted ? (
+                <div className="flex flex-col items-end gap-1">
+                  <span
+                    data-testid="item-deleted-badge"
+                    className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                  >
+                    Deleted
+                  </span>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onEdit(item)}
+                  leftIcon={<Pencil className="h-3.5 w-3.5" />}
+                >
+                  Edit
+                </Button>
+              )}
             </div>
 
             <Tabs
@@ -177,7 +190,9 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({ item, onCl
               onChange={(id) => setTab(id as TabId)}
             />
 
-            {tab === 'lots' && <LotInspector key={item.currentStock} itemId={item.itemId} baseUnit={item.baseUnit} editable />}
+            {tab === 'lots' && (
+              <LotInspector key={item.currentStock} itemId={item.itemId} baseUnit={item.baseUnit} editable={!deleted} />
+            )}
             {tab === 'sales' && (
               <BillsTab itemId={item.itemId} kind="SALE" onView={(id) => setViewBill({ kind: 'SALE', id })} />
             )}

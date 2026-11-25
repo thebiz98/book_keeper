@@ -18,7 +18,18 @@ export type AppError =
   | { type: 'MigrationError'; details: string }
   | { type: 'IoError'; details: string }
   | { type: 'OperationNotAllowed'; details: string }
-  | { type: 'BillLocked'; details: { code: string; message: string } };
+  | { type: 'BillLocked'; details: { code: string; message: string } }
+  /** FR-45 / FR-46: the name belongs to a deleted record; `existing_id` can be restored. */
+  | { type: 'DeletedNameClash'; details: { field: string; code: string; existing_id: number; message: string } };
+
+/** The deleted record behind a `DeletedNameClash` (e.g. `ITEM_NAME_DELETED`), else null. */
+export function deletedNameClash(e: unknown): { code: string; existingId: number; message: string } | null {
+  if (typeof e === 'object' && e !== null && (e as { type?: unknown }).type === 'DeletedNameClash') {
+    const d = (e as { details: { code: string; existing_id: number; message: string } }).details;
+    return { code: d.code, existingId: d.existing_id, message: d.message };
+  }
+  return null;
+}
 
 export const APP_ERROR_TYPES = [
   'ValidationError',
@@ -31,6 +42,7 @@ export const APP_ERROR_TYPES = [
   'IoError',
   'OperationNotAllowed',
   'BillLocked',
+  'DeletedNameClash',
 ] as const;
 
 export function isAppError(x: unknown): x is AppError {

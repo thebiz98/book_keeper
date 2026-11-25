@@ -10,11 +10,14 @@ import {
   Upload,
   PackagePlus,
   Boxes,
+  Trash2,
 } from 'lucide-react';
 import { api } from '@/api';
 import { errorMessage } from '@/api/errors';
 import { totalPages } from '@/lib/pagination';
-import type { ItemSearchResult } from '@/types';
+import type { DeletedItemRow, ItemSearchResult } from '@/types';
+import { DeletedRecordsDialog } from '@/components/domain/DeletedRecordsDialog';
+import { ItemDeleteDialog } from '@/components/domain/ItemDeleteDialog';
 import type { Paginated } from '@/types/api';
 import { useGridKeyboardNav } from '@/hooks/useGridKeyboardNav';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
@@ -48,6 +51,9 @@ export const InventoryPage: React.FC = () => {
   const [adjustItem, setAdjustItem] = useState<ItemSearchResult | null>(null);
   const [setStockItem, setSetStockItem] = useState<ItemSearchResult | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [deletedOpen, setDeletedOpen] = useState(false);
+  const [purgeId, setPurgeId] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [bundleItem, setBundleItem] = useState<ItemSearchResult | null>(null);
   const [detailsItem, setDetailsItem] = useState<ItemSearchResult | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -98,7 +104,7 @@ export const InventoryPage: React.FC = () => {
   const pages = totalPages(total, PAGE_SIZE);
 
   const anyOverlayOpen =
-    drawerOpen || detailsItem !== null || adjustItem !== null || setStockItem !== null || importOpen;
+    drawerOpen || detailsItem !== null || adjustItem !== null || setStockItem !== null || importOpen || deletedOpen || purgeId !== null;
   const nav = useGridKeyboardNav<ItemSearchResult>({
     items,
     getId: (i) => i.itemId,
@@ -185,6 +191,16 @@ export const InventoryPage: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
+            data-testid="deleted-items-button"
+            onClick={() => setDeletedOpen(true)}
+            leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+          >
+            Deleted items
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setImportOpen(true)}
             leftIcon={<Upload className="h-3.5 w-3.5" />}
           >
@@ -204,6 +220,19 @@ export const InventoryPage: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {notice && (
+        <div
+          role="status"
+          data-testid="inventory-notice"
+          className="shrink-0 flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+        >
+          <span>{notice}</span>
+          <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)} className="cursor-pointer px-1">
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Catalog Table */}
       <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs flex-1 min-h-[240px] flex flex-col">
@@ -420,6 +449,57 @@ export const InventoryPage: React.FC = () => {
         onClose={() => setDrawerOpen(false)}
         item={drawerItem}
         onSaved={refreshAll}
+        onDeleted={(name, mode) =>
+          setNotice(
+            mode === 'HARD'
+              ? `Deleted '${name}' permanently.`
+              : `Deleted '${name}'. Restore it from Deleted items.`
+          )
+        }
+        onRestoredOpen={(id) => {
+          api
+            .getItem(id)
+            .then((row) => {
+              setEditingItem(row);
+              setDrawerOpen(true);
+            })
+            .catch((e) => setNotice(errorMessage(e)));
+        }}
+      />
+
+      <DeletedRecordsDialog<DeletedItemRow>
+        isOpen={deletedOpen}
+        title="Deleted items"
+        columns={[
+          { header: 'Name', render: (r) => <span className="font-semibold">{r.name}</span> },
+          { header: 'Type', render: (r) => (r.itemType === 'SERVICE' ? 'Service' : 'Physical') },
+          { header: 'Category', render: (r) => r.category ?? '—' },
+          { header: 'Stock', align: 'right', render: (r) => (r.itemType === 'SERVICE' ? '—' : `${r.currentStock} ${r.baseUnit}`) },
+          { header: 'Stock value', align: 'right', render: (r) => <CurrencyDisplay amount={r.stockValue} size="sm" /> },
+          { header: 'Deleted on', render: (r) => r.deletedAt.slice(0, 10) },
+        ]}
+        fetchPage={(s, p, size) => api.listDeletedItems(s, p, size)}
+        rowId={(r) => r.itemId}
+        restore={(r) => api.restoreItem(r.itemId)}
+        onRestored={refreshAll}
+        extraAction={{
+          label: 'Delete permanently',
+          visible: (r) => r.canPurge === true,
+          run: async (r) => {
+            setPurgeId(r.itemId);
+          },
+        }}
+        onClose={() => setDeletedOpen(false)}
+      />
+
+      <ItemDeleteDialog
+        itemId={purgeId}
+        onClose={() => setPurgeId(null)}
+        onDeleted={(name) => {
+          setPurgeId(null);
+          setNotice(`Deleted '${name}' permanently.`);
+          refreshAll();
+        }}
       />
 
       <ItemDetailsDrawer
