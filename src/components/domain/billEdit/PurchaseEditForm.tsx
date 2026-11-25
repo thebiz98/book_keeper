@@ -11,6 +11,9 @@ import { CurrencyDisplay } from '../../common/CurrencyDisplay';
 import { PartySelector } from '../PartySelector';
 import { ItemSearchTypeahead } from '../ItemSearchTypeahead';
 import { BillChargesPanel } from '../BillChargesPanel';
+import { BundleCreationModal } from '../BundleCreationModal';
+import { NEW_BUNDLE, NEW_BUNDLE_LABEL } from '@/lib/bundleSentinel';
+import { savedBundleToSearchResult } from '@/lib/billEditDraft';
 import { usePurchaseEditDraft } from './usePurchaseEditDraft';
 import { useBillEditPreview } from './useBillEditPreview';
 import { EditErrors, EditTotals, PaymentStatusControl, inputCls } from './EditParts';
@@ -34,6 +37,8 @@ export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCa
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
+  // One bundle modal for the whole form; the target says which line asked for it (FR-29).
+  const [bundleTarget, setBundleTarget] = useState<{ lineKey: number; itemId: number; baseUnit: string } | null>(null);
 
   useEffect(() => {
     onDirtyChange?.(dr.dirty);
@@ -167,13 +172,21 @@ export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCa
               <TableRow key={l.key} data-testid="edit-line" data-line-key={l.key}>
                 <TableCell className="py-1 font-medium">{l.itemName}</TableCell>
                 <TableCell className="min-w-28">
-                  <Select
+                  <Select<string | number>
                     aria-label={`Unit ${l.itemName}`}
                     value={l.bundleId ?? BASE}
-                    onChange={(v) => dr.setUnit(l.key, Number(v) === BASE ? null : Number(v))}
+                    onChange={(v) => {
+                      if (v === NEW_BUNDLE) {
+                        // The unit stays as it was; Cancel leaves it there.
+                        setBundleTarget({ lineKey: l.key, itemId: l.itemId, baseUnit: l.baseUnit });
+                        return;
+                      }
+                      dr.setUnit(l.key, Number(v) === BASE ? null : Number(v));
+                    }}
                     options={[
                       { value: BASE, label: l.baseUnit },
                       ...l.bundles.map((b) => ({ value: b.bundleId, label: `${b.bundleName} (× ${b.unitsPerBundle})` })),
+                      { value: NEW_BUNDLE, label: NEW_BUNDLE_LABEL },
                     ]}
                   />
                 </TableCell>
@@ -252,6 +265,18 @@ export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCa
           </span>
         )}
       </div>
+
+      <BundleCreationModal
+        isOpen={bundleTarget !== null}
+        onClose={() => setBundleTarget(null)}
+        initialItemId={bundleTarget?.itemId}
+        baseUnit={bundleTarget?.baseUnit}
+        onBundleCreated={(saved) => {
+          if (!bundleTarget) return;
+          dr.addBundle(bundleTarget.itemId, savedBundleToSearchResult(saved));
+          dr.setUnit(bundleTarget.lineKey, saved.id);
+        }}
+      />
 
       <BillChargesPanel
         side="PURCHASE"

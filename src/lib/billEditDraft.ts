@@ -5,7 +5,7 @@
  * the same name and multiplier, otherwise the line falls back to base units. Line totals are
  * preserved either way.
  */
-import type { ItemBundleSearchResult, ItemSearchResult, PurchaseItem, SaleItem } from '@/types';
+import type { ItemBundleSearchResult, ItemSearchResult, PurchaseItem, SaleItem, SavedBundle } from '@/types';
 import type { CartLine } from '@/store/useCartStore';
 import type { PurchaseLine } from '@/components/domain/purchaseMath';
 
@@ -84,3 +84,15 @@ export function purchaseLineToDraft(lot: PurchaseItem, item: ItemSearchResult | 
   };
 }
 
+
+/** Row mapping only: a bundle just saved by `BundleCreationModal` as an entry of a line's unit list. */
+export function savedBundleToSearchResult(b: SavedBundle): ItemBundleSearchResult {
+  return {
+    bundleId: b.id,
+    bundleName: b.bundleName,
+    unitsPerBundle: b.unitsPerBundle,
+    bundlePrice: b.defaultBundlePrice,
+    defaultRate: b.defaultRate,
+    barcode: b.barcode,
+  };
+}

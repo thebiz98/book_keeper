@@ -160,6 +160,18 @@ export function usePurchaseEditDraft(billId: number) {
     [patch]
   );
 
+  /** Makes a freshly created bundle available in the unit list of every line of that item. */
+  const addBundle = useCallback(
+    (itemId: number, bundle: ItemBundleSearchResult) =>
+      patch((d) => ({
+        ...d,
+        lines: d.lines.map((l) =>
+          l.itemId === itemId ? { ...l, bundles: [...l.bundles.filter((x) => x.bundleId !== bundle.bundleId), bundle] } : l
+        ),
+      })),
+    [patch]
+  );
+
   /** Appends a new line (no lot id); returns its row key so the form can focus it. */
   const addLine = useCallback(
     (item: ItemSearchResult): number => {
@@ -268,6 +280,7 @@ export function usePurchaseEditDraft(billId: number) {
     setHeader,
     setLine,
     setUnit,
+    addBundle,
     addLine,
     removeLine,
     addCharge,
