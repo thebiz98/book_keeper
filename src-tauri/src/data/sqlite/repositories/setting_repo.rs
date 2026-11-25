@@ -20,7 +20,7 @@ impl SettingRepository for SqliteSettingRepository {
     fn get_shop_setting(&self) -> Result<ShopSetting, AppError> {
         self.conn
             .query_row(
-                "SELECT id, shop_name, phone, address, tax_id FROM shop_settings ORDER BY id LIMIT 1",
+                "SELECT id, shop_name, phone, address, tax_id, opening_cash FROM shop_settings ORDER BY id LIMIT 1",
                 [],
                 |r| {
                     Ok(ShopSetting {
@@ -29,6 +29,7 @@ impl SettingRepository for SqliteSettingRepository {
                         phone: r.get(2)?,
                         address: r.get(3)?,
                         tax_id: r.get(4)?,
+                        opening_cash: r.get(5)?,
                     })
                 },
             )
@@ -39,10 +40,10 @@ impl SettingRepository for SqliteSettingRepository {
     fn upsert_shop_setting(&mut self, s: &ShopSetting) -> Result<(), AppError> {
         let id = 1; // single-row table (CHECK id = 1)
         self.conn.execute(
-            "INSERT INTO shop_settings (id, shop_name, phone, address, tax_id) VALUES (?1,?2,?3,?4,?5) \
+            "INSERT INTO shop_settings (id, shop_name, phone, address, tax_id, opening_cash) VALUES (?1,?2,?3,?4,?5,?6) \
              ON CONFLICT(id) DO UPDATE SET shop_name=excluded.shop_name, phone=excluded.phone, \
-             address=excluded.address, tax_id=excluded.tax_id",
-            params![id, s.shop_name, s.phone, s.address, s.tax_id],
+             address=excluded.address, tax_id=excluded.tax_id, opening_cash=excluded.opening_cash",
+            params![id, s.shop_name, s.phone, s.address, s.tax_id, s.opening_cash],
         )?;
         Ok(())
     }

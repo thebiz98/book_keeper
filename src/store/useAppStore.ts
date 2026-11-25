@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { api } from '@/api';
-import type { ShopProfile, CashDrawerFlow, AppState } from '@/types/store';
+import type { ShopProfile, AppState } from '@/types/store';
 
-export type { ShopProfile, CashDrawerFlow, AppState };
+export type { ShopProfile, AppState };
 
 /** AppState (frozen contract in src/types/store.ts) plus the F6 shell additions. */
 export interface AppStoreState extends AppState {
@@ -19,7 +19,7 @@ export interface AppStoreState extends AppState {
   backupRequested: boolean;
 
   loadShopSettings: () => Promise<void>;
-  /** Refetch `getDashboardMetrics().liveCashInDrawer` into `liveCashInDrawer`. */
+  /** Refetch `getDashboardMetrics().cashInHand` into `cashInHand`. */
   refreshMetrics: () => Promise<void>;
   setDbLabel: (label: string | null) => void;
   openLookup: () => void;
@@ -37,12 +37,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   dbLabel: 'shop.db',
   lookupOpen: false,
   backupRequested: false,
-  salesCash: 0,
-  customerDuesSettled: 0,
-  purchaseCash: 0,
-  vendorDuesSettled: 0,
-  refunds: 0,
-  liveCashInDrawer: 0,
+  cashInHand: 0,
 
   setActiveRoute: (route: string): void => {
     set({ activeRoute: route });
@@ -78,7 +73,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   refreshMetrics: async (): Promise<void> => {
     try {
       const m = await api.getDashboardMetrics();
-      set({ liveCashInDrawer: m.liveCashInDrawer });
+      set({ cashInHand: m.cashInHand });
     } catch {
       /* keep the last known value */
     }
@@ -93,24 +88,4 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set({ backupRequested: false });
     return true;
   },
-
-  /** @deprecated The backend ledger is the source of truth; use `refreshMetrics()`. */
-  recordCashFlow: (_flow: CashDrawerFlow): void => {
-    void get().refreshMetrics();
-  },
-
-  /** @deprecated Use `refreshMetrics()`. */
-  resetCashDrawer: (): void => {
-    set({
-      salesCash: 0,
-      customerDuesSettled: 0,
-      purchaseCash: 0,
-      vendorDuesSettled: 0,
-      refunds: 0,
-      liveCashInDrawer: 0,
-    });
-  },
-
-  /** @deprecated Returns the last metric value; use `refreshMetrics()`. */
-  calculateCashDrawer: (): number => get().liveCashInDrawer,
 }));

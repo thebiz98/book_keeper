@@ -940,7 +940,6 @@ export class MockApiClient implements ApiClient {
       todaySalesCount: this.sales.length + 12,
       todayPurchaseAmount: 1500,
       todayPurchaseCount: 2,
-      todayNetProfit: 1200,
       totalStockValuation: 185000,
       customerReceivables: this.parties
         .filter((p) => p.partyType === 'CUSTOMER')
@@ -948,7 +947,7 @@ export class MockApiClient implements ApiClient {
       vendorPayables: this.parties
         .filter((p) => p.partyType === 'VENDOR')
         .reduce((s, p) => s + p.balanceDue, 0),
-      liveCashInDrawer: 3800,
+      cashInHand: 3800,
       todayExpensesAmount: 350,
     };
   }

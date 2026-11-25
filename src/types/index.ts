@@ -469,11 +469,11 @@ export interface DashboardMetrics {
   todaySalesCount: number;
   todayPurchaseAmount: number;
   todayPurchaseCount: number;
-  todayNetProfit: number;
   totalStockValuation: number;
   customerReceivables: number;
   vendorPayables: number;
-  liveCashInDrawer: number;
+  /** All-time: opening cash + every cash movement up to today (FR-33). */
+  cashInHand: number;
   todayExpensesAmount: number;
 }
 
@@ -519,6 +519,8 @@ export interface ShopSettings {
   phone: string | null;
   address: string | null;
   taxId: string | null;
+  /** Cash already in the drawer when the shop started using the app (FR-33). */
+  openingCash: number;
 }
 
 // --- Store expenses (FR-18) ---

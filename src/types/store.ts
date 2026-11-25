@@ -70,31 +70,16 @@ export interface ShopProfile {
   taxId?: string;
 }
 
-export interface CashDrawerFlow {
-  salesCash?: number;
-  customerDuesSettled?: number;
-  purchaseCash?: number;
-  vendorDuesSettled?: number;
-  refunds?: number;
-}
-
 export interface AppState {
   activeRoute: string;
   shopProfile: ShopProfile;
   isDbConnected: boolean;
-  salesCash: number;
-  customerDuesSettled: number;
-  purchaseCash: number;
-  vendorDuesSettled: number;
-  refunds: number;
-  liveCashInDrawer: number;
+  /** All-time cash in hand from the backend (FR-33); refreshed by `refreshMetrics()`. */
+  cashInHand: number;
 
   setActiveRoute: (route: string) => void;
   setShopProfile: (profile: Partial<ShopProfile>) => void;
   setDbConnected: (connected: boolean) => void;
-  recordCashFlow: (flow: CashDrawerFlow) => void;
-  resetCashDrawer: () => void;
-  calculateCashDrawer: () => number;
 }
 
 export interface ThemeState {

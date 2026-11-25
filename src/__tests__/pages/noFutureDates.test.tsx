@@ -34,7 +34,7 @@ describe('Entry date inputs stop at today (FR-28, DD-58)', () => {
       createPurchase: vi.fn(),
       previewPurchase: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p),
       previewSale: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p),
-      getDashboardMetrics: { liveCashInDrawer: 0 },
+      getDashboardMetrics: { cashInHand: 0 },
     });
     render(<NewSalePage />);
     await flush(150);
@@ -62,7 +62,7 @@ describe('Entry date inputs stop at today (FR-28, DD-58)', () => {
       [previewKey]: async (p: Parameters<typeof fakeBillPreview>[0]) =>
         fakeBillPreview(p, { errors: [{ field: 'transaction_date', message: 'Date cannot be in the future' }] }),
       searchItemsFts: search,
-      getDashboardMetrics: { liveCashInDrawer: 0 },
+      getDashboardMetrics: { cashInHand: 0 },
     });
     render(<BillDetailDrawer kind={kind} billId={id} onClose={() => {}} />);
     await waitFor(() => !!document.querySelector('[data-testid="bill-edit"]:not([disabled])'));

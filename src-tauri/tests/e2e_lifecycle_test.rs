@@ -207,7 +207,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
     let metrics = report_service.get_dashboard_metrics().expect("dashboard metrics");
     assert_eq!(metrics.total_stock_valuation, 240.0);
 
-    assert_eq!(metrics.live_cash_in_drawer, 300.0, "ledger drawer: 1200 - 800 - 100");
+    assert_eq!(metrics.cash_in_hand, 300.0, "ledger drawer: 1200 - 800 - 100");
     let pnl = report_service.get_pnl_report("2026-11-20", "2026-11-20").expect("pnl");
     assert_eq!(
         (pnl.gross_sales, pnl.sales_returns, pnl.net_sales, pnl.cogs, pnl.gross_profit, pnl.inventory_losses, pnl.net_profit),

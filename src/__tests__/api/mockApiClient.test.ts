@@ -165,7 +165,7 @@ describe('MockApiClient contract shapes', () => {
   });
 
   it('report shapes', async () => {
-    has(await c.getDashboardMetrics(), ['todaySalesAmount', 'todaySalesCount', 'liveCashInDrawer', 'todayExpensesAmount', 'vendorPayables']);
+    has(await c.getDashboardMetrics(), ['todaySalesAmount', 'todaySalesCount', 'cashInHand', 'todayExpensesAmount', 'vendorPayables']);
     has((await c.getLowStockAlerts())[0], ['id', 'currentStock', 'baseUnit']);
     expect((await c.getSalesPurchaseTrend('7d')).length).toBe(7);
     has((await c.getSalesPurchaseTrend('1y'))[0], ['date', 'salesAmount', 'purchaseAmount']);

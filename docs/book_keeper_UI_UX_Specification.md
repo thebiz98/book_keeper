@@ -74,13 +74,11 @@ The application maintains a persistent desktop shell across all views.
 
 ### Page 1: Dashboard / Home Cockpit (`F1`)
 * **Purpose:** Daily command center for stock health, cash register balancing, and credit dues.
-* **Top KPI Ribbon:**
-  - **Today's Gross Sales (₹)** + Count of completed bills.
-  - **Today's Purchases (₹)** + Count of inward batches.
-  - **Today's Net Profit (₹):** Same formula as the P&L report for today (Net Sales − COGS net of returns − Inventory Losses).
-  - **Total Inventory Valuation (₹):** Real-time sum: $\sum (\text{Remaining Lot Qty} \times \text{Unit Cost})$.
-  - **Total Customer Receivables (₹):** Sum of outstanding customer credit dues.
-  - **Total Vendor Payables (₹):** Sum of outstanding supplier bills.
+* **Summary Cards (v1.3, FR-32, FR-33):** three grouped cards replace the KPI ribbon (side by side on wide screens, stacked on narrow). Each row is a link: `label + caption ... amount`. There is no profit figure on this page (it is in Reports and Sales History).
+  - **Today:** Sales (amount, "n bills") -> Sales History; Purchases (amount, "n batches") -> Purchase History.
+  - **Dues:** Receivables ("customers owe you"), Payables ("you owe vendors") -> Credit & Dues.
+  - **Cash & Stock:** **Cash in hand** (largest, coloured; running all-time total including opening cash, never resets), Today's expenses -> Expenses, Inventory valuation (sum of remaining lot qty x unit cost) -> Reports.
+  - Wireframe: `[ TODAY: Sales / Purchases ]  [ DUES: Receivables / Payables ]  [ CASH & STOCK: CASH IN HAND / Expenses / Valuation ]`
 * **Action Header Bar:**
   - `[+ New Sale (F2)]`
   - `[+ New Purchase (F3)]`

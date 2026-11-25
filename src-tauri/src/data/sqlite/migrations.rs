@@ -402,6 +402,11 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 7, name: "bill_charges", sql: SCHEMA_V7 },
     Migration { version: 8, name: "bill_correction", sql: SCHEMA_V8 },
     Migration { version: 9, name: "line_transaction_date", sql: SCHEMA_V9 },
+    Migration {
+        version: 10,
+        name: "cash_opening",
+        sql: "ALTER TABLE shop_settings ADD COLUMN opening_cash REAL NOT NULL DEFAULT 0 CHECK (opening_cash >= 0);",
+    },
 ];
 
 /// Highest schema version this build knows.

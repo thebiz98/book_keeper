@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { act } from 'react';
 import { render } from '../testUtils';
 import { NewSalePage } from '@/pages/NewSalePage';
@@ -29,7 +29,7 @@ function makeApi() {
     searchItemsFts: [],
     listParties: [],
     searchParties: [],
-    getDashboardMetrics: { liveCashInDrawer: 0 },
+    getDashboardMetrics: { cashInHand: 0 },
     // DD-56: the screen shows what the backend preview returns (a test double stands in for it).
     previewSale: async (p: Parameters<typeof fakeBillPreview>[0] & { charges: { amount: number }[] }) =>
       p.charges.some((c) => c.amount === 250)

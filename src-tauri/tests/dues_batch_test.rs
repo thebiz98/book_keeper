@@ -60,7 +60,7 @@ fn seed_three(db: &TestDb) {
 fn batch_settles_several_bills_and_moves_cash() {
     let (acc, db) = setup();
     seed_three(&db);
-    let before = acc.calculate_live_cash_drawer(DAY).unwrap();
+    let before = acc.calculate_cash_in_hand(DAY).unwrap();
     let res = acc
         .settle_bills_batch(batch(1, TransactionType::Sale, &[(1, 300.0), (2, 150.0)]))
         .unwrap();
@@ -69,7 +69,7 @@ fn batch_settles_several_bills_and_moves_cash() {
     assert_eq!(sale_header(&db, 1), (300.0, 0.0, PaymentStatus::Paid));
     assert_eq!(sale_header(&db, 2), (250.0, 250.0, PaymentStatus::Partial));
     assert_eq!(sale_header(&db, 3).1, 200.0);
-    assert_eq!(acc.calculate_live_cash_drawer(DAY).unwrap(), before + 450.0);
+    assert_eq!(acc.calculate_cash_in_hand(DAY).unwrap(), before + 450.0);
     assert_ledger_invariant(&db);
 }
 
@@ -185,17 +185,17 @@ fn update_settlement_within_the_cap() {
     seed_three(&db);
     acc.settle_bills_batch(batch(1, TransactionType::Sale, &[(1, 100.0)])).unwrap();
     let id = first_settlement(&db, 1);
-    let drawer = acc.calculate_live_cash_drawer(DAY).unwrap();
+    let drawer = acc.calculate_cash_in_hand(DAY).unwrap();
 
     // Up to old + balance (= 300), down to 50.
     let row = acc.update_settlement(id, upd(300.0)).unwrap();
     assert_eq!(row.amount_paid, 300.0);
     assert_eq!(row.payment_mode.as_deref(), Some("UPI"));
     assert_eq!(sale_header(&db, 1), (300.0, 0.0, PaymentStatus::Paid));
-    assert_eq!(acc.calculate_live_cash_drawer(DAY).unwrap(), drawer + 200.0);
+    assert_eq!(acc.calculate_cash_in_hand(DAY).unwrap(), drawer + 200.0);
     acc.update_settlement(id, upd(50.0)).unwrap();
     assert_eq!(sale_header(&db, 1), (50.0, 250.0, PaymentStatus::Partial));
-    assert_eq!(acc.calculate_live_cash_drawer(DAY).unwrap(), drawer - 50.0);
+    assert_eq!(acc.calculate_cash_in_hand(DAY).unwrap(), drawer - 50.0);
 
     assert_eq!(field_of(acc.update_settlement(id, upd(300.01))), "amount_paid");
     assert_eq!(field_of(acc.update_settlement(id, upd(0.0))), "amount_paid");
@@ -234,13 +234,13 @@ fn delete_settlement_restores_balance_and_status() {
     seed_three(&db);
     acc.settle_bills_batch(batch(1, TransactionType::Sale, &[(1, 300.0), (3, 50.0)])).unwrap();
     assert_eq!(sale_header(&db, 1).2, PaymentStatus::Paid);
-    let drawer = acc.calculate_live_cash_drawer(DAY).unwrap();
+    let drawer = acc.calculate_cash_in_hand(DAY).unwrap();
     let id = first_settlement(&db, 1);
     let out = acc.delete_settlement(id).unwrap();
     assert_eq!(out.removed_amount, 300.0);
     assert_eq!(out.transaction_id, 1);
     assert_eq!(sale_header(&db, 1), (0.0, 300.0, PaymentStatus::Unpaid));
-    assert_eq!(acc.calculate_live_cash_drawer(DAY).unwrap(), drawer - 300.0);
+    assert_eq!(acc.calculate_cash_in_hand(DAY).unwrap(), drawer - 300.0);
     assert!(matches!(acc.delete_settlement(id), Err(AppError::NotFound { .. })));
     assert_ledger_invariant(&db);
 }

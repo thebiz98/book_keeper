@@ -109,7 +109,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
     let metrics = report_service.get_dashboard_metrics().unwrap();
     assert_eq!(metrics.today_sales_amount, 4000.0);
     assert_eq!(metrics.today_purchase_amount, 2500.0);
-    assert_eq!(metrics.live_cash_in_drawer, 2500.0, "Evening drawer must equal ₹4,000 - ₹1,500 = ₹2,500");
+    assert_eq!(metrics.cash_in_hand, 2500.0, "Evening drawer must equal ₹4,000 - ₹1,500 = ₹2,500");
 
     let valuation = report_service.get_stock_valuation_report().unwrap();
     assert_eq!(valuation.total_valuation, 475.0, "Stock valuation: 95 * 5.0 = ₹475");

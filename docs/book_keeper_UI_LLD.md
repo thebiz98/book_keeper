@@ -662,3 +662,11 @@ gantt
 * Data: `previewLotDraw(itemId, quantity, priorQuantity)` through `usePreview` (debounced), keyed on (item, base quantity, prior). `quantity` = qty x unitsPerBundle of the chosen unit; `prior` = Σ base units of cart lines with the same `itemId`, passed by `NewSalePage` as the `priorQuantity(itemId)` prop (row mapping only).
 * In-drawer sale edit form: not changed (out of scope).
 * Tests (Vitest): merged prices and highlight from a stubbed `previewLotDraw`; no `Rate:` in the indicator; prior quantity is sent.
+
+## Dashboard cards and cash in hand (FR-32, FR-33, DD-61, DD-62, `feat/dashboard-cash`, v1.3 C5)
+* `DashboardSummaryCards` (`src/components/domain/DashboardSummaryCards.tsx`) replaces the eight `Kpi` tiles. Grid `grid-cols-1 md:grid-cols-3 gap-3`; each card is a surface with a header strip (icon chip + uppercase 11px title) and a divided list of rows. A row is a `<button>`: label (13px, medium) with a caption (11px, muted) on the left, the amount (`CurrencyDisplay`, tabular, right-aligned) on the right, hover background, `focus-visible` ring, a chevron that appears on hover. Loading shows "-"; the metrics error banner with Retry stays above the grid.
+* Cards: **Today** (Sales "n bills" -> sales-history, Purchases "n batches" -> purchase-history), **Dues** (Receivables "customers owe you", Payables "you owe vendors" -> dues), **Cash & Stock** (Cash in hand = hero row, larger and coloured; Today's expenses -> expenses; Inventory valuation -> reports). The history pages have no date hand-off param, so the rows only navigate.
+* Test ids kept: `kpi-sales`, `kpi-purchases`, `kpi-valuation`, `kpi-receivables`, `kpi-payables`, `kpi-expenses`, `kpi-cash` (on the row button). `kpi-profit` is gone.
+* Store: `liveCashInDrawer` -> `cashInHand`; unused `salesCash`, `purchaseCash`, `resetCashDrawer` removed. The header pill reads "Cash in hand".
+* Settings: an "Opening cash (₹)" numeric field in the Shop Profile card (below a divider), help "Cash already in the drawer when you started using Book Keeper", saved by "Save Profile" with the shop settings, then `refreshMetrics()`. The backend validates and its message is shown on failure.
+* Tests (Vitest): three cards with grouped rows; no profit tile; row clicks navigate; header "Cash in hand"; Settings saves opening cash.

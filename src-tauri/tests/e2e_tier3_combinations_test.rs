@@ -201,7 +201,7 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
     assert_eq!(dues_after[0].balance_due, 900.0);
 
     // Step 5: Cash drawer for 2026-11-15 must reflect the ₹600 cash inflow
-    let drawer_today = harness.accounting_service.calculate_live_cash_drawer("2026-11-15").unwrap();
+    let drawer_today = harness.accounting_service.calculate_cash_in_hand("2026-11-15").unwrap();
     assert_eq!(drawer_today, 600.0);
 }
 
@@ -490,6 +490,7 @@ fn test_tc_t3_cmb_009_shop_settings_profile_and_sale_summary() {
         address: Some("Shop 12, Market Square".to_string()),
         phone: Some("011-99887766".to_string()),
         tax_id: Some("07ABCDE1234F1Z5".to_string()),
+        opening_cash: 0.0,
     };
     {
         let mut tx = harness.uow.begin_transaction().unwrap();

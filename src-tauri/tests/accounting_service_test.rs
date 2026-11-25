@@ -76,12 +76,12 @@ fn test_tc_dues_003_daily_cash_drawer_reconciliation() {
     tx.commit().unwrap();
 
     acc.settle_bill_payment(settle_payload(3, TransactionType::Sale, Some(11), 400.0)).unwrap();
-    assert_eq!(acc.calculate_live_cash_drawer(DAY).unwrap(), 1400.0, "upfront 1000 + settled 400, each once");
+    assert_eq!(acc.calculate_cash_in_hand(DAY).unwrap(), 1400.0, "upfront 1000 + settled 400, each once");
 
     let s = acc.ledger_cash_summary(DAY, DAY).unwrap();
     assert_eq!((s.sale_upfront, s.sale_settlement, s.cash_in, s.cash_out, s.net), (1000.0, 400.0, 1400.0, 0.0, 1400.0));
     // The 19th has nothing in the ledger (the bill itself moved no cash).
-    assert_eq!(acc.calculate_live_cash_drawer("2026-11-19").unwrap(), 0.0);
+    assert_eq!(acc.calculate_cash_in_hand("2026-11-19").unwrap(), 0.0);
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn test_cash_drawer_uses_full_direction_table() {
     assert_eq!(s.cash_in, 525.0);
     assert_eq!(s.cash_out, 260.0);
     assert_eq!(s.net, 265.0);
-    assert_eq!(acc.calculate_live_cash_drawer(DAY).unwrap(), 265.0);
+    assert_eq!(acc.calculate_cash_in_hand(DAY).unwrap(), 265.0);
 }
 
 #[test]
@@ -231,8 +231,9 @@ fn test_vendor_side_specific_and_fifo_settlement() {
     assert_eq!(res.bills_touched, vec![1, 2]);
     assert_eq!(pur_header(&db, 1), (500.0, 0.0, PaymentStatus::Paid));
     assert_eq!(pur_header(&db, 2), (150.0, 150.0, PaymentStatus::Partial));
-    // Settlement is cash out for purchases.
-    assert_eq!(acc.calculate_live_cash_drawer(DAY).unwrap(), -550.0);
+    // Settlement is cash out for purchases: 100 (bill 1 upfront, an earlier day, counted since cash
+    // in hand is all-time) + 100 + 450.
+    assert_eq!(acc.calculate_cash_in_hand(DAY).unwrap(), -650.0);
 }
 
 #[test]

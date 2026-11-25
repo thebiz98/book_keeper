@@ -85,7 +85,7 @@ describe('SettingsPage testing tools', () => {
       getShopSettings: { id: 1, shopName: 'Shop', phone: null, address: null, taxId: null },
       getAppConfig: view({ testingMode: true }),
       resetData: async (scope: 'Transactions' | 'All') => summary(scope),
-      getDashboardMetrics: { liveCashInDrawer: 0 },
+      getDashboardMetrics: { cashInHand: 0 },
       ...over,
     });
   }

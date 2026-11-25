@@ -62,7 +62,17 @@ pub fn ledger_cash_summary(
     Ok(s)
 }
 
-/// The one cash-drawer formula: `(ledger summary, expenses, net)` over `[from, to]` where
+/// Earliest date any ledger or expense row can carry (string compare on `YYYY-MM-DD`).
+const FIRST_DAY: &str = "0000-01-01";
+
+/// Cash in hand (FR-33): opening cash plus the all-time [`cash_position`] net up to `today`.
+/// Rows dated after `today` are outside the range and never count.
+pub fn cash_in_hand_at(tx: &mut dyn TransactionContext, today: &str) -> Result<f64, AppError> {
+    let opening = tx.settings().get_shop_setting()?.opening_cash;
+    Ok(round2(opening + cash_position(tx, FIRST_DAY, today)?.2))
+}
+
+/// The one cash-drawer formula:`(ledger summary, expenses, net)` over `[from, to]` where
 /// `net = ledger net - expenses` (DD-37: expenses are cash out of the drawer on their date).
 pub fn cash_position(
     tx: &mut dyn TransactionContext,
@@ -98,10 +108,10 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
         ledger_cash_summary(&mut *tx, from, to)
     }
 
-    /// Net cash in the drawer for one day, derived purely from the ledger (DD-01).
-    pub fn calculate_live_cash_drawer(&self, today: &str) -> Result<f64, AppError> {
+    /// All-time cash in hand up to `today`, derived from the ledger plus opening cash (DD-01, DD-62).
+    pub fn calculate_cash_in_hand(&self, today: &str) -> Result<f64, AppError> {
         let mut tx = self.uow.begin_read()?;
-        Ok(cash_position(&mut *tx, today, today)?.2)
+        cash_in_hand_at(&mut *tx, today)
     }
 
     /// Open bills `(id, balance_due)` of a party, oldest first (`transaction_date, id`).

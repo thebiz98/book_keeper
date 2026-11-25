@@ -46,7 +46,7 @@ function makeApi(over: Record<string, unknown> = {}) {
     updateExpense: async (id: number, p: { amount: number }) => ({ ...row(id, INK, p.amount), updatedAt: 'now' }),
     deleteExpense: undefined,
     listExpenses: { items: rows, total: 2, page: 1, limit: 25, periodTotal: 500 },
-    getDashboardMetrics: { liveCashInDrawer: 0 },
+    getDashboardMetrics: { cashInHand: 0 },
     ...over,
   });
 }
@@ -212,7 +212,7 @@ describe('F7 hotkey', () => {
   });
 
   it('navigates to Expenses and focuses the Type field', async () => {
-    makeApi({ getDashboardMetrics: { liveCashInDrawer: 0, todayExpensesAmount: 0 } });
+    makeApi({ getDashboardMetrics: { cashInHand: 0, todayExpensesAmount: 0 } });
     useAppStore.setState({ activeRoute: 'dashboard' });
     render(<App />);
     await flush(20);

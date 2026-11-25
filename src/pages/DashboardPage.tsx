@@ -6,7 +6,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
-import { Card, CardContent } from '@/components/ui/Card';
+import { DashboardSummaryCards } from '@/components/domain/DashboardSummaryCards';
 import { Button } from '@/components/ui/Button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { StockAdjustmentModal } from '@/components/domain/StockAdjustmentModal';
@@ -59,24 +59,6 @@ const Err: React.FC<{ msg: string; onRetry: () => void }> = ({ msg, onRetry }) =
       Retry
     </button>
   </div>
-);
-
-const Kpi: React.FC<{ label: string; value: number | null; sub?: string; colored?: boolean; testId: string }> = ({
-  label,
-  value,
-  sub,
-  colored,
-  testId,
-}) => (
-  <Card>
-    <CardContent className="p-3 flex flex-col justify-between h-full" data-testid={testId}>
-      <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">{label}</span>
-      <div className="text-lg font-bold font-mono my-1">
-        {value === null ? <span className="text-slate-400">-</span> : <CurrencyDisplay amount={value} size="lg" colored={colored} />}
-      </div>
-      {sub && <span className="text-[10px] text-slate-500 font-mono">{sub}</span>}
-    </CardContent>
-  </Card>
 );
 
 export const DashboardPage: React.FC = () => {
@@ -136,7 +118,7 @@ export const DashboardPage: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-xs">
         <div>
           <h1 className="text-base font-bold text-slate-900 dark:text-slate-100">Retail Counter Cockpit</h1>
-          <p className="text-xs text-slate-500">Daily turnover, cash drawer and inventory health</p>
+          <p className="text-xs text-slate-500">Daily turnover, cash in hand and inventory health</p>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" onClick={() => setActiveRoute('sale')} hotkey="F2" leftIcon={<ShoppingCart className="h-3.5 w-3.5" />}>
@@ -158,16 +140,7 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {base?.metrics.error && <Err msg={`Could not load metrics: ${base.metrics.error}`} onRetry={loadBase} />}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-        <Kpi testId="kpi-sales" label="Today's Gross Sales" value={m?.todaySalesAmount ?? null} sub={m ? `${m.todaySalesCount} bills` : undefined} />
-        <Kpi testId="kpi-purchases" label="Today's Purchases" value={m?.todayPurchaseAmount ?? null} sub={m ? `${m.todayPurchaseCount} batches` : undefined} />
-        <Kpi testId="kpi-profit" label="Today's Net Profit" value={m?.todayNetProfit ?? null} colored />
-        <Kpi testId="kpi-valuation" label="Inventory Valuation" value={m?.totalStockValuation ?? null} />
-        <Kpi testId="kpi-receivables" label="Customer Receivables" value={m?.customerReceivables ?? null} />
-        <Kpi testId="kpi-payables" label="Vendor Payables" value={m?.vendorPayables ?? null} />
-        <Kpi testId="kpi-expenses" label="Today's Expenses" value={m?.todayExpensesAmount ?? null} />
-        <Kpi testId="kpi-cash" label="Cash in Drawer" value={m?.liveCashInDrawer ?? null} colored sub="After today's expenses" />
-      </div>
+      <DashboardSummaryCards metrics={m} onNavigate={setActiveRoute} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 flex flex-col gap-4">

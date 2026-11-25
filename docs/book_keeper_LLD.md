@@ -1493,7 +1493,7 @@ Dates are inclusive `YYYY-MM-DD` strings compared lexically. All sums `COALESCE(
 | `today_sales_count` / `today_purchase_count` | Count of sale bills / `PURCHASE`-source purchase bills dated today |
 | `total_stock_valuation` | Σ `remaining_quantity × unit_cost` over all lots with `remaining_quantity > 0` (any source) |
 | `customer_receivables` / `vendor_payables` | Σ `balance_due` over sale bills / `PURCHASE`-source purchase bills with `balance_due > 0` |
-| Cash flow buckets | Ledger sums by `(transaction_type, kind)` with `settlement_date` in range (see HLD §9.3 `CashFlowReport`); `net_cash_balance = inflows − outflows`; `live_cash_in_drawer` = today's `net_cash_balance` |
+| Cash flow buckets | Ledger sums by `(transaction_type, kind)` with `settlement_date` in range (see HLD §9.3 `CashFlowReport`); `net_cash_balance = inflows − outflows`; `cash_in_hand` = `opening_cash` + all-time `net_cash_balance` up to today (§20, FR-33) |
 | Trend | One point per day (`7d`, `30d`) or per month (`1y`) with `sales_amount` = gross sales and `purchase_amount` = `PURCHASE`-source purchases; missing days are zero-filled |
 | Stock valuation categories | Group by `COALESCE(item.category, 'Uncategorized')` |
 
@@ -2489,3 +2489,11 @@ Equivalence (preview equals the command, field by field), no side effects (row c
 * **DTO.** `LotDraw { lots: [LotDrawLot { purchase_item_id, transaction_code, source, unit_cost, remaining_quantity, draw_quantity }], draw_cost, available, shortfall }`.
 * **Algorithm.** `skip = prior_quantity`; for each lot in order: `after_skip = max(0, remaining - skip)`, `skip = max(0, skip - remaining)`, `draw = min(after_skip, left)`, `left -= draw`. `draw_cost = Σ draw × unit_cost`; `available = Σ remaining`; `shortfall = max(0, prior + quantity - available)` (EPS-clamped to 0). Unknown item -> `NotFound`; SERVICE item -> empty `lots`, `available` 0, `shortfall` 0. Lot code and source come from `list_lots_for_item`, joined by `purchase_item_id`.
 * **Tests (`tests/lot_draw_test.rs`).** Multi-lot draw with prior quantity, shortfall, no rows written, SERVICE item, unknown item, invalid quantity.
+
+## 20. Dashboard Cash in Hand (FR-32, FR-33, DD-61, DD-62, schema v10, `feat/dashboard-cash`, v1.3 C5)
+* **Schema v10** (`cash_opening`): `ALTER TABLE shop_settings ADD COLUMN opening_cash REAL NOT NULL DEFAULT 0 CHECK (opening_cash >= 0);`. Fixture `v10.sql` (frozen, records `schema_version` 10). Existing rows get 0.
+* **Settings.** `ShopSetting` gains `opening_cash: f64`. `get_shop_setting` reads it and `upsert_shop_setting` writes it. `ShopSettingServiceImpl::update_settings` validates it: finite and >= 0 (else `ValidationError { field: "opening_cash" }`), then `round2`. The `get_shop_settings` / `update_shop_settings` commands carry it (no new command).
+* **DashboardMetrics.** `today_net_profit` is removed (and the `pnl` call with it). `live_cash_in_drawer` becomes `cash_in_hand`. Kept: today's sales / purchase totals and counts, `total_stock_valuation`, receivables, payables, `today_expenses_amount` (today only).
+* **Formula.** `cash_in_hand = round2(opening_cash + cash_position(tx, "0000-01-01", today).2)`, read in one `begin_read()` snapshot. `cash_position` is still the only drawer formula (DD-37 expenses included). Rows dated after today are outside the range, so a future-dated row never counts. A credit sale writes no cash ledger row, so it does not move cash.
+* **Accounting service.** `calculate_live_cash_drawer(today)` is renamed `calculate_cash_in_hand(today)`, with the same all-time meaning plus opening cash. The Cash Flow report is unchanged (movement within its period).
+* **Tests.** `tests/report_service_test.rs`: cash carries across days (sale yesterday, expense today); includes opening cash; ignores rows after today; does not move on a credit sale; dashboard has no profit field. Settings: opening cash round trip, negative and non-finite rejected. `tests/schema_test.rs`: v9 -> v10 upgrade keeps data, defaults 0, CHECK rejects negatives, frozen fixture matches. Existing drawer tests are updated to the all-time meaning.
