@@ -76,7 +76,7 @@ const Row: React.FC<{ row: RowSpec; onOpen: (route: string) => void; tile?: bool
             amount={row.value}
             size={big ? 'xl' : 'md'}
             colored={row.colored}
-            className={cn(big ? 'text-2xl font-bold leading-8' : 'font-semibold')}
+            className={cn(big ? 'text-[21px] font-bold leading-7' : 'font-semibold')}
           />
         )}
         <ChevronRight
@@ -165,7 +165,7 @@ export const DashboardSummaryCards: React.FC<{
         },
         {
           testId: 'kpi-valuation',
-          label: 'Inventory valuation',
+          label: 'Inventory value',
           caption: 'stock at cost',
           value: m?.totalStockValuation ?? null,
           route: 'inventory',
