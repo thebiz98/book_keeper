@@ -34,6 +34,13 @@ export interface LiveSearchTypeaheadProps<T> {
   clearOnSelect?: boolean;
   className?: string;
   inputRef?: React.MutableRefObject<HTMLInputElement | null>;
+  /**
+   * `dropdown` (default): absolute popover under the input. `inline`: the results sit in normal
+   * flow below the input inside a scrolling container (the input row never scrolls away).
+   */
+  resultsMode?: 'dropdown' | 'inline';
+  /** Extra classes for the results container. */
+  resultsClassName?: string;
 }
 
 /**
@@ -62,6 +69,8 @@ export function LiveSearchTypeahead<T>({
   clearOnSelect = true,
   className,
   inputRef: externalInputRef,
+  resultsMode = 'dropdown',
+  resultsClassName,
 }: LiveSearchTypeaheadProps<T>): React.JSX.Element {
   const live = useLiveSearch<T[]>({
     initial: [],
@@ -126,6 +135,15 @@ export function LiveSearchTypeahead<T>({
   const showList = isOpen && optionCount > 0;
   const showEmpty = isOpen && settled && results.length === 0 && !onCreate;
   const activeId = showList ? `${listId}-opt-${highlightedIndex}` : undefined;
+
+  // Keep the highlighted option visible inside the (scrolling) list.
+  useEffect(() => {
+    if (!showList) return;
+    const el = containerRef.current?.querySelector(`[id="${listId}-opt-${highlightedIndex}"]`);
+    (el as HTMLElement | null)?.scrollIntoView?.({ block: 'nearest' });
+  }, [showList, highlightedIndex, listId]);
+
+  const inline = resultsMode === 'inline';
 
   const closeAfterSelect = () => {
     if (clearOnSelect) reset();
@@ -194,8 +212,8 @@ export function LiveSearchTypeahead<T>({
   };
 
   return (
-    <div ref={containerRef} className={cn('relative w-full', className)}>
-      <div className="relative flex items-center">
+    <div ref={containerRef} className={cn('relative w-full', inline && 'flex min-h-0 flex-col', className)}>
+      <div className={cn('relative flex items-center', inline && 'shrink-0')}>
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <input
           ref={setInput}
@@ -231,7 +249,12 @@ export function LiveSearchTypeahead<T>({
           id={listId}
           role="listbox"
           aria-label={listAriaLabel ?? `${ariaLabel} results`}
-          className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1"
+          data-results-mode={resultsMode}
+          className={cn(
+            'mt-1 w-full rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 py-1',
+            inline ? 'min-h-0 flex-1 overflow-y-auto' : 'absolute z-50 max-h-72 overflow-auto shadow-xl',
+            resultsClassName
+          )}
         >
           {showEmpty ? (
             <div className="px-4 py-3 text-xs text-slate-400 text-center">{emptyText(trimmed)}</div>

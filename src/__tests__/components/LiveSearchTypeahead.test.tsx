@@ -96,4 +96,28 @@ describe('LiveSearchTypeahead', () => {
     await flush(60);
     expect(document.body.textContent).toContain('Nothing for "zzz"');
   });
-});
+
+  it('dropdown mode (default) renders an absolute popover', async () => {
+    setup([{ id: 1, name: 'Rent' }]);
+    typeInto(input(), 'ren');
+    await flush(60);
+    const list = document.querySelector('[role="listbox"]')!;
+    expect(list.getAttribute('data-results-mode')).toBe('dropdown');
+    expect(list.className).toContain('absolute');
+  });
+
+  it('inline mode renders results in a scroll container, outside the input row', async () => {
+    setup([{ id: 1, name: 'Rent' }, { id: 2, name: 'Rental' }], { resultsMode: 'inline' });
+    typeInto(input(), 'ren');
+    await flush(60);
+    const list = document.querySelector('[role="listbox"]')!;
+    expect(list.getAttribute('data-results-mode')).toBe('inline');
+    expect(list.className).toContain('overflow-y-auto');
+    expect(list.className).not.toContain('absolute');
+    expect(list.contains(input())).toBe(false);
+    expect(options()).toEqual(['Rent', 'Rental', '+ Create "ren"']);
+    press(input(), 'ArrowDown');
+    await flush(0);
+    press(input(), 'Enter');
+    await flush(0);
+  });});
