@@ -50,9 +50,10 @@ pub use purchase_dto::{
     UpdateLotPricePayload,
 };
 pub use report_dto::{
-    CashFlowReport, CategoryValuation, DashboardMetrics, LowStockItem, PnLReport,
-    RecentTransaction, RecentTransactionKind,
-    StockValuationReport, TrendDataPoint,
+    CashFlowReport, CategoryValuation, DashboardMetrics, InventorySpeedFilter, InventorySpeedReport,
+    InventorySpeedRow, ItemProfitFilter, ItemProfitReconciliation, ItemProfitReport, ItemProfitRow,
+    ItemProfitTotals, LowStockItem, PnLReport, RecentTransaction, RecentTransactionKind, ReportSort,
+    SpeedClass, SpeedCounts, StockValuationReport, TrendDataPoint,
 };
 pub use return_dto::{
     CustomerReturnItemPayload, CustomerReturnPayload, ReturnDetailView, ReturnItemDetail,

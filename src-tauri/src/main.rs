@@ -66,6 +66,8 @@ fn main() {
             item_controller::get_bundle_suggestions,
             item_controller::get_service_components,
             report_controller::get_cash_flow_report,
+            report_controller::get_item_profit_report,
+            report_controller::get_inventory_speed_report,
             report_controller::get_dashboard_metrics,
             item_controller::get_items_catalog,
             item_controller::list_categories,

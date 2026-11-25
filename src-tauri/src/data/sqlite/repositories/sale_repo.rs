@@ -77,7 +77,7 @@ const PROFIT_SCRAP: &str = "COALESCE((SELECT SUM(ri.cost_amount) FROM return_ite
      JOIN sale_items si ON si.id = ri.sale_item_id \
      WHERE r.return_type = 'CUSTOMER' AND ri.line_type = 'RETURNED' AND ri.condition = 'DAMAGED_SCRAP' \
        AND si.sale_transaction_id = t.id), 0.0)";
-const PROFIT_REPLACEMENT: &str = "COALESCE((SELECT SUM(o.quantity_depleted * o.unit_cost) \
+pub(crate) const PROFIT_REPLACEMENT: &str = "COALESCE((SELECT SUM(o.quantity_depleted * o.unit_cost) \
      FROM stock_outflow_allocations o JOIN return_transactions r ON r.id = o.source_id \
      WHERE o.source_type = 'REPLACEMENT' AND r.return_type = 'CUSTOMER' AND r.original_transaction_id = t.id), 0.0)";
 
@@ -90,7 +90,7 @@ fn profit_misc() -> String {
 }
 
 /// An opening-balance bill (FR-35) is not a sale: its profit is 0.
-fn profit_expr() -> String {
+pub(crate) fn profit_expr() -> String {
     format!(
         "CASE WHEN t.is_opening_balance = 1 THEN 0.0 ELSE \
          ROUND(t.total_amount - {PROFIT_COST_NET} - {} - {PROFIT_REFUNDS} - {PROFIT_SCRAP} - {PROFIT_REPLACEMENT}, 2) END",

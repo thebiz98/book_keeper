@@ -12,6 +12,7 @@ pub mod maintenance_repo;
 pub mod outflow_allocation_repo;
 pub mod party_repo;
 pub mod purchase_repo;
+pub mod item_analytics_sql;
 pub mod report_repo;
 pub mod return_repo;
 pub mod sale_repo;
