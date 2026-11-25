@@ -147,3 +147,10 @@ Manual checklist:
 - Every entry date picker greys out tomorrow and later; typing a future date by hand and saving shows "Date cannot be in the future" (sale / purchase list it with the preview errors, bill edit shows it under the date, expense / settlement / return / adjustment show the command error).
 - Reports date range still accepts any date.
 - Editing an old bill dated in the future (legacy) forces the date back to today or earlier.
+
+## Branch feat/sale-lot-prices (FR-31, DD-60; no schema, v1.3 C4)
+Delivered: `preview_lot_draw { item_id, quantity, prior_quantity }` (read-only, `InventoryAllocationStrategy::open_lots_in_draw_order` + service) returning `LotDraw`. Sale entry info line: `Rate:` removed, `LotDrawLine` shows merged lot purchase prices, the drawn groups highlighted, `-> cost` and `short by N`; `NewSalePage` passes `priorQuantity` (row mapping). In-drawer sale edit form not changed. Tests: `tests/lot_draw_test.rs`, `src/__tests__/pages/lotDraw.test.tsx`. Note: the strategy trait gained a required method (test LifoStrategy updated).
+Manual checklist:
+- Pick an item with 2+ lots: prices show as "Rate-free" info line; raise the quantity past the first lot and the highlight moves; the cost matches the later bill COGS.
+- Add the same item twice: the second line draws after the first line units.
+- Quantity above stock shows "short by N" in rose; more than 4 distinct prices shows "+N more" with a tooltip; light and dark.

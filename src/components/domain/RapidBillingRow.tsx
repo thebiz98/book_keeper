@@ -8,13 +8,16 @@ import React, {
 import { Plus } from 'lucide-react';
 import { NEW_BUNDLE, NEW_BUNDLE_LABEL } from '@/lib/bundleSentinel';
 import { cn } from '@/lib/utils';
-import type { ItemBundleSearchResult, SavedBundle, ItemSearchResult } from '@/types';
+import type { LotDraw, ItemBundleSearchResult, SavedBundle, ItemSearchResult } from '@/types';
 import type { BundleInput } from '@/types/store';
+import { api } from '@/api';
+import { usePreview } from '@/hooks/usePreview';
 import { useEscapeLayer, useHotkeyAction } from '@/hooks/useHotkeys';
 import { Button } from '../ui/Button';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { ItemSearchTypeahead } from './ItemSearchTypeahead';
 import { ItemQuickCreateModal } from './ItemQuickCreateModal';
+import { LotDrawLine } from './LotDrawLine';
 
 export interface BillingLineEntry {
   item: ItemSearchResult;
@@ -33,6 +36,8 @@ export interface RapidBillingRowProps {
   onOpenBundleModal?: (item: ItemSearchResult | null) => void;
   /** A bundle just created through the modal; it is added to the unit list and selected. */
   newBundle?: { bundle: SavedBundle; seq: number } | null;
+  /** Base units of the same item already on the bill (row mapping of the cart, FR-31). */
+  priorQuantity?: (itemId: number) => number;
   autoFocus?: boolean;
   className?: string;
 }
@@ -66,7 +71,7 @@ const inputClass =
 
 export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRowProps>(
   (
-    { onAddLine, onCompleteBill, onOpenBundleModal, newBundle, autoFocus = false, className },
+    { onAddLine, onCompleteBill, onOpenBundleModal, newBundle, priorQuantity, autoFocus = false, className },
     ref
   ) => {
     const [item, setItem] = useState<ItemSearchResult | null>(null);
@@ -93,6 +98,16 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
         ? bundleMrp[selectedBundle.bundleId] ?? null
         : item.mrp
       : null;
+
+    // FR-31: the open lots' purchase prices and the FIFO draw for this quantity (backend dry run).
+    const typedQty = parseFloat(qty);
+    const drawQty = Number.isFinite(typedQty) && typedQty >= 0 ? typedQty * (selectedBundle?.unitsPerBundle ?? 1) : 0;
+    const prior = item ? priorQuantity?.(item.itemId) ?? 0 : 0;
+    const lotDraw = usePreview<{ itemId: number; quantity: number; prior: number }, LotDraw>({
+      input: item ? { itemId: item.itemId, quantity: drawQty, prior } : null,
+      fetcher: async (i) => api.previewLotDraw(i.itemId, i.quantity, i.prior),
+    });
+    const draw = lotDraw.data && lotDraw.data.lots.length > 0 ? lotDraw.data : null;
 
     // Focus Qty whenever a new item is selected.
     useEffect(() => {
@@ -348,10 +363,12 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
               Available: {fmtQty(item.currentStock)} {item.baseUnit}
             </span>
             <span>|</span>
-            <span>
-              Rate: <CurrencyDisplay amount={Number.isFinite(parsedRate) ? parsedRate : 0} size="sm" />
-            </span>
-            <span>|</span>
+            {draw && (
+              <>
+                <LotDrawLine draw={draw} baseUnit={item.baseUnit} />
+                <span>|</span>
+              </>
+            )}
             <span>
               MRP: {mrpShown != null ? <CurrencyDisplay amount={mrpShown} size="sm" /> : '—'}
             </span>

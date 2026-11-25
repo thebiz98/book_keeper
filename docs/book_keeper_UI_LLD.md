@@ -655,3 +655,10 @@ gantt
 * Every entry `<input type="date">` has `max={todayLocal()}` (input help only; the rule lives in the backend, DD-56): NewSalePage, NewPurchasePage, bill edit forms, ExpenseForm, SettlementModal, SettlementEditModal, BatchSettlementForm, ReturnFormCustomer / Vendor, StockAdjustmentForm, SetStockDialog. `DateRangePicker` (reports) is excluded.
 * A hand-typed future date shows the backend message ("Date cannot be in the future") next to the date, via the preview `errors[]` field or the command error.
 * Tests (Vitest): date inputs carry `max`; a date preview error renders.
+
+## Sale-row lot prices (FR-31, DD-60, `feat/sale-lot-prices`, v1.3 C4)
+* `RapidBillingRow` info line (`data-testid="stock-indicator"`): item name | Available | `LotDrawLine` | MRP. The old `Rate:` echo is removed.
+* `LotDrawLine` (`src/components/domain/LotDrawLine.tsx`) shows "Purchase price:" then the open lots as `₹40.00 × 5`. Adjacent lots with an equal `unit_cost` merge (summed quantities, joined with `·`) followed by the base unit. Groups with `draw_quantity > 0` are bold with a blue tint, then `→ cost ₹x for this qty` (`draw_cost`). `shortfall > 0` shows `short by N` in rose. More than 4 groups: show 4 and `+N more` with a `title` listing all. Display formatting only (DD-56).
+* Data: `previewLotDraw(itemId, quantity, priorQuantity)` through `usePreview` (debounced), keyed on (item, base quantity, prior). `quantity` = qty x unitsPerBundle of the chosen unit; `prior` = Σ base units of cart lines with the same `itemId`, passed by `NewSalePage` as the `priorQuantity(itemId)` prop (row mapping only).
+* In-drawer sale edit form: not changed (out of scope).
+* Tests (Vitest): merged prices and highlight from a stubbed `previewLotDraw`; no `Rate:` in the indicator; prior quantity is sent.

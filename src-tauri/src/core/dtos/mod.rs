@@ -28,7 +28,7 @@ pub use expense_dto::{
     CreateExpenseTypePayload, ExpenseFilter, ExpenseListResponse, ExpensePayload, ExpenseTypeTotal,
 };
 pub use item_dto::{
-    BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, ItemBillRef, ItemBundleSearchResult, ItemLot,
+    BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, ItemBillRef, ItemBundleSearchResult, ItemLot, LotDraw, LotDrawLot,
     ItemSearchResult, SavedBundle, UpdateBundlePayload, UpdateItemPayload,
 };
 pub use import_dto::{

@@ -902,6 +902,9 @@ export class MockApiClient implements ApiClient {
       valueChange: 0,
     };
   }
+  async previewLotDraw(_itemId: number, _quantity: number, _priorQuantity: number) {
+    return { lots: [], drawCost: 0, available: 0, shortfall: 0 };
+  }
   async getItemLots(itemId: number) {
     return [
       {

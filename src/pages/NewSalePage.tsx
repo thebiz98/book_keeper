@@ -233,6 +233,9 @@ export const NewSalePage: React.FC = () => {
           setIsBundleModalOpen(true);
         }}
         newBundle={newBundle}
+        priorQuantity={(itemId) =>
+          items.filter((l) => l.itemId === itemId).reduce((sum, l) => sum + l.quantity * l.unitsPerBundle, 0)
+        }
       />
 
       {/* Cart Line Items Table */}

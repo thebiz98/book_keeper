@@ -15,6 +15,7 @@ import type {
   SavedBundle,
   ItemBillRef,
   ItemLot,
+  LotDraw,
   ItemSearchResult,
   ItemType,
   LowStockItem,
@@ -646,6 +647,8 @@ export interface ApiClient {
   /** DD-56: dry runs of the stock commands: the unit cost used, the FIFO loss and the value change. */
   previewStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentPreview>;
   previewSetItemStock(payload: SetItemStockPayload): Promise<SetItemStockResult>;
+  /** FR-31: open lots in FIFO order and the draw of `quantity` after `priorQuantity` (base units). */
+  previewLotDraw(itemId: number, quantity: number, priorQuantity: number): Promise<LotDraw>;
   /**
    * NOTE: get_item_lots is implemented in adjustment_controller.rs but is NOT yet in
    * main.rs generate_handler!. It will reject until the backend registers it.

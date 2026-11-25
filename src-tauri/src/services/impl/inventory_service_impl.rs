@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, PageRequest, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
+    ItemBillRef, ItemLot, LotDraw, LotDrawLot, PageRequest, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult,
 };
 use crate::core::money::{check_entry_date_now, round2};
@@ -558,6 +558,45 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         let result = self.set_item_stock_in_tx(&mut *tx, &p);
         tx.rollback()?; // never committed
         result
+    }
+
+    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_quantity: f64) -> Result<LotDraw, AppError> {
+        for (field, v) in [("quantity", quantity), ("prior_quantity", prior_quantity)] {
+            if !v.is_finite() || v < 0.0 {
+                return Err(validation(field, format!("must be a finite number >= 0 (got {v})")));
+            }
+        }
+        let mut tx = self.uow.begin_read()?;
+        let item = find_item(&mut *tx, item_id)?;
+        let empty = LotDraw { lots: vec![], draw_cost: 0.0, available: 0.0, shortfall: 0.0 };
+        if item.item_type != ItemType::Physical {
+            return Ok(empty);
+        }
+        let open = self.strategy.open_lots_in_draw_order(&mut *tx, item_id)?;
+        let info = tx.purchases().list_lots_for_item(item_id)?;
+        let mut skip = prior_quantity;
+        let mut left = quantity;
+        let (mut lots, mut cost, mut available) = (Vec::with_capacity(open.len()), 0.0, 0.0);
+        for lot in open {
+            let rem = lot.remaining_quantity;
+            let after_skip = (rem - skip).max(0.0);
+            skip = (skip - rem).max(0.0);
+            let draw = after_skip.min(left);
+            left -= draw;
+            cost += draw * lot.unit_cost;
+            available += rem;
+            let meta = info.iter().find(|l| l.purchase_item_id == lot.id);
+            lots.push(LotDrawLot {
+                purchase_item_id: lot.id,
+                transaction_code: meta.map(|m| m.transaction_code.clone()).unwrap_or_default(),
+                source: meta.map(|m| m.source).unwrap_or(LotSource::Purchase),
+                unit_cost: lot.unit_cost,
+                remaining_quantity: rem,
+                draw_quantity: draw,
+            });
+        }
+        let short = prior_quantity + quantity - available;
+        Ok(LotDraw { lots, draw_cost: cost, available, shortfall: if short > EPS { short } else { 0.0 } })
     }
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
