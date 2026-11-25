@@ -84,7 +84,7 @@ export function useReportItemDrawers(): {
           setEditing(item);
         }}
       />
-      <ItemEditDrawer isOpen={editing !== null} item={editing} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />
+      <ItemEditDrawer isOpen={editing !== null} item={editing} onClose={() => setEditing(null)} onSaved={() => {}} />
     </>
   );
   return { open, drawers };

@@ -8,6 +8,7 @@ import { FormActions } from '../ui/FormActions';
 import { SetStockDialog } from './SetStockDialog';
 import { TextInput } from '../ui/TextInput';
 import { BundleTable } from './BundleTable';
+import { LotInspector } from './LotInspector';
 import { validationField } from './formUtils';
 import { FIELD_MAP, validateItemForm, type ItemFormErrors } from './itemForm';
 import { ServiceComponentsEditor, toComponentInputs, type ComponentRow } from './ServiceComponentsEditor';
@@ -50,6 +51,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   const [saving, setSaving] = useState(false);
   const busy = useRef(false);
   const bundleModalOpen = useRef(false);
+  const lotModalOpen = useRef(false);
   const [stockOpen, setStockOpen] = useState(false);
   const stockDialogOpen = useRef(false);
   stockDialogOpen.current = stockOpen;
@@ -150,7 +152,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (bundleModalOpen.current || stockDialogOpen.current) return;
+    if (bundleModalOpen.current || stockDialogOpen.current || lotModalOpen.current) return;
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void handleSave();
@@ -161,7 +163,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     <Drawer
       isOpen={isOpen}
       onClose={() => {
-        if (!bundleModalOpen.current && !stockDialogOpen.current) onClose();
+        if (!bundleModalOpen.current && !stockDialogOpen.current && !lotModalOpen.current) onClose();
       }}
       title={isEdit ? `Edit ${isService ? 'Service' : 'Item'}: ${item.name}` : isService ? 'Add New Service' : 'Add New Item'}
       description={
@@ -339,6 +341,28 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           <p role="alert" className="text-xs text-rose-600 font-medium">
             {formError}
           </p>
+        )}
+
+        {isEdit && !isService && (
+          <section
+            data-testid="item-edit-lots"
+            aria-label="Lots and Purchase Price"
+            className="mt-2 pt-3 border-t border-slate-100 dark:border-slate-800"
+          >
+            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-1">Lots &amp; Purchase Price</h3>
+            <p className="text-[10px] text-slate-400 mb-2">
+              Fix a wrong Purchase Price here. Past sale costs and the purchase bill are re-costed by the backend.
+            </p>
+            <LotInspector
+              itemId={item.itemId}
+              baseUnit={item.baseUnit}
+              editable
+              onChanged={onSaved}
+              onModalToggle={(o) => {
+                lotModalOpen.current = o;
+              }}
+            />
+          </section>
         )}
 
         {isService ? null : isEdit ? (
