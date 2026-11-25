@@ -140,3 +140,10 @@ Manual checklist:
 - Purchase row stays one line and does not jump when picking an item or a Box unit; label "Purchase Price / Box *" is not wrapped; light and dark.
 - Inventory: Add bundle icon on a physical row; the Bundles count refreshes after Save; absent on services.
 - New Sale: customer on the left, invoice and date on the right; totals right-aligned above Complete Sale, with and without charges.
+
+## Branch feat/no-future-dates (FR-28, DD-58; no schema, v1.3 C3)
+Delivered: `core::clock` (`today_local`, per-thread test pin `with_today`) and `core::money::check_entry_date` / `check_entry_date_now`; applied to sale, purchase, expense, settlement (single, batch, edit), return and stock adjustment / set-stock dates. Message "Date cannot be in the future" on the date field. Report filters are unchanged. UI: `max={todayLocal()}` added to the sale, purchase, bill edit and expense date inputs (the rest already had it). Tests: `tests/no_future_dates_test.rs`, `src/__tests__/pages/noFutureDates.test.tsx`.
+Manual checklist:
+- Every entry date picker greys out tomorrow and later; typing a future date by hand and saving shows "Date cannot be in the future" (sale / purchase list it with the preview errors, bill edit shows it under the date, expense / settlement / return / adjustment show the command error).
+- Reports date range still accepts any date.
+- Editing an old bill dated in the future (legacy) forces the date back to today or earlier.

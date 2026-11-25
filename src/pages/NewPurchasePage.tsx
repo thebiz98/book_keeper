@@ -406,6 +406,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
               label="Inward Date"
               type="date"
               value={inwardDate}
+              max={todayLocal()}
               onChange={(e) => setInwardDate(e.target.value)}
               className="font-mono"
             />

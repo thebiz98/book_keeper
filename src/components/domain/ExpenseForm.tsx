@@ -132,6 +132,7 @@ export const ExpenseForm: React.FC<ExpenseFormProps> = ({ editing, codeKey, onSa
         type="date"
         data-testid="expense-date"
         value={date}
+        max={todayLocal()}
         onChange={(e) => setDate(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {

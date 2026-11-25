@@ -7,7 +7,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_date, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
 use crate::services::r#impl::bill_guard::{
     evaluate_sale_guard, locked, locked_with, PARTY_CHANGE_WITH_CREDITS, PARTY_REQUIRED_WITH_PAYMENTS,
     TOTAL_BELOW_APPLIED,
@@ -71,7 +71,7 @@ fn validate_sale_shape(payload: &CreateSalePayload) -> Result<(), AppError> {
     if payload.items.is_empty() {
         return Err(validation("items", "items cannot be empty"));
     }
-    check_date("transaction_date", &payload.transaction_date)?;
+    check_entry_date_now("transaction_date", &payload.transaction_date)?;
     validate_charge_inputs(&payload.charges)?;
     if !payload.paid_amount.is_finite() || payload.paid_amount < 0.0 {
         return Err(validation("paid_amount", "paid_amount must be a non-negative number"));

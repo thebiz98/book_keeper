@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import type { PreviewSalePayload } from '@/types';
+import { todayLocal } from '@/lib/dates';
 import { Button } from '../../ui/Button';
 import { Select } from '../../ui/Select';
 import { TextInput } from '../../ui/TextInput';
@@ -115,6 +116,7 @@ export const SaleEditForm: React.FC<SaleEditFormProps> = ({ billId, onCancel, on
           label="Date"
           type="date"
           value={draft.date}
+          max={todayLocal()}
           error={dateError}
           onChange={(e) => dr.setHeader({ date: e.target.value })}
           className="font-mono"

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::core::dtos::{CreateExpenseTypePayload, ExpenseFilter, ExpenseListResponse, ExpensePayload};
 use crate::core::entities::{Expense, ExpenseType};
 use crate::core::error::AppError;
-use crate::core::money::{check_date, round2};
+use crate::core::money::{check_entry_date_now, round2};
 use crate::core::value_objects::{clean_name, clean_optional};
 use crate::data::contracts::search_indexer::FtsIndex;
 use crate::data::contracts::unit_of_work::UnitOfWork;
@@ -51,7 +51,7 @@ struct Checked {
 }
 
 fn check_payload(p: &ExpensePayload) -> Result<Checked, AppError> {
-    check_date("expense_date", &p.expense_date)?;
+    check_entry_date_now("expense_date", &p.expense_date)?;
     let positive = p.amount.is_finite() && p.amount > 0.0;
     let amount = round2(p.amount);
     if !positive || amount <= 0.0 {

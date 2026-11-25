@@ -2464,3 +2464,21 @@ Bill commands pass a `BillFigures` recorder into `_in_tx` (`price_*` fills it ri
 
 ### 17.3 Tests (`tests/preview_test.rs`)
 Equivalence (preview equals the command, field by field), no side effects (row counts, `code_sequences`, `current_stock` unchanged) and same errors (preview `errors` equal the command's error mapped to `{field, message}`).
+
+## 18. No Future-Dated Entries (FR-28, DD-58, no schema, `feat/no-future-dates`, v1.3 C3)
+* **Rule.** An entry date may be today or earlier. The check is backend-only; the UI `max=` is input help.
+* **Clock seam.** `core::clock::today_local() -> String` (local date, `YYYY-MM-DD`). Tests pin it per thread with `with_today(date, || ..)` / `TodayGuard::new(date)`, so services need no constructor change and parallel tests do not interfere. `ReportServiceImpl::with_fixed_today` is unchanged.
+* **Helpers (`core::money`).** `check_entry_date(field, date, today)` calls `check_date`, then `date > today` (lexical ISO compare) gives `ValidationError { field, message: "Date cannot be in the future" }`. `check_entry_date_now(field, date)` passes `today_local()`.
+* **Validation table.**
+
+| Command family | Field | Notes |
+|---|---|---|
+| `create_sale`, `update_sale`, `preview_sale` | `transaction_date` | shared `validate_sale_shape`; editing a future-dated bill without moving its date is rejected |
+| `create_purchase`, `update_purchase`, `preview_purchase` | `transaction_date` | shared `validate_purchase_shape` |
+| `create_expense` / `update_expense` | `expense_date` | |
+| `settle_bill_payment`, batch settlement, edit settlement | `settlement_date` | previews share the validators |
+| `create_customer_return`, `create_vendor_return` (and previews) | `return_date` | |
+| `create_adjustment`, `set_item_stock` (and previews) | `adjustment_date` | |
+
+* **Not covered.** Report from/to filters (`report_service_impl`, `check_date` only), internal source-lot creation, imports.
+* **Tests.** Per family: today passes, tomorrow is rejected with the field above; the preview returns the same `{field, message}`; an existing future-dated bill (inserted through the repo) is rejected on edit without a date change.

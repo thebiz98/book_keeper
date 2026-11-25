@@ -6,7 +6,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
-use crate::core::money::{cash_direction, check_date, round2, CashDirection, MONEY_EPS};
+use crate::core::money::{cash_direction, check_entry_date_now, round2, CashDirection, MONEY_EPS};
 use crate::core::value_objects::{LotSource, PartyType, PaymentKind, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::accounting_service::AccountingService;
@@ -259,7 +259,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
                 format!("Settle between 1 and {MAX_BATCH_ALLOCATIONS} bills at a time"),
             ));
         }
-        check_date("settlement_date", date)?;
+        check_entry_date_now("settlement_date", date)?;
         let party = tx.parties().find_by_id(party_id)?.ok_or_else(|| AppError::NotFound {
             entity: "Party".to_string(),
             id: party_id.to_string(),
@@ -392,7 +392,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
 
     fn settle_bill_payment(&self, payload: SettlePaymentPayload) -> Result<SettlementResult, AppError> {
         let amount = settle_amount(payload.amount_paid)?;
-        check_date("settlement_date", &payload.settlement_date)?;
+        check_entry_date_now("settlement_date", &payload.settlement_date)?;
 
         let tx_type = payload.transaction_type;
         let mut tx = self.uow.begin_transaction()?;
@@ -426,7 +426,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
         if amount <= 0.0 {
             return Err(validation("amount_paid", "Settlement amount must be positive"));
         }
-        check_date("settlement_date", &payload.settlement_date)?;
+        check_entry_date_now("settlement_date", &payload.settlement_date)?;
         let mut tx = self.uow.begin_transaction()?;
         let old = Self::load_settlement(&mut *tx, settlement_id, "edit")?;
         let bill_id = old.transaction_id.ok_or_else(|| validation("transaction_id", "Settlement has no bill"))?;

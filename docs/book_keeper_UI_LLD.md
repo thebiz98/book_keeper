@@ -650,3 +650,8 @@ gantt
 * **Sale header / footer.** Header: `PartySelector` left (`w-80`, `flex-1 max-w-md`), invoice pill and date right. Footer: left = Items / Total Units + Notes; right = a right-aligned stack (`cart-subtotal`; with charges `cart-charges-total`, `cart-discounts-total`, `cart-grand-total`), then Clear and Complete Sale. The payable figure is the largest.
 * **Tests (Vitest):** sentinel opens the modal and keeps the unit (sale, purchase); arrows skip it; no Bundle / New Bundle button; purchase placeholder; Inventory Add bundle; sale header DOM order; subtotal in the same footer block as `complete-sale-btn`.
 
+
+## No future dates (FR-28, DD-58, `feat/no-future-dates`, v1.3 C3)
+* Every entry `<input type="date">` has `max={todayLocal()}` (input help only; the rule lives in the backend, DD-56): NewSalePage, NewPurchasePage, bill edit forms, ExpenseForm, SettlementModal, SettlementEditModal, BatchSettlementForm, ReturnFormCustomer / Vendor, StockAdjustmentForm, SetStockDialog. `DateRangePicker` (reports) is excluded.
+* A hand-typed future date shows the backend message ("Date cannot be in the future") next to the date, via the preview `errors[]` field or the command error.
+* Tests (Vitest): date inputs carry `max`; a date preview error renders.

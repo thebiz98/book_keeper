@@ -8,7 +8,7 @@ use crate::core::dtos::{validate_date_range, BillEditGuard, DeleteReturnResult,
 };
 use crate::core::entities::{Item, ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_date, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
 use crate::core::value_objects::{
     LotSource, OutflowSourceType, ReturnLineType, ReturnType, SettlementType, StockCondition,
     TransactionType,
@@ -150,7 +150,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
 {
     fn create_customer_return_in_tx(&self, tx: &mut dyn TransactionContext, payload: &CustomerReturnPayload) -> Result<ReturnResult, AppError> {
         // ---- Payload-only validation -------------------------------------------------------
-        check_date("return_date", &payload.return_date)?;
+        check_entry_date_now("return_date", &payload.return_date)?;
         if payload.items.is_empty() {
             return Err(validation("items", "A return needs at least one returned line"));
         }
@@ -377,7 +377,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
     }
 
     fn create_vendor_return_in_tx(&self, tx: &mut dyn TransactionContext, payload: &VendorReturnPayload) -> Result<ReturnResult, AppError> {
-        check_date("return_date", &payload.return_date)?;
+        check_entry_date_now("return_date", &payload.return_date)?;
         if payload.settlement_type == SettlementType::Replacement {
             return Err(validation("settlement_type", "Replacement is customer-only; vendor returns are always Refund"));
         }
