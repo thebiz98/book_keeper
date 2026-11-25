@@ -161,7 +161,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Returns** can be deleted (not edited). Returns on the same original bill are deleted **newest first** (the cost replay depends on it). Deleting a return reverses its stock and ledger effects. It is rejected if units it restocked into a lot are no longer there (lot `remaining` < the units to remove), or if its `RETURN` lot has any allocation or `remaining < quantity`. Deleting a vendor return puts its units back on their lots.
   * **Expenses** can be edited and deleted freely.
   * No revision history is kept in v1; headers record `updated_at`. Codes of deleted records are not reused (`code_sequences` high-water mark, schema v6; no new table in v8).
-  * Entry points: Edit / Delete actions in the bill detail drawer (Sales History, Purchase History, party ledger). Edit opens the bill in the normal sale/purchase entry screen in edit mode, prefilled.
+  * Entry points: Edit / Delete actions in the bill detail drawer (Sales History, Purchase History, party ledger). Edit turns the drawer itself into a form (header fields, lines with add / remove / unit / quantity / price, charges, payment); no navigation (DD-57).
 * **FR-21: Item Type — Physical vs Service** *(added 2026-11-22, DD-42; entity only in v1.1)*
   * Every item has an `item_type`: `PHYSICAL` (stocked goods, the default) or `SERVICE` (e.g. photo printing, lamination).
   * A `SERVICE` item has a price but no stock: no lots, no FIFO, no stock check, no low-stock flag, excluded from stock valuation.

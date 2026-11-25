@@ -333,3 +333,9 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - **Tests:** Rust tests assert `preview(x) == command(x)` and that a preview leaves no rows behind. The TS rule copies and their tests are deleted (`lotPriceEffect.ts`, `allocateFifo`, `validatePayment` / `effectivePaid`, the return credit/cash split, `estimateFifoCost`, `latestLotCost`, `billTotals`).
 - **Mock client:** stays a thin fixture client (DD-27). It returns canned previews, with no rules.
 - *Amends* DD-51's shared TS/Rust case table (Rust only now).
+
+**DD-57 — Bill edit is in-drawer, no page hand-off (2026-11-24, v1.2 C1).**
+- **Decision:** `Edit` in the bill drawer turns the drawer into a form (header, lines, charges, payment). The sale / purchase entry pages no longer have an edit mode, and `billEditHandoff.ts` is deleted.
+- **Why:** the hand-off queued a request that the page consumed in a mount effect. Under StrictMode the effect runs twice, the second `takeBillEdit()` returned null and the page showed a blank bill (same class as `bc66322`). The owner also wanted to add, remove and re-price lines where the bill is shown.
+- **Rules kept:** DD-56 (all figures from `previewPurchase` / `previewSale`), FR-20 guards via `getBillEditGuard`, payload and backend commands unchanged. No schema or IPC change.
+- **Side effect:** the edit never touches the sale cart store, so a sale in progress on the billing screen stays as it is (the "Discard current cart?" confirm is gone).

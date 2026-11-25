@@ -25,8 +25,6 @@ export interface CartState {
   totalBaseUnits: number;
   totalItems: number;
   selectedCustomer: CustomerInput | null;
-  /** FR-20: set while a sale is being edited; null when creating a new one. */
-  editing: { saleId: number; code: string } | null;
 
   /**
    * Add a line. Merges into an existing line only when item, unit (bundle) and rate are all
@@ -48,16 +46,9 @@ export interface CartState {
   addCharge: (line: Omit<BillChargeLine, 'key'>) => boolean;
   updateChargeAmount: (key: number, amount: number) => boolean;
   removeCharge: (key: number) => void;
-  /** Resets everything, including edit mode. */
+  /** Resets everything. */
   clearCart: () => void;
   setCustomer: (customer: CustomerInput | null) => void;
-  /** FR-20: replaces the cart with an existing bill's lines and enters edit mode. */
-  loadForEdit: (
-    lines: Omit<CartLine, 'lineId'>[],
-    customer: CustomerInput | null,
-    editing: { saleId: number; code: string },
-    charges?: Omit<BillChargeLine, 'key'>[]
-  ) => void;
 }
 
 let lineSeq = 0;
@@ -81,7 +72,6 @@ const initialState = {
   totalBaseUnits: 0,
   totalItems: 0,
   selectedCustomer: null as CustomerInput | null,
-  editing: null as { saleId: number; code: string } | null,
 };
 
 export const useCartStore = create<CartState>((set, get) => ({
@@ -198,17 +188,4 @@ export const useCartStore = create<CartState>((set, get) => ({
   clearCart: () => set({ ...initialState }),
 
   setCustomer: (customer) => set({ selectedCustomer: customer }),
-
-  loadForEdit: (lines, customer, editing, chargeLines = []) => {
-    const items: CartLine[] = lines.map((l) => ({ ...l, lineId: nextLineId() }));
-    const charges: BillChargeLine[] = chargeLines.map((c) => ({ ...c, key: ++chargeSeq }));
-    set({
-      ...initialState,
-      items,
-      charges,
-      selectedCustomer: customer,
-      editing,
-      ...countsFor(items),
-    });
-  },
 }));
