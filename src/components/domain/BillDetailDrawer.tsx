@@ -28,6 +28,13 @@ export interface BillDetailDrawerProps {
   onClose: () => void;
   /** Called after the bill was deleted (callers reload their list). */
   onChanged?: () => void;
+  /**
+   * `edit` opens straight into edit mode once the guard says the bill is editable; otherwise the
+   * drawer stays in view mode with the guard reasons visible (FR-34).
+   */
+  initialMode?: 'view' | 'edit';
+  /** Sale view: adds Cost / Profit per line and the profit reconciliation footer (FR-34). */
+  showProfit?: boolean;
 }
 
 /** "Box of 12 x 2 (24 base)" for pack lines, plain base quantity otherwise. */
@@ -115,7 +122,14 @@ export const LedgerRows: React.FC<LedgerRowsProps> = ({ rows, onEditSettlement, 
   );
 };
 
-export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId, onClose, onChanged }) => {
+export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
+  kind,
+  billId,
+  onClose,
+  onChanged,
+  initialMode = 'view',
+  showProfit = false,
+}) => {
   const [sale, setSale] = useState<SaleDetailView | null>(null);
   const [purchase, setPurchase] = useState<PurchaseDetailView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,13 +148,17 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   const [confirmLeaveEdit, setConfirmLeaveEdit] = useState<'cancel' | 'close' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // A different bill always opens in view mode.
+  // A different bill always opens in view mode (unless the caller asked for edit, below).
+  const autoEditDone = useRef(false);
   useEffect(() => {
     setMode('view');
     setEditDirty(false);
     setConfirmLeaveEdit(null);
     setNotice(null);
+    autoEditDone.current = false;
   }, [kind, billId]);
+  const initialModeRef = useRef(initialMode);
+  initialModeRef.current = initialMode;
 
   useEffect(() => {
     if (billId === null) return;
@@ -158,7 +176,16 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     setLoading(true);
     api
       .getBillEditGuard(kind, billId)
-      .then((g) => live && setGuard(g))
+      .then((g) => {
+        if (!live) return;
+        setGuard(g);
+        // initialMode="edit": enter edit mode once, when the guard allows it; else stay in view mode
+        // (the guard reasons are shown in the footer).
+        if (initialModeRef.current === 'edit' && !autoEditDone.current) {
+          autoEditDone.current = true;
+          if (g.canEdit) setMode('edit');
+        }
+      })
       .catch(() => {}); // the actions simply stay disabled when the pre-check fails
     const p =
       kind === 'SALE'
@@ -224,6 +251,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   const canSettle = !!head && head.balanceDue > 0 && head.partyId !== null;
   const rowMax = (r: PaymentSettlement) => (head ? head.balanceDue + r.amountPaid : r.amountPaid);
   const charges = sale?.charges ?? purchase?.charges ?? [];
+  const profitOn = kind === 'SALE' && showProfit && !!sale;
   const supplierRef = purchase?.purchase.supplierInvoiceRef ?? null;
 
   const { printDetail } = usePrintBill();
@@ -362,6 +390,8 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
                 <TableHead className="text-right">{kind === 'SALE' ? 'Rate/unit' : 'Purchase price/unit'}</TableHead>
                 <TableHead className="text-right">Total</TableHead>
                 <TableHead className="text-right">{kind === 'SALE' ? 'Returned' : 'Remaining'}</TableHead>
+                {profitOn && <TableHead className="text-right">Cost</TableHead>}
+                {profitOn && <TableHead className="text-right">Profit</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -377,10 +407,20 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
                       <CurrencyDisplay amount={it.saleItem.totalAmount} size="sm" />
                     </TableCell>
                     <TableCell className="text-right font-mono">{it.returnedQuantity}</TableCell>
+                    {profitOn && (
+                      <TableCell className="text-right" data-testid="line-cost">
+                        <CurrencyDisplay amount={it.costAmount} size="sm" />
+                      </TableCell>
+                    )}
+                    {profitOn && (
+                      <TableCell className="text-right" data-testid="line-profit">
+                        <CurrencyDisplay amount={it.profit} size="sm" colored />
+                      </TableCell>
+                    )}
                   </TableRow>
                   {it.allocations.length > 0 && (
                     <TableRow>
-                      <TableCell colSpan={5} className="pb-1.5 pl-3 text-[11px] text-slate-500">
+                      <TableCell colSpan={profitOn ? 7 : 5}className="pb-1.5 pl-3 text-[11px] text-slate-500">
                         FIFO cost:{' '}
                         {it.allocations.map((a, i) => (
                           <span key={a.id} className="font-mono">
@@ -457,6 +497,23 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
               Balance: <CurrencyDisplay amount={head.balanceDue} size="sm" colored />
             </div>
           </div>
+
+          {profitOn && sale && (
+            <div className="flex flex-col items-end gap-0.5" data-testid="profit-footer">
+              <div>
+                Lines profit: <CurrencyDisplay amount={sale.profitSummary.linesProfit} size="sm" />
+              </div>
+              <div>
+                + Charges: <CurrencyDisplay amount={sale.profitSummary.charges} size="sm" />
+              </div>
+              <div>
+                − Returns / replacements: <CurrencyDisplay amount={Math.abs(sale.profitSummary.returnAdjustment)} size="sm" />
+              </div>
+              <div className="font-semibold" data-testid="profit-total">
+                = Bill profit: <CurrencyDisplay amount={sale.profitSummary.total} size="sm" colored />
+              </div>
+            </div>
+          )}
 
           <div>
             <h3 className="font-semibold mb-1">Ledger</h3>
