@@ -43,7 +43,7 @@ fn seed(app: &AppState) -> i64 {
         .unwrap();
     let party = app
         .party_service
-        .create_party(CreatePartyPayload { name: "Ram".into(), phone: None, party_type: PartyType::Customer, notes: None })
+        .create_party(CreatePartyPayload { name: "Ram".into(), phone: None, party_type: PartyType::Customer, notes: None, opening_balance: None })
         .unwrap();
     app.purchase_service
         .create_purchase(CreatePurchasePayload {

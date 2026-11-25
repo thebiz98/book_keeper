@@ -70,6 +70,7 @@ pub fn create_test_party(
         is_active: true,
         created_at: "2026-11-20T10:00:00Z".to_string(),
         updated_at: "2026-11-20T10:00:00Z".to_string(),
+        opening_balance: None,
     }
 }
 
@@ -110,6 +111,7 @@ pub fn create_test_purchase_tx(
         charges_total: 0.0,
         discounts_total: 0.0,
         updated_at: None,
+        is_opening_balance: false,
     }
 }
 
@@ -175,6 +177,7 @@ pub fn create_test_sale_tx(
         charges_total: 0.0,
         discounts_total: 0.0,
         updated_at: None,
+        is_opening_balance: false,
     }
 }
 

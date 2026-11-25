@@ -199,6 +199,9 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             ),
             None => None,
         };
+        if sale.as_ref().is_some_and(|s| s.is_opening_balance) {
+            return Err(validation("original_sale_id", "An opening balance has no items to return"));
+        }
         let (party_id, party_name) = resolve_party(
             tx,
             payload.party_id,
@@ -394,6 +397,9 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                     .purchases()
                     .find_transaction_by_id(pid)?
                     .ok_or_else(|| AppError::not_found("PurchaseTransaction", pid.to_string()))?;
+                if p.is_opening_balance {
+                    return Err(validation("original_purchase_id", "An opening balance has no items to return"));
+                }
                 if p.source != LotSource::Purchase {
                     return Err(validation("original_purchase_id", "Only a PURCHASE bill can be returned to a vendor"));
                 }

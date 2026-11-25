@@ -40,6 +40,10 @@ pub trait PurchaseRepository {
     /// Open bills for FIFO settlement / credit: `source = PURCHASE`, `balance_due > 0`,
     /// `ORDER BY transaction_date, id`.
     fn list_open_for_party(&self, party_id: i64) -> Result<Vec<PurchaseTransaction>, AppError>;
+    /// Next `OB-` code (FR-35); call inside the write transaction that inserts the bill.
+    fn next_opening_code(&self) -> Result<String, AppError>;
+    /// The vendor's opening-balance bill (FR-35), if any.
+    fn find_opening_for_party(&self, party_id: i64) -> Result<Option<PurchaseTransaction>, AppError>;
     /// History list: `source = PURCHASE` only.
     fn list_purchases(
         &self,

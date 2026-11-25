@@ -23,14 +23,14 @@ impl SqliteReportRepository {
 /// All P&L components in one statement (?1 = from, ?2 = to, inclusive lexical date range).
 const PNL_SQL: &str = "SELECT
   (SELECT COALESCE(SUM(items_subtotal), 0.0) FROM sale_transactions
-     WHERE transaction_date BETWEEN ?1 AND ?2),
+     WHERE is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(total_amount), 0.0) FROM return_transactions
      WHERE return_type = 'CUSTOMER' AND settlement_type = 'REFUND' AND return_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost), 0.0)
      FROM sale_stock_allocations a
      JOIN sale_items si ON si.id = a.sale_item_id
      JOIN sale_transactions s ON s.id = si.sale_transaction_id
-     WHERE s.transaction_date BETWEEN ?1 AND ?2),
+     WHERE s.is_opening_balance = 0 AND s.transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(o.quantity_depleted * o.unit_cost), 0.0)
      FROM stock_outflow_allocations o
      JOIN return_transactions r ON r.id = o.source_id
@@ -45,18 +45,18 @@ const PNL_SQL: &str = "SELECT
      WHERE r.return_type = 'CUSTOMER' AND ri.line_type = 'RETURNED'
        AND ri.condition = 'DAMAGED_SCRAP' AND r.return_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(items_subtotal), 0.0) FROM purchase_transactions
-     WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2),
+     WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(total_amount), 0.0) FROM return_transactions
      WHERE return_type = 'VENDOR' AND return_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(amount), 0.0) FROM expenses WHERE expense_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(discounts_total), 0.0) FROM sale_transactions
-     WHERE transaction_date BETWEEN ?1 AND ?2),
+     WHERE is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(charges_total), 0.0) FROM sale_transactions
-     WHERE transaction_date BETWEEN ?1 AND ?2),
+     WHERE is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(discounts_total), 0.0) FROM purchase_transactions
-     WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2),
+     WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(charges_total), 0.0) FROM purchase_transactions
-     WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2)";
+     WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2)";
 
 impl ReportRepository for SqliteReportRepository {
     fn pnl(&self, from: &str, to: &str) -> Result<PnLReport, AppError> {
@@ -103,7 +103,7 @@ impl ReportRepository for SqliteReportRepository {
     fn sales_totals(&self, from: &str, to: &str) -> Result<(f64, usize), AppError> {
         let (sum, n): (f64, i64) = self.conn.query_row(
             "SELECT COALESCE(SUM(items_subtotal), 0.0), COUNT(*) FROM sale_transactions \
-             WHERE transaction_date BETWEEN ?1 AND ?2",
+             WHERE is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2",
             params![from, to],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
@@ -113,7 +113,7 @@ impl ReportRepository for SqliteReportRepository {
     fn purchase_totals(&self, from: &str, to: &str) -> Result<(f64, usize), AppError> {
         let (sum, n): (f64, i64) = self.conn.query_row(
             "SELECT COALESCE(SUM(items_subtotal), 0.0), COUNT(*) FROM purchase_transactions \
-             WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2",
+             WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2",
             params![from, to],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
@@ -188,10 +188,10 @@ impl ReportRepository for SqliteReportRepository {
         let mut stmt = self.conn.prepare(
             "SELECT k, SUM(s), SUM(p) FROM ( \
                SELECT substr(transaction_date, 1, ?3) AS k, items_subtotal AS s, 0.0 AS p \
-                 FROM sale_transactions WHERE transaction_date BETWEEN ?1 AND ?2 \
+                 FROM sale_transactions WHERE is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2 \
                UNION ALL \
                SELECT substr(transaction_date, 1, ?3), 0.0, items_subtotal \
-                 FROM purchase_transactions WHERE source = 'PURCHASE' AND transaction_date BETWEEN ?1 AND ?2 \
+                 FROM purchase_transactions WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2 \
              ) GROUP BY k ORDER BY k",
         )?;
         let rows = stmt
@@ -207,12 +207,12 @@ impl ReportRepository for SqliteReportRepository {
             "SELECT kind, id, code, date, created_at, party_name, amount, status FROM ( \
                SELECT 'SALE' AS kind, id, transaction_code AS code, transaction_date AS date, created_at, \
                       party_name, total_amount AS amount, payment_status AS status \
-                 FROM sale_transactions ORDER BY created_at DESC, id DESC LIMIT ?1) \
+                 FROM sale_transactions WHERE is_opening_balance = 0 ORDER BY created_at DESC, id DESC LIMIT ?1) \
              UNION ALL \
              SELECT kind, id, code, date, created_at, party_name, amount, status FROM ( \
                SELECT 'PURCHASE' AS kind, id, transaction_code AS code, transaction_date AS date, created_at, \
                       party_name, total_amount AS amount, payment_status AS status \
-                 FROM purchase_transactions WHERE source = 'PURCHASE' \
+                 FROM purchase_transactions WHERE source = 'PURCHASE' AND is_opening_balance = 0 \
                  ORDER BY created_at DESC, id DESC LIMIT ?1) \
              UNION ALL \
              SELECT kind, id, code, date, created_at, party_name, amount, status FROM ( \

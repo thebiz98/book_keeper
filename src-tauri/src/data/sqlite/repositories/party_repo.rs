@@ -2,7 +2,8 @@
 use rusqlite::{params, OptionalExtension, Row};
 
 use crate::core::dtos::PartyDueSummary;
-use crate::core::entities::{Party, PartyListRow};
+use crate::core::entities::{Party, PartyListRow, PartyOpeningBalance};
+use crate::core::money::round2;
 use crate::core::error::AppError;
 use crate::core::value_objects::PartyType;
 use crate::data::contracts::PartyRepository;
@@ -16,6 +17,33 @@ pub struct SqlitePartyRepository {
 impl SqlitePartyRepository {
     pub fn new(conn: SqliteConn) -> Self {
         Self { conn }
+    }
+
+    /// The party's opening bill (FR-35), read from the side its type owns.
+    fn opening_balance_of(&self, party_id: i64, party_type: PartyType) -> Result<Option<PartyOpeningBalance>, AppError> {
+        let table = match party_type {
+            PartyType::Customer => "sale_transactions",
+            PartyType::Vendor => "purchase_transactions",
+        };
+        Ok(self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT id, transaction_code, total_amount, transaction_date, total_amount - balance_due \
+                     FROM {table} WHERE party_id = ?1 AND is_opening_balance = 1"
+                ),
+                params![party_id],
+                |r| {
+                    Ok(PartyOpeningBalance {
+                        bill_id: r.get(0)?,
+                        transaction_code: r.get(1)?,
+                        amount: r.get(2)?,
+                        as_of_date: r.get(3)?,
+                        settled_amount: round2(r.get(4)?),
+                    })
+                },
+            )
+            .optional()?)
     }
 }
 
@@ -31,15 +59,23 @@ fn map_party(r: &Row<'_>) -> rusqlite::Result<Party> {
         is_active: r.get(5)?,
         created_at: r.get(6)?,
         updated_at: r.get(7)?,
+        opening_balance: None,
     })
 }
 
 impl PartyRepository for SqlitePartyRepository {
     fn find_by_id(&self, id: i64) -> Result<Option<Party>, AppError> {
-        Ok(self
+        let found = self
             .conn
             .query_row(&format!("SELECT {COLS} FROM parties WHERE id = ?1"), params![id], map_party)
-            .optional()?)
+            .optional()?;
+        match found {
+            Some(mut p) => {
+                p.opening_balance = self.opening_balance_of(p.id, p.party_type)?;
+                Ok(Some(p))
+            }
+            None => Ok(None),
+        }
     }
 
     fn list(&self, party_type: Option<PartyType>, active_only: bool) -> Result<Vec<Party>, AppError> {
@@ -99,8 +135,8 @@ impl PartyRepository for SqlitePartyRepository {
                  ELSE (SELECT COALESCE(SUM(u.balance_due), 0.0) FROM purchase_transactions u WHERE u.party_id = p.id AND u.source = 'PURCHASE') \
                END, \
                CASE p.party_type \
-                 WHEN 'CUSTOMER' THEN (SELECT COUNT(*) FROM sale_transactions s WHERE s.party_id = p.id) \
-                 ELSE (SELECT COUNT(*) FROM purchase_transactions u WHERE u.party_id = p.id AND u.source = 'PURCHASE') \
+                 WHEN 'CUSTOMER' THEN (SELECT COUNT(*) FROM sale_transactions s WHERE s.party_id = p.id AND s.is_opening_balance = 0) \
+                 ELSE (SELECT COUNT(*) FROM purchase_transactions u WHERE u.party_id = p.id AND u.source = 'PURCHASE' AND u.is_opening_balance = 0) \
                END \
              FROM parties p \
              WHERE (?1 IS NULL OR p.party_type = ?1) AND (?2 = 0 OR p.is_active = 1) \
@@ -109,7 +145,7 @@ impl PartyRepository for SqlitePartyRepository {
                     OR (?4 IS NOT NULL AND p.id IN (SELECT party_id FROM party_search_fts WHERE phone_digits LIKE ?4))) \
              ORDER BY p.name COLLATE NOCASE, p.id";
         let mut stmt = self.conn.prepare_cached(sql)?;
-        let rows = stmt
+        let mut rows = stmt
             .query_map(params![pt, active_only as i64, fq, digits], |r| {
                 Ok(PartyListRow {
                     party: map_party(r)?,
@@ -118,6 +154,9 @@ impl PartyRepository for SqlitePartyRepository {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        for row in &mut rows {
+            row.party.opening_balance = self.opening_balance_of(row.party.id, row.party.party_type)?;
+        }
         Ok(rows)
     }
 

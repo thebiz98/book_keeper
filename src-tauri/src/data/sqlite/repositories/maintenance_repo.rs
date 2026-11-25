@@ -52,7 +52,7 @@ const TRANSACTION_STEPS: &[(&str, &str)] = &[
     // Codes restart (DD-34). OPN- stays: OPENING lots are kept.
     (
         "code_sequences",
-        "DELETE FROM code_sequences WHERE prefix IN ('SAL-', 'PUR-', 'ADJ-', 'RTL-', 'RET-', 'EXP-')",
+        "DELETE FROM code_sequences WHERE prefix IN ('SAL-', 'PUR-', 'ADJ-', 'RTL-', 'RET-', 'EXP-', 'OB-')",
     ),
 ];
 
