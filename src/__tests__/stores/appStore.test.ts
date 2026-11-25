@@ -7,7 +7,7 @@ const reset = () =>
     activeRoute: 'dashboard',
     shopProfile: { shopName: '' },
     shopLoaded: false,
-    liveCashInDrawer: 0,
+    cashInHand: 0,
     lookupOpen: false,
     backupRequested: false,
     isDbConnected: true,
@@ -38,18 +38,18 @@ describe('useAppStore (shell)', () => {
     expect(useAppStore.getState().shopLoaded).toBe(true);
   });
 
-  it('refreshMetrics reads liveCashInDrawer from the dashboard metrics', async () => {
+  it('refreshMetrics reads cashInHand from the dashboard metrics', async () => {
     const api = installApi();
     await useAppStore.getState().refreshMetrics();
     expect(api.getDashboardMetrics).toHaveBeenCalled();
-    expect(useAppStore.getState().liveCashInDrawer).toBe(123);
+    expect(useAppStore.getState().cashInHand).toBe(123);
   });
 
   it('refreshMetrics keeps the last value on failure', async () => {
     installApi({ getDashboardMetrics: vi.fn(async () => { throw new Error('x'); }) });
-    useAppStore.setState({ liveCashInDrawer: 55 });
+    useAppStore.setState({ cashInHand: 55 });
     await useAppStore.getState().refreshMetrics();
-    expect(useAppStore.getState().liveCashInDrawer).toBe(55);
+    expect(useAppStore.getState().cashInHand).toBe(55);
   });
 
   it('lookup open/close', () => {

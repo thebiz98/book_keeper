@@ -550,6 +550,7 @@ export const initialShopSettings: ShopSettings = {
   phone: '+91 98123 45678',
   address: 'Shop 14, Central Market, Lajpat Nagar, New Delhi - 110024',
   taxId: '07AAAAA0000A1Z5',
+  openingCash: 0,
 };
 
 export const initialBundleSuggestions: BundleSuggestion[] = [

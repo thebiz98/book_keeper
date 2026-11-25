@@ -172,7 +172,7 @@ describe('NewSalePage layout (FR-30)', () => {
     installPageApi({
       getNextSaleCode: 'SAL-0002',
       searchItemsFts: [],
-      getDashboardMetrics: { liveCashInDrawer: 0 },
+      getDashboardMetrics: { cashInHand: 0 },
       previewSale: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p),
     });
     const { container } = render(<NewSalePage />);

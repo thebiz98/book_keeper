@@ -41,6 +41,7 @@ export const SettingsPage: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [taxId, setTaxId] = useState('');
+  const [openingCash, setOpeningCash] = useState('0');
   const [isSaving, setIsSaving] = useState(false);
   const [profileNotice, setProfileNotice] = useState<Notice>(null);
 
@@ -77,6 +78,7 @@ export const SettingsPage: React.FC = () => {
         setPhone(s.phone ?? '');
         setAddress(s.address ?? '');
         setTaxId(s.taxId ?? '');
+        setOpeningCash(String(s.openingCash ?? 0));
       })
       .catch((err) => setProfileNotice({ kind: 'error', text: `Failed to load settings: ${errorMessage(err)}` }));
   }, []);
@@ -95,7 +97,9 @@ export const SettingsPage: React.FC = () => {
         phone: phone.trim() || null,
         address: address.trim() || null,
         taxId: taxId.trim() || null,
+        openingCash: openingCash.trim() === '' ? 0 : Number(openingCash),
       });
+      void useAppStore.getState().refreshMetrics();
       setShopProfile({
         shopName: shopName.trim(),
         phone: phone.trim(),
@@ -219,6 +223,25 @@ export const SettingsPage: React.FC = () => {
             <TextInput label="Tax / GST ID" value={taxId} onChange={(e) => setTaxId(e.target.value)} />
           </div>
           <TextInput label="Address" value={address} onChange={(e) => setAddress(e.target.value)} />
+          <div className="border-t border-slate-100 dark:border-slate-800 pt-3 flex flex-col gap-1">
+            <div className="max-w-xs">
+              <TextInput
+                label="Opening cash (₹)"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="0.01"
+                data-testid="opening-cash"
+                aria-describedby="opening-cash-help"
+                className="tabular-nums text-right"
+                value={openingCash}
+                onChange={(e) => setOpeningCash(e.target.value)}
+              />
+            </div>
+            <p id="opening-cash-help" className="text-xs text-slate-500">
+              Cash already in the drawer when you started using Book Keeper
+            </p>
+          </div>
           <div className="flex items-center gap-3">
             <Button
               variant="primary"

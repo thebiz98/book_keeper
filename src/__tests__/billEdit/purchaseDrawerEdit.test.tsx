@@ -32,7 +32,7 @@ function mount(opts: { guard?: BillEditGuard; preview?: (p: never) => unknown; s
     searchItemsFts: search,
     previewPurchase: opts.preview ?? (async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p)),
     updatePurchase: { purchaseId: 8, transactionCode: 'PUR-1008' },
-    getDashboardMetrics: { liveCashInDrawer: 0 },
+    getDashboardMetrics: { cashInHand: 0 },
   });
   const ui = <BillDetailDrawer kind="PURCHASE" billId={8} onClose={() => {}} onChanged={opts.onChanged} />;
   render(opts.strict ? <React.StrictMode>{ui}</React.StrictMode> : ui);

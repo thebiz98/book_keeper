@@ -34,7 +34,7 @@ export const Header: React.FC = () => {
   const loadShopSettings = useAppStore((s) => s.loadShopSettings);
   const refreshMetrics = useAppStore((s) => s.refreshMetrics);
   const openLookup = useAppStore((s) => s.openLookup);
-  const liveCashInDrawer = useAppStore((s) => s.liveCashInDrawer);
+  const cashInHand = useAppStore((s) => s.cashInHand);
   const isDbConnected = useAppStore((s) => s.isDbConnected);
 
   const theme = useThemeStore((s) => s.theme);
@@ -110,13 +110,13 @@ export const Header: React.FC = () => {
 
       {/* Right: Cash Drawer Pill, DB Indicator, Theme Toggle */}
       <div className="flex items-center gap-3">
-        {/* Physical Cash Drawer Pill */}
+        {/* Cash in hand pill (all-time running total, FR-33) */}
         <div
-          title="Physical Cash in Register Drawer"
+          title="Cash in hand: opening cash plus all cash received minus all cash paid out"
           className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium"
         >
-          <span className="text-[10px] text-slate-400 uppercase font-semibold">Cash</span>
-          <CurrencyDisplay amount={liveCashInDrawer} colored size="sm" />
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Cash in hand</span>
+          <CurrencyDisplay amount={cashInHand} colored size="sm" />
         </div>
 
         {/* Database Health Pill */}
