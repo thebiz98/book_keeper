@@ -169,3 +169,12 @@ Manual checklist:
 - Pencil opens the drawer directly in the edit form; on a bill with returns it opens in view mode and shows the reasons.
 - Columns menu -> Show profit: a coloured Profit column appears; restart the app: hidden again. Purchase history has no menu.
 - With profit on, open a bill with a discount, a charge and a return: Cost/Profit per line and the footer add up to the bill profit; the sum of bill profits equals Reports -> P&L net profit for those days (excluding expenses).
+
+## Branch feat/party-opening-balance (FR-35, DD-64; schema v11, v1.3 C7)
+Delivered: migration v11 (`is_opening_balance` on both bill headers, one-per-party partial unique indexes, frozen fixture `v11.sql`, upgrade + fixture tests), `OB-` code sequence (cleared by the Transactions reset), `Party.opening_balance`, `opening_balance` on the create / update party payloads (one transaction, create / update / remove, amount cannot drop below settled, type change refused while one exists), guard reason `OPENING_BALANCE`, returns against an opening bill refused. Exclusion list (LLD §22) applied to history, P&L, dashboard today, trend, recent, profit and party bill count; dues, ledger and every settlement path include it. Deviation from the plan: `SalesHistoryFilter.include_opening_balance` (default off) and `is_opening_balance` on history rows, because the Credit & Dues and batch-settlement bill lists are built from the history endpoints. UI: Opening balance section in the party dialog, "Opening balance" labels in the ledger, dues lists and drawer, read-only drawer (no Edit / Delete / Print, Settle kept). PartySelector quick-create stays name / phone only. New: `tests/party_opening_balance_test.rs`, `src/__tests__/pages/partyOpeningBalance.test.tsx`.
+Manual checklist:
+- Add Customer with "Customer owes you" 500 as of an older date: it appears in Credit & Dues, the party ledger ("Opening balance" row) and Receivables, but not in Sales History, Reports, the dashboard Today card or the trend.
+- Add Vendor with "You owe this vendor": same on the purchase side; the label reads "You owe this vendor (₹)".
+- Settle part of it from Credit & Dues: Cash in hand moves by that amount only; edit the party: "₹X already settled" shows, and lowering below it shows the backend error in the dialog.
+- Open the opening bill from the ledger: no Edit, Delete or Print; Settle works. The Type select is disabled while an opening balance exists.
+- Edit the party and clear the amount (nothing settled): the opening bill disappears from dues.
