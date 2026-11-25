@@ -589,6 +589,11 @@ export class MockApiClient implements ApiClient {
     const page = paginate(rows, filter?.page, filter?.limit);
     return { ...page, items: page.items.map((i) => toSearchResult(i)) };
   }
+  async getItem(itemId: number) {
+    const item = this.items.find((i) => i.id === itemId);
+    if (!item) throw notFound('Item', itemId);
+    return toSearchResult(item);
+  }
   async listCategories() {
     return [...new Set(this.items.map((i) => i.category).filter((c): c is string => !!c))].sort();
   }

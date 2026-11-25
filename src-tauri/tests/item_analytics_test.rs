@@ -548,6 +548,31 @@ fn speed_validation_and_no_writes() {
     assert_eq!(bad(f), "limit");
 }
 
+// ------------------------------------ get_item (exact row click) ------------------------------------
+
+#[test]
+fn get_item_found_service_can_make_not_found_and_no_writes() {
+    use book_keeper::services::contracts::item_service::ItemService;
+    let e = env();
+    let paper = e.item("Paper");
+    e.lot(paper, 10.0, 2.0);
+    let print = e.svc("Print", Some(3.0), &[(paper, 2.0)]);
+    let before = e.table_counts();
+    let p = e.items.get_item(paper).unwrap();
+    assert_eq!((p.item_id, p.name.as_str(), p.item_type), (paper, "Paper", ItemType::Physical));
+    close(p.current_stock, 10.0);
+    assert_eq!(p.can_make, None);
+    let s = e.items.get_item(print).unwrap();
+    assert_eq!(s.item_type, ItemType::Service);
+    assert_eq!(s.service_cost, Some(3.0));
+    assert_eq!(s.can_make, Some(5));
+    match e.items.get_item(9999) {
+        Err(AppError::NotFound { entity, .. }) => assert_eq!(entity, "Item"),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+    assert_eq!(e.table_counts(), before);
+}
+
 // ------------------------------------ query plans ------------------------------------
 
 fn plan(e: &E, sql: &str, nparams: usize) -> String {

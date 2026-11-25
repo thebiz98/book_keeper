@@ -72,6 +72,7 @@ export class TauriClient implements ApiClient {
   // --- Items & Catalog ---
   searchItemsFts: ApiClient['searchItemsFts'] = (query, limit) =>
     invokeCmd('search_items_fts', { query, limit: limit ?? null });
+  getItem: ApiClient['getItem'] = (itemId) => invokeCmd('get_item', { itemId });
   getItemsCatalog: ApiClient['getItemsCatalog'] = (filter) =>
     invokeCmd('get_items_catalog', {
       category: filter?.category ?? null,

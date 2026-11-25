@@ -64,34 +64,6 @@ export const ReportSearch: React.FC<{
   </div>
 );
 
-/** A report row only knows the item's id, name and unit, so the details drawer item is looked up. */
-async function lookupItem(r: { itemId: number; name: string; baseUnit: string }): Promise<ItemSearchResult> {
-  try {
-    const page = await api.getItemsCatalog({ search: r.name, limit: 50 });
-    const hit = page.items.find((i) => i.itemId === r.itemId);
-    if (hit) return hit;
-  } catch {
-    /* fall through to the minimal item */
-  }
-  return {
-    itemId: r.itemId,
-    name: r.name,
-    category: null,
-    barcode: null,
-    baseUnit: r.baseUnit,
-    itemType: 'PHYSICAL',
-    mrp: null,
-    defaultSalePrice: 0,
-    currentStock: 0,
-    isLowStock: false,
-    lowStockThreshold: 0,
-    bundles: [],
-    matchedBundleId: null,
-    serviceCost: null,
-    canMake: null,
-  };
-}
-
 /** Row click on a report list opens Item details (and its Edit drawer), as on Inventory. */
 export function useReportItemDrawers(): {
   open: (r: { itemId: number; name: string; baseUnit: string }) => void;
@@ -100,7 +72,7 @@ export function useReportItemDrawers(): {
   const [details, setDetails] = useState<ItemSearchResult | null>(null);
   const [editing, setEditing] = useState<ItemSearchResult | null>(null);
   const open = useCallback((r: { itemId: number; name: string; baseUnit: string }) => {
-    void lookupItem(r).then(setDetails);
+    api.getItem(r.itemId).then(setDetails).catch(() => setDetails(null));
   }, []);
   const drawers = (
     <>

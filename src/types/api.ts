@@ -630,6 +630,8 @@ export interface ApiClient {
   // Items & Catalog
   searchItemsFts(query: string, limit?: number): Promise<ItemSearchResult[]>;
   getItemsCatalog(filter?: CatalogFilter): Promise<Paginated<ItemSearchResult>>;
+  /** One item by id, same row shape as the catalog (NotFound when missing). Read-only. */
+  getItem(itemId: number): Promise<ItemSearchResult>;
   listCategories(): Promise<string[]>;
   createItem(payload: CreateItemPayload): Promise<number>;
   updateItem(itemId: number, payload: UpdateItemPayload): Promise<void>;

@@ -18,7 +18,7 @@ describe('MockApiClient contract shapes', () => {
     const methods = [
       'getNextSaleCode', 'createSale', 'getSalesHistory', 'getSaleDetails',
       'getNextPurchaseCode', 'createPurchase', 'getPurchasesHistory', 'getPurchaseDetails',
-      'searchItemsFts', 'getItemsCatalog', 'listCategories', 'createItem', 'updateItem',
+      'searchItemsFts', 'getItemsCatalog', 'getItem', 'listCategories', 'createItem', 'updateItem',
       'getBundleSuggestions', 'createBundle', 'updateBundle', 'deleteBundle',
       'getPartyDuesSummary', 'settleBillPayment', 'getPartyLedger',
       'createParty', 'updateParty', 'getParty', 'listParties', 'searchParties',

@@ -90,9 +90,9 @@ describe('ItemProfitPanel (FR-38)', () => {
   });
 
   it('opens Item details on a row click', async () => {
-    installApi({
+    const api = installApi({
       getItemProfitReport: profitReport(),
-      getItemsCatalog: { items: [catalogItem(1, 'Paper')], total: 1, page: 1, limit: 50 },
+      getItem: catalogItem(1, 'Paper'),
       getItemLots: [],
       getItemSales: { items: [], total: 0, page: 1, limit: 10 },
       getItemPurchases: { items: [], total: 0, page: 1, limit: 10 },
@@ -101,6 +101,7 @@ describe('ItemProfitPanel (FR-38)', () => {
     await waitFor(() => document.querySelectorAll('[data-testid="item-profit-row"]').length === 2);
     click(document.querySelector('[data-testid="item-profit-row"]')!);
     await waitFor(() => bodyText().includes('Sale Price'));
+    expect(api.getItem).toHaveBeenCalledWith(1);
   });
 });
 
@@ -145,7 +146,7 @@ describe('InventorySpeedPanel (FR-39)', () => {
         if (fail) throw new Error('boom');
         return speedReport();
       },
-      getItemsCatalog: { items: [catalogItem(1, 'Paper')], total: 1, page: 1, limit: 50 },
+      getItem: catalogItem(1, 'Paper'),
       getItemLots: [],
       getItemSales: { items: [], total: 0, page: 1, limit: 10 },
       getItemPurchases: { items: [], total: 0, page: 1, limit: 10 },

@@ -70,6 +70,7 @@ fn main() {
             report_controller::get_inventory_speed_report,
             report_controller::get_dashboard_metrics,
             item_controller::get_items_catalog,
+            item_controller::get_item,
             item_controller::list_categories,
             report_controller::get_low_stock_alerts,
             purchase_controller::get_next_purchase_code,

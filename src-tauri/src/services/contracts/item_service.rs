@@ -11,6 +11,8 @@ pub trait ItemService: Send + Sync {
     /// Typeahead search (default limit 8, max 200).
     fn search_items_fts(&self, query: &str, limit: Option<usize>) -> Result<Vec<ItemSearchResult>, AppError>;
     /// Distinct categories of active items.
+    /// One item by id with bundles and, for a service, "Can make N". NotFound when missing. Read-only.
+    fn get_item(&self, item_id: i64) -> Result<ItemSearchResult, AppError>;
     fn list_categories(&self) -> Result<Vec<String>, AppError>;
     fn create_item(&self, payload: CreateItemPayload) -> Result<i64, AppError>;
     fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError>;
@@ -31,6 +33,10 @@ impl<T: ItemService + ?Sized> ItemService for std::sync::Arc<T> {
 
     fn search_items_fts(&self, query: &str, limit: Option<usize>) -> Result<Vec<ItemSearchResult>, AppError> {
         (**self).search_items_fts(query, limit)
+    }
+
+    fn get_item(&self, item_id: i64) -> Result<ItemSearchResult, AppError> {
+        (**self).get_item(item_id)
     }
 
     fn list_categories(&self) -> Result<Vec<String>, AppError> {
