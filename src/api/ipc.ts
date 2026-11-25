@@ -108,6 +108,8 @@ export class TauriClient implements ApiClient {
     invokeCmd('update_settlement', { settlementId, payload });
   deleteSettlement: ApiClient['deleteSettlement'] = (settlementId) =>
     invokeCmd('delete_settlement', { settlementId });
+  getSettlementHistory: ApiClient['getSettlementHistory'] = (filter) =>
+    invokeCmd('get_settlement_history', { filter });
   getPartyLedger: ApiClient['getPartyLedger'] = (partyId) =>
     invokeCmd('get_party_ledger', { partyId });
 

@@ -190,6 +190,37 @@ export interface SettlePaymentPayload {
   notes: string | null;
 }
 
+/** FR-42. `side`: SALE = received from customers, PURCHASE = paid to vendors. */
+export interface SettlementHistoryFilter {
+  fromDate: string;
+  toDate: string;
+  side?: TransactionType | null;
+  partySearch?: string | null;
+  page: number;
+  pageSize: number;
+}
+
+export interface SettlementHistoryRow {
+  settlementId: number;
+  settlementDate: string;
+  partyId: number | null;
+  partyName: string;
+  transactionType: TransactionType;
+  transactionId: number;
+  transactionCode: string;
+  isOpeningBalance: boolean;
+  amount: number;
+  paymentMode: string | null;
+  notes: string | null;
+}
+
+export interface SettlementHistoryPage {
+  rows: SettlementHistoryRow[];
+  totalReceived: number;
+  totalPaid: number;
+  totalCount: number;
+}
+
 export interface SettleAllocation {
   transactionId: number;
   amountPaid: number;
@@ -607,6 +638,8 @@ export interface ApiClient {
   updateSettlement(settlementId: number, payload: UpdateSettlementPayload): Promise<PaymentSettlement>;
   deleteSettlement(settlementId: number): Promise<DeleteSettlementResult>;
   getPartyLedger(partyId: number): Promise<PartyLedgerView>;
+  /** FR-42: SETTLEMENT rows across all parties, newest first, paged in SQL, with totals over the filter. */
+  getSettlementHistory(filter: SettlementHistoryFilter): Promise<SettlementHistoryPage>;
 
   // Parties
   createParty(payload: CreatePartyPayload): Promise<number>;

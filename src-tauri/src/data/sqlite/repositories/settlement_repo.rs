@@ -233,7 +233,7 @@ impl SettlementRepository for SqliteSettlementRepository {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT ps.id, ps.settlement_date, ps.party_id, COALESCE(p.name, st.party_name, pt.party_name, ''), \
                     ps.transaction_type, ps.transaction_id, COALESCE(st.transaction_code, pt.transaction_code, ''), \
-                    COALESCE(st.is_opening_balance, pt.is_opening_balance, 0), ps.amount_paid, ps.notes \
+                    COALESCE(st.is_opening_balance, pt.is_opening_balance, 0), ps.amount_paid, ps.notes, ps.payment_mode \
              {FROM_WHERE} ORDER BY ps.settlement_date DESC, ps.id DESC LIMIT ?5 OFFSET ?6"
         ))?;
         let rows = stmt
@@ -249,6 +249,7 @@ impl SettlementRepository for SqliteSettlementRepository {
                     is_opening_balance: r.get::<_, i64>(7)? != 0,
                     amount: r.get(8)?,
                     notes: r.get(9)?,
+                    payment_mode: r.get(10)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

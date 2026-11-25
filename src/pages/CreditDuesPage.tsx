@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { User, Truck, Search, ChevronDown, ChevronRight } from 'lucide-react';
+import { User, Truck, Search, ChevronDown, ChevronRight, History } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import type { PartyDueSummary, PartyType } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
 import { SettlementModal } from '@/components/domain/SettlementModal';
+import { SettlementHistoryView } from '@/components/domain/SettlementHistoryView';
 import { PartyLedgerDrawer } from '@/components/domain/PartyLedgerDrawer';
 import { DataTable, type DataTableColumn } from '@/components/domain/DataTable';
 import { fetchOpenBills, transactionTypeFor, type OpenBill } from '@/components/domain/openBills';
@@ -100,6 +101,8 @@ const OpenBillsPanel: React.FC<{
 
 export const CreditDuesPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<PartyType>('CUSTOMER');
+  /** FR-42: third tab. The party tab stays remembered underneath. */
+  const [showHistory, setShowHistory] = useState(false);
   const [duesList, setDuesList] = useState<PartyDueSummary[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -193,21 +196,36 @@ export const CreditDuesPage: React.FC = () => {
     <div className="flex flex-col gap-4 h-full min-h-0">
       <div className="shrink-0 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
         <Tabs
-          activeTab={activeTab}
-          onChange={(id) => setActiveTab(id === 'VENDOR' ? 'VENDOR' : 'CUSTOMER')}
+          activeTab={showHistory ? 'HISTORY' : activeTab}
+          onChange={(id) => {
+            setShowHistory(id === 'HISTORY');
+            if (id !== 'HISTORY') setActiveTab(id === 'VENDOR' ? 'VENDOR' : 'CUSTOMER');
+          }}
           tabs={[
             { id: 'CUSTOMER', label: 'Customer Receivables', icon: <User className="h-3.5 w-3.5" /> },
             { id: 'VENDOR', label: 'Vendor Payables', icon: <Truck className="h-3.5 w-3.5" /> },
+            { id: 'HISTORY', label: 'Settlement History', icon: <History className="h-3.5 w-3.5" /> },
           ]}
         />
+        {!showHistory && (
         <div className="flex flex-col text-right">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
             {isCustomer ? 'Total Receivables Owed' : 'Total Payables Due'}
           </span>
           {error ? <span className="text-xl text-slate-400">-</span> : <CurrencyDisplay amount={totalOutstanding} size="xl" colored />}
         </div>
+        )}
       </div>
 
+      {showHistory ? (
+        <SettlementHistoryView
+          onChanged={() => {
+            setReloadKey((k) => k + 1);
+            fetchDues();
+          }}
+        />
+      ) : (
+        <>
       <div className="shrink-0 p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -243,6 +261,8 @@ export const CreditDuesPage: React.FC = () => {
         )}
         onRowClick={(d) => setExpanded(expanded === d.partyId ? null : d.partyId)}
       />
+        </>
+      )}
 
       {target && (
         <SettlementModal

@@ -31,6 +31,8 @@ import type {
   ReturnTransaction,
   SaleDetailView,
   SaleHistoryRow,
+  SettlementHistoryFilter,
+  SettlementHistoryPage,
   ShopSettings,
   AppConfigView,
   ResetScope,
@@ -703,6 +705,9 @@ export class MockApiClient implements ApiClient {
   }
   async deleteSettlement(_settlementId: number) {
     return { removedAmount: 0, transactionId: 0 };
+  }
+  async getSettlementHistory(_filter: SettlementHistoryFilter): Promise<SettlementHistoryPage> {
+    return { rows: [], totalReceived: 0, totalPaid: 0, totalCount: 0 };
   }
   async getPartyLedger(partyId: number) {
     const p = this.findParty(partyId);

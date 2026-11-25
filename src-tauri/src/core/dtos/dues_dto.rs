@@ -144,6 +144,8 @@ pub struct SettlementHistoryRow {
     pub transaction_code: String,
     pub is_opening_balance: bool,
     pub amount: f64,
+    /// Prefills the edit form (an edit without it would reset the mode).
+    pub payment_mode: Option<String>,
     pub notes: Option<String>,
 }
 
