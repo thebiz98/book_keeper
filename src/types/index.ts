@@ -130,6 +130,18 @@ export interface Party {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  /** The party's opening bill (FR-35); null / absent when none. */
+  openingBalance?: PartyOpeningBalance | null;
+}
+
+/** A party's opening bill as returned with the party (FR-35). */
+export interface PartyOpeningBalance {
+  billId: number;
+  transactionCode: string;
+  amount: number;
+  asOfDate: string;
+  /** Settlements + return credits already applied to the bill. */
+  settledAmount: number;
 }
 
 /** list_parties / search_parties row: Party flattened plus ledger stats. */
@@ -156,6 +168,8 @@ export interface SaleTransaction {
   discountsTotal: number;
   /** Last edit time (FR-20); null if never edited. */
   updatedAt: string | null;
+  /** Party opening-balance bill (FR-35): read-only, no lines. */
+  isOpeningBalance?: boolean;
 }
 
 export interface SaleItem {
@@ -224,6 +238,8 @@ export interface PurchaseTransaction {
   discountsTotal: number;
   /** Last edit time (FR-20); null if never edited. */
   updatedAt: string | null;
+  /** Party opening-balance bill (FR-35): read-only, no lines. */
+  isOpeningBalance?: boolean;
 }
 
 export interface PurchaseItem {
@@ -277,6 +293,8 @@ export interface SaleHistoryRow {
   discountsTotal: number;
   /** Bill profit (FR-34); null unless the request set includeProfit. Sales only. */
   profit?: number | null;
+  /** Party opening-balance bill (FR-35); only listed when the request set includeOpeningBalance. */
+  isOpeningBalance?: boolean;
 }
 
 export interface PurchaseHistoryRow extends SaleHistoryRow {
@@ -420,6 +438,7 @@ export interface PartyLedgerBill {
   paidAmount: number;
   balanceDue: number;
   paymentStatus: PaymentStatus;
+  isOpeningBalance?: boolean;
 }
 
 export interface PartyLedgerView {

@@ -65,7 +65,14 @@ const OpenBillsPanel: React.FC<{
       <TableBody>
         {bills.map((b) => (
           <TableRow key={b.id} >
-            <TableCell className="py-1 font-mono font-semibold">{b.transactionCode}</TableCell>
+            <TableCell className="py-1 font-mono font-semibold">
+              {b.transactionCode}
+              {b.isOpeningBalance && (
+                <span data-testid="opening-label" className="ml-1.5 font-sans font-normal text-[11px] text-slate-500">
+                  Opening balance
+                </span>
+              )}
+            </TableCell>
             <TableCell className="font-mono">{b.transactionDate}</TableCell>
             <TableCell className="text-right">
               <CurrencyDisplay amount={b.totalAmount} size="sm" />

@@ -247,7 +247,14 @@ export const BatchSettlementForm: React.FC<BatchSettlementFormProps> = ({
                         onChange={(e) => onRow(b, { checked: e.target.checked })}
                       />
                     </td>
-                    <td className="font-mono">{b.transactionCode}</td>
+                    <td className="font-mono">
+                      {b.transactionCode}
+                      {b.isOpeningBalance && (
+                        <span data-testid="opening-label" className="ml-1.5 font-sans text-[11px] text-slate-500">
+                          Opening balance
+                        </span>
+                      )}
+                    </td>
                     <td className="font-mono text-slate-500">{b.transactionDate}</td>
                     <td className="text-right font-mono">
                       <CurrencyDisplay amount={b.totalAmount} size="sm" />

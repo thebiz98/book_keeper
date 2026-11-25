@@ -96,6 +96,14 @@ function toSearchResult(i: MockItem, matchedBundleId: number | null = null): Ite
   };
 }
 
+const toOpening = (
+  partyId: number,
+  ob: { amount: number; asOfDate: string } | null | undefined
+): Party['openingBalance'] =>
+  ob && ob.amount > 0
+    ? { billId: partyId + 5000, transactionCode: `OB-${String(partyId).padStart(4, '0')}`, amount: ob.amount, asOfDate: ob.asOfDate, settledAmount: 0 }
+    : null;
+
 const toParty = (p: MockParty): Party => ({
   id: p.id,
   name: p.name,
@@ -105,6 +113,7 @@ const toParty = (p: MockParty): Party => ({
   isActive: p.isActive,
   createdAt: p.createdAt,
   updatedAt: p.updatedAt,
+  openingBalance: p.openingBalance ?? null,
 });
 
 const toListRow = (p: MockParty): PartyListRow => ({
@@ -710,20 +719,28 @@ export class MockApiClient implements ApiClient {
   // --- Parties ---
   async createParty(payload: Parameters<ApiClient['createParty']>[0]) {
     const id = this.id() + 1000;
+    const { openingBalance, ...rest } = payload;
     this.parties.push({
       id,
-      ...payload,
+      ...rest,
+      openingBalance: toOpening(id, openingBalance),
+      balanceDue: openingBalance?.amount ?? 0,
       isActive: true,
       createdAt: nowIso(),
       updatedAt: nowIso(),
-      balanceDue: 0,
       oldestBillDate: null,
       unpaidBillsCount: 0,
     });
     return id;
   }
   async updateParty(partyId: number, payload: Parameters<ApiClient['updateParty']>[1]) {
-    Object.assign(this.findParty(partyId), payload, { updatedAt: nowIso() });
+    const { openingBalance, ...rest } = payload;
+    const party = this.findParty(partyId);
+    Object.assign(party, rest, { updatedAt: nowIso() });
+    if (openingBalance !== undefined) {
+      party.openingBalance = toOpening(partyId, openingBalance);
+      party.balanceDue = openingBalance?.amount ?? 0;
+    }
   }
   async getParty(partyId: number) {
     return toParty(this.findParty(partyId));

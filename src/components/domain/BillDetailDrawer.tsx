@@ -264,7 +264,8 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
   const printRef = useRef(doPrint);
   printRef.current = doPrint;
   // Print is a view-mode action: in edit mode it would print the saved bill, not the edits.
-  const printable = billId !== null && head !== null && mode === 'view';
+  const isOpening = !!head?.isOpeningBalance;
+  const printable = billId !== null && head !== null && mode === 'view' && !isOpening;
   useEffect(() => {
     if (!printable) return;
     const onKey = (e: KeyboardEvent) => {
@@ -282,13 +283,19 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
       isOpen={billId !== null}
       onClose={requestClose}
       className={mode === 'edit' ? 'w-[900px]' : undefined}
-      title={head ? `${kind === 'SALE' ? 'Invoice' : 'Purchase'} ${head.transactionCode}` : 'Bill details'}
+      title={
+        head
+          ? isOpening
+            ? `Opening balance ${head.transactionCode}`
+            : `${kind === 'SALE' ? 'Invoice' : 'Purchase'} ${head.transactionCode}`
+          : 'Bill details'
+      }
       description={head?.updatedAt ? `Edited ${head.updatedAt.slice(0, 10)}` : undefined}
       width="xl"
       footer={
         head && mode === 'view' && (
           <div className="flex w-full flex-col gap-2" data-testid="bill-actions">
-            {guard && guard.reasons.length > 0 && (
+            {!isOpening && guard && guard.reasons.length > 0 && (
               <ul className="text-[11px] text-amber-700 dark:text-amber-400 list-disc pl-4" data-testid="guard-reasons">
                 {guard.reasons.map((r) => (
                   <li key={r.code}>{r.message}</li>
@@ -296,16 +303,18 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
               </ul>
             )}
             <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                data-testid="bill-print"
-                leftIcon={<Printer size={12} />}
-                onClick={doPrint}
-                title="Print (Ctrl+P)"
-              >
-                Print
-              </Button>
+              {!isOpening && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="bill-print"
+                  leftIcon={<Printer size={12} />}
+                  onClick={doPrint}
+                  title="Print (Ctrl+P)"
+                >
+                  Print
+                </Button>
+              )}
               {canSettle && (
                 <Button
                   variant="secondary"
@@ -317,24 +326,28 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
                   Settle
                 </Button>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                data-testid="bill-edit"
-                disabled={!guard?.canEdit}
-                onClick={onEditClick}
-              >
-                Edit
-              </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                data-testid="bill-delete"
-                disabled={!guard?.canDelete}
-                onClick={() => setConfirmDelete(true)}
-              >
-                Delete
-              </Button>
+              {!isOpening && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="bill-edit"
+                  disabled={!guard?.canEdit}
+                  onClick={onEditClick}
+                >
+                  Edit
+                </Button>
+              )}
+              {!isOpening && (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  data-testid="bill-delete"
+                  disabled={!guard?.canDelete}
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  Delete
+                </Button>
+              )}
             </div>
           </div>
         )
@@ -365,14 +378,19 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
               <span className="font-medium">{head.partyName ?? (kind === 'SALE' ? 'Walk-in' : '-')}</span>
             </div>
             <div>
-              <span className="text-slate-500">Date: </span>
+              <span className="text-slate-500">{isOpening ? 'As of: ' : 'Date: '}</span>
               <span className="font-mono">{head.transactionDate}</span>
             </div>
+            {isOpening && (
+              <div className="col-span-2 text-slate-500" data-testid="opening-note">
+                Opening balance: brought forward from before Book Keeper. Change it from the party record.
+              </div>
+            )}
             <div>
               <span className="text-slate-500">Status: </span>
               <PaymentStatusBadge status={head.paymentStatus} />
             </div>
-            {kind === 'PURCHASE' && (
+            {kind === 'PURCHASE' && !isOpening && (
               <div>
                 <span className="text-slate-500">Supplier invoice ref: </span>
                 <span data-testid="supplier-ref" className="font-mono">
@@ -382,6 +400,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
             )}
           </div>
 
+          {!isOpening && (
           <Table dense scroll="page">
             <TableHeader>
               <TableRow className="text-left text-slate-400">
@@ -448,6 +467,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
               ))}
             </TableBody>
           </Table>
+          )}
 
           {charges.length > 0 && (
             <div data-testid="bill-charges">
@@ -498,7 +518,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
             </div>
           </div>
 
-          {profitOn && sale && (
+          {profitOn && sale && !isOpening && (
             <div className="flex flex-col items-end gap-0.5" data-testid="profit-footer">
               <div>
                 Lines profit: <CurrencyDisplay amount={sale.profitSummary.linesProfit} size="sm" />
