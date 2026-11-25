@@ -134,10 +134,10 @@ describe('DashboardPage', () => {
     for (const id of ['kpi-cash', 'kpi-expenses', 'kpi-valuation']) {
       const btn = document.querySelector(`[data-testid="${id}"]`)!;
       expect(btn.className).toContain('h-full');
-      expect(btn.querySelector('.text-2xl')).not.toBeNull();
+      expect(btn.querySelector('.text-\\[21px\\]')).not.toBeNull();
     }
     // Today / Dues rows keep the compact size.
-    expect(document.querySelector('[data-testid="kpi-sales"] .text-2xl')).toBeNull();
+    expect(document.querySelector('[data-testid="kpi-sales"] .text-\\[21px\\]')).toBeNull();
   });
 
   it('low-stock rows show stock / level and no category caption', async () => {
