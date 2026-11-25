@@ -305,6 +305,23 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         }
     }
 
+    fn get_item(&self, item_id: i64) -> Result<ItemSearchResult, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let bundles = tx
+            .bundles()
+            .find_by_item_id(item_id)?
+            .into_iter()
+            .map(|b| ItemBundleSearchResult::from_bundle(b, item.default_sale_price))
+            .collect();
+        let is_service = item.item_type == ItemType::Service;
+        let mut row = to_search_result(item, bundles);
+        if is_service {
+            row.can_make = tx.service_components().can_make(&[item_id])?.get(&item_id).copied();
+        }
+        Ok(row)
+    }
+
     fn list_categories(&self) -> Result<Vec<String>, AppError> {
         let mut tx = self.uow.begin_read()?;
         tx.items().list_categories()

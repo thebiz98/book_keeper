@@ -18,7 +18,7 @@ describe('MockApiClient contract shapes', () => {
     const methods = [
       'getNextSaleCode', 'createSale', 'getSalesHistory', 'getSaleDetails',
       'getNextPurchaseCode', 'createPurchase', 'getPurchasesHistory', 'getPurchaseDetails',
-      'searchItemsFts', 'getItemsCatalog', 'listCategories', 'createItem', 'updateItem',
+      'searchItemsFts', 'getItemsCatalog', 'getItem', 'listCategories', 'createItem', 'updateItem',
       'getBundleSuggestions', 'createBundle', 'updateBundle', 'deleteBundle',
       'getPartyDuesSummary', 'settleBillPayment', 'getPartyLedger',
       'createParty', 'updateParty', 'getParty', 'listParties', 'searchParties',
@@ -26,7 +26,7 @@ describe('MockApiClient contract shapes', () => {
       'getNextReturnCode', 'createCustomerReturn', 'createVendorReturn', 'getReturnDetails',
       'listReturns', 'createStockAdjustment', 'setItemStock', 'getItemLots', 'previewLotDraw', 'getItemSales', 'getItemPurchases', 'listStockAdjustments',
       'getDashboardMetrics', 'getLowStockAlerts', 'getSalesPurchaseTrend', 'getRecentTransactions',
-      'getPnLReport', 'getStockValuationReport', 'getCashFlowReport',
+      'getPnLReport', 'getStockValuationReport', 'getCashFlowReport', 'getItemProfitReport', 'getInventorySpeedReport',
       'getShopSettings', 'updateShopSettings', 'backupDatabase', 'verifyDatabaseIntegrity',
       'validateItemsImport', 'executeItemsImport',
       'searchExpenseTypes', 'listExpenseTypes', 'createExpenseType', 'updateExpenseType',

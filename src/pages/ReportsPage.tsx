@@ -5,6 +5,8 @@ import { startOfMonth, todayLocal } from '@/lib/dates';
 import type { CashFlowReport, PnLReport, StockValuationReport } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { DateRangePicker } from '@/components/common/DateRangePicker';
+import { ItemProfitPanel } from '@/components/domain/ItemProfitPanel';
+import { InventorySpeedPanel } from '@/components/domain/InventorySpeedPanel';
 import { SalesPurchaseTrendPanel } from '@/components/domain/SalesPurchaseTrendPanel';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 
@@ -207,6 +209,9 @@ export const ReportsPage: React.FC = () => {
           </div>
         )}
       </Panel>
+
+      <ItemProfitPanel fromDate={range.startDate} toDate={range.endDate} />
+      <InventorySpeedPanel />
 
       {/* Optional: Sales vs Purchases trend (moved off the dashboard). Loads only when opened. */}
       <section className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">

@@ -62,3 +62,8 @@ pub async fn get_service_components(state: State<'_, AppState>, item_id: i64) ->
     let svc = state.item_service.clone();
     super::run_blocking(move || svc.get_service_components(item_id)).await
 }
+#[tauri::command]
+pub async fn get_item(state: State<'_, AppState>, item_id: i64) -> Result<ItemSearchResult, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.get_item(item_id)).await
+}

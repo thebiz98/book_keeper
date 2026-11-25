@@ -114,3 +114,129 @@ pub struct CashFlowReport {
     pub total_outflow: f64,
     pub net_cash_balance: f64,             // inflows - outflows - expenses
 }
+
+// ---- Item profit and inventory speed (FR-38, FR-39, DD-68) ---------------------------------------
+
+/// Sort request of a report list. `dir` is `ASC` or `DESC`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReportSort {
+    pub field: String,
+    pub dir: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemProfitFilter {
+    pub from_date: String,
+    pub to_date: String,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub sort: Option<ReportSort>,
+    #[serde(default)]
+    pub page: Option<usize>,
+    #[serde(default)]
+    pub page_size: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemProfitRow {
+    pub item_id: i64,
+    pub name: String,
+    pub base_unit: String,
+    /// Units sold net of linked customer returns.
+    pub qty_sold: f64,
+    /// Line totals less the bill discount share and linked refunds.
+    pub revenue: f64,
+    /// Net FIFO cost (scrapped units keep theirs) plus misc. cost.
+    pub cost: f64,
+    pub profit: f64,
+    /// `profit / revenue * 100`; `None` when revenue is 0.
+    pub margin_pct: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemProfitTotals {
+    pub revenue: f64,
+    pub cost: f64,
+    pub profit: f64,
+    pub margin_pct: Option<f64>,
+}
+
+/// `items_profit + charges - replacement_cost = bills_profit` over every non-opening bill in range.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemProfitReconciliation {
+    pub items_profit: f64,
+    pub charges: f64,
+    pub replacement_cost: f64,
+    pub bills_profit: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemProfitReport {
+    pub rows: Vec<ItemProfitRow>,
+    pub totals: ItemProfitTotals,
+    pub reconciliation: ItemProfitReconciliation,
+    pub total_count: usize,
+    pub page: usize,
+    pub page_size: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InventorySpeedFilter {
+    pub from_date: String,
+    pub to_date: String,
+    /// `ALL` (or absent), `FAST`, `NORMAL`, `SLOW`, `DEAD`.
+    #[serde(default)]
+    pub class: Option<String>,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub sort: Option<ReportSort>,
+    #[serde(default)]
+    pub page: Option<usize>,
+    #[serde(default)]
+    pub page_size: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SpeedClass {
+    Fast,
+    Normal,
+    Slow,
+    Dead,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InventorySpeedRow {
+    pub item_id: i64,
+    pub name: String,
+    pub base_unit: String,
+    /// Units sold net of returns plus units consumed by services.
+    pub units_out: f64,
+    pub units_per_day: f64,
+    pub stock: f64,
+    /// `stock / units_per_day`; `None` when nothing moved.
+    pub days_of_cover: Option<f64>,
+    pub class: SpeedClass,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeedCounts {
+    pub fast: usize,
+    pub normal: usize,
+    pub slow: usize,
+    pub dead: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InventorySpeedReport {
+    pub rows: Vec<InventorySpeedRow>,
+    /// Over the search-filtered items, ignoring the class tab.
+    pub counts: SpeedCounts,
+    /// Inclusive day count of the period (>= 1).
+    pub days: u32,
+    pub total_count: usize,
+    pub page: usize,
+    pub page_size: usize,
+}

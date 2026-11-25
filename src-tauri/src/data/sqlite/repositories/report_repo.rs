@@ -7,7 +7,9 @@ use crate::core::dtos::{
 };
 use crate::core::error::AppError;
 use crate::core::money::round2;
-use crate::data::contracts::report_repository::ReportRepository;
+use crate::core::dtos::{InventorySpeedReport, ItemProfitReport};
+use crate::data::contracts::report_repository::{ReportListQuery, ReportRepository};
+use crate::data::sqlite::repositories::item_analytics_sql;
 use crate::data::sqlite::service_sql::misc_cost_sql;
 use crate::data::sqlite::{opt_enum_col, SqliteConn};
 
@@ -252,5 +254,18 @@ impl ReportRepository for SqliteReportRepository {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    fn item_profit(&self, q: &ReportListQuery) -> Result<ItemProfitReport, AppError> {
+        item_analytics_sql::item_profit(&self.conn, q)
+    }
+
+    fn inventory_speed(
+        &self,
+        q: &ReportListQuery,
+        class: Option<&str>,
+        days: u32,
+    ) -> Result<InventorySpeedReport, AppError> {
+        item_analytics_sql::inventory_speed(&self.conn, q, class, days)
     }
 }

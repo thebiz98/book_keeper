@@ -1,4 +1,4 @@
-use crate::core::dtos::{LowStockItem, PnLReport, RecentTransaction, StockValuationReport};
+use crate::core::dtos::{InventorySpeedReport, ItemProfitReport, LowStockItem, PnLReport, RecentTransaction, StockValuationReport};
 use crate::core::error::AppError;
 
 /// Read-only SQL aggregates behind the reports/dashboard (LLD §6.10 Metric Definitions).
@@ -22,4 +22,22 @@ pub trait ReportRepository {
     fn trend_buckets(&self, from: &str, to: &str, key_len: usize) -> Result<Vec<(String, f64, f64)>, AppError>;
     /// Newest `limit` sales / PURCHASE bills / returns merged, newest first.
     fn recent_transactions(&self, limit: usize) -> Result<Vec<RecentTransaction>, AppError>;
+    /// Item profit (FR-38): one row per item sold in range, totals over all matching rows.
+    fn item_profit(&self, q: &ReportListQuery) -> Result<ItemProfitReport, AppError>;
+    /// Inventory speed (FR-39, DD-68). `class` is FAST / NORMAL / SLOW / DEAD or None; `days` >= 1.
+    fn inventory_speed(&self, q: &ReportListQuery, class: Option<&str>, days: u32) -> Result<InventorySpeedReport, AppError>;
 }
+
+/// One validated list request of an item report: paging and ordering are applied in SQL (X6).
+/// `order` is a whitelisted key (see the repository), never raw user text.
+#[derive(Debug, Clone, Copy)]
+pub struct ReportListQuery<'a> {
+    pub from: &'a str,
+    pub to: &'a str,
+    pub search: Option<&'a str>,
+    pub order: &'a str,
+    pub desc: bool,
+    pub offset: usize,
+    pub limit: usize,
+}
+

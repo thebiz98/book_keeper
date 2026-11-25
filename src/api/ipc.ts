@@ -72,6 +72,7 @@ export class TauriClient implements ApiClient {
   // --- Items & Catalog ---
   searchItemsFts: ApiClient['searchItemsFts'] = (query, limit) =>
     invokeCmd('search_items_fts', { query, limit: limit ?? null });
+  getItem: ApiClient['getItem'] = (itemId) => invokeCmd('get_item', { itemId });
   getItemsCatalog: ApiClient['getItemsCatalog'] = (filter) =>
     invokeCmd('get_items_catalog', {
       category: filter?.category ?? null,
@@ -195,6 +196,10 @@ export class TauriClient implements ApiClient {
     invokeCmd('get_pnl_report', { fromDate, toDate });
   getStockValuationReport: ApiClient['getStockValuationReport'] = () =>
     invokeCmd('get_stock_valuation_report');
+  getItemProfitReport: ApiClient['getItemProfitReport'] = (filter) =>
+    invokeCmd('get_item_profit_report', { filter });
+  getInventorySpeedReport: ApiClient['getInventorySpeedReport'] = (filter) =>
+    invokeCmd('get_inventory_speed_report', { filter });
   getCashFlowReport: ApiClient['getCashFlowReport'] = (fromDate, toDate) =>
     invokeCmd('get_cash_flow_report', { fromDate, toDate });
 

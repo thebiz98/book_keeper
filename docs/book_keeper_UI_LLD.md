@@ -740,3 +740,11 @@ UI only; no backend, schema or IPC change.
  Paid 300.00   Balance due 230.00   PARTIAL
 ```
 * **Tests (Vitest, `billPrint.test.tsx`):** header order; party left / date + code right; Sl. No; pack text in the item cell; subtotal row after the spacer; charges after the subtotal and before Total (`Less:` and `−`); Total = stored `total_amount`; purchase vendor + supplier ref; walk-in fallback.
+
+
+## Item profit and inventory speed (FR-38, FR-39, DD-68, `feat/item-analytics`, v1.4 D3)
+* **Placement.** `ReportsPage` gets two `Panel`s below Cash Flow and Valuation: **Item profit** and **Inventory speed**. Components `components/domain/ItemProfitPanel.tsx` and `InventorySpeedPanel.tsx` (Panel pattern: loading text, error with Retry). Both use the shared `Table` (R7, sticky header, bounded scroll), `Pager`, and a `useLiveSearch` search box (150 ms, page resets on commit). Sortable headers are buttons with `aria-sort`. Sorting, paging and search are arguments of `api.getItemProfitReport` / `api.getInventorySpeedReport` (DD-56).
+* **Item profit.** Uses the page period selector. Columns: Item, Qty, Revenue, Cost, Profit (green / red), Margin % ("-" when null). A totals row (all matching rows) and a reconciliation footer: "Items profit + charges - replacement cost = bills profit" with the four backend figures. Row click opens `ItemDetailsDrawer`.
+* **Inventory speed.** Own `DateRangePicker` defaulting to the last 30 days (the page period is usually "this month"; a speed view needs a steady window), labelled in the panel. Tabs All / Fast / Slow / Dead with counts from the response (Normal items show under All). Columns: Item, Units out, Per day, Stock, Days of cover ("-" when null), Class badge. Row click opens `ItemDetailsDrawer`.
+* **Mock client + types.** `ItemProfitReport`, `InventorySpeedReport` and friends in `types/api.ts`; `ipc.ts` and `mockClient.ts` implement both commands.
+* **Tests (Vitest).** each panel renders rows, totals, reconciliation; sort click and search call the API with the right args; tab click sends the class; error + Retry; row click opens the drawer.

@@ -6,11 +6,14 @@ use std::sync::Arc;
 use chrono::{Datelike, Duration, NaiveDate};
 
 use crate::core::dtos::{
-    CashFlowReport, DashboardMetrics, LowStockItem, PnLReport, RecentTransaction,
+    CashFlowReport, DashboardMetrics, InventorySpeedFilter, InventorySpeedReport, ItemProfitFilter,
+    ItemProfitReport, LowStockItem, PnLReport, RecentTransaction, ReportSort,
     StockValuationReport, TrendDataPoint,
 };
+use crate::core::dtos::pagination::{clean_text, PageRequest};
 use crate::core::error::AppError;
 use crate::core::money::{check_date, round2};
+use crate::data::contracts::report_repository::ReportListQuery;
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::report_service::ReportService;
 use crate::services::r#impl::accounting_service_impl::{cash_in_hand_at, cash_position};
@@ -171,5 +174,77 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
         }
         let mut tx = self.uow.begin_read()?;
         tx.reports().recent_transactions(limit)
+    }
+
+    fn get_item_profit_report(&self, filter: ItemProfitFilter) -> Result<ItemProfitReport, AppError> {
+        check_range(&filter.from_date, &filter.to_date)?;
+        let page = PageRequest::new(filter.page, filter.page_size)?;
+        let (order, desc) = sort_of(
+            filter.sort.as_ref(),
+            &["name", "qty", "revenue", "cost", "profit", "margin"],
+            ("profit", true),
+        )?;
+        let q = ReportListQuery {
+            from: &filter.from_date,
+            to: &filter.to_date,
+            search: clean_text(filter.search.as_deref()),
+            order,
+            desc,
+            offset: page.offset(),
+            limit: page.limit,
+        };
+        let mut tx = self.uow.begin_read()?;
+        let mut r = tx.reports().item_profit(&q)?;
+        r.page = page.page;
+        Ok(r)
+    }
+
+    fn get_inventory_speed_report(&self, filter: InventorySpeedFilter) -> Result<InventorySpeedReport, AppError> {
+        check_range(&filter.from_date, &filter.to_date)?;
+        let page = PageRequest::new(filter.page, filter.page_size)?;
+        let (order, desc) = sort_of(
+            filter.sort.as_ref(),
+            &["name", "units_out", "per_day", "stock", "cover", "class"],
+            ("units_out", true),
+        )?;
+        let class = match filter.class.as_deref().map(str::trim) {
+            None | Some("") | Some("ALL") => None,
+            Some(c @ ("FAST" | "NORMAL" | "SLOW" | "DEAD")) => Some(c),
+            Some(other) => return Err(validation("class", format!("unknown class '{other}'"))),
+        };
+        let parse = |s: &str| NaiveDate::parse_from_str(s, "%Y-%m-%d").expect("range already checked");
+        let days = ((parse(&filter.to_date) - parse(&filter.from_date)).num_days() + 1) as u32;
+        let q = ReportListQuery {
+            from: &filter.from_date,
+            to: &filter.to_date,
+            search: clean_text(filter.search.as_deref()),
+            order,
+            desc,
+            offset: page.offset(),
+            limit: page.limit,
+        };
+        let mut tx = self.uow.begin_read()?;
+        let mut r = tx.reports().inventory_speed(&q, class, days)?;
+        r.page = page.page;
+        Ok(r)
+    }
+}
+
+/// Validates a report sort against the allowed keys; returns the key and whether it is descending.
+fn sort_of<'a>(
+    sort: Option<&ReportSort>,
+    allowed: &[&'a str],
+    default: (&'a str, bool),
+) -> Result<(&'a str, bool), AppError> {
+    let Some(s) = sort else { return Ok(default) };
+    let key = allowed
+        .iter()
+        .copied()
+        .find(|k| *k == s.field)
+        .ok_or_else(|| validation("sort", format!("unknown sort field '{}'", s.field)))?;
+    match s.dir.as_str() {
+        "ASC" => Ok((key, false)),
+        "DESC" => Ok((key, true)),
+        other => Err(validation("sort", format!("sort dir must be ASC or DESC, got '{other}'"))),
     }
 }

@@ -1,5 +1,6 @@
 use crate::core::dtos::{
-    CashFlowReport, DashboardMetrics, LowStockItem, PnLReport, RecentTransaction,
+    CashFlowReport, DashboardMetrics, InventorySpeedFilter, InventorySpeedReport, ItemProfitFilter,
+    ItemProfitReport, LowStockItem, PnLReport, RecentTransaction,
     StockValuationReport, TrendDataPoint,
 };
 use crate::core::error::AppError;
@@ -14,6 +15,10 @@ pub trait ReportService: Send + Sync {
     fn get_cash_flow_report(&self, from_date: &str, to_date: &str) -> Result<CashFlowReport, AppError>;
     /// Newest `limit` (1..=100) sales, PURCHASE-source purchases and returns, newest first.
     fn get_recent_transactions(&self, limit: usize) -> Result<Vec<RecentTransaction>, AppError>;
+    /// Item-wise profit for the period (FR-38). Read-only; sorting, search and paging run in SQL.
+    fn get_item_profit_report(&self, filter: ItemProfitFilter) -> Result<ItemProfitReport, AppError>;
+    /// Fast / slow / dead stock for the period (FR-39, DD-68). Read-only.
+    fn get_inventory_speed_report(&self, filter: InventorySpeedFilter) -> Result<InventorySpeedReport, AppError>;
 }
 
 impl<T: ReportService + ?Sized> ReportService for std::sync::Arc<T> {
@@ -37,5 +42,11 @@ impl<T: ReportService + ?Sized> ReportService for std::sync::Arc<T> {
     }
     fn get_recent_transactions(&self, limit: usize) -> Result<Vec<RecentTransaction>, AppError> {
         (**self).get_recent_transactions(limit)
+    }
+    fn get_item_profit_report(&self, filter: ItemProfitFilter) -> Result<ItemProfitReport, AppError> {
+        (**self).get_item_profit_report(filter)
+    }
+    fn get_inventory_speed_report(&self, filter: InventorySpeedFilter) -> Result<InventorySpeedReport, AppError> {
+        (**self).get_inventory_speed_report(filter)
     }
 }

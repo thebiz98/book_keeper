@@ -38,3 +38,13 @@ pub async fn get_recent_transactions(state: State<'_, AppState>, limit: usize) -
     let svc = state.report_service.clone();
     super::run_blocking(move || svc.get_recent_transactions(limit)).await
 }
+#[tauri::command]
+pub async fn get_item_profit_report(state: State<'_, AppState>, filter: ItemProfitFilter) -> Result<ItemProfitReport, AppError> {
+    let svc = state.report_service.clone();
+    super::run_blocking(move || svc.get_item_profit_report(filter)).await
+}
+#[tauri::command]
+pub async fn get_inventory_speed_report(state: State<'_, AppState>, filter: InventorySpeedFilter) -> Result<InventorySpeedReport, AppError> {
+    let svc = state.report_service.clone();
+    super::run_blocking(move || svc.get_inventory_speed_report(filter)).await
+}
