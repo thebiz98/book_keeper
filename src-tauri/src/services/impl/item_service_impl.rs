@@ -699,7 +699,10 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
     ) -> Result<Paginated<DeletedItemRow>, AppError> {
         let req = PageRequest::new(page, page_size.or(Some(10)))?;
         let mut tx = self.uow.begin_read()?;
-        let (rows, total) = tx.items().list_inactive(search.as_deref().unwrap_or(""), req.offset(), req.limit)?;
+        let (mut rows, total) = tx.items().list_inactive(search.as_deref().unwrap_or(""), req.offset(), req.limit)?;
+        for r in &mut rows {
+            r.can_purge = tx.items().usage_reasons(r.item_id)?.is_empty();
+        }
         Ok(Paginated::new(rows, total, req.page, req.limit))
     }
 

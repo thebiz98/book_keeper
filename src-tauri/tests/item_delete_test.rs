@@ -316,6 +316,7 @@ fn returns_of_a_deleted_item_are_rejected_but_existing_returns_can_be_deleted() 
     };
     let first = e.rets.create_customer_return(ret(1.0)).unwrap().return_id;
     e.items.delete_item(pen).unwrap();
+    assert!(e.sales.get_sale_details(sale).unwrap().items[0].item_deleted, "pickers disable the line");
     let err = e.rets.create_customer_return(ret(1.0)).unwrap_err();
     assert!(err.to_string().contains("'Pen' is deleted. Restore the item first."), "{err}");
     let vr = VendorReturnPayload {

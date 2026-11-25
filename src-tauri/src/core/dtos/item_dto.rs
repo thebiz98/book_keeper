@@ -197,6 +197,9 @@ pub struct DeletedItemRow {
     pub stock_value: f64,
     /// `updated_at` (the delete time: every other write to a deleted item is rejected).
     pub deleted_at: String,
+    /// A1 (DD-79): never used, so it can be removed permanently from this list.
+    #[serde(default)]
+    pub can_purge: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

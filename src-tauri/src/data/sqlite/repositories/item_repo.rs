@@ -213,6 +213,7 @@ impl ItemRepository for SqliteItemRepository {
                     current_stock: r.get(5)?,
                     stock_value: round2(r.get(6)?),
                     deleted_at: r.get(7)?,
+                    can_purge: false,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

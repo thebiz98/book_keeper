@@ -587,7 +587,9 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             let net_unit_price = net_unit_price(item.unit_price, sale.items_subtotal, sale.discounts_total);
             // FR-34: cost net of returned units; revenue net of the bill discount share (FR-19 rule).
             let misc_cost = round2(line_misc.get(&item.id).copied().unwrap_or(0.0));
-            let is_service = tx.items().find_by_id(item.item_id)?.is_some_and(|i| i.item_type == ItemType::Service);
+            let master = tx.items().find_by_id(item.item_id)?;
+            let is_service = master.as_ref().is_some_and(|i| i.item_type == ItemType::Service);
+            let item_deleted = master.as_ref().is_some_and(|i| !i.is_active);
             let cost_amount = round2(
                 allocations.iter().map(|a| (a.quantity_depleted - a.returned_quantity) * a.unit_cost).sum::<f64>()
                     + misc_cost,
@@ -604,6 +606,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                 cost_amount,
                 misc_cost,
                 is_service,
+                item_deleted,
                 profit,
             });
         }
