@@ -431,6 +431,7 @@ const V7: &str = include_str!("fixtures/schema/v7.sql");
 const V8: &str = include_str!("fixtures/schema/v8.sql");
 #[allow(dead_code)]
 const V9: &str = include_str!("fixtures/schema/v9.sql");
+const V10: &str = include_str!("fixtures/schema/v10.sql");
 /// The shipped v8 fixture is a DDL delta without its `schema_version` row (never edited); chains that
 /// go past v8 record it with this step.
 const V8_RECORD: &str = "INSERT INTO schema_version (version, name) VALUES (8, 'bill_correction'); PRAGMA user_version = 8;";
@@ -923,6 +924,43 @@ fn frozen_v9_fixture_matches_the_migrated_schema() {
             .prepare("SELECT name FROM pragma_table_info('sale_items') UNION ALL SELECT name FROM pragma_table_info('purchase_items') UNION ALL SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%_items_item_date' ORDER BY 1")
             .unwrap();
         st.query_map([], |r| r.get::<_, String>(0)).unwrap().map(|x| x.unwrap()).collect()
+    };
+    assert_eq!(shape(&from_fixtures), shape(&migrated));
+    drop(from_fixtures);
+    drop(migrated);
+    cleanup(&p1);
+    cleanup(&p2);
+}
+
+#[test]
+fn v9_database_upgrades_to_v10_adding_opening_cash() {
+    let (path, conn) = db_from_fixtures("v9up", &[V1, V2, V3, V4, V5, V6, V7, V8, V8_RECORD, V9]);
+    conn.execute_batch("UPDATE shop_settings SET shop_name = 'Kept Store';").unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 10);
+    let (name, cash): (String, f64) = conn
+        .query_row("SELECT shop_name, opening_cash FROM shop_settings WHERE id = 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((name.as_str(), cash), ("Kept Store", 0.0));
+    conn.execute("UPDATE shop_settings SET opening_cash = 250.5 WHERE id = 1", []).unwrap();
+    assert!(conn.execute("UPDATE shop_settings SET opening_cash = -1 WHERE id = 1", []).is_err(), "CHECK rejects negatives");
+    let before = current_version(&conn).unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(current_version(&conn).unwrap(), before);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn frozen_v10_fixture_matches_the_migrated_schema() {
+    let (p1, from_fixtures) = db_from_fixtures("v10fx", &[V1, V2, V3, V4, V5, V6, V7, V8, V8_RECORD, V9, V10]);
+    let (p2, migrated) = db_from_fixtures("v10mig", &[V1]);
+    run_migrations(&migrated).unwrap();
+    let shape = |c: &Connection| -> Vec<(String, String, i64, Option<String>)> {
+        let mut st = c
+            .prepare("SELECT name, type, \"notnull\", dflt_value FROM pragma_table_info('shop_settings') ORDER BY name")
+            .unwrap();
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()).collect()
     };
     assert_eq!(shape(&from_fixtures), shape(&migrated));
     drop(from_fixtures);

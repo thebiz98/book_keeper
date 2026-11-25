@@ -492,3 +492,21 @@ fn linked_return_lookup_filters_return_type_and_orders_newest_last() {
     let vendor = tx.returns().find_return_by_id(2).unwrap().unwrap();
     assert_eq!(tx.returns().newer_linked_return(&vendor).unwrap(), None, "no newer vendor return on id 7");
 }
+
+#[test]
+fn opening_cash_roundtrips_and_the_service_validates_it() {
+    use book_keeper::services::contracts::shop_setting_service::ShopSettingService;
+    let uow = TestDb::new();
+    let svc = book_keeper::services::ShopSettingServiceImpl::new(uow.clone());
+    assert_eq!(svc.get_settings().unwrap().opening_cash, 0.0);
+    let mut s = svc.get_settings().unwrap();
+    s.opening_cash = 1234.567;
+    svc.update_settings(s.clone()).unwrap();
+    assert_eq!(svc.get_settings().unwrap().opening_cash, 1234.57, "rounded to 2 places");
+    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+        s.opening_cash = bad;
+        let e = svc.update_settings(s.clone()).unwrap_err();
+        assert!(matches!(e, book_keeper::core::error::AppError::ValidationError { ref field, .. } if field == "opening_cash"));
+    }
+    assert_eq!(svc.get_settings().unwrap().opening_cash, 1234.57, "rejected writes change nothing");
+}
