@@ -445,3 +445,9 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 
 **DD-78 — Lots in the item edit screen reuse FR-25 (2026-11-25, v1.5 FR-44).**
 - An item has no purchase price of its own; each lot has one (FR-25 terminology). The edit screen embeds the existing editable `LotInspector` (`get_item_lots`) and `LotPriceEditModal` (`update_lot_purchase_price`), so no backend change and no rule is duplicated (DD-56).
+
+**DD-79 — Never-used items are removed permanently (2026-11-25, v1.5 FR-45 amendment A1; owner decision).**
+- Import mistakes leave items that were never used. Delete stays one action; the backend picks the mode (DD-56). **HARD** when the item appears in no `sale_items`, `return_items` or `stock_adjustments` row, has no `purchase_items` under a non-`OPENING` header, every `OPENING` lot is untouched (`remaining_quantity = quantity`, no `sale_stock_allocations` / `stock_outflow_allocations` on it), and it is not a component in any `service_components` row. Its own bundles and its own component rows (as a service) are not "use". Otherwise **SOFT** (DD-74).
+- Safe because nothing references the row after its OPENING lots, bundles and own component rows are removed (the 8 `REFERENCES items(id)` foreign keys are `item_bundles`, `purchase_items`, `sale_items`, `return_items`, `stock_adjustments` (two versions of the table) and `service_components` x2). An imported item's opening lot shares one `OPN-` header per date: only this item's lines go, and the header is dropped when it is left empty.
+- A soft-deleted item that is still unused can be removed permanently from the Deleted items list; the same check decides.
+
