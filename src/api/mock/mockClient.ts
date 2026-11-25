@@ -191,7 +191,9 @@ export class MockApiClient implements ApiClient {
     };
   }
   async getSalesHistory(filter: Parameters<ApiClient['getSalesHistory']>[0] = {}) {
-    return paginate(this.sales, filter?.page, filter?.limit);
+    const p = paginate(this.sales, filter?.page, filter?.limit);
+    // Thin stub (DD-27): the real profit is a backend calculation.
+    return { ...p, items: p.items.map((r) => ({ ...r, profit: filter?.includeProfit ? 0 : null })) };
   }
   // FR-20 (thin stubs, DD-27: no business rules, no stock or ledger effects)
   async updateSale(saleId: number, payload: Parameters<ApiClient['createSale']>[0]) {
@@ -277,10 +279,13 @@ export class MockApiClient implements ApiClient {
             row.itemsSubtotal > 0
               ? row.itemsSubtotal * Math.max(0, 1 - row.discountsTotal / row.itemsSubtotal)
               : row.itemsSubtotal,
+          costAmount: 0,
+          profit: 0,
         },
       ],
       settlements: [],
       charges: this.billCharges.filter((c) => c.transactionType === 'SALE' && c.transactionId === row.id),
+      profitSummary: { linesProfit: 0, charges: row.chargesTotal, returnAdjustment: 0, total: 0 },
     };
   }
 

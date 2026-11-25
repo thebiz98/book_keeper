@@ -189,6 +189,19 @@ export interface SaleItemDetail {
   allocations: SaleStockAllocation[];
   /** Sold rate net of the bill discount share (FR-19): the linked-refund cap. */
   netUnitPrice: number;
+  /** FIFO cost of the line net of returned units (FR-34). */
+  costAmount: number;
+  /** Line total less its bill discount share less costAmount (FR-34). */
+  profit: number;
+}
+
+/** Reconciliation of a sale's profit (FR-34): linesProfit + charges + returnAdjustment = total. */
+export interface ProfitSummary {
+  linesProfit: number;
+  charges: number;
+  /** Refunds, scrapped cost and replacement cost, as a number <= 0. */
+  returnAdjustment: number;
+  total: number;
 }
 
 export interface PurchaseTransaction {
@@ -262,6 +275,8 @@ export interface SaleHistoryRow {
   itemsSubtotal: number;
   chargesTotal: number;
   discountsTotal: number;
+  /** Bill profit (FR-34); null unless the request set includeProfit. Sales only. */
+  profit?: number | null;
 }
 
 export interface PurchaseHistoryRow extends SaleHistoryRow {
@@ -274,6 +289,7 @@ export interface SaleDetailView {
   items: SaleItemDetail[];
   settlements: PaymentSettlement[];
   charges: BillCharge[];
+  profitSummary: ProfitSummary;
 }
 
 export interface PurchaseDetailView {
