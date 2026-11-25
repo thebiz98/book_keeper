@@ -45,7 +45,12 @@ pub async fn preview_set_item_stock(state: State<'_, AppState>, payload: SetItem
     super::run_blocking(move || svc.preview_set_item_stock(payload)).await
 }
 #[tauri::command]
-pub async fn preview_lot_draw(state: State<'_, AppState>, item_id: i64, quantity: f64, prior_quantity: f64) -> Result<LotDraw, AppError> {
+pub async fn preview_lot_draw(state: State<'_, AppState>, item_id: i64, quantity: f64, prior_lines: Vec<PriorLine>) -> Result<LotDraw, AppError> {
     let svc = state.inventory_service.clone();
-    super::run_blocking(move || svc.preview_lot_draw(item_id, quantity, prior_quantity)).await
+    super::run_blocking(move || svc.preview_lot_draw(item_id, quantity, &prior_lines)).await
+}
+#[tauri::command]
+pub async fn preview_service_cost(state: State<'_, AppState>, payload: PreviewServiceCostPayload) -> Result<ServiceCostPreview, AppError> {
+    let svc = state.inventory_service.clone();
+    super::run_blocking(move || svc.preview_service_cost(payload)).await
 }

@@ -25,6 +25,10 @@ import type {
   PartyListRow,
   PartyType,
   PaymentSettlement,
+  PreviewServiceCostPayload,
+  PriorLine,
+  ServiceComponentView,
+  ServiceCostPreview,
   PurchaseDetailView,
   PurchaseHistoryRow,
   ReturnDetailView,
@@ -95,6 +99,8 @@ function toSearchResult(i: MockItem, matchedBundleId: number | null = null): Ite
       barcode: b.barcode,
     })),
     matchedBundleId,
+    serviceCost: i.serviceCost ?? null,
+    canMake: null,
   };
 }
 
@@ -601,14 +607,15 @@ export class MockApiClient implements ApiClient {
       updatedAt: nowIso(),
       costPrice: payload.initialCost ?? 0,
       bundles: [],
+      serviceCost: payload.serviceCost ?? null,
     });
     return id;
   }
   async updateItem(itemId: number, payload: Parameters<ApiClient['updateItem']>[1]) {
     const item = this.items.find((i) => i.id === itemId);
     if (!item) throw notFound('Item', itemId);
-    const { itemType, lowStockThreshold, ...rest } = payload;
-    Object.assign(item, rest, itemType ? { itemType } : {}, { updatedAt: nowIso() });
+    const { itemType, lowStockThreshold, components: _components, serviceCost, ...rest } = payload;
+    Object.assign(item, rest, itemType ? { itemType } : {}, { serviceCost: serviceCost ?? null, updatedAt: nowIso() });
     if (lowStockThreshold != null) item.lowStockThreshold = lowStockThreshold;
   }
   async updateItemLowStockThreshold(itemId: number, threshold: number) {
@@ -929,8 +936,15 @@ export class MockApiClient implements ApiClient {
       valueChange: 0,
     };
   }
-  async previewLotDraw(_itemId: number, _quantity: number, _priorQuantity: number) {
-    return { lots: [], drawCost: 0, available: 0, shortfall: 0 };
+  async previewLotDraw(_itemId: number, _quantity: number, _priorLines: PriorLine[]) {
+    return { lots: [], drawCost: 0, available: 0, shortfall: 0, components: [], componentsCost: 0, miscCost: 0, lineCost: 0 };
+  }
+  async previewServiceCost(_payload: PreviewServiceCostPayload): Promise<ServiceCostPreview> {
+    // DD-27: the mock holds no lots, so it prices nothing.
+    return { componentsCost: 0, miscCost: 0, unitCost: 0 };
+  }
+  async getServiceComponents(_itemId: number): Promise<ServiceComponentView[]> {
+    return [];
   }
   async getItemLots(itemId: number) {
     return [
@@ -1028,6 +1042,7 @@ export class MockApiClient implements ApiClient {
       salesReturns: 2000,
       netSales: 118000,
       cogs: 85000,
+      serviceMiscCosts: 0,
       grossProfit: 33000,
       inventoryLosses: 500,
       netProfit: 31300,

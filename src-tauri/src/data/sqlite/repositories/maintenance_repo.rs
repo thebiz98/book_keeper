@@ -65,6 +65,7 @@ const TRANSACTION_TABLES: &[&str] = &[
 const CATALOG_STEPS: &[(&str, &str)] = &[
     ("purchase_items", "DELETE FROM purchase_items"),
     ("purchase_transactions", "DELETE FROM purchase_transactions"),
+    ("service_components", "DELETE FROM service_components"),
     ("item_bundles", "DELETE FROM item_bundles"),
     ("items", "DELETE FROM items"),
     ("parties", "DELETE FROM parties"),
@@ -73,7 +74,7 @@ const CATALOG_STEPS: &[(&str, &str)] = &[
     ("code_sequences", "DELETE FROM code_sequences"),
 ];
 
-const CATALOG_TABLES: &[&str] = &["purchase_items", "purchase_transactions", "item_bundles", "items", "parties", "expense_types", "charge_types"];
+const CATALOG_TABLES: &[&str] = &["purchase_items", "purchase_transactions", "service_components", "item_bundles", "items", "parties", "expense_types", "charge_types"];
 
 impl MaintenanceRepository for SqliteMaintenanceRepository {
     fn clear_transactions(&mut self) -> Result<Vec<(String, i64)>, AppError> {

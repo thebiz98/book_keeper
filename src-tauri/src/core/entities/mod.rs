@@ -12,7 +12,7 @@ pub mod stock_return;
 pub use adjustment::{StockAdjustment, StockOutflowAllocation};
 pub use charge::{BillCharge, ChargeType};
 pub use expense::{Expense, ExpenseType};
-pub use item::{Item, ItemBundle};
+pub use item::{Item, ItemBundle, ServiceComponent};
 pub use party::{CreatePartyPayload, OpeningBalanceInput, Party, PartyListRow, PartyOpeningBalance, UpdatePartyPayload};
 pub use purchase::{PurchaseItem, PurchaseTransaction};
 pub use sale::{SaleItem, SaleStockAllocation, SaleTransaction};

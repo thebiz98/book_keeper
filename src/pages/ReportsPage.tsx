@@ -106,6 +106,7 @@ export const ReportsPage: React.FC = () => {
               <Line testId="pnl-sales-returns" label="Less: Sales Returns" amount={p.salesReturns} negative />
               <Line testId="pnl-net-sales" label="Net Sales" amount={p.netSales} strong />
               <Line testId="pnl-cogs" label="Less: FIFO COGS (net of returns)" amount={p.cogs} negative />
+              <Line testId="pnl-service-misc" label="Less: Service misc. costs" amount={p.serviceMiscCosts ?? 0} negative />
               <Line testId="pnl-gross-profit" label="Gross Profit" amount={p.grossProfit} strong />
               <Line testId="pnl-other-income" label="Add: Other Income" amount={p.otherIncome} />
               {p.otherIncome > 0 && (

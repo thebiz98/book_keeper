@@ -26,7 +26,7 @@ fn setup() -> (Items, InventoryServiceImpl<FifoStrategy>, TestDb) {
 }
 
 fn item_payload(name: &str) -> CreateItemPayload {
-    CreateItemPayload { item_type: None, low_stock_threshold: None,
+    CreateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0, initial_stock: None, initial_cost: None, bundles: None,
     }
@@ -40,7 +40,7 @@ fn bundle_payload(item_id: i64, name: &str, units: f64) -> CreateBundlePayload {
 }
 
 fn update_payload(name: &str) -> UpdateItemPayload {
-    UpdateItemPayload { item_type: None, low_stock_threshold: None,
+    UpdateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0,
     }
@@ -374,16 +374,17 @@ fn test_tc_typ_02_explicit_physical_is_accepted() {
 }
 
 #[test]
-fn test_tc_typ_03_service_is_rejected_on_create_and_nothing_is_written() {
+fn test_tc_typ_03_service_is_accepted_on_create_with_no_stock_and_no_low_flag() {
     let (items, _, db) = setup();
     let mut p = item_payload("Svc");
     p.item_type = Some(ItemType::Service);
-    assert_eq!(field_of(items.create_item(p)), "item_type");
-    assert!(db.begin_read().unwrap().items().find_by_name("Svc").unwrap().is_none());
+    let id = items.create_item(p).unwrap();
+    let it = stored_item(&db, id);
+    assert_eq!((it.item_type, it.current_stock, it.is_low_stock), (ItemType::Service, 0.0, false));
 }
 
 #[test]
-fn test_tc_typ_04_service_is_rejected_on_update_and_none_keeps_the_type() {
+fn test_tc_typ_04_type_change_is_rejected_on_update_and_none_keeps_the_type() {
     let (items, _, db) = setup();
     let id = items.create_item(item_payload("Pen")).unwrap();
     let mut u = update_payload("Pen renamed");

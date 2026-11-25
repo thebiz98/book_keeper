@@ -8,7 +8,8 @@ export type ItemField =
   | 'defaultSalePrice'
   | 'initialStock'
   | 'initialCost'
-  | 'lowStockThreshold';
+  | 'lowStockThreshold'
+  | 'serviceCost';
 
 /** Backend ValidationError `details.field` -> form field. Category/barcode are not in the item UI (D5). */
 export const FIELD_MAP: Record<string, ItemField> = {
@@ -19,6 +20,7 @@ export const FIELD_MAP: Record<string, ItemField> = {
   initial_stock: 'initialStock',
   initial_cost: 'initialCost',
   low_stock_threshold: 'lowStockThreshold',
+  service_cost: 'serviceCost',
 };
 
 export type ItemFormErrors = Partial<Record<ItemField, string>>;
@@ -31,6 +33,8 @@ export interface ItemFormInput {
   lowStock: string;
   initialStock: string;
   initialCost: string;
+  /** Service form only (FR-36). */
+  serviceCost?: string;
 }
 
 export type ItemFormMode =
@@ -41,7 +45,9 @@ export type ItemFormMode =
   /** Quick create on New Sale: stock and purchase price are both required (> 0). */
   | 'quick-stock'
   /** Quick create on New Purchase: no stock fields. */
-  | 'quick';
+  | 'quick'
+  /** Service create / edit (FR-36): no stock, bundles or low stock level; optional Service cost. */
+  | 'service';
 
 export interface ItemFormValues {
   mrp: number | null;
@@ -49,6 +55,7 @@ export interface ItemFormValues {
   lowStock: number;
   stock: number | null;
   cost: number | null;
+  serviceCost: number | null;
 }
 
 /** Validate the item fields; returns the errors and, when clean, the parsed numbers. */
@@ -68,8 +75,12 @@ export function validateItemForm(
   if (priceVal === null || !Number.isFinite(priceVal) || priceVal < 0) {
     errs.defaultSalePrice = 'Enter a sale price (0 or more)';
   }
-  if (lowVal === null || !Number.isFinite(lowVal) || lowVal < 0) {
+  if (mode !== 'service' && (lowVal === null || !Number.isFinite(lowVal) || lowVal < 0)) {
     errs.lowStockThreshold = 'Low stock level must be 0 or more';
+  }
+  const svcCostVal = parseOptional(input.serviceCost ?? '');
+  if (mode === 'service' && svcCostVal !== null && (!Number.isFinite(svcCostVal) || svcCostVal < 0)) {
+    errs.serviceCost = 'Service cost must be 0 or more (leave empty for none)';
   }
   if (mrpVal !== null && (!Number.isFinite(mrpVal) || mrpVal <= 0)) {
     errs.mrp = 'MRP must be greater than 0 (leave empty for none)';
@@ -95,6 +106,13 @@ export function validateItemForm(
   if (Object.keys(errs).length > 0) return { errors: errs, values: null };
   return {
     errors: errs,
-    values: { mrp: mrpVal, price: priceVal as number, lowStock: lowVal as number, stock: stockVal, cost: costVal },
+    values: {
+      mrp: mrpVal,
+      price: priceVal as number,
+      lowStock: (lowVal ?? 5) as number,
+      stock: stockVal,
+      cost: costVal,
+      serviceCost: svcCostVal,
+    },
   };
 }

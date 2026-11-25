@@ -156,6 +156,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
           <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Item (name or barcode) *</span>
           <ItemSearchTypeahead
             autoFocus
+            physicalOnly
             placeholder="Search item to adjust..."
             onSelectItem={(r) =>
               setItem({ itemId: r.itemId, name: r.name, currentStock: r.currentStock, baseUnit: r.baseUnit })

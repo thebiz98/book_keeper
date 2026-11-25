@@ -22,6 +22,8 @@ export interface MockItem {
   barcode: string | null;
   baseUnit: string;
   itemType: ItemType;
+  /** SERVICE only (FR-36). */
+  serviceCost?: number | null;
   mrp: number | null;
   defaultSalePrice: number;
   currentStock: number;

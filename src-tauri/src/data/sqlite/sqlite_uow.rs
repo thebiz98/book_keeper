@@ -40,6 +40,7 @@ impl SqliteUnitOfWork {
             bundles: SqliteBundleRepository::new(conn.clone()),
             purchases: SqlitePurchaseRepository::new(conn.clone()),
             sales: SqliteSaleRepository::new(conn.clone()),
+            service_components: SqliteServiceComponentRepository::new(conn.clone()),
             allocations: SqliteAllocationRepository::new(conn.clone()),
             settlements: SqliteSettlementRepository::new(conn.clone()),
             returns: SqliteReturnRepository::new(conn.clone()),
@@ -77,6 +78,7 @@ pub struct SqliteTransactionContext {
     bundles: SqliteBundleRepository,
     purchases: SqlitePurchaseRepository,
     sales: SqliteSaleRepository,
+    service_components: SqliteServiceComponentRepository,
     allocations: SqliteAllocationRepository,
     settlements: SqliteSettlementRepository,
     returns: SqliteReturnRepository,
@@ -141,6 +143,7 @@ impl TransactionContext for SqliteTransactionContext {
     fn bundles(&mut self) -> &mut dyn BundleRepository { &mut self.bundles }
     fn purchases(&mut self) -> &mut dyn PurchaseRepository { &mut self.purchases }
     fn sales(&mut self) -> &mut dyn SaleRepository { &mut self.sales }
+    fn service_components(&mut self) -> &mut dyn ServiceComponentRepository { &mut self.service_components }
     fn allocations(&mut self) -> &mut dyn AllocationRepository { &mut self.allocations }
     fn settlements(&mut self) -> &mut dyn SettlementRepository { &mut self.settlements }
     fn returns(&mut self) -> &mut dyn ReturnRepository { &mut self.returns }

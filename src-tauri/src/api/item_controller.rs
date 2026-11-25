@@ -57,3 +57,8 @@ pub async fn get_bundle_suggestions(state: State<'_, AppState>) -> Result<Vec<Bu
     let svc = state.item_service.clone();
     super::run_blocking(move || svc.get_bundle_suggestions()).await
 }
+#[tauri::command]
+pub async fn get_service_components(state: State<'_, AppState>, item_id: i64) -> Result<Vec<ServiceComponentView>, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.get_service_components(item_id)).await
+}

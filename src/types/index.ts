@@ -67,6 +67,54 @@ export interface ItemSearchResult {
   bundles: ItemBundleSearchResult[];
   /** Set when the query matched a bundle barcode. */
   matchedBundleId: number | null;
+  /** SERVICE only (FR-36): intended cost per unit. */
+  serviceCost?: number | null;
+  /** SERVICE only (FR-36): "Can make N" from component stock; null without components. */
+  canMake?: number | null;
+}
+
+/** One component of a service (FR-36): base units of a physical item per service unit. */
+export interface ServiceComponentInput {
+  componentItemId: number;
+  quantityPerUnit: number;
+}
+
+/** Component row of a service for the edit drawer (get_service_components). */
+export interface ServiceComponentView {
+  componentItemId: number;
+  name: string;
+  baseUnit: string;
+  quantityPerUnit: number;
+  currentStock: number;
+}
+
+/** preview_service_cost input / result (FR-36, DD-56). */
+export interface PreviewServiceCostPayload {
+  components: ServiceComponentInput[];
+  serviceCost: number | null;
+}
+export interface ServiceCostPreview {
+  componentsCost: number;
+  miscCost: number;
+  unitCost: number;
+}
+
+/** Base units of an earlier cart line (FR-31 / FR-37); the backend expands services. */
+export interface PriorLine {
+  itemId: number;
+  quantity: number;
+}
+
+/** One component's draw inside a service line's lot draw (FR-37). */
+export interface LotDrawComponent {
+  itemId: number;
+  name: string;
+  baseUnit: string;
+  quantity: number;
+  lots: LotDrawLot[];
+  drawCost: number;
+  available: number;
+  shortfall: number;
 }
 
 /** One open lot in a sale-row lot draw (FR-31). `drawQuantity` is the part of the entered quantity taken from it. */
@@ -85,6 +133,12 @@ export interface LotDraw {
   drawCost: number;
   available: number;
   shortfall: number;
+  /** Service lines (FR-37): per-component draws; empty for a physical item. */
+  components?: LotDrawComponent[];
+  componentsCost?: number;
+  miscCost?: number;
+  /** Physical: drawCost. Service: componentsCost + miscCost. */
+  lineCost?: number;
 }
 
 export interface ItemLot {
@@ -207,6 +261,10 @@ export interface SaleItemDetail {
   costAmount: number;
   /** Line total less its bill discount share less costAmount (FR-34). */
   profit: number;
+  /** Service lines (FR-37): cost not covered by the components' FIFO cost (already inside costAmount). */
+  miscCost?: number;
+  /** Service lines are not returnable (DD-67); return pickers skip them. */
+  isService?: boolean;
 }
 
 /** Reconciliation of a sale's profit (FR-34): linesProfit + charges + returnAdjustment = total. */
@@ -455,6 +513,8 @@ export interface PnLReport {
   salesReturns: number;
   netSales: number;
   cogs: number;
+  /** Miscellaneous service costs (FR-37), shown under COGS. */
+  serviceMiscCosts?: number;
   grossProfit: number;
   inventoryLosses: number;
   netProfit: number;

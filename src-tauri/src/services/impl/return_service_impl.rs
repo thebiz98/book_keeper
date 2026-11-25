@@ -138,7 +138,16 @@ fn active_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Item, Ap
     if !item.is_active {
         return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
     }
+    reject_service_return(&item)?;
     Ok(item)
+}
+
+/// DD-67: services are corrected by bill edit/delete, never returned or issued as replacements.
+fn reject_service_return(item: &Item) -> Result<(), AppError> {
+    if item.item_type == crate::core::value_objects::ItemType::Service {
+        return Err(validation("item_id", format!("Services cannot be returned ('{}')", item.name)));
+    }
+    Ok(())
 }
 
 fn active_item_name(tx: &mut dyn TransactionContext, item_id: i64) -> Result<String, AppError> {
@@ -224,6 +233,11 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                     if line.item_id != it.item_id {
                         return Err(validation("item_id", format!("Item does not match sale line {sid}")));
                     }
+                    let sold = tx
+                        .items()
+                        .find_by_id(line.item_id)?
+                        .ok_or_else(|| AppError::not_found("Item", line.item_id.to_string()))?;
+                    reject_service_return(&sold)?;
                     // Refund cap = the sold rate net of the bill-level discount share (FR-19).
                     let s = sale.as_ref().expect("a linked line implies the original sale");
                     let cap = net_unit_price(line.unit_price, s.items_subtotal, s.discounts_total);
@@ -418,12 +432,12 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         let mut fifo_reqs: Vec<(i64, f64)> = Vec::new();
         let mut item_names: Vec<String> = Vec::new();
         for it in &payload.items {
-            item_names.push(
-                tx.items()
-                    .find_by_id(it.item_id)?
-                    .ok_or_else(|| AppError::not_found("Item", it.item_id.to_string()))?
-                    .name,
-            );
+            let vendor_item = tx
+                .items()
+                .find_by_id(it.item_id)?
+                .ok_or_else(|| AppError::not_found("Item", it.item_id.to_string()))?;
+            reject_service_return(&vendor_item)?;
+            item_names.push(vendor_item.name);
             match it.purchase_item_id {
                 Some(lid) => {
                     let lot = tx

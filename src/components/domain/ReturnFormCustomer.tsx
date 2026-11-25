@@ -103,7 +103,9 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
       .then((d) => {
         setDetail(d);
         setLines(
-          d.items.map((it) => ({
+          d.items
+            .filter((it) => !it.isService) // DD-67: service lines are not returnable
+            .map((it) => ({
             saleItemId: it.saleItem.id,
             itemId: it.saleItem.itemId,
             name: it.itemName,
@@ -349,7 +351,7 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
           </div>
           <div>
             <FieldLabel>Add returned item</FieldLabel>
-            <ItemSearchTypeahead onSelectItem={addFreeItem} placeholder="Search item to return..." />
+            <ItemSearchTypeahead physicalOnly onSelectItem={addFreeItem} placeholder="Search item to return..." />
           </div>
           {freeLines.length > 0 && (
             <Table dense scroll="bounded">
@@ -460,7 +462,7 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
       ) : (
         <div className="flex flex-col gap-2" data-testid="replacement-section">
           <FieldLabel>Items to issue</FieldLabel>
-          <ItemSearchTypeahead onSelectItem={addIssueItem} placeholder="Search item to issue..." />
+          <ItemSearchTypeahead physicalOnly onSelectItem={addIssueItem} placeholder="Search item to issue..." />
           {issue.map((x) => (
             <div key={x.itemId} className="flex items-center gap-2 text-xs">
               <span className="flex-1 font-medium">{x.name}</span>

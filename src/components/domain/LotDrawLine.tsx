@@ -84,4 +84,46 @@ export const LotDrawLine: React.FC<LotDrawLineProps> = ({ draw, baseUnit, classN
   );
 };
 
+export interface ServiceDrawLineProps {
+  draw: LotDraw;
+  className?: string;
+}
+
+/**
+ * FR-37: what a service line would consume and cost, straight from `preview_lot_draw`: each
+ * component's draw, the components' cost, the misc. cost and the line cost. Formatting only.
+ */
+export const ServiceDrawLine: React.FC<ServiceDrawLineProps> = ({ draw, className }) => {
+  const comps = draw.components ?? [];
+  if (comps.length === 0) return null;
+  return (
+    <span data-testid="service-draw-line" className={cn('inline-flex flex-wrap items-center gap-x-2', className)}>
+      <span>Uses:</span>
+      {comps.map((c) => (
+        <span key={c.itemId} data-testid="service-component" className="tabular-nums">
+          {fmtQty(c.quantity)} {c.baseUnit} {c.name}
+          {c.shortfall > 0 && (
+            <span className="ml-1 font-semibold text-rose-600 dark:text-rose-400">(short by {fmtQty(c.shortfall)})</span>
+          )}
+        </span>
+      ))}
+      <span aria-hidden>·</span>
+      <span data-testid="service-components-cost" className="tabular-nums">
+        Components {fmtMoney(draw.componentsCost ?? 0)}
+      </span>
+      <span data-testid="service-misc-cost" className="tabular-nums">
+        Misc {fmtMoney(draw.miscCost ?? 0)}
+      </span>
+      <span data-testid="service-line-cost" className="tabular-nums font-semibold">
+        Cost {fmtMoney(draw.lineCost ?? 0)}
+      </span>
+      {draw.shortfall > 0 && (
+        <span data-testid="service-shortfall" className="font-semibold text-rose-600 dark:text-rose-400 tabular-nums">
+          short by {fmtQty(draw.shortfall)}
+        </span>
+      )}
+    </span>
+  );
+};
+
 export default LotDrawLine;

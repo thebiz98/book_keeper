@@ -132,7 +132,10 @@ pub struct BillProfitParts {
     pub scrap_cost: f64,
     /// FIFO cost of replacement units issued against the bill.
     pub replacement_cost: f64,
-    /// `round2(total_amount - cost_net - refunds - scrap_cost - replacement_cost)`.
+    /// Miscellaneous service cost of the bill's service lines (FR-37), derived in SQL.
+    #[serde(default)]
+    pub misc_cost: f64,
+    /// `round2(total_amount - cost_net - misc_cost - refunds - scrap_cost - replacement_cost)`.
     pub total: f64,
 }
 
@@ -157,8 +160,14 @@ pub struct SaleItemDetail {
     pub allocations: Vec<SaleStockAllocation>,
     /// Sold rate net of the bill-level discount share (FR-19): the refund cap of a linked return.
     pub net_unit_price: f64,
-    /// FIFO cost of the line net of returned units (FR-34).
+    /// Line cost: FIFO cost net of returned units plus `misc_cost` (FR-34, FR-37).
     pub cost_amount: f64,
+    /// Miscellaneous service cost of a service line (0 for physical lines).
+    #[serde(default)]
+    pub misc_cost: f64,
+    /// True for a service line (FR-37): not returnable, so return pickers skip it.
+    #[serde(default)]
+    pub is_service: bool,
     /// `line total - bill discount share - cost_amount` (FR-34).
     pub profit: f64,
 }

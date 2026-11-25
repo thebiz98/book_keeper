@@ -62,6 +62,9 @@ pub struct PnLReport {
     pub sales_returns: f64,
     pub net_sales: f64,
     pub cogs: f64,
+    /// Miscellaneous service costs (FR-37): service targets not covered by component FIFO cost.
+    #[serde(default)]
+    pub service_misc_costs: f64,
     pub gross_profit: f64,
     pub inventory_losses: f64,
     pub net_profit: f64,

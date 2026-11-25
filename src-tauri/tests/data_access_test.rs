@@ -366,7 +366,7 @@ fn adjustment_and_opening_creators_use_their_own_sequences() {
     let db = TestDb::new();
     let inventory = InventoryServiceImpl::new(FifoStrategy, db.clone());
     let items = ItemServiceImpl::new(db.clone(), std::sync::Arc::new(db.indexer()), inventory.clone());
-    let mk = |name: &str| CreateItemPayload { item_type: None, low_stock_threshold: None,
+    let mk = |name: &str| CreateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,
         name: name.into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
         default_sale_price: 10.0, initial_stock: Some(8.0), initial_cost: Some(6.0), bundles: None,
     };

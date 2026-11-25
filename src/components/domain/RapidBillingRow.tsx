@@ -8,7 +8,7 @@ import React, {
 import { Plus } from 'lucide-react';
 import { NEW_BUNDLE, NEW_BUNDLE_LABEL } from '@/lib/bundleSentinel';
 import { cn } from '@/lib/utils';
-import type { LotDraw, ItemBundleSearchResult, SavedBundle, ItemSearchResult } from '@/types';
+import type { LotDraw, ItemBundleSearchResult, PriorLine, SavedBundle, ItemSearchResult } from '@/types';
 import type { BundleInput } from '@/types/store';
 import { api } from '@/api';
 import { usePreview } from '@/hooks/usePreview';
@@ -17,7 +17,7 @@ import { Button } from '../ui/Button';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { ItemSearchTypeahead } from './ItemSearchTypeahead';
 import { ItemQuickCreateModal } from './ItemQuickCreateModal';
-import { LotDrawLine } from './LotDrawLine';
+import { LotDrawLine, ServiceDrawLine } from './LotDrawLine';
 
 export interface BillingLineEntry {
   item: ItemSearchResult;
@@ -36,8 +36,8 @@ export interface RapidBillingRowProps {
   onOpenBundleModal?: (item: ItemSearchResult | null) => void;
   /** A bundle just created through the modal; it is added to the unit list and selected. */
   newBundle?: { bundle: SavedBundle; seq: number } | null;
-  /** Base units of the same item already on the bill (row mapping of the cart, FR-31). */
-  priorQuantity?: (itemId: number) => number;
+  /** Earlier cart lines as `{ itemId, quantity }` in base units (row mapping of the cart, FR-31 / FR-37). */
+  priorLines?: () => PriorLine[];
   autoFocus?: boolean;
   className?: string;
 }
@@ -71,7 +71,7 @@ const inputClass =
 
 export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRowProps>(
   (
-    { onAddLine, onCompleteBill, onOpenBundleModal, newBundle, priorQuantity, autoFocus = false, className },
+    { onAddLine, onCompleteBill, onOpenBundleModal, newBundle, priorLines, autoFocus = false, className },
     ref
   ) => {
     const [item, setItem] = useState<ItemSearchResult | null>(null);
@@ -102,12 +102,14 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
     // FR-31: the open lots' purchase prices and the FIFO draw for this quantity (backend dry run).
     const typedQty = parseFloat(qty);
     const drawQty = Number.isFinite(typedQty) && typedQty >= 0 ? typedQty * (selectedBundle?.unitsPerBundle ?? 1) : 0;
-    const prior = item ? priorQuantity?.(item.itemId) ?? 0 : 0;
-    const lotDraw = usePreview<{ itemId: number; quantity: number; prior: number }, LotDraw>({
+    const prior = item ? priorLines?.() ?? [] : [];
+    const lotDraw = usePreview<{ itemId: number; quantity: number; prior: PriorLine[] }, LotDraw>({
       input: item ? { itemId: item.itemId, quantity: drawQty, prior } : null,
       fetcher: async (i) => api.previewLotDraw(i.itemId, i.quantity, i.prior),
     });
+    const isService = item?.itemType === 'SERVICE';
     const draw = lotDraw.data && lotDraw.data.lots.length > 0 ? lotDraw.data : null;
+    const serviceDraw = isService && lotDraw.data && (lotDraw.data.components?.length ?? 0) > 0 ? lotDraw.data : null;
 
     // Focus Qty whenever a new item is selected.
     useEffect(() => {
@@ -313,7 +315,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
                   {b.bundleName}
                 </option>
               ))}
-              {item && onOpenBundleModal && <option value={NEW_BUNDLE}>{NEW_BUNDLE_LABEL}</option>}
+              {item && !isService && onOpenBundleModal && <option value={NEW_BUNDLE}>{NEW_BUNDLE_LABEL}</option>}
             </select>
           </div>
 
@@ -359,13 +361,25 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
             className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-mono text-slate-600 dark:text-slate-300 pl-1"
           >
             <span className="font-sans font-semibold text-slate-900 dark:text-slate-100">{item.name}</span>
-            <span>
-              Available: {fmtQty(item.currentStock)} {item.baseUnit}
-            </span>
+            {isService ? (
+              <span data-testid="can-make">
+                Can make: {item.canMake != null ? fmtQty(item.canMake) : '—'} {item.baseUnit}
+              </span>
+            ) : (
+              <span>
+                Available: {fmtQty(item.currentStock)} {item.baseUnit}
+              </span>
+            )}
             <span>|</span>
             {draw && (
               <>
                 <LotDrawLine draw={draw} baseUnit={item.baseUnit} />
+                <span>|</span>
+              </>
+            )}
+            {serviceDraw && (
+              <>
+                <ServiceDrawLine draw={serviceDraw} />
                 <span>|</span>
               </>
             )}

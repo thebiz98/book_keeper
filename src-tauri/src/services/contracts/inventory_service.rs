@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, LotDraw, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
+    ItemBillRef, ItemLot, LotDraw, Paginated, PreviewServiceCostPayload, PriorLine, ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult,
 };
 use crate::core::entities::{PurchaseItem, StockAdjustment};
@@ -145,9 +145,13 @@ pub trait InventoryService: Send + Sync {
     /// DD-56: dry run of `set_item_stock` in a transaction that is dropped. Same errors as the command.
     fn preview_set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError>;
 
-    /// FR-31 / DD-60: read-only draw of `quantity` base units after `prior_quantity` already on the
-    /// bill, over the open lots in the strategy's order. Unknown item -> NotFound; SERVICE -> no lots.
-    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_quantity: f64) -> Result<LotDraw, AppError>;
+    /// FR-31 / DD-60 / FR-37: read-only draw of `quantity` base units after the `prior_lines` already on the
+    /// bill (service lines count as their components), over the open lots in the strategy order. A SERVICE
+    /// item returns per-component draws and its components/misc/line cost. Unknown item -> NotFound.
+    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_lines: &[PriorLine]) -> Result<LotDraw, AppError>;
+
+    /// FR-36 / DD-56: read-only cost of one service unit from the unsaved component list and Service cost.
+    fn preview_service_cost(&self, payload: PreviewServiceCostPayload) -> Result<ServiceCostPreview, AppError>;
 
     /// Lot inspector (all sources, oldest first).
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;
@@ -304,8 +308,12 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
         (**self).preview_set_item_stock(payload)
     }
 
-    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_quantity: f64) -> Result<LotDraw, AppError> {
-        (**self).preview_lot_draw(item_id, quantity, prior_quantity)
+    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_lines: &[PriorLine]) -> Result<LotDraw, AppError> {
+        (**self).preview_lot_draw(item_id, quantity, prior_lines)
+    }
+
+    fn preview_service_cost(&self, payload: PreviewServiceCostPayload) -> Result<ServiceCostPreview, AppError> {
+        (**self).preview_service_cost(payload)
     }
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
