@@ -9,11 +9,10 @@ pub struct DashboardMetrics {
     pub today_sales_count: usize,
     pub today_purchase_amount: f64, // PURCHASE-source bills only
     pub today_purchase_count: usize,
-    pub today_net_profit: f64,      // Same formula as PnLReport.net_profit for today
     pub total_stock_valuation: f64, // Sum of (remaining_qty * unit_cost), all lots
     pub customer_receivables: f64,  // Outstanding customer dues
     pub vendor_payables: f64,       // Outstanding vendor dues (PURCHASE source)
-    pub live_cash_in_drawer: f64,   // Today's ledger cash in - cash out - today's expenses
+    pub cash_in_hand: f64,          // opening cash + all-time ledger cash in - out - expenses, up to today (FR-33)
     pub today_expenses_amount: f64, // Σ expenses dated today (FR-18)
 }
 

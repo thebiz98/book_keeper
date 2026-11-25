@@ -13,7 +13,7 @@ use crate::core::error::AppError;
 use crate::core::money::{check_date, round2};
 use crate::data::contracts::unit_of_work::UnitOfWork;
 use crate::services::contracts::report_service::ReportService;
-use crate::services::r#impl::accounting_service_impl::cash_position;
+use crate::services::r#impl::accounting_service_impl::{cash_in_hand_at, cash_position};
 
 const MAX_RECENT: usize = 100;
 
@@ -61,22 +61,21 @@ impl<U: UnitOfWork> ReportService for ReportServiceImpl<U> {
     fn get_dashboard_metrics(&self) -> Result<DashboardMetrics, AppError> {
         let today = fmt(self.today());
         let mut tx = self.uow.begin_read()?;
-        let pnl = tx.reports().pnl(&today, &today)?;
         let (today_sales_amount, today_sales_count) = tx.reports().sales_totals(&today, &today)?;
         let (today_purchase_amount, today_purchase_count) = tx.reports().purchase_totals(&today, &today)?;
         let (customer_receivables, vendor_payables) = tx.reports().dues_totals()?;
         let total_stock_valuation = tx.reports().stock_valuation()?.total_valuation;
-        let (_, today_expenses_amount, live_cash_in_drawer) = cash_position(&mut *tx, &today, &today)?;
+        let (_, today_expenses_amount, _) = cash_position(&mut *tx, &today, &today)?;
+        let cash_in_hand = cash_in_hand_at(&mut *tx, &today)?;
         Ok(DashboardMetrics {
             today_sales_amount,
             today_sales_count,
             today_purchase_amount,
             today_purchase_count,
-            today_net_profit: pnl.net_profit,
             total_stock_valuation,
             customer_receivables,
             vendor_payables,
-            live_cash_in_drawer,
+            cash_in_hand,
             today_expenses_amount,
         })
     }

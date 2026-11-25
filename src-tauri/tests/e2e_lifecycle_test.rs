@@ -1,6 +1,6 @@
 // tests/e2e_lifecycle_test.rs
 //! End-to-End (E2E) Integration Lifecycle Scenario
-//! Derived strictly from book_keeper_LLD.md § 11.11, § 3.10 of Spec Miner report, and ORIGINAL_REQUEST.md
+//! Derived strictly from book_keeper_LLD.md Â§ 11.11, Â§ 3.10 of Spec Miner report, and ORIGINAL_REQUEST.md
 
 mod common;
 
@@ -34,8 +34,8 @@ fn test_e2e_5_step_lifecycle_scenario() {
         tx.commit().expect("commit item");
     }
 
-    // STEP 1: Inward Purchase 1 (Lot #1) - 100 Pencils @ ₹5/pc (Paid = ₹500)
-    println!("--- Step 1: Purchase 100 Pencils @ ₹5/pc ---");
+    // STEP 1: Inward Purchase 1 (Lot #1) - 100 Pencils @ â‚¹5/pc (Paid = â‚¹500)
+    println!("--- Step 1: Purchase 100 Pencils @ â‚¹5/pc ---");
     let pur1_payload = CreatePurchasePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -71,8 +71,8 @@ fn test_e2e_5_step_lifecycle_scenario() {
         assert_eq!(item.is_low_stock, false);
     }
 
-    // STEP 2: Inward Purchase 2 (Lot #2) - 50 Pencils @ ₹6/pc (Paid = ₹300)
-    println!("--- Step 2: Purchase 50 Pencils @ ₹6/pc ---");
+    // STEP 2: Inward Purchase 2 (Lot #2) - 50 Pencils @ â‚¹6/pc (Paid = â‚¹300)
+    println!("--- Step 2: Purchase 50 Pencils @ â‚¹6/pc ---");
     let pur2_payload = CreatePurchasePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -106,8 +106,8 @@ fn test_e2e_5_step_lifecycle_scenario() {
         assert_eq!(item.is_low_stock, false);
     }
 
-    // STEP 3: Counter Sale - 120 Pencils @ ₹10/pc (Paid = ₹1,200)
-    println!("--- Step 3: Sale 120 Pencils @ ₹10/pc ---");
+    // STEP 3: Counter Sale - 120 Pencils @ â‚¹10/pc (Paid = â‚¹1,200)
+    println!("--- Step 3: Sale 120 Pencils @ â‚¹10/pc ---");
     let sale_payload = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -152,7 +152,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
         let cogs = (100.0 * 5.0) + (20.0 * 6.0);
         assert_eq!(cogs, 620.0);
         let gross_profit = 1200.0 - cogs;
-        assert_eq!(gross_profit, 580.0, "Gross profit: 1200 - 620 = ₹580");
+        assert_eq!(gross_profit, 580.0, "Gross profit: 1200 - 620 = â‚¹580");
     }
 
     // STEP 4: Customer Returns 10 Pencils (Restockable + Cash Refund)
@@ -196,18 +196,18 @@ fn test_e2e_5_step_lifecycle_scenario() {
             .into_iter().filter(|s| s.kind == PaymentKind::RefundOut).collect();
         assert_eq!(refunds.len(), 1);
         assert_eq!(refunds[0].kind, PaymentKind::RefundOut);
-        assert_eq!(refunds[0].amount_paid, 100.0, "REFUND_OUT row logged with a positive ₹100");
+        assert_eq!(refunds[0].amount_paid, 100.0, "REFUND_OUT row logged with a positive â‚¹100");
     }
 
     // STEP 5: Valuation & Telemetry Audit
     println!("--- Step 5: Verify Valuation & Telemetry Audit ---");
     let valuation_report = report_service.get_stock_valuation_report().expect("valuation report");
-    assert_eq!(valuation_report.total_valuation, 240.0, "Total stock valuation: 40 @ ₹6 = ₹240");
+    assert_eq!(valuation_report.total_valuation, 240.0, "Total stock valuation: 40 @ â‚¹6 = â‚¹240");
 
     let metrics = report_service.get_dashboard_metrics().expect("dashboard metrics");
     assert_eq!(metrics.total_stock_valuation, 240.0);
 
-    assert_eq!(metrics.live_cash_in_drawer, 300.0, "ledger drawer: 1200 - 800 - 100");
+    assert_eq!(metrics.cash_in_hand, 300.0, "ledger drawer: 1200 - 800 - 100");
     let pnl = report_service.get_pnl_report("2026-11-20", "2026-11-20").expect("pnl");
     assert_eq!(
         (pnl.gross_sales, pnl.sales_returns, pnl.net_sales, pnl.cogs, pnl.gross_profit, pnl.inventory_losses, pnl.net_profit),
@@ -218,7 +218,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
     let purchases_cash = 500.0 + 300.0;
     let refund_cash = 100.0;
     let expected_drawer = sales_cash - purchases_cash - refund_cash;
-    assert_eq!(expected_drawer, 300.0, "Cash drawer must reconcile to ₹300");
+    assert_eq!(expected_drawer, 300.0, "Cash drawer must reconcile to â‚¹300");
 
     {
         let mut tx = uow.begin_transaction().expect("tx");

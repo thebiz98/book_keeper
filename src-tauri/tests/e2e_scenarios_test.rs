@@ -1,6 +1,6 @@
 // tests/e2e_scenarios_test.rs
 //! Test Suite: Tier 4 Real-World Application Scenarios (S1 to S4)
-//! Derived from TEST_INFRA.md § Real-World Application Scenarios and Spec Miner Report
+//! Derived from TEST_INFRA.md Â§ Real-World Application Scenarios and Spec Miner Report
 
 mod common;
 
@@ -39,7 +39,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
         tx.commit().unwrap();
     }
 
-    // 2. Morning Inward Receipt: 500 Pencils @ ₹5/pc (Total = ₹2,500; Cash paid = ₹1,500; Credit = ₹1,000)
+    // 2. Morning Inward Receipt: 500 Pencils @ â‚¹5/pc (Total = â‚¹2,500; Cash paid = â‚¹1,500; Credit = â‚¹1,000)
     let pur_payload = CreatePurchasePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -63,7 +63,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
         assert_eq!(item.is_low_stock, false);
     }
 
-    // 3. Rapid Day Counter Billing: 10 sales totaling ₹4,000 (400 pcs depleted via FIFO @ ₹10)
+    // 3. Rapid Day Counter Billing: 10 sales totaling â‚¹4,000 (400 pcs depleted via FIFO @ â‚¹10)
     for _ in 1..=10 {
         let sale_payload = CreateSalePayload {
             charges: vec![],
@@ -109,10 +109,10 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
     let metrics = report_service.get_dashboard_metrics().unwrap();
     assert_eq!(metrics.today_sales_amount, 4000.0);
     assert_eq!(metrics.today_purchase_amount, 2500.0);
-    assert_eq!(metrics.live_cash_in_drawer, 2500.0, "Evening drawer must equal ₹4,000 - ₹1,500 = ₹2,500");
+    assert_eq!(metrics.cash_in_hand, 2500.0, "Evening drawer must equal â‚¹4,000 - â‚¹1,500 = â‚¹2,500");
 
     let valuation = report_service.get_stock_valuation_report().unwrap();
-    assert_eq!(valuation.total_valuation, 475.0, "Stock valuation: 95 * 5.0 = ₹475");
+    assert_eq!(valuation.total_valuation, 475.0, "Stock valuation: 95 * 5.0 = â‚¹475");
     println!("=== SCENARIO S1 PASSED SUCCESSFULLY! ===");
 }
 
