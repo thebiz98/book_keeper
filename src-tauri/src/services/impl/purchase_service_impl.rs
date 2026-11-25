@@ -178,7 +178,7 @@ fn check_purchase_payment(
 ) -> Result<f64, AppError> {
     let upfront = purchase_upfront(status, open, paid)?;
     if status != PaymentStatus::Paid && party_id.is_none() {
-        return Err(validation("party_id", "vendor required for credit"));
+        return Err(validation("party_id", "Pick a vendor to record an unpaid or part-paid purchase"));
     }
     Ok(upfront)
 }

@@ -17,7 +17,8 @@ import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
 import { ItemQuickCreateModal } from '@/components/domain/ItemQuickCreateModal';
 import { BillChargesPanel, type BillChargesPanelHandle } from '@/components/domain/BillChargesPanel';
-import { BillTotalsSummary } from '@/components/domain/BillTotalsSummary';
+import { BillFooterTotals } from '@/components/domain/BillFooterTotals';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { toChargeInputs, type BillChargeLine } from '@/lib/billMath';
 import { lineBaseQuantity, lineCostPerBase, type PurchaseLine } from '@/components/domain/purchaseMath';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
@@ -91,6 +92,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
   const [paidInput, setPaidInput] = useState<number>(0);
 
   const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitting = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +124,12 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     setUnitChoice(item.matchedBundleId ?? BASE);
     setQuantity(1);
     setDraftError(null);
-    setTimeout(() => costRef.current?.focus(), 0);
+    // Same flow as New Sale: item, then quantity.
+    setTimeout(() => {
+      const q = document.getElementById('purchase-qty') as HTMLInputElement | null;
+      q?.focus();
+      q?.select();
+    }, 0);
   }, []);
 
   // Pre-fill (dashboard Inward action / ?item= / props). Runs once on mount.
@@ -268,13 +275,15 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     input: payInput,
     fetcher: (p) => api.previewPurchase(p, null),
   });
-  const pending = bill !== null && (totalsPreview.isLoading || payPreview.isLoading || payPreview.data === null);
+  // Only an in-flight preview is pending; a failed one reports its error (shown above the buttons).
+  const pending = bill !== null && (totalsPreview.isLoading || payPreview.isLoading);
   const previewErrors = [...totalsPreview.errors, ...payPreview.errors];
   const itemsSubtotal = totals?.itemsSubtotal ?? 0;
   const total = totals?.totalAmount ?? 0;
   const paid = paymentStatus === 'PARTIAL' ? paidInput : (payPreview.data?.payment?.paidAmount ?? paidToSend ?? 0);
   const balanceDue = payPreview.data?.payment?.balanceDue ?? totals?.openAmount ?? 0;
   const paymentError = lines.length > 0 && !pending ? (previewErrors[0]?.message ?? null) : null;
+  const payVerdictMissing = bill !== null && !pending && payPreview.data === null && previewErrors.length === 0;
 
   const addCharge = (line: Omit<BillChargeLine, 'key'>): boolean => {
     if (!(line.amount > 0)) return false;
@@ -289,6 +298,25 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
   const removeCharge = (key: number) => setCharges((prev) => prev.filter((c) => c.key !== key));
   const totalBaseUnits = lines.reduce((a, l) => a + lineBaseQuantity(l), 0);
 
+  /** Back to an empty purchase (after Save, or Clear). */
+  const clearDraft = () => {
+    setLines([]);
+    setCharges([]);
+    setSupplierInvoiceRef('');
+    setNotes('');
+    setVendorId(null);
+    setPaymentStatus('PAID');
+    setPaidInput(0);
+    setInwardDate(todayLocal());
+    setSelectedItem(null);
+    setUnitChoice(BASE);
+    setQuantity(1);
+    setUnitCostText('');
+    setDraftError(null);
+    setError(null);
+    setSuccessCode(null);
+  };
+
   const handleRecordInward = async () => {
     if (submitting.current) return;
     if (lines.length === 0) {
@@ -296,9 +324,17 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       return;
     }
     // Saving waits for the backend's verdict on exactly what is on screen (pending or any error blocks).
-    if (!bill || pending) return;
+    if (!bill) return;
+    if (pending) {
+      setError('Still checking the bill. Try again in a moment.');
+      return;
+    }
     if (previewErrors.length > 0) {
       setError(previewErrors[0].message);
+      return;
+    }
+    if (payVerdictMissing) {
+      setError('Could not check the payment. Change a value and try again.');
       return;
     }
 
@@ -315,17 +351,8 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
     try {
       const res = await api.createPurchase(payload);
+      clearDraft();
       setSuccessCode(res.transactionCode);
-      setLines([]);
-      setCharges([]);
-      setSupplierInvoiceRef('');
-      setNotes('');
-      setVendorId(null);
-      setPaymentStatus('PAID');
-      setPaidInput(0);
-      setInwardDate(todayLocal());
-      setSelectedItem(null);
-      setUnitCostText('');
       refreshCodePreview();
       focusSearch();
     } catch (err) {
@@ -336,7 +363,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     }
   };
 
-  // Hotkeys: Ctrl+Enter records, Alt+B opens the bundle modal. Own listener so the page works
+  // Hotkeys: Ctrl+Enter records, Alt+B opens the bundle modal, Esc offers Clear. Own listener so the page works
   // regardless of the shell's registry; always calls the latest handler.
   const latest = useRef({
     record: handleRecordInward,
@@ -344,9 +371,13 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
     charges: () => {},
     newItem: () => {},
     modalOpen: false,
+    hasLines: false,
+    clear: () => {},
   });
   latest.current = {
-    modalOpen: isBundleModalOpen || chargeModalOpen || quickName !== null,
+    modalOpen: isBundleModalOpen || chargeModalOpen || quickName !== null || isClearConfirmOpen,
+    hasLines: lines.length > 0,
+    clear: () => setIsClearConfirmOpen(true),
     record: handleRecordInward,
     charges: () => chargesRef.current?.open(),
     newItem: () => setQuickName(searchWrapRef.current?.querySelector('input')?.value.trim() ?? ''),
@@ -370,6 +401,9 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       } else if (e.altKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         latest.current.newItem();
+      } else if (e.key === 'Escape' && !e.defaultPrevented && latest.current.hasLines) {
+        // Esc with nothing else to close: offer to discard the purchase (same as New Sale).
+        latest.current.clear();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -385,13 +419,30 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Header Info Bar */}
-      <div className="flex flex-wrap items-end justify-between gap-3 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800">
-            <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400">
-              Inward
-            </span>
+      {/* Header: same layout as New Sale (party left; reference, code and date right). */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+        <div data-testid="purchase-vendor" className="w-80 flex-1 max-w-md">
+          <PartySelector
+            partyType="VENDOR"
+            selectedPartyId={vendorId}
+            onSelectParty={(party) => setVendorId(party ? party.id : null)}
+            allowWalkIn
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="text"
+            aria-label="Supplier Invoice / DC #"
+            title="Supplier Invoice / DC #"
+            placeholder="e.g. INV-9841"
+            value={supplierInvoiceRef}
+            onChange={(e) => setSupplierInvoiceRef(e.target.value)}
+            className="w-40 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800">
+            <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400">Next Inward</span>
             <span
               data-testid="code-preview"
               title="Preview only. The final code is assigned when the purchase is recorded."
@@ -401,48 +452,23 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
             </span>
           </div>
 
-          <div className="w-36">
-            <TextInput
-              label="Inward Date"
+          <div className="flex items-center gap-1 text-xs">
+            <label htmlFor="purchase-date" className="text-slate-400">
+              Date:
+            </label>
+            <input
+              id="purchase-date"
               type="date"
               value={inwardDate}
               max={todayLocal()}
               onChange={(e) => setInwardDate(e.target.value)}
-              className="font-mono"
+              className="bg-transparent font-mono font-medium text-slate-800 dark:text-slate-200 focus:outline-none"
             />
           </div>
-
-          <div className="w-44">
-            <TextInput
-              label="Notes"
-              placeholder="optional"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </div>
-
-          <div className="w-44">
-            <TextInput
-              label="Supplier Invoice / DC #"
-              placeholder="e.g. INV-9841"
-              value={supplierInvoiceRef}
-              onChange={(e) => setSupplierInvoiceRef(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="w-72">
-          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Vendor</span>
-          <PartySelector
-            partyType="VENDOR"
-            selectedPartyId={vendorId}
-            onSelectParty={(party) => setVendorId(party ? party.id : null)}
-            allowWalkIn
-          />
         </div>
       </div>
 
-      {/* Inward Line Item Entry Row */}
+      {/* Entry row: same order as New Sale (Item, Qty, Unit, Price, Add). */}
       <div
         onKeyDown={onDraftKeyDown}
         className="p-3.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap lg:flex-nowrap items-start gap-2 text-xs"
@@ -470,21 +496,6 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
           </div>
         </EntryField>
 
-        <EntryField label="Unit" htmlFor="purchase-unit" className="w-44 shrink-0">
-          <Select<string | number>
-            id="purchase-unit"
-            value={unitChoice}
-            onChange={(v) => {
-              // The sentinel opens the modal; the unit stays as it was (FR-29).
-              if (v === NEW_BUNDLE) latest.current.bundle();
-              else setUnitChoice(Number(v));
-            }}
-            options={unitOptions}
-            disabled={!selectedItem}
-            aria-label="Unit"
-          />
-        </EntryField>
-
         <EntryField
           label="Quantity"
           required
@@ -510,6 +521,21 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
             allowDecimals
             hideConversion
             disabled={!selectedItem}
+          />
+        </EntryField>
+
+        <EntryField label="Unit" htmlFor="purchase-unit" className="w-44 shrink-0">
+          <Select<string | number>
+            id="purchase-unit"
+            value={unitChoice}
+            onChange={(v) => {
+              // The sentinel opens the modal; the unit stays as it was (FR-29).
+              if (v === NEW_BUNDLE) latest.current.bundle();
+              else setUnitChoice(Number(v));
+            }}
+            options={unitOptions}
+            disabled={!selectedItem}
+            aria-label="Unit"
           />
         </EntryField>
 
@@ -552,7 +578,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
         )}
       </div>
 
-      {/* Inward Items Table */}
+      {/* Lines table: same column order as the sale cart (price per base unit where MRP is). */}
       <div ref={tableCardRef} className="flex-1 min-h-[220px] rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
         <Table dense>
           <TableHeader>
@@ -560,18 +586,17 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
               <TableHead className="w-10 text-center">#</TableHead>
               <TableHead>Item Name</TableHead>
               <TableHead>Packaging</TableHead>
-              <TableHead className="text-center">Inward Qty</TableHead>
-              <TableHead className="text-center">Base Units</TableHead>
-              <TableHead align="right">Purchase Price (₹)</TableHead>
-              <TableHead align="right">Purchase Price / base unit (₹)</TableHead>
-              <TableHead align="right">Line Total (₹)</TableHead>
+              <TableHead className="text-center w-40">Quantity</TableHead>
+              <TableHead align="right">Price / base unit</TableHead>
+              <TableHead align="right">Purchase Price</TableHead>
+              <TableHead align="right">Line Total</TableHead>
               <TableHead className="w-12 text-center">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {lines.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="py-12 text-center text-slate-400 text-xs">
+                <TableCell colSpan={8} className="py-12 text-center text-slate-400 text-xs">
                   No inward lines yet. Pick an item above and press Enter to add it.
                 </TableCell>
               </TableRow>
@@ -579,33 +604,48 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
               lines.map((l, idx) => (
                 <TableRow key={l.key} data-testid="purchase-line">
                   <TableCell className="text-center text-slate-400 select-none">{idx + 1}</TableCell>
-                  <TableCell className="font-semibold text-slate-900 dark:text-slate-100">
-                    {l.itemName}
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <span className="font-medium text-slate-900 dark:text-slate-100">{l.itemName}</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                        {l.quantity} {l.packLabel}
+                        {l.bundleId !== null ? ` × ${l.unitsPerBundle}` : ''}
+                      </span>
+                    </div>
                   </TableCell>
-                  <TableCell className="text-slate-500">
-                    {l.bundleId !== null ? `${l.packLabel} (× ${l.unitsPerBundle})` : l.baseUnit}
+                  <TableCell>
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                      {l.bundleId !== null ? `${l.packLabel} (× ${l.unitsPerBundle})` : l.baseUnit}
+                    </span>
                   </TableCell>
                   <TableCell className="text-center font-mono font-medium">
-                    {l.quantity} {l.packLabel}
+                    <div className="flex flex-col items-center">
+                      <span>
+                        {l.quantity} {l.packLabel}
+                      </span>
+                      {l.bundleId !== null && (
+                        <span className="text-[10px] text-blue-600 dark:text-blue-400">
+                          = {lineBaseQuantity(l)} {l.baseUnit}
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
-                  <TableCell className="text-center font-mono font-medium text-blue-600 dark:text-blue-400">
-                    {lineBaseQuantity(l)} {l.baseUnit}
+                  <TableCell align="right" mono className="text-slate-500 text-xs">
+                    {lineCostPerBase(l).toFixed(4)}
                   </TableCell>
                   <TableCell align="right" mono>
                     <CurrencyDisplay amount={l.unitCost} size="sm" />
                   </TableCell>
-                  <TableCell align="right" mono className="text-slate-500">
-                    {lineCostPerBase(l).toFixed(4)}
-                  </TableCell>
-                  <TableCell align="right" mono className="font-bold text-slate-900 dark:text-slate-100">
+                  <TableCell align="right" mono className="font-semibold text-slate-900 dark:text-slate-100">
                     {totals?.lineTotals[idx] != null ? <CurrencyDisplay amount={totals.lineTotals[idx]} size="sm" /> : '—'}
                   </TableCell>
                   <TableCell className="text-center">
                     <button
                       type="button"
+                      title="Remove line"
                       aria-label={`Remove ${l.itemName}`}
                       onClick={() => handleRemoveLine(l.key)}
-                      className="p-1 rounded text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                      className="p-1 rounded text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -628,111 +668,142 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
         onModalOpenChange={setChargeModalOpen}
       />
 
-      {/* Footer Settlement & Commit Bar */}
-      <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-6">
-          <div className="flex flex-col">
-            <span className="text-xs text-slate-500 font-medium">
-              {charges.length > 0 ? 'Grand Total (payable)' : 'Total Purchase Value'}
-            </span>
-            <div data-testid="purchase-total" className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-              <CurrencyDisplay amount={total} size="xl" />
-            </div>
-          </div>
-          {charges.length > 0 && (
-            <div className="w-56" data-testid="purchase-breakdown">
-              <span data-testid="purchase-items-subtotal" className="sr-only">
-                {itemsSubtotal}
-              </span>
-              <BillTotalsSummary compact itemsSubtotal={itemsSubtotal} lines={charges} grandTotal={total} />
-            </div>
-          )}
-          <div className="h-8 w-px bg-slate-200 dark:bg-slate-800" />
+      {/* Footer: same layout as New Sale (counts + notes left; totals, payment, messages, buttons right). */}
+      <div className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-col gap-2 min-w-[200px] flex-1 max-w-sm">
           <div className="flex flex-col text-xs text-slate-500 font-mono">
             <span>Lines: {lines.length}</span>
-            <span>Total Base Units: {totalBaseUnits}</span>
+            <span>Total Base Units: {Number(totalBaseUnits.toFixed(3))}</span>
           </div>
+          <input
+            type="text"
+            aria-label="Notes"
+            placeholder="Notes (optional)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
         </div>
 
-        <div className="flex items-center gap-3">
-          <div
-            role="radiogroup"
-            aria-label="Payment status"
-            className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs"
-          >
-            {(['PAID', 'PARTIAL', 'UNPAID'] as const).map((st) => (
-              <button
-                key={st}
-                type="button"
-                role="radio"
-                aria-checked={paymentStatus === st}
-                onClick={() => setPaymentStatus(st)}
-                className={`px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
-                  paymentStatus === st
-                    ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                {st}
-              </button>
-            ))}
+        <div data-testid="purchase-footer-actions" className="flex flex-col items-end gap-3 ml-auto">
+          <BillFooterTotals
+            testIdPrefix="purchase"
+            hasCharges={charges.length > 0}
+            itemsSubtotal={itemsSubtotal}
+            chargesTotal={totals?.chargesTotal ?? 0}
+            discountsTotal={totals?.discountsTotal ?? 0}
+            totalAmount={total}
+          />
+
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div
+              role="radiogroup"
+              aria-label="Payment status"
+              className="flex p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-xs"
+            >
+              {(['PAID', 'PARTIAL', 'UNPAID'] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  role="radio"
+                  aria-checked={paymentStatus === st}
+                  onClick={() => setPaymentStatus(st)}
+                  className={`px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                    paymentStatus === st
+                      ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs">
+              <span className="text-slate-400">Paid: ₹</span>
+              <input
+                type="number"
+                aria-label="Paid amount"
+                min={0}
+                step="any"
+                disabled={paymentStatus !== 'PARTIAL'}
+                value={paymentStatus === 'PARTIAL' ? paidInput || '' : paid}
+                onChange={(e) => setPaidInput(parseFloat(e.target.value) || 0)}
+                className="w-24 bg-transparent font-mono font-bold text-right focus:outline-none disabled:opacity-60"
+              />
+            </div>
+            <div className="flex flex-col items-end text-xs">
+              <span className="text-slate-500">Balance due (vendor payable)</span>
+              <CurrencyDisplay amount={balanceDue} size="md" />
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 text-xs">
-            <span className="text-slate-400">Paid: ₹</span>
-            <input
-              type="number"
-              aria-label="Paid amount"
-              min={0}
-              step="any"
-              disabled={paymentStatus !== 'PARTIAL'}
-              value={paymentStatus === 'PARTIAL' ? paidInput || '' : paid}
-              onChange={(e) => setPaidInput(parseFloat(e.target.value) || 0)}
-              className="w-24 bg-transparent font-mono font-bold text-right focus:outline-none disabled:opacity-60"
-            />
-          </div>
-          <div className="flex flex-col text-xs">
-            <span className="text-slate-500">Balance due (vendor payable)</span>
-            <CurrencyDisplay amount={balanceDue} size="md" />
-          </div>
-        </div>
+          {/* Messages sit right above the buttons so a refused click is never silent. */}
+          {error ? (
+            <p role="alert" className="max-w-md text-right text-xs text-rose-600 dark:text-rose-400 font-medium">
+              {error}
+            </p>
+          ) : (
+            paymentError && (
+              <p data-testid="payment-hint" className="max-w-md text-right text-xs text-amber-700 dark:text-amber-400">
+                {paymentError}
+              </p>
+            )
+          )}
+          {successCode && (
+            <p
+              role="status"
+              data-testid="purchase-success"
+              className="text-sm text-emerald-700 dark:text-emerald-400 font-medium"
+            >
+              Purchase recorded: <span className="font-mono font-bold">{successCode}</span>
+            </p>
+          )}
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="primary"
-            size="lg"
-            disabled={lines.length === 0}
-            isLoading={isSubmitting}
-            onClick={() => void handleRecordInward()}
-            hotkey="Ctrl+Enter"
-            leftIcon={<CheckCircle2 className="h-5 w-5" />}
-          >
-            Record Inward Stock
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="md"
+              disabled={lines.length === 0}
+              onClick={() => setIsClearConfirmOpen(true)}
+              hotkey="Esc"
+              leftIcon={<Trash2 className="h-4 w-4" />}
+            >
+              Clear
+            </Button>
+            <Button
+              variant="primary"
+              size="lg"
+              data-testid="record-purchase-btn"
+              disabled={lines.length === 0}
+              isLoading={isSubmitting}
+              onClick={() => void handleRecordInward()}
+              hotkey="Ctrl+Enter"
+              leftIcon={<CheckCircle2 className="h-5 w-5" />}
+            >
+              Record Inward Stock
+            </Button>
+          </div>
         </div>
       </div>
 
-      {paymentError && !error && (
-        <p data-testid="payment-hint" className="text-xs text-amber-700 dark:text-amber-400 px-1">
-          {paymentError}
-        </p>
-      )}
-
-      {error && (
-        <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium px-1">
-          {error}
-        </p>
-      )}
-
-      {successCode && (
-        <p
-          role="status"
-          data-testid="purchase-success"
-          className="text-sm text-emerald-700 dark:text-emerald-400 font-medium px-1"
-        >
-          Purchase recorded: <span className="font-mono font-bold">{successCode}</span>
-        </p>
-      )}
+      <ConfirmDialog
+        isOpen={isClearConfirmOpen}
+        title="Clear Current Purchase?"
+        message="Discard every line, charge and note on this purchase? This cannot be undone."
+        variant="danger"
+        confirmText="Discard Purchase"
+        cancelText="Keep Lines"
+        onConfirm={() => {
+          clearDraft();
+          setIsClearConfirmOpen(false);
+          focusSearch();
+        }}
+        onCancel={() => {
+          setIsClearConfirmOpen(false);
+          focusSearch();
+        }}
+      />
 
       <BundleCreationModal
         isOpen={isBundleModalOpen}

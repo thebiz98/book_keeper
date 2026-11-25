@@ -180,7 +180,7 @@ fn check_sale_payment(
 ) -> Result<(f64, f64), AppError> {
     let split = sale_payment_split(status, open, paid)?;
     if status != PaymentStatus::Paid && party_id.is_none() {
-        return Err(validation("party_id", "customer required for credit"));
+        return Err(validation("party_id", "Pick a customer to sell on credit (unpaid or part-paid)"));
     }
     Ok(split)
 }
