@@ -398,7 +398,11 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         // PURCHASE-source only: ADJUSTMENT / OPENING / RETURN headers are not supplier bills (DD-07).
         let (w, vals) = history_where(
             filter,
-            Some("t.source = 'PURCHASE' AND t.is_opening_balance = 0"),
+            Some(if filter.include_opening_balance == Some(true) {
+                "t.source = 'PURCHASE'"
+            } else {
+                "t.source = 'PURCHASE' AND t.is_opening_balance = 0"
+            }),
             &["t.transaction_code", "t.party_name", "t.supplier_invoice_ref"],
         )?;
         let total: i64 = self.conn.query_row(
@@ -413,7 +417,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
             "SELECT t.id, t.transaction_code, t.supplier_invoice_ref, t.transaction_date, t.created_at, \
              t.party_id, t.party_name, \
              (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_transaction_id = t.id), \
-             t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total \
+             t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total, t.is_opening_balance \
              FROM purchase_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -435,6 +439,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
                     items_subtotal: r.get(12)?,
                     charges_total: r.get(13)?,
                     discounts_total: r.get(14)?,
+                    is_opening_balance: r.get(15)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

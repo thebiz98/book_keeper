@@ -332,3 +332,18 @@ fn transactions_reset_clears_opening_bills_and_the_ob_sequence() {
     let again = e.party("Cust2", PartyType::Customer, ob(10.0, DAY));
     assert_eq!(e.opening(again).unwrap().transaction_code, "OB-0001", "the OB- sequence restarted");
 }
+
+#[test]
+fn dues_paths_can_list_the_opening_bill_flagged() {
+    let e = env();
+    let c = e.party("Cust", PartyType::Customer, ob(500.0, DAY));
+    let v = e.party("Vend", PartyType::Vendor, ob(300.0, DAY));
+    let f = |p: i64, on: bool| SalesHistoryFilter { party_id: Some(p), include_opening_balance: Some(on), ..Default::default() };
+    assert_eq!(e.sales.get_sales_history(f(c, false)).unwrap().total, 0);
+    let rows = e.sales.get_sales_history(f(c, true)).unwrap();
+    assert_eq!((rows.total, rows.items[0].is_opening_balance, rows.items[0].balance_due), (1, true, 500.0));
+    let mut tx = e.db.begin_read().unwrap();
+    assert_eq!(tx.purchases().list_history(&f(v, false), 0, 50).unwrap().1, 0);
+    let (prows, n) = tx.purchases().list_history(&f(v, true), 0, 50).unwrap();
+    assert_eq!((n, prows[0].is_opening_balance), (1, true));
+}

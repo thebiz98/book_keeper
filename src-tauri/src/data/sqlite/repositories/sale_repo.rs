@@ -301,7 +301,7 @@ impl SaleRepository for SqliteSaleRepository {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<SaleHistoryRow>, usize), AppError> {
-        let (w, vals) = history_where(filter, Some("t.is_opening_balance = 0"), &["t.transaction_code", "t.party_name"])?;
+        let (w, vals) = history_where(filter, (filter.include_opening_balance != Some(true)).then_some("t.is_opening_balance = 0"), &["t.transaction_code", "t.party_name"])?;
         let total: i64 = self.conn.query_row(
             &format!("SELECT COUNT(*) FROM sale_transactions t{w}"),
             rusqlite::params_from_iter(vals.iter()),
@@ -315,7 +315,7 @@ impl SaleRepository for SqliteSaleRepository {
             "SELECT t.id, t.transaction_code, t.transaction_date, t.created_at, t.party_id, t.party_name, \
              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_transaction_id = t.id), \
              t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total, \
-             {profit_col} \
+             {profit_col}, t.is_opening_balance \
              FROM sale_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -337,6 +337,7 @@ impl SaleRepository for SqliteSaleRepository {
                     charges_total: r.get(12)?,
                     discounts_total: r.get(13)?,
                     profit: r.get(14)?,
+                    is_opening_balance: r.get(15)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
