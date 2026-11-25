@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, ChevronDown, ChevronRight } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import { startOfMonth, todayLocal } from '@/lib/dates';
 import type { CashFlowReport, PnLReport, StockValuationReport } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { DateRangePicker } from '@/components/common/DateRangePicker';
+import { SalesPurchaseTrendPanel } from '@/components/domain/SalesPurchaseTrendPanel';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 
 interface Section<T> {
@@ -78,6 +79,7 @@ export const ReportsPage: React.FC = () => {
   const [pnl, retryPnl] = useReport<PnLReport>(() => api.getPnLReport(range.startDate, range.endDate), [range.startDate, range.endDate]);
   const [cash, retryCash] = useReport<CashFlowReport>(() => api.getCashFlowReport(range.startDate, range.endDate), [range.startDate, range.endDate]);
   const [val, retryVal] = useReport<StockValuationReport>(() => api.getStockValuationReport(), []);
+  const [showTrend, setShowTrend] = useState(false);
   const onRange = useCallback((r: { startDate: string; endDate: string }) => setRange(r), []);
 
   const p = pnl.data;
@@ -204,6 +206,25 @@ export const ReportsPage: React.FC = () => {
           </div>
         )}
       </Panel>
+
+      {/* Optional: Sales vs Purchases trend (moved off the dashboard). Loads only when opened. */}
+      <section className="p-4 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+        <button
+          type="button"
+          aria-expanded={showTrend}
+          data-testid="trend-toggle"
+          onClick={() => setShowTrend((v) => !v)}
+          className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
+        >
+          {showTrend ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          Sales vs Purchases trend
+        </button>
+        {showTrend && (
+          <div className="mt-3">
+            <SalesPurchaseTrendPanel />
+          </div>
+        )}
+      </section>
     </div>
   );
 };

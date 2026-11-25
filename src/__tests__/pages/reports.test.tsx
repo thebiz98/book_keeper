@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { ReportsPage } from '@/pages/ReportsPage';
-import { installApi, waitFor, bodyText } from './helpers';
+import { installApi, waitFor, bodyText, click, flush } from './helpers';
 
 describe('ReportsPage', () => {
   beforeEach(() => {
@@ -62,5 +62,26 @@ describe('ReportsPage', () => {
     });
     render(<ReportsPage />);
     await waitFor(() => bodyText().includes('bad date'));
+  });
+  it('shows the Sales vs Purchases trend only when asked, with 7D / 30D / 1Y', async () => {
+    const api = installApi({
+      getPnLReport: { grossSales: 0, salesReturns: 0, netSales: 0, cogs: 0, grossProfit: 0, inventoryLosses: 0, netProfit: 0, totalPurchases: 0, salesDiscounts: 0, otherIncome: 0, saleChargesIncome: 0, purchaseDiscountsIncome: 0, purchaseChargesExpense: 0, operatingExpenses: 0, expensesByType: [] },
+      getCashFlowReport: { salesCashInflow: 0, customerSettlementsInflow: 0, vendorRefundsInflow: 0, purchaseCashOutflow: 0, vendorSettlementsOutflow: 0, refundsCashOutflow: 0, expensesCashOutflow: 0, totalInflow: 0, totalOutflow: 0, netCashBalance: 0 },
+      getStockValuationReport: { totalValuation: 0, activeLotsCount: 0, categoriesBreakdown: [] },
+      getSalesPurchaseTrend: [{ date: '2026-02-01', salesAmount: 10, purchaseAmount: 5 }],
+    });
+    render(<ReportsPage />);
+    await waitFor(() => !!document.querySelector('[data-testid="pnl"]'));
+    expect(document.querySelector('[data-testid="trend"]')).toBeNull();
+    expect(api.getSalesPurchaseTrend).not.toHaveBeenCalled();
+
+    click(document.querySelector('[data-testid="trend-toggle"]')!);
+    await waitFor(() => !!document.querySelector('[data-testid="trend"]'));
+    expect(document.querySelector('[data-testid="trend"]')!.textContent).toContain('2026-02-01');
+    click(document.querySelector('[data-period="30d"]')!);
+    await flush();
+    click(document.querySelector('[data-period="1y"]')!);
+    await flush();
+    expect(api.getSalesPurchaseTrend.mock.calls.map((c) => c[0])).toEqual(['7d', '30d', '1y']);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { DashboardPage, resetDashboardCache } from '@/pages/DashboardPage';
-import { installApi, flush, waitFor, click, bodyText } from './helpers';
+import { installApi, waitFor, click, bodyText } from './helpers';
 import type { DashboardMetrics } from '@/types';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -52,15 +52,13 @@ describe('DashboardPage', () => {
     expect(bodyText()).toContain('Stock Adjustment');
   });
 
-  it('trend toggle requests 30d and 1y', async () => {
+  it('has no Sales vs Purchases chart (moved to Financial Reports)', async () => {
     const api = installApi({ ...base, getDashboardMetrics: metrics });
     render(<DashboardPage />);
     await waitFor(() => bodyText().includes('₹1,234.00'));
-    click(document.querySelector('[data-period="30d"]')!);
-    await flush();
-    click(document.querySelector('[data-period="1y"]')!);
-    await flush();
-    expect(api.getSalesPurchaseTrend.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining(['7d', '30d', '1y']));
+    expect(document.querySelector('[data-testid="trend"]')).toBeNull();
+    expect(bodyText()).not.toContain('Sales vs Purchases');
+    expect(api.getSalesPurchaseTrend).not.toHaveBeenCalled();
   });
 
   it('shows an error, not fake zeros, when metrics fail', async () => {
