@@ -15,6 +15,7 @@ pub mod purchase_repo;
 pub mod report_repo;
 pub mod return_repo;
 pub mod sale_repo;
+pub mod service_component_repo;
 pub mod setting_repo;
 pub mod settlement_repo;
 
@@ -32,5 +33,6 @@ pub use purchase_repo::SqlitePurchaseRepository;
 pub use report_repo::SqliteReportRepository;
 pub use return_repo::SqliteReturnRepository;
 pub use sale_repo::SqliteSaleRepository;
+pub use service_component_repo::SqliteServiceComponentRepository;
 pub use setting_repo::SqliteSettingRepository;
 pub use settlement_repo::SqliteSettlementRepository;

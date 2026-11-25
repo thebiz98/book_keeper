@@ -51,6 +51,9 @@ pub trait SaleRepository {
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError>;
     /// FR-34: the components of one bill's profit, from the same SQL as the history `profit` column.
     fn bill_profit_parts(&self, sale_id: i64) -> Result<BillProfitParts, AppError>;
+    /// FR-37: miscellaneous service cost per line of one bill, `(sale_item_id, misc)`, from the shared
+    /// `misc_cost_sql` fragment (physical lines give 0).
+    fn list_line_misc_costs(&self, sale_id: i64) -> Result<Vec<(i64, f64)>, AppError>;
 
     /// FR-23: distinct bills containing the item, `transaction_date DESC, id DESC`, paged in SQL,
     /// plus the distinct bill count. Served by `idx_sale_items_item_date`.

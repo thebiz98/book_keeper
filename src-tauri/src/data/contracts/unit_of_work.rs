@@ -13,6 +13,7 @@ use super::purchase_repository::PurchaseRepository;
 use super::report_repository::ReportRepository;
 use super::return_repository::ReturnRepository;
 use super::sale_repository::SaleRepository;
+use super::service_component_repository::ServiceComponentRepository;
 use super::setting_repository::SettingRepository;
 use super::settlement_repository::SettlementRepository;
 
@@ -54,6 +55,7 @@ pub trait TransactionContext {
     fn bundles(&mut self) -> &mut dyn BundleRepository;
     fn purchases(&mut self) -> &mut dyn PurchaseRepository;
     fn sales(&mut self) -> &mut dyn SaleRepository;
+    fn service_components(&mut self) -> &mut dyn ServiceComponentRepository;
     fn allocations(&mut self) -> &mut dyn AllocationRepository;
     fn settlements(&mut self) -> &mut dyn SettlementRepository;
     fn returns(&mut self) -> &mut dyn ReturnRepository;

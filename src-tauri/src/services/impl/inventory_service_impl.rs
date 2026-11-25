@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, LotDraw, LotDrawLot, PageRequest, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
+    ItemBillRef, ItemLot, LotDraw, LotDrawComponent, LotDrawLot, PageRequest, Paginated, PreviewServiceCostPayload, PriorLine,
+    ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult,
 };
 use crate::core::money::{check_entry_date_now, round2};
@@ -79,11 +80,56 @@ fn require_stockable(item: &Item) -> Result<(), AppError> {
     Ok(())
 }
 
+/// FR-36 / X5: a service has no lots, so no stock-moving path may name one.
+fn reject_service(item: &Item) -> Result<(), AppError> {
+    if item.item_type == ItemType::Service {
+        return Err(validation("item_id", format!("'{}' is a service item and has no stock", item.name)));
+    }
+    Ok(())
+}
+
 fn locked(code: &str, message: impl Into<String>) -> AppError {
     AppError::BillLocked { code: code.to_string(), message: message.into() }
 }
 
 impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
+
+    /// FR-31 draw over one item's open lots in the strategy's order, skipping `skip` base units that
+    /// earlier cart lines will take first. Returns `(lots, cost, available, shortfall)`; units beyond
+    /// the stock cost nothing and show up as shortfall.
+    fn draw_lots(
+        &self,
+        tx: &mut dyn TransactionContext,
+        item_id: i64,
+        quantity: f64,
+        skip: f64,
+    ) -> Result<(Vec<LotDrawLot>, f64, f64, f64), AppError> {
+        let open = self.strategy.open_lots_in_draw_order(tx, item_id)?;
+        let info = tx.purchases().list_lots_for_item(item_id)?;
+        let mut skip_left = skip;
+        let mut left = quantity;
+        let (mut lots, mut cost, mut available) = (Vec::with_capacity(open.len()), 0.0, 0.0);
+        for lot in open {
+            let rem = lot.remaining_quantity;
+            let after_skip = (rem - skip_left).max(0.0);
+            skip_left = (skip_left - rem).max(0.0);
+            let draw = after_skip.min(left);
+            left -= draw;
+            cost += draw * lot.unit_cost;
+            available += rem;
+            let meta = info.iter().find(|l| l.purchase_item_id == lot.id);
+            lots.push(LotDrawLot {
+                purchase_item_id: lot.id,
+                transaction_code: meta.map(|m| m.transaction_code.clone()).unwrap_or_default(),
+                source: meta.map(|m| m.source).unwrap_or(LotSource::Purchase),
+                unit_cost: lot.unit_cost,
+                remaining_quantity: rem,
+                draw_quantity: draw,
+            });
+        }
+        let short = skip + quantity - available;
+        Ok((lots, cost, available, if short > EPS { short } else { 0.0 }))
+    }
     /// FR-20: pushes a new lot cost into everything costed from the lot: sale allocations,
     /// adjustment / replacement outflow rows, and the stored `RETURN_ITEM.cost_amount` of linked
     /// customer lines (replayed) and replacement lines (outflow rows walked in id order).
@@ -350,7 +396,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         purchase_item: &PurchaseItem,
     ) -> Result<(), AppError> {
         require_positive("quantity", purchase_item.quantity)?;
-        find_item(uow, purchase_item.item_id)?;
+        reject_service(&find_item(uow, purchase_item.item_id)?)?;
         uow.purchases().create_purchase_item(purchase_item)?;
         uow.items()
             .apply_stock_delta(purchase_item.item_id, purchase_item.remaining_quantity)?;
@@ -408,6 +454,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         for &(item_id, quantity, unit_cost) in lines {
             require_positive("quantity", quantity)?;
             let item = find_item(uow, item_id)?;
+            reject_service(&item)?;
             let cost = match unit_cost {
                 Some(c) => c,
                 None => uow.purchases().get_latest_lot_cost(item_id)?.ok_or_else(|| {
@@ -473,6 +520,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         item_id: i64,
         quantity: f64,
     ) -> Result<f64, AppError> {
+        reject_service(&find_item(uow, item_id)?)?;
         let out = self
             .strategy
             .deplete_lots_for_outflow(uow, source_type, source_id, item_id, quantity)?;
@@ -490,6 +538,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         quantity: f64,
     ) -> Result<f64, AppError> {
         require_positive("quantity", quantity)?;
+        reject_service(&find_item(uow, item_id)?)?;
         let Some(lot_id) = purchase_item_id else {
             return self.issue_stock_outflow(uow, OutflowSourceType::VendorReturn, return_id, item_id, quantity);
         };
@@ -561,43 +610,96 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         result
     }
 
-    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_quantity: f64) -> Result<LotDraw, AppError> {
-        for (field, v) in [("quantity", quantity), ("prior_quantity", prior_quantity)] {
-            if !v.is_finite() || v < 0.0 {
-                return Err(validation(field, format!("must be a finite number >= 0 (got {v})")));
+    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_lines: &[PriorLine]) -> Result<LotDraw, AppError> {
+        if !quantity.is_finite() || quantity < 0.0 {
+            return Err(validation("quantity", format!("must be a finite number >= 0 (got {quantity})")));
+        }
+        for p in prior_lines {
+            if !p.quantity.is_finite() || p.quantity < 0.0 {
+                return Err(validation("prior_lines", format!("must be finite numbers >= 0 (got {})", p.quantity)));
             }
         }
         let mut tx = self.uow.begin_read()?;
         let item = find_item(&mut *tx, item_id)?;
-        let empty = LotDraw { lots: vec![], draw_cost: 0.0, available: 0.0, shortfall: 0.0 };
-        if item.item_type != ItemType::Physical {
-            return Ok(empty);
+
+        // Base units each stocked item has already been promised to earlier cart lines; a service
+        // line counts as its components (FR-37, expanded here so the UI never knows the rule).
+        let mut prior: std::collections::HashMap<i64, f64> = std::collections::HashMap::new();
+        for p in prior_lines {
+            let pi = find_item(&mut *tx, p.item_id)?;
+            if pi.item_type == ItemType::Service {
+                for c in tx.service_components().list_for_service(pi.id)? {
+                    *prior.entry(c.component_item_id).or_insert(0.0) += p.quantity * c.quantity_per_unit;
+                }
+            } else {
+                *prior.entry(pi.id).or_insert(0.0) += p.quantity;
+            }
         }
-        let open = self.strategy.open_lots_in_draw_order(&mut *tx, item_id)?;
-        let info = tx.purchases().list_lots_for_item(item_id)?;
-        let mut skip = prior_quantity;
-        let mut left = quantity;
-        let (mut lots, mut cost, mut available) = (Vec::with_capacity(open.len()), 0.0, 0.0);
-        for lot in open {
-            let rem = lot.remaining_quantity;
-            let after_skip = (rem - skip).max(0.0);
-            skip = (skip - rem).max(0.0);
-            let draw = after_skip.min(left);
-            left -= draw;
-            cost += draw * lot.unit_cost;
-            available += rem;
-            let meta = info.iter().find(|l| l.purchase_item_id == lot.id);
-            lots.push(LotDrawLot {
-                purchase_item_id: lot.id,
-                transaction_code: meta.map(|m| m.transaction_code.clone()).unwrap_or_default(),
-                source: meta.map(|m| m.source).unwrap_or(LotSource::Purchase),
-                unit_cost: lot.unit_cost,
-                remaining_quantity: rem,
-                draw_quantity: draw,
+
+        if item.item_type == ItemType::Physical {
+            let skip = prior.get(&item_id).copied().unwrap_or(0.0);
+            let (lots, cost, available, shortfall) = self.draw_lots(&mut *tx, item_id, quantity, skip)?;
+            return Ok(LotDraw {
+                lots,
+                draw_cost: cost,
+                available,
+                shortfall,
+                components: Vec::new(),
+                components_cost: 0.0,
+                misc_cost: 0.0,
+                line_cost: cost,
             });
         }
-        let short = prior_quantity + quantity - available;
-        Ok(LotDraw { lots, draw_cost: cost, available, shortfall: if short > EPS { short } else { 0.0 } })
+
+        let mut components = Vec::new();
+        let (mut components_cost, mut units_available, mut units_short) = (0.0, f64::INFINITY, 0.0_f64);
+        for c in tx.service_components().list_for_service(item_id)? {
+            let comp = find_item(&mut *tx, c.component_item_id)?;
+            let need = quantity * c.quantity_per_unit;
+            let skip = prior.get(&comp.id).copied().unwrap_or(0.0);
+            let (lots, cost, available, shortfall) = self.draw_lots(&mut *tx, comp.id, need, skip)?;
+            components_cost += cost;
+            units_available = units_available.min(((available - skip).max(0.0) / c.quantity_per_unit + 1e-9).floor());
+            units_short = units_short.max(shortfall / c.quantity_per_unit);
+            components.push(LotDrawComponent {
+                item_id: comp.id,
+                name: comp.name,
+                base_unit: comp.base_unit,
+                quantity: need,
+                lots,
+                draw_cost: cost,
+                available,
+                shortfall,
+            });
+        }
+        let target = item.service_cost.map(|c| round2(c * quantity)).unwrap_or(0.0);
+        let misc = (target - components_cost).max(0.0);
+        Ok(LotDraw {
+            lots: Vec::new(),
+            draw_cost: components_cost,
+            available: if units_available.is_finite() { units_available } else { quantity },
+            shortfall: if units_short > EPS { units_short } else { 0.0 },
+            components,
+            components_cost,
+            misc_cost: misc,
+            line_cost: components_cost + misc,
+        })
+    }
+
+    fn preview_service_cost(&self, payload: PreviewServiceCostPayload) -> Result<ServiceCostPreview, AppError> {
+        let service_cost = crate::services::r#impl::item_service_impl::validate_service_cost(payload.service_cost)?;
+        let mut tx = self.uow.begin_read()?;
+        let rows = crate::services::r#impl::item_service_impl::validate_components(&mut *tx, None, &payload.components)?;
+        let mut components_cost = 0.0;
+        for (component_id, qty) in rows {
+            components_cost += self.draw_lots(&mut *tx, component_id, qty, 0.0)?.1;
+        }
+        let misc = (service_cost.unwrap_or(0.0) - components_cost).max(0.0);
+        Ok(ServiceCostPreview {
+            components_cost: round2(components_cost),
+            misc_cost: round2(misc),
+            unit_cost: round2(components_cost + misc),
+        })
     }
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
@@ -671,9 +773,10 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                     .ok_or_else(|| AppError::not_found("PurchaseItem", a.purchase_item_id.to_string()))?;
                 uow.purchases()
                     .update_remaining_quantity(lot.id, (lot.remaining_quantity + back).min(lot.quantity))?;
-                match per_item.iter_mut().find(|(i, _)| *i == line.item_id) {
+                // X4: credit the lot's own item. A service line's allocations sit on its components' lots.
+                match per_item.iter_mut().find(|(i, _)| *i == lot.item_id) {
                     Some(e) => e.1 += back,
-                    None => per_item.push((line.item_id, back)),
+                    None => per_item.push((lot.item_id, back)),
                 }
             }
             uow.allocations().delete_by_sale_item_id(line.id)?;

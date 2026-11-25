@@ -123,6 +123,9 @@ fn resolve_purchase(
         if !item.is_active {
             return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
         }
+        if item.item_type == crate::core::value_objects::ItemType::Service {
+            return Err(validation("item_id", format!("'{}' is a service item and cannot be purchased", item.name)));
+        }
         let (multiplier, pack_label) = match line.bundle_id {
             Some(bundle_id) => {
                 let bundle = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| AppError::NotFound {

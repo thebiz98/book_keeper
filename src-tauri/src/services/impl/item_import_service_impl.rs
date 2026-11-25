@@ -696,6 +696,7 @@ pub(crate) fn execute_checked<U: UnitOfWork, I: InventoryService>(
                     created_at: now.clone(),
                     updated_at: now.clone(),
                     low_stock_threshold: row.low_stock_threshold.unwrap_or(DEFAULT_LOW_STOCK_THRESHOLD),
+                    service_cost: None,
                 };
                 let item_id = tx.items().create(&item)?;
                 if let Some((bundle_name, units)) = &row.bundle {

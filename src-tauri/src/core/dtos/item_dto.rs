@@ -12,12 +12,55 @@ pub struct CreateItemPayload {
     pub initial_stock: Option<f64>,
     pub initial_cost: Option<f64>,
     pub bundles: Option<Vec<CreateBundlePayload>>,
-    /// `None` => `PHYSICAL`. `SERVICE` is rejected in v1.1 (FR-21).
+    /// `None` => `PHYSICAL`.
     #[serde(default)]
     pub item_type: Option<ItemType>,
     /// `None` => 5 (DEFAULT_LOW_STOCK_THRESHOLD). 0 = never low.
     #[serde(default)]
     pub low_stock_threshold: Option<f64>,
+    /// SERVICE only (FR-36): intended cost per service unit, >= 0 or `None`.
+    #[serde(default)]
+    pub service_cost: Option<f64>,
+    /// SERVICE only (FR-36): the bill of materials.
+    #[serde(default)]
+    pub components: Option<Vec<ServiceComponentInput>>,
+}
+
+/// One component of a service (FR-36): base units of a physical item used by one service unit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServiceComponentInput {
+    pub component_item_id: i64,
+    pub quantity_per_unit: f64,
+}
+
+/// Component row of a service as the edit drawer shows it (FR-36).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServiceComponentView {
+    pub component_item_id: i64,
+    pub name: String,
+    pub base_unit: String,
+    pub quantity_per_unit: f64,
+    pub current_stock: f64,
+}
+
+/// Input of `preview_service_cost` (FR-36, DD-56): the unsaved component list and Service cost.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PreviewServiceCostPayload {
+    #[serde(default)]
+    pub components: Vec<ServiceComponentInput>,
+    #[serde(default)]
+    pub service_cost: Option<f64>,
+}
+
+/// Cost of one service unit at today's FIFO lots (FR-36).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServiceCostPreview {
+    /// FIFO cost of the components one unit would draw now.
+    pub components_cost: f64,
+    /// `max(0, service_cost - components_cost)`.
+    pub misc_cost: f64,
+    /// `components_cost + misc_cost`.
+    pub unit_cost: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -28,12 +71,18 @@ pub struct UpdateItemPayload {
     pub base_unit: String,
     pub mrp: Option<f64>,
     pub default_sale_price: f64,
-    /// `None` => keep the current type. `SERVICE` is rejected in v1.1 (FR-21).
+    /// `None` => keep the current type. A different type is rejected (FR-36).
     #[serde(default)]
     pub item_type: Option<ItemType>,
     /// `None` => keep the current level.
     #[serde(default)]
     pub low_stock_threshold: Option<f64>,
+    /// SERVICE only: full replacement (`None` clears the Service cost).
+    #[serde(default)]
+    pub service_cost: Option<f64>,
+    /// SERVICE only: `Some(list)` replaces the components, `None` keeps them.
+    #[serde(default)]
+    pub components: Option<Vec<ServiceComponentInput>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,6 +133,12 @@ pub struct ItemSearchResult {
     /// Set when the hit came from a bundle barcode row (scanner on a pack barcode).
     #[serde(default)]
     pub matched_bundle_id: Option<i64>,
+    /// SERVICE only (FR-36): intended cost per unit.
+    #[serde(default)]
+    pub service_cost: Option<f64>,
+    /// SERVICE only (FR-36): "Can make N" from the components' stock; `None` without components.
+    #[serde(default)]
+    pub can_make: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -167,17 +222,52 @@ pub struct LotDrawLot {
     pub source: LotSource,
     pub unit_cost: f64,
     pub remaining_quantity: f64,
-    /// Part of the requested quantity taken from this lot, after `prior_quantity` is consumed first.
+    /// Part of the requested quantity taken from this lot, after the prior lines' quantity is consumed first.
     pub draw_quantity: f64,
 }
 
-/// Read-only FIFO draw for the sale entry row (FR-31, DD-60).
+/// Base-unit quantity of an earlier cart line (FR-31, FR-37): the backend expands service lines
+/// into their components, the UI only maps its rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PriorLine {
+    pub item_id: i64,
+    pub quantity: f64,
+}
+
+/// One component's draw inside a service line's lot draw (FR-37).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LotDrawComponent {
+    pub item_id: i64,
+    pub name: String,
+    pub base_unit: String,
+    /// Base units of the component this line consumes.
+    pub quantity: f64,
+    pub lots: Vec<LotDrawLot>,
+    pub draw_cost: f64,
+    pub available: f64,
+    pub shortfall: f64,
+}
+
+/// Read-only FIFO draw for the sale entry row (FR-31, DD-60, FR-37). For a physical item `lots` is
+/// the draw and `line_cost == draw_cost`; for a service `lots` is empty and `components` carries
+/// the per-component draws.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LotDraw {
     pub lots: Vec<LotDrawLot>,
     pub draw_cost: f64,
     pub available: f64,
     pub shortfall: f64,
+    #[serde(default)]
+    pub components: Vec<LotDrawComponent>,
+    /// Service: components' FIFO cost (same as `draw_cost`).
+    #[serde(default)]
+    pub components_cost: f64,
+    /// Service: `max(0, round2(service_cost x quantity) - components_cost)`; physical: 0.
+    #[serde(default)]
+    pub misc_cost: f64,
+    /// `components_cost + misc_cost` for a service, `draw_cost` for a physical item.
+    #[serde(default)]
+    pub line_cost: f64,
 }
 
 /// One bill that contains an item (Item details drawer, FR-23). Each bill appears once per item.

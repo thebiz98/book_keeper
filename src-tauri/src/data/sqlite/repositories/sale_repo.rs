@@ -7,10 +7,11 @@ use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
 use crate::data::contracts::sale_repository::SaleRepository;
 use crate::data::sqlite::code_gen::{next_code, OPENING_BALANCE_CODE, SALE_CODE};
+use crate::data::sqlite::service_sql::misc_cost_sql;
 use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
 const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total, updated_at, is_opening_balance";
-const ITEM_COLS: &str = "id, sale_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_price, total_amount";
+const ITEM_COLS: &str = "id, sale_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_price, total_amount, service_cost_total";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<SaleTransaction> {
     Ok(SaleTransaction {
@@ -45,6 +46,7 @@ fn map_item(r: &Row<'_>) -> rusqlite::Result<SaleItem> {
         quantity: r.get(6)?,
         unit_price: r.get(7)?,
         total_amount: r.get(8)?,
+        service_cost_total: r.get(9)?,
     })
 }
 
@@ -79,11 +81,20 @@ const PROFIT_REPLACEMENT: &str = "COALESCE((SELECT SUM(o.quantity_depleted * o.u
      FROM stock_outflow_allocations o JOIN return_transactions r ON r.id = o.source_id \
      WHERE o.source_type = 'REPLACEMENT' AND r.return_type = 'CUSTOMER' AND r.original_transaction_id = t.id), 0.0)";
 
+/// Miscellaneous service cost of the bill (FR-37, X3): the shared fragment summed over its lines.
+fn profit_misc() -> String {
+    format!(
+        "COALESCE((SELECT SUM({}) FROM sale_items si WHERE si.sale_transaction_id = t.id), 0.0)",
+        misc_cost_sql("si")
+    )
+}
+
 /// An opening-balance bill (FR-35) is not a sale: its profit is 0.
 fn profit_expr() -> String {
     format!(
         "CASE WHEN t.is_opening_balance = 1 THEN 0.0 ELSE \
-         ROUND(t.total_amount - {PROFIT_COST_NET} - {PROFIT_REFUNDS} - {PROFIT_SCRAP} - {PROFIT_REPLACEMENT}, 2) END"
+         ROUND(t.total_amount - {PROFIT_COST_NET} - {} - {PROFIT_REFUNDS} - {PROFIT_SCRAP} - {PROFIT_REPLACEMENT}, 2) END",
+        profit_misc()
     )
 }
 
@@ -199,11 +210,11 @@ impl SaleRepository for SqliteSaleRepository {
     fn create_sale_item(&mut self, l: &SaleItem) -> Result<i64, AppError> {
         self.conn.execute(
             &format!(
-                "INSERT INTO sale_items ({ITEM_COLS}, transaction_date) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,                  (SELECT transaction_date FROM sale_transactions WHERE id = ?2))"
+                "INSERT INTO sale_items ({ITEM_COLS}, transaction_date) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,                  (SELECT transaction_date FROM sale_transactions WHERE id = ?2))"
             ),
             params![
                 opt_id(l.id), l.sale_transaction_id, l.item_id, l.item_name, l.pack_label, l.pack_quantity,
-                l.quantity, l.unit_price, l.total_amount
+                l.quantity, l.unit_price, l.total_amount, l.service_cost_total
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -360,9 +371,10 @@ impl SaleRepository for SqliteSaleRepository {
 
     fn bill_profit_parts(&self, sale_id: i64) -> Result<BillProfitParts, AppError> {
         let sql = format!(
-            "SELECT {PROFIT_COST_NET}, {PROFIT_REFUNDS}, {PROFIT_SCRAP}, {PROFIT_REPLACEMENT}, {} \
+            "SELECT {PROFIT_COST_NET}, {PROFIT_REFUNDS}, {PROFIT_SCRAP}, {PROFIT_REPLACEMENT}, {}, {} \
              FROM sale_transactions t WHERE t.id = ?1",
-            profit_expr()
+            profit_expr(),
+            profit_misc()
         );
         self.conn
             .query_row(&sql, params![sale_id], |r| {
@@ -372,10 +384,23 @@ impl SaleRepository for SqliteSaleRepository {
                     scrap_cost: r.get(2)?,
                     replacement_cost: r.get(3)?,
                     total: r.get(4)?,
+                    misc_cost: r.get(5)?,
                 })
             })
             .optional()?
             .ok_or_else(|| AppError::not_found("SaleTransaction", sale_id.to_string()))
+    }
+
+    fn list_line_misc_costs(&self, sale_id: i64) -> Result<Vec<(i64, f64)>, AppError> {
+        let sql = format!(
+            "SELECT si.id, {} FROM sale_items si WHERE si.sale_transaction_id = ?1 ORDER BY si.id",
+            misc_cost_sql("si")
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params![sale_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError> {

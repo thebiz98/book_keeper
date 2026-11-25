@@ -19,6 +19,19 @@ pub struct Item {
     pub updated_at: String,
     #[serde(default = "crate::core::stock_rules::default_low_stock_threshold")]
     pub low_stock_threshold: f64,
+    /// SERVICE only (v12, FR-36): intended cost per service unit, a floor over the components' FIFO cost.
+    #[serde(default)]
+    pub service_cost: Option<f64>,
+}
+
+/// One row of a service's bill of materials (v12, FR-36): base units of `component_item_id`
+/// consumed by one unit of `service_item_id`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServiceComponent {
+    pub id: i64,
+    pub service_item_id: i64,
+    pub component_item_id: i64,
+    pub quantity_per_unit: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

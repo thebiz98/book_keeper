@@ -91,6 +91,8 @@ fn map_item_result(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemSearchResult> 
         low_stock_threshold: r.get(10)?,
         bundles: Vec::new(),
         matched_bundle_id: None,
+        service_cost: r.get(11)?,
+        can_make: r.get(12)?,
     })
 }
 
@@ -101,7 +103,8 @@ fn load_results(conn: &Connection, ids: Vec<i64>, clean_q: &str) -> Result<Vec<I
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, \
-                 is_low_stock, item_type, low_stock_threshold FROM items WHERE is_active = 1 AND id IN ({ph})"
+                 is_low_stock, item_type, low_stock_threshold, service_cost, {} FROM items i WHERE is_active = 1 AND id IN ({ph})",
+                crate::data::sqlite::service_sql::can_make_sql("i")
             ))
             .map_err(idx_err)?;
         let rows = stmt

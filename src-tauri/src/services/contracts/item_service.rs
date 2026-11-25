@@ -1,6 +1,6 @@
 use crate::core::dtos::{
     BundleSuggestion, CreateBundlePayload, CatalogFilter, CreateItemPayload, ItemSearchResult, Paginated, SavedBundle,
-    UpdateBundlePayload, UpdateItemPayload,
+    ServiceComponentView, UpdateBundlePayload, UpdateItemPayload,
 };
 use crate::core::error::AppError;
 
@@ -20,6 +20,8 @@ pub trait ItemService: Send + Sync {
     fn update_bundle(&self, bundle_id: i64, payload: UpdateBundlePayload) -> Result<SavedBundle, AppError>;
     fn delete_bundle(&self, bundle_id: i64) -> Result<(), AppError>;
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError>;
+    /// FR-36: the components of a service with their names, units and current stock.
+    fn get_service_components(&self, item_id: i64) -> Result<Vec<ServiceComponentView>, AppError>;
 }
 
 impl<T: ItemService + ?Sized> ItemService for std::sync::Arc<T> {
@@ -61,5 +63,9 @@ impl<T: ItemService + ?Sized> ItemService for std::sync::Arc<T> {
 
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError> {
         (**self).get_bundle_suggestions()
+    }
+
+    fn get_service_components(&self, item_id: i64) -> Result<Vec<ServiceComponentView>, AppError> {
+        (**self).get_service_components(item_id)
     }
 }

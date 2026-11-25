@@ -8,6 +8,7 @@ use crate::core::dtos::{
 use crate::core::error::AppError;
 use crate::core::money::round2;
 use crate::data::contracts::report_repository::ReportRepository;
+use crate::data::sqlite::service_sql::misc_cost_sql;
 use crate::data::sqlite::{opt_enum_col, SqliteConn};
 
 pub struct SqliteReportRepository {
@@ -60,21 +61,29 @@ const PNL_SQL: &str = "SELECT
 
 impl ReportRepository for SqliteReportRepository {
     fn pnl(&self, from: &str, to: &str) -> Result<PnLReport, AppError> {
-        let v: [f64; 13] = self.conn.query_row(PNL_SQL, params![from, to], |r| {
-            let mut a = [0.0; 13];
+        // FR-37 / X3: misc. cost of the period's service lines comes from the shared fragment.
+        let sql = format!(
+            "{PNL_SQL}, (SELECT COALESCE(SUM({}), 0.0) FROM sale_items si \
+             JOIN sale_transactions s ON s.id = si.sale_transaction_id \
+             WHERE s.is_opening_balance = 0 AND s.transaction_date BETWEEN ?1 AND ?2)",
+            misc_cost_sql("si")
+        );
+        let v: [f64; 14] = self.conn.query_row(&sql, params![from, to], |r| {
+            let mut a = [0.0; 14];
             for (i, slot) in a.iter_mut().enumerate() {
                 *slot = r.get(i)?;
             }
             Ok(a)
         })?;
-        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses, sale_disc, sale_chg, pur_disc, pur_chg] =
+        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses, sale_disc, sale_chg, pur_disc, pur_chg, misc] =
             v;
         let gross_sales = round2(gross);
         let sales_returns = round2(returns);
         let sales_discounts = round2(sale_disc);
         let net_sales = round2(gross_sales - sales_discounts - sales_returns);
         let cogs = round2(cogs_sales + cogs_repl);
-        let gross_profit = round2(net_sales - cogs);
+        let service_misc_costs = round2(misc);
+        let gross_profit = round2(net_sales - cogs - service_misc_costs);
         let inventory_losses = round2(loss_adj + loss_scrap);
         let sale_charges_income = round2(sale_chg);
         let purchase_discounts_income = round2(pur_disc);
@@ -86,6 +95,7 @@ impl ReportRepository for SqliteReportRepository {
             sales_returns,
             net_sales,
             cogs,
+            service_misc_costs,
             gross_profit,
             inventory_losses,
             net_profit: round2(gross_profit + other_income - inventory_losses - operating_expenses),

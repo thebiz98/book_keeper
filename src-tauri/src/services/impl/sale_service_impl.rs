@@ -16,7 +16,7 @@ use crate::services::r#impl::bill_math::{
     bill_preview, compute_bill_totals, delete_bill_charges, insert_bill_charges, net_unit_price,
     resolve_bill_charges, sale_payment_split, validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
 };
-use crate::core::value_objects::{PartyType, PaymentKind, PaymentStatus, TransactionType};
+use crate::core::value_objects::{ItemType, PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::InventoryService;
 use crate::services::contracts::payment_service::PaymentService;
@@ -55,6 +55,10 @@ struct ResolvedSaleLine {
     pack_quantity: f64,
     base_qty: f64,
     line_total: f64,
+    /// SERVICE lines (FR-37): component item ids with the base quantity this line consumes.
+    components: Vec<(i64, f64)>,
+    /// SERVICE lines: `round2(service_cost x quantity)`; `None` without a Service cost.
+    service_cost_total: Option<f64>,
 }
 
 /// Party and lines of a sale payload, resolved against the database (no charges, no stock check).
@@ -123,6 +127,10 @@ fn resolve_sale(
         if !item.is_active {
             return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
         }
+        let is_service = item.item_type == ItemType::Service;
+        if is_service && line.bundle_id.is_some() {
+            return Err(validation("bundle_id", format!("'{}' is a service; services are sold in single units", item.name)));
+        }
         let (multiplier, pack_label) = match line.bundle_id {
             Some(bundle_id) => {
                 let bundle = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| AppError::NotFound {
@@ -144,8 +152,28 @@ fn resolve_sale(
         };
         let base_qty = line.bundle_quantity * multiplier;
         let line_total = round2(line.bundle_quantity * line.unit_price);
-        *required.entry(item.id).or_insert(0.0) += base_qty;
-        lines.push(ResolvedSaleLine { item, pack_label, pack_quantity: line.bundle_quantity, base_qty, line_total });
+        let mut components: Vec<(i64, f64)> = Vec::new();
+        let mut service_cost_total = None;
+        if is_service {
+            // FR-37: the line draws its components; the service itself holds no stock.
+            for c in tx.service_components().list_for_service(item.id)? {
+                let qty = base_qty * c.quantity_per_unit;
+                components.push((c.component_item_id, qty));
+                *required.entry(c.component_item_id).or_insert(0.0) += qty;
+            }
+            service_cost_total = item.service_cost.map(|c| round2(c * base_qty));
+        } else {
+            *required.entry(item.id).or_insert(0.0) += base_qty;
+        }
+        lines.push(ResolvedSaleLine {
+            item,
+            pack_label,
+            pack_quantity: line.bundle_quantity,
+            base_qty,
+            line_total,
+            components,
+            service_cost_total,
+        });
     }
     Ok(ResolvedSale {
         party_id: payload.party_id,
@@ -216,9 +244,56 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
                 quantity: l.base_qty,
                 unit_price: l.line_total / l.base_qty,
                 total_amount: l.line_total,
+                service_cost_total: l.service_cost_total,
             };
             let sale_item_id = tx.sales().create_sale_item(&sale_item)?;
-            self.inventory_service.deplete_stock_for_sale(tx, sale_item_id, l.item.id, l.base_qty)?;
+            if l.item.item_type == ItemType::Service {
+                // FR-37: allocations of a service line point at its components' lots.
+                for &(component_id, qty) in &l.components {
+                    self.inventory_service.deplete_stock_for_sale(tx, sale_item_id, component_id, qty)?;
+                }
+            } else {
+                self.inventory_service.deplete_stock_for_sale(tx, sale_item_id, l.item.id, l.base_qty)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Stock check for a sale (DD-10). Without service lines this is the aggregated per-item check.
+    /// With service lines the lines are walked in order against a running total, so physical and
+    /// service lines share the same lots and a shortfall on a service line names the component, the
+    /// service and the line number (FR-37).
+    fn check_sale_stock(&self, tx: &mut dyn TransactionContext, r: &ResolvedSale) -> Result<(), AppError> {
+        if !r.lines.iter().any(|l| l.item.item_type == ItemType::Service) {
+            return self.inventory_service.validate_stock_availability(tx, &r.requirements);
+        }
+        let mut running: BTreeMap<i64, f64> = BTreeMap::new();
+        for (n, l) in r.lines.iter().enumerate() {
+            let draws: Vec<(i64, f64)> = if l.item.item_type == ItemType::Service {
+                l.components.clone()
+            } else {
+                vec![(l.item.id, l.base_qty)]
+            };
+            for (item_id, qty) in draws {
+                let total = running.entry(item_id).or_insert(0.0);
+                *total += qty;
+                let need = *total;
+                match self.inventory_service.validate_stock_availability(tx, &[(item_id, need)]) {
+                    Err(AppError::InsufficientStockError { item_name, required, available, .. })
+                        if l.item.item_type == ItemType::Service =>
+                    {
+                        return Err(validation(
+                            "items",
+                            format!(
+                                "Not enough '{item_name}' for service '{}' (line {}): need {required}, have {available}",
+                                l.item.name,
+                                n + 1
+                            ),
+                        ));
+                    }
+                    other => other?,
+                }
+            }
         }
         Ok(())
     }
@@ -270,7 +345,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
         // lines of one item (DD-10) and the payment cross-check (DD-02).
         let r = resolve_sale(tx, payload, None)?;
         let (charges, totals) = price_sale(tx, payload, &r, 0.0, fig)?;
-        self.inventory_service.validate_stock_availability(tx, &r.requirements)?;
+        self.check_sale_stock(tx, &r)?;
         let total_amount = totals.total_amount;
         let (upfront, change) = if with_payment {
             check_sale_payment(payload.payment_status, round2(payload.paid_amount), total_amount, r.party_id)?
@@ -353,7 +428,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
             ));
         }
         let (charges, totals) = price_sale(tx, payload, &r, g.applied_amount, fig)?;
-        self.inventory_service.validate_stock_availability(tx, &r.requirements)?;
+        self.check_sale_stock(tx, &r)?;
         let total_amount = totals.total_amount;
         if total_amount + MONEY_EPS < g.applied_amount {
             return Err(locked_with(
@@ -494,6 +569,9 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         let items = tx.sales().list_items_by_transaction_id(sale_id)?;
         let returned: std::collections::HashMap<i64, f64> =
             tx.sales().get_returned_quantities_for_sale(sale_id)?.into_iter().collect();
+        // FR-37 / X3: misc. cost per line comes from the one shared SQL fragment.
+        let line_misc: std::collections::HashMap<i64, f64> =
+            tx.sales().list_line_misc_costs(sale_id)?.into_iter().collect();
         let mut details: Vec<SaleItemDetail> = Vec::new();
         for item in items {
             // DD-30 / DD-28: bills read the write-time snapshots, not the live catalog.
@@ -503,8 +581,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             let returned_quantity = returned.get(&item.id).copied().unwrap_or(0.0);
             let net_unit_price = net_unit_price(item.unit_price, sale.items_subtotal, sale.discounts_total);
             // FR-34: cost net of returned units; revenue net of the bill discount share (FR-19 rule).
+            let misc_cost = round2(line_misc.get(&item.id).copied().unwrap_or(0.0));
+            let is_service = tx.items().find_by_id(item.item_id)?.is_some_and(|i| i.item_type == ItemType::Service);
             let cost_amount = round2(
-                allocations.iter().map(|a| (a.quantity_depleted - a.returned_quantity) * a.unit_cost).sum(),
+                allocations.iter().map(|a| (a.quantity_depleted - a.returned_quantity) * a.unit_cost).sum::<f64>()
+                    + misc_cost,
             );
             let share = net_unit_price_factor(sale.items_subtotal, sale.discounts_total);
             let profit = round2(item.total_amount * share - cost_amount);
@@ -516,6 +597,8 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                 allocations,
                 net_unit_price,
                 cost_amount,
+                misc_cost,
+                is_service,
                 profit,
             });
         }

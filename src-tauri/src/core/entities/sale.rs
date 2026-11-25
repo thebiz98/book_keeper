@@ -37,6 +37,9 @@ pub struct SaleItem {
     pub quantity: f64,   // Base units
     pub unit_price: f64, // Effective selling rate per base unit
     pub total_amount: f64,
+    /// Service lines only (v12, FR-37): `round2(service_cost x quantity)` at save time; NULL otherwise.
+    #[serde(default)]
+    pub service_cost_total: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1,11 +1,12 @@
 use std::sync::Arc;
 use crate::core::dtos::{
     BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult,
-    ItemSearchResult, PageRequest, Paginated, SavedBundle, UpdateBundlePayload,
-    UpdateItemPayload,
+    ItemSearchResult, PageRequest, Paginated, SavedBundle, ServiceComponentInput, ServiceComponentView,
+    UpdateBundlePayload, UpdateItemPayload,
 };
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
+use crate::core::money::round2;
 use crate::core::stock_rules::{
     is_low_stock, validate_low_stock_threshold, DEFAULT_LOW_STOCK_THRESHOLD,
 };
@@ -49,15 +50,48 @@ pub enum BarcodeOwner {
 
 /// Pure field validation for an item (create, update, import). `name` is checked trimmed.
 /// `mrp` must be null or > 0 (0 is rejected: the UI sends null for "no MRP").
-/// FR-21: only physical (stocked) items can be saved until service billing exists.
-pub fn validate_item_type(t: ItemType) -> Result<(), AppError> {
-    match t {
-        ItemType::Physical => Ok(()),
-        ItemType::Service => Err(invalid(
-            "item_type",
-            "Service items are not supported yet. Only physical (stocked) items can be saved in this version.",
-        )),
+/// FR-36: a Service cost is optional, finite and >= 0 (rounded to 2 places).
+pub fn validate_service_cost(cost: Option<f64>) -> Result<Option<f64>, AppError> {
+    match cost {
+        Some(c) if !c.is_finite() || c < 0.0 => {
+            Err(invalid("service_cost", "Service cost must be a number that is 0 or more"))
+        }
+        Some(c) => Ok(Some(round2(c))),
+        None => Ok(None),
     }
+}
+
+/// FR-36: every component is an active physical item other than the service itself, listed once,
+/// with a finite quantity per unit > 0. Returns the rows to store, in the given order.
+pub fn validate_components(
+    tx: &mut dyn TransactionContext,
+    service_id: Option<i64>,
+    components: &[ServiceComponentInput],
+) -> Result<Vec<(i64, f64)>, AppError> {
+    let mut out: Vec<(i64, f64)> = Vec::with_capacity(components.len());
+    for c in components {
+        if !c.quantity_per_unit.is_finite() || c.quantity_per_unit <= 0.0 {
+            return Err(invalid("components", "Quantity per unit must be a number greater than 0"));
+        }
+        if Some(c.component_item_id) == service_id {
+            return Err(invalid("components", "A service cannot be its own component"));
+        }
+        let item = tx
+            .items()
+            .find_by_id(c.component_item_id)?
+            .ok_or_else(|| not_found("Item", c.component_item_id))?;
+        if item.item_type != ItemType::Physical {
+            return Err(invalid("components", format!("Component '{}' is a service; only physical items can be components", item.name)));
+        }
+        if !item.is_active {
+            return Err(invalid("components", format!("Component '{}' is inactive", item.name)));
+        }
+        if out.iter().any(|(id, _)| *id == c.component_item_id) {
+            return Err(invalid("components", format!("Component '{}' is listed more than once", item.name)));
+        }
+        out.push((c.component_item_id, c.quantity_per_unit));
+    }
+    Ok(out)
 }
 
 pub fn validate_item_fields(name: &str, default_sale_price: f64, mrp: Option<f64>) -> Result<(), AppError> {
@@ -174,6 +208,8 @@ pub fn to_search_result(i: Item, bundles: Vec<ItemBundleSearchResult>) -> ItemSe
         is_low_stock: i.is_low_stock,
         low_stock_threshold: i.low_stock_threshold,
         matched_bundle_id: None,
+        service_cost: i.service_cost,
+        can_make: None,
     }
 }
 
@@ -247,11 +283,16 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
             let price = items.iter().find(|i| i.id == b.item_id).map_or(0.0, |i| i.default_sale_price);
             by_item.entry(b.item_id).or_default().push(ItemBundleSearchResult::from_bundle(b, price));
         }
+        let service_ids: Vec<i64> = items.iter().filter(|i| i.item_type == ItemType::Service).map(|i| i.id).collect();
+        let can_make = tx.service_components().can_make(&service_ids)?;
         let rows = items
             .into_iter()
             .map(|i| {
                 let b = by_item.remove(&i.id).unwrap_or_default();
-                to_search_result(i, b)
+                let id = i.id;
+                let mut row = to_search_result(i, b);
+                row.can_make = can_make.get(&id).copied();
+                row
             })
             .collect();
         Ok(Paginated::new(rows, total, page.page, page.limit))
@@ -271,7 +312,6 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
 
     fn create_item(&self, payload: CreateItemPayload) -> Result<i64, AppError> {
         let item_type = payload.item_type.unwrap_or_default();
-        validate_item_type(item_type)?;
         validate_item_fields(&payload.name, payload.default_sale_price, payload.mrp)?;
         let threshold = payload.low_stock_threshold.unwrap_or(DEFAULT_LOW_STOCK_THRESHOLD);
         validate_low_stock_threshold(threshold)?;
@@ -280,9 +320,32 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
                 validate_bundle_fields(&b.bundle_name, b.units_per_bundle, b.mrp, b.default_bundle_price)?;
             }
         }
+        let is_service = item_type == ItemType::Service;
+        let service_cost = if is_service {
+            // FR-36: a service has no stock and no bundles.
+            if payload.initial_stock.unwrap_or(0.0) != 0.0 || payload.initial_cost.is_some() {
+                return Err(invalid("initial_stock", "A service has no stock, so it cannot have opening stock"));
+            }
+            if payload.bundles.as_ref().is_some_and(|b| !b.is_empty()) {
+                return Err(invalid("bundles", "A service cannot have bundles"));
+            }
+            validate_service_cost(payload.service_cost)?
+        } else {
+            if payload.service_cost.is_some() {
+                return Err(invalid("service_cost", "Only a service can have a Service cost"));
+            }
+            if payload.components.as_ref().is_some_and(|c| !c.is_empty()) {
+                return Err(invalid("components", "Only a service can have components"));
+            }
+            None
+        };
 
         let mut tx = self.uow.begin_transaction()?;
         ensure_item_name_unique(&mut *tx, &payload.name, None)?;
+        let components = match (&payload.components, is_service) {
+            (Some(c), true) => validate_components(&mut *tx, None, c)?,
+            _ => Vec::new(),
+        };
         let barcode = clean(payload.barcode);
         if let Some(bc) = barcode.as_deref() {
             ensure_barcode_unique(&mut *tx, bc, None)?;
@@ -306,9 +369,13 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
             created_at: now.clone(),
             updated_at: now,
             low_stock_threshold: threshold,
+            service_cost,
         };
 
         let item_id = tx.items().create(&item)?;
+        if is_service && !components.is_empty() {
+            tx.service_components().replace_for_service(item_id, &components)?;
+        }
 
         if initial_stock != 0.0 {
             // initial_cost is required (or a prior lot): never derived from the sale price (DD-12).
@@ -344,15 +411,32 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
 
     fn update_item(&self, item_id: i64, payload: UpdateItemPayload) -> Result<(), AppError> {
         validate_item_fields(&payload.name, payload.default_sale_price, payload.mrp)?;
-        if let Some(t) = payload.item_type {
-            validate_item_type(t)?;
-        }
         if let Some(t) = payload.low_stock_threshold {
             validate_low_stock_threshold(t)?;
         }
 
         let mut tx = self.uow.begin_transaction()?;
         let mut existing = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        // FR-36: the type is fixed once the item exists.
+        if payload.item_type.is_some_and(|t| t != existing.item_type) {
+            return Err(invalid("item_type", "Item type cannot be changed"));
+        }
+        let is_service = existing.item_type == ItemType::Service;
+        let service_cost = if is_service {
+            validate_service_cost(payload.service_cost)?
+        } else {
+            if payload.service_cost.is_some() {
+                return Err(invalid("service_cost", "Only a service can have a Service cost"));
+            }
+            if payload.components.as_ref().is_some_and(|c| !c.is_empty()) {
+                return Err(invalid("components", "Only a service can have components"));
+            }
+            None
+        };
+        let components = match (&payload.components, is_service) {
+            (Some(c), true) => Some(validate_components(&mut *tx, Some(item_id), c)?),
+            _ => None,
+        };
         ensure_item_name_unique(&mut *tx, &payload.name, Some(item_id))?;
         let barcode = clean(payload.barcode);
         if let Some(bc) = barcode.as_deref() {
@@ -366,15 +450,16 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         existing.base_unit = payload.base_unit.trim().to_string();
         existing.mrp = payload.mrp; // None clears the MRP
         existing.default_sale_price = payload.default_sale_price;
-        if let Some(t) = payload.item_type {
-            existing.item_type = t;
-        }
         if let Some(t) = payload.low_stock_threshold {
             existing.low_stock_threshold = t;
         }
+        existing.service_cost = service_cost;
         existing.updated_at = chrono::Utc::now().to_rfc3339();
 
         tx.items().update(&existing)?;
+        if let Some(c) = components {
+            tx.service_components().replace_for_service(item_id, &c)?;
+        }
         let bundles = tx.bundles().find_by_item_id(item_id)?;
         tx.commit()?;
 
@@ -410,6 +495,9 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
 
         let mut tx = self.uow.begin_transaction()?;
         let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        if item.item_type == ItemType::Service {
+            return Err(invalid("item_id", format!("'{}' is a service item; services cannot have bundles", item.name)));
+        }
         let mut bundle = Self::validate_and_build_bundle(&mut *tx, item_id, None, &p)?;
         bundle.id = tx.bundles().create(&bundle)?;
         let bundles = tx.bundles().find_by_item_id(item_id)?;
@@ -448,5 +536,25 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError> {
         let mut tx = self.uow.begin_read()?;
         tx.bundles().get_bundle_suggestions()
+    }
+
+    fn get_service_components(&self, item_id: i64) -> Result<Vec<ServiceComponentView>, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let mut out = Vec::new();
+        for c in tx.service_components().list_for_service(item_id)? {
+            let it = tx
+                .items()
+                .find_by_id(c.component_item_id)?
+                .ok_or_else(|| not_found("Item", c.component_item_id))?;
+            out.push(ServiceComponentView {
+                component_item_id: it.id,
+                name: it.name,
+                base_unit: it.base_unit,
+                quantity_per_unit: c.quantity_per_unit,
+                current_stock: it.current_stock,
+            });
+        }
+        Ok(out)
     }
 }

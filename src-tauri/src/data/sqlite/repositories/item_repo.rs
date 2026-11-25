@@ -17,7 +17,7 @@ impl SqliteItemRepository {
     }
 }
 
-const COLS: &str = "id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, is_low_stock, is_active, created_at, updated_at, item_type, low_stock_threshold";
+const COLS: &str = "id, name, category, barcode, base_unit, mrp, default_sale_price, current_stock, is_low_stock, is_active, created_at, updated_at, item_type, low_stock_threshold, service_cost";
 
 fn map_item(r: &Row<'_>) -> rusqlite::Result<Item> {
     Ok(Item {
@@ -35,6 +35,7 @@ fn map_item(r: &Row<'_>) -> rusqlite::Result<Item> {
         updated_at: r.get(11)?,
         item_type: enum_col(r, 12)?,
         low_stock_threshold: r.get(13)?,
+        service_cost: r.get(14)?,
     })
 }
 
@@ -116,12 +117,12 @@ impl ItemRepository for SqliteItemRepository {
         self.conn.execute(
             &format!(
                 "INSERT INTO items ({COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8, \
-                 (?13 = 'PHYSICAL' AND ?8 < ?14), ?10,?11,?12,?13,?14)"
+                 (?13 = 'PHYSICAL' AND ?8 < ?14), ?10,?11,?12,?13,?14,?15)"
             ),
             params![
                 id, item.name, item.category, item.barcode, item.base_unit, item.mrp,
                 item.default_sale_price, item.current_stock, item.is_low_stock, item.is_active,
-                item.created_at, item.updated_at, t, item.low_stock_threshold
+                item.created_at, item.updated_at, t, item.low_stock_threshold, item.service_cost
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -131,11 +132,12 @@ impl ItemRepository for SqliteItemRepository {
         let t = enum_to_sql(&item.item_type)?;
         let n = self.conn.execute(
             "UPDATE items SET name=?2, category=?3, barcode=?4, base_unit=?5, mrp=?6, \
-             default_sale_price=?7, is_active=?8, updated_at=?9, item_type=?10, low_stock_threshold=?11, \
+             default_sale_price=?7, is_active=?8, updated_at=?9, item_type=?10, low_stock_threshold=?11, service_cost=?12, \
              is_low_stock = (?10 = 'PHYSICAL' AND current_stock < ?11) WHERE id=?1",
             params![
                 item.id, item.name, item.category, item.barcode, item.base_unit, item.mrp,
-                item.default_sale_price, item.is_active, item.updated_at, t, item.low_stock_threshold
+                item.default_sale_price, item.is_active, item.updated_at, t, item.low_stock_threshold,
+                item.service_cost
             ],
         )?;
         if n == 0 { Err(not_found(item.id)) } else { Ok(()) }

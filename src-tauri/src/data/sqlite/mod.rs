@@ -31,6 +31,7 @@ pub mod fts_indexer;
 pub mod fts_specs;
 pub mod migrations;
 pub mod repositories;
+pub mod service_sql;
 pub mod sqlite_uow;
 
 use std::rc::Rc;
