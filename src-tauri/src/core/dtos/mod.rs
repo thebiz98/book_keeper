@@ -22,7 +22,8 @@ pub use correction_dto::{
 };
 pub use dues_dto::{
     DeleteSettlementResult, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
-    SettleAllocation, SettleBatchPayload, SettlePaymentPayload, SettlementResult, UpdateSettlementPayload,
+    SettleAllocation, SettleBatchPayload, SettlePaymentPayload, SettlementHistoryFilter, SettlementHistoryPage,
+    SettlementHistoryRow, SettlementResult, UpdateSettlementPayload,
 };
 pub use expense_dto::{
     CreateExpenseTypePayload, ExpenseFilter, ExpenseListResponse, ExpensePayload, ExpenseTypeTotal,

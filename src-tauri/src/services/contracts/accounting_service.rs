@@ -1,6 +1,6 @@
 use crate::core::dtos::{
     DeleteSettlementResult, PartyDueSummary, PartyLedgerView, SettleAllocation, SettleBatchPayload, SettlePaymentPayload,
-    SettlementResult, UpdateSettlementPayload,
+    SettlementHistoryFilter, SettlementHistoryPage, SettlementResult, UpdateSettlementPayload,
 };
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
@@ -44,6 +44,10 @@ pub trait AccountingService: Send + Sync {
 
     /// D8: deletes a SETTLEMENT row and recomputes its bill; other kinds are rejected.
     fn delete_settlement(&self, settlement_id: i64) -> Result<DeleteSettlementResult, AppError>;
+
+    /// FR-42: `SETTLEMENT` rows across all parties, newest first, paged in SQL, with totals.
+    /// Read-only. Rejects page < 1, page_size outside 1..=200 and from_date > to_date.
+    fn get_settlement_history(&self, filter: SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError>;
 
     /// Applies a return's value as RETURN_CREDIT inside the caller's transaction.
     /// `target_bill = Some(id)` credits that bill only; `None` credits the party's oldest open
@@ -106,6 +110,10 @@ impl<T: AccountingService + ?Sized> AccountingService for std::sync::Arc<T> {
 
     fn delete_settlement(&self, settlement_id: i64) -> Result<DeleteSettlementResult, AppError> {
         (**self).delete_settlement(settlement_id)
+    }
+
+    fn get_settlement_history(&self, filter: SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError> {
+        (**self).get_settlement_history(filter)
     }
 
     fn apply_return_credit(

@@ -30,6 +30,11 @@ pub async fn update_settlement(state: State<'_, AppState>, settlement_id: i64, p
     super::run_blocking(move || svc.update_settlement(settlement_id, payload)).await
 }
 #[tauri::command]
+pub async fn get_settlement_history(state: State<'_, AppState>, filter: SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError> {
+    let svc = state.accounting_service.clone();
+    super::run_blocking(move || svc.get_settlement_history(filter)).await
+}
+#[tauri::command]
 pub async fn delete_settlement(state: State<'_, AppState>, settlement_id: i64) -> Result<DeleteSettlementResult, AppError> {
     let svc = state.accounting_service.clone();
     super::run_blocking(move || svc.delete_settlement(settlement_id)).await

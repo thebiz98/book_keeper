@@ -105,6 +105,7 @@ fn main() {
             dues_controller::settle_bills_batch,
             dues_controller::update_settlement,
             dues_controller::delete_settlement,
+            dues_controller::get_settlement_history,
             item_controller::update_item,
             item_controller::update_item_low_stock_threshold,
             party_controller::update_party,

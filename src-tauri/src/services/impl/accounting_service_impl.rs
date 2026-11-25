@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use crate::core::dtos::{
     LedgerCashSummary, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
-    DeleteSettlementResult, RecordPaymentPayload, SettleAllocation, SettleBatchPayload, SettlePaymentPayload, SettlementResult,
+    DeleteSettlementResult, RecordPaymentPayload, SettlementHistoryFilter, SettlementHistoryPage, SettleAllocation, SettleBatchPayload, SettlePaymentPayload, SettlementResult,
     UpdateSettlementPayload,
 };
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
-use crate::core::money::{cash_direction, check_entry_date_now, round2, CashDirection, MONEY_EPS};
+use crate::core::money::{cash_direction, check_date, check_entry_date_now, round2, CashDirection, MONEY_EPS};
 use crate::core::value_objects::{LotSource, PartyType, PaymentKind, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::accounting_service::AccountingService;
@@ -366,6 +366,22 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
             r.balance_due = round2(r.balance_due);
         }
         Ok(rows)
+    }
+
+    fn get_settlement_history(&self, filter: SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError> {
+        if filter.page < 1 {
+            return Err(validation("page", "Page must be at least 1"));
+        }
+        if !(1..=200).contains(&filter.page_size) {
+            return Err(validation("page_size", "Page size must be between 1 and 200"));
+        }
+        check_date("from_date", &filter.from_date)?;
+        check_date("to_date", &filter.to_date)?;
+        if filter.from_date > filter.to_date {
+            return Err(validation("from_date", "From date must not be after To date"));
+        }
+        let mut tx = self.uow.begin_read()?;
+        tx.settlements().list_settlement_history(&filter)
     }
 
     fn settle_bills_batch(&self, payload: SettleBatchPayload) -> Result<SettlementResult, AppError> {
