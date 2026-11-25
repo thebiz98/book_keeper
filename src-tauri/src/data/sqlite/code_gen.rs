@@ -37,6 +37,9 @@ pub const RETURN_CODE: CodeSeq = CodeSeq { prefix: "RET-", start: 1001, width: 4
 pub const ADJUSTMENT_LOT_CODE: CodeSeq = CodeSeq { prefix: "ADJ-", start: 1, width: 4 };
 pub const OPENING_LOT_CODE: CodeSeq = CodeSeq { prefix: "OPN-", start: 1, width: 4 };
 pub const RETURN_LOT_CODE: CodeSeq = CodeSeq { prefix: "RTL-", start: 1, width: 4 };
+/// Party opening-balance bills (FR-35): one sequence for both sides. The high-water mark in
+/// `code_sequences` is global, so a customer and a vendor never get the same number.
+pub const OPENING_BALANCE_CODE: CodeSeq = CodeSeq { prefix: "OB-", start: 1, width: 4 };
 pub const EXPENSE_CODE: CodeSeq = CodeSeq { prefix: "EXP-", start: 1001, width: 4 };
 
 /// The `purchase_transactions` sequence for a lot header of the given source (DD-07).

@@ -58,6 +58,9 @@ pub struct PurchaseHistoryRow {
     pub items_subtotal: f64,
     pub charges_total: f64,
     pub discounts_total: f64,
+    /// Party opening-balance bill (FR-35); only present when the filter asked for it.
+    #[serde(default)]
+    pub is_opening_balance: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

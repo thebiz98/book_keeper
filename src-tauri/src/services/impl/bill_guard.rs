@@ -16,6 +16,7 @@ pub const TOTAL_BELOW_APPLIED: &str = "TOTAL_BELOW_APPLIED";
 pub const PARTY_CHANGE_WITH_CREDITS: &str = "PARTY_CHANGE_WITH_CREDITS";
 pub const PARTY_REQUIRED_WITH_PAYMENTS: &str = "PARTY_REQUIRED_WITH_PAYMENTS";
 pub const NEWER_RETURN: &str = "NEWER_RETURN";
+pub const OPENING_BALANCE: &str = "OPENING_BALANCE";
 
 /// The `BillLocked` error for one guard reason.
 pub fn locked(reason: &GuardReason) -> AppError {
@@ -33,6 +34,17 @@ fn reason(code: &str, message: String, blocks_edit: bool, blocks_delete: bool) -
 
 fn codes(returns: &[ReturnTransaction]) -> String {
     returns.iter().map(|r| r.return_code.clone()).collect::<Vec<_>>().join(", ")
+}
+
+/// An opening-balance bill (FR-35) is a party balance, not a trade: it can be neither edited nor
+/// deleted here. Change it from the party dialog.
+fn opening_balance_reason(code: &str) -> GuardReason {
+    reason(
+        OPENING_BALANCE,
+        format!("{code} is the party's opening balance. Change it from the party record."),
+        true,
+        true,
+    )
 }
 
 fn finish(mut g: BillEditGuard) -> BillEditGuard {
@@ -106,7 +118,13 @@ pub fn evaluate_sale_guard(tx: &mut dyn TransactionContext, sale_id: i64) -> Res
         .sales()
         .find_transaction_by_id(sale_id)?
         .ok_or_else(|| AppError::not_found("SaleTransaction", sale_id.to_string()))?;
+    let is_opening = sale.is_opening_balance;
     let mut g = blank_guard(CorrectionTarget::Sale, sale_id, sale.transaction_code);
+    if is_opening {
+        g.reasons.push(opening_balance_reason(&g.code.clone()));
+        g.can_change_party = false;
+        return Ok(finish(g));
+    }
     ledger_part(tx, TransactionType::Sale, sale_id, ReturnType::Customer, &mut g)?;
     Ok(finish(g))
 }
@@ -117,6 +135,11 @@ pub fn evaluate_purchase_guard(tx: &mut dyn TransactionContext, purchase_id: i64
         .find_transaction_by_id(purchase_id)?
         .ok_or_else(|| AppError::not_found("PurchaseTransaction", purchase_id.to_string()))?;
     let mut g = blank_guard(CorrectionTarget::Purchase, purchase_id, p.transaction_code.clone());
+    if p.is_opening_balance {
+        g.reasons.push(opening_balance_reason(&p.transaction_code));
+        g.can_change_party = false;
+        return Ok(finish(g));
+    }
     if p.source != LotSource::Purchase {
         g.reasons.push(reason(
             NOT_A_PURCHASE,

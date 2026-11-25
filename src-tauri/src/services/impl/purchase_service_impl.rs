@@ -276,6 +276,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             charges_total: totals.charges_total,
             discounts_total: totals.discounts_total,
             updated_at: None,
+            is_opening_balance: false,
         };
         let purchase_id = tx.purchases().create_transaction(&purchase_tx)?;
         insert_bill_charges(tx, TransactionType::Purchase, purchase_id, &charges)?;
@@ -394,6 +395,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             charges_total: totals.charges_total,
             discounts_total: totals.discounts_total,
             updated_at: Some(chrono::Utc::now().to_rfc3339()),
+            is_opening_balance: false,
             ..old.clone()
         };
         tx.purchases().update_header_for_edit(&header)?;
@@ -507,6 +509,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             charges_total: totals.charges_total,
             discounts_total: totals.discounts_total,
             updated_at: Some(chrono::Utc::now().to_rfc3339()),
+            is_opening_balance: false,
             ..header.clone()
         };
         tx.purchases().update_header_for_edit(&updated)?;

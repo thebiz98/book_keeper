@@ -91,6 +91,8 @@ export interface HistoryFilter {
   limit?: number | null;
   /** Sales history only (FR-34): rows carry the bill profit. */
   includeProfit?: boolean | null;
+  /** Dues paths only (FR-35): also list the party's opening-balance bill. */
+  includeOpeningBalance?: boolean | null;
 }
 
 export interface ReturnsFilter {
@@ -301,6 +303,8 @@ export interface CreatePartyPayload {
   phone: string | null;
   partyType: PartyType;
   notes: string | null;
+  /** FR-35: creates / updates / removes (amount 0) the party's opening bill; omit to leave it as is. */
+  openingBalance?: { amount: number; asOfDate: string } | null;
 }
 
 export type UpdatePartyPayload = CreatePartyPayload;

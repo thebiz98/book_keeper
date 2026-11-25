@@ -82,6 +82,10 @@ pub struct SalesHistoryFilter {
     /// Sales only (FR-34): when true each row carries the bill profit; otherwise `profit` is `null`.
     #[serde(default)]
     pub include_profit: Option<bool>,
+    /// Dues paths only (FR-35): when true the list also holds the party's opening-balance bill.
+    /// Absent / false: opening bills are excluded (history is trade only).
+    #[serde(default)]
+    pub include_opening_balance: Option<bool>,
 }
 
 impl SalesHistoryFilter {
@@ -112,6 +116,9 @@ pub struct SaleHistoryRow {
     /// Bill profit (FR-34); `None` unless the filter asked for it.
     #[serde(default)]
     pub profit: Option<f64>,
+    /// Party opening-balance bill (FR-35); only present when the filter asked for it.
+    #[serde(default)]
+    pub is_opening_balance: bool,
 }
 
 /// Raw components of one bill's profit (same sources as the P&L), computed in SQL.

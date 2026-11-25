@@ -23,6 +23,10 @@ pub trait SaleRepository {
     ) -> Result<(), AppError>;
     /// Open bills for FIFO settlement / credit: `balance_due > 0`, `ORDER BY transaction_date, id`.
     fn list_open_for_party(&self, party_id: i64) -> Result<Vec<SaleTransaction>, AppError>;
+    /// Next `OB-` code (FR-35); call inside the write transaction that inserts the bill.
+    fn next_opening_code(&self) -> Result<String, AppError>;
+    /// The customer's opening-balance bill (FR-35), if any.
+    fn find_opening_for_party(&self, party_id: i64) -> Result<Option<SaleTransaction>, AppError>;
     fn list_sales(
         &self,
         start_date: Option<&str>,

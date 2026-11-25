@@ -12,7 +12,7 @@ export async function fetchOpenBills(type: TransactionType, partyId: number): Pr
   const fetchAll = async (status: 'UNPAID' | 'PARTIAL'): Promise<OpenBill[]> => {
     const out: OpenBill[] = [];
     for (let page = 1; page <= 50; page++) {
-      const filter = { partyId, paymentStatus: status, page, limit: 200 };
+      const filter = { partyId, paymentStatus: status, page, limit: 200, includeOpeningBalance: true };
       const res = type === 'SALE' ? await api.getSalesHistory(filter) : await api.getPurchasesHistory(filter);
       out.push(...res.items);
       if (out.length >= res.total || res.items.length === 0) break;

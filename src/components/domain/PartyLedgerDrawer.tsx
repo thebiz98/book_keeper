@@ -44,6 +44,10 @@ export const PartyLedgerDrawer: React.FC<PartyLedgerDrawerProps> = ({ partyId, o
     setLedger(null);
   }, [partyId]);
 
+  const isOpeningEntry = (e: { transactionCode: string; transactionType: string }) =>
+    (e.transactionType === 'SALE' || e.transactionType === 'PURCHASE') &&
+    !!ledger?.bills.find((b) => b.transactionCode === e.transactionCode)?.isOpeningBalance;
+
   const afterMoneyChange = () => {
     setReloadKey((k) => k + 1);
     refreshAppMetrics();
@@ -111,7 +115,13 @@ export const PartyLedgerDrawer: React.FC<PartyLedgerDrawerProps> = ({ partyId, o
                   >
                     <TableCell className="py-1 font-mono">{e.date}</TableCell>
                     <TableCell className="font-mono">{e.transactionCode}</TableCell>
-                    <TableCell>{e.transactionType}</TableCell>
+                    <TableCell>
+                      {isOpeningEntry(e) ? (
+                        <span data-testid="opening-label">Opening balance</span>
+                      ) : (
+                        e.transactionType
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">{e.debit > 0 ? <CurrencyDisplay amount={e.debit} size="sm" /> : ''}</TableCell>
                     <TableCell className="text-right">{e.credit > 0 ? <CurrencyDisplay amount={e.credit} size="sm" /> : ''}</TableCell>
                     <TableCell className="text-right">

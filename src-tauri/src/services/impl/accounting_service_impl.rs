@@ -573,6 +573,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
                     paid_amount: b.paid_amount,
                     balance_due: b.balance_due,
                     payment_status: b.payment_status,
+                    is_opening_balance: b.is_opening_balance,
                 })
                 .collect(),
             TransactionType::Purchase => tx
@@ -588,6 +589,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
                     paid_amount: b.paid_amount,
                     balance_due: b.balance_due,
                     payment_status: b.payment_status,
+                    is_opening_balance: b.is_opening_balance,
                 })
                 .collect(),
         };

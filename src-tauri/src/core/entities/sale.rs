@@ -21,6 +21,9 @@ pub struct SaleTransaction {
     pub discounts_total: f64,
     /// Last edit time (FR-20, v8); `None` if never edited.
     pub updated_at: Option<String>,
+    /// Party opening balance bill (FR-35, v11): no lines, never a sale for any report.
+    #[serde(default)]
+    pub is_opening_balance: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

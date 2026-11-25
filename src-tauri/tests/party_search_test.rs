@@ -20,7 +20,7 @@ fn setup() -> (TestDb, Svc) {
 }
 
 fn add(svc: &Svc, name: &str, phone: Option<&str>, t: PartyType) -> i64 {
-    svc.create_party(CreatePartyPayload { name: name.into(), phone: phone.map(Into::into), party_type: t, notes: None })
+    svc.create_party(CreatePartyPayload { name: name.into(), phone: phone.map(Into::into), party_type: t, notes: None, opening_balance: None })
         .unwrap()
 }
 
@@ -41,7 +41,7 @@ fn psrch_02_rename_replaces_the_index_row() {
     let id = add(&svc, "Ramesh Kumar", None, PartyType::Customer);
     svc.update_party(
         id,
-        UpdatePartyPayload { name: "Suresh Kumar".into(), phone: None, party_type: PartyType::Customer, notes: None },
+        UpdatePartyPayload { name: "Suresh Kumar".into(), phone: None, party_type: PartyType::Customer, notes: None, opening_balance: None },
     )
     .unwrap();
     assert!(names(&svc, "ram", None).is_empty());

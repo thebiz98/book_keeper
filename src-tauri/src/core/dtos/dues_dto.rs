@@ -103,6 +103,9 @@ pub struct PartyLedgerBill {
     pub paid_amount: f64,
     pub balance_due: f64,
     pub payment_status: PaymentStatus,
+    /// Party opening-balance bill (FR-35).
+    #[serde(default)]
+    pub is_opening_balance: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

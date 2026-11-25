@@ -3,6 +3,8 @@ import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { Users, Plus, Search, Pencil, User, Truck, BookOpen } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import type { PartyListRow, PartyType } from '@/types';
+import type { CreatePartyPayload } from '@/types/api';
+import { todayLocal } from '@/lib/dates';
 import { PartyLedgerDrawer } from '@/components/domain/PartyLedgerDrawer';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -19,6 +21,11 @@ interface PartyForm {
   phone: string;
   notes: string;
   partyType: PartyType;
+  /** Opening balance (FR-35): amount text, "As of" date, and what the existing opening bill shows. */
+  openingAmount: string;
+  openingDate: string;
+  hadOpening: boolean;
+  settledAmount: number;
 }
 
 const emptyForm = (partyType: PartyType): PartyForm => ({
@@ -27,6 +34,10 @@ const emptyForm = (partyType: PartyType): PartyForm => ({
   phone: '',
   notes: '',
   partyType,
+  openingAmount: '',
+  openingDate: todayLocal(),
+  hadOpening: false,
+  settledAmount: 0,
 });
 
 export const PartiesPage: React.FC = () => {
@@ -64,12 +75,26 @@ export const PartiesPage: React.FC = () => {
     savingRef.current = true;
     setIsSaving(true);
     setFormError(null);
-    const payload = {
+    const payload: CreatePartyPayload = {
       name: form.name.trim(),
       phone: form.phone.trim() || null,
       notes: form.notes.trim() || null,
       partyType: form.partyType,
     };
+    const amountText = form.openingAmount.trim();
+    if (amountText) {
+      const amount = Number(amountText);
+      if (!Number.isFinite(amount)) {
+        setFormError('Opening balance must be a number');
+        savingRef.current = false;
+        setIsSaving(false);
+        return;
+      }
+      payload.openingBalance = { amount, asOfDate: form.openingDate };
+    } else if (form.hadOpening) {
+      // An emptied field of an existing opening bill removes it (the backend refuses if settled).
+      payload.openingBalance = { amount: 0, asOfDate: form.openingDate };
+    }
     try {
       if (form.id === null) {
         await api.createParty(payload);
@@ -93,6 +118,10 @@ export const PartiesPage: React.FC = () => {
       phone: p.phone ?? '',
       notes: p.notes ?? '',
       partyType: p.partyType,
+      openingAmount: p.openingBalance ? String(p.openingBalance.amount) : '',
+      openingDate: p.openingBalance?.asOfDate ?? todayLocal(),
+      hadOpening: !!p.openingBalance,
+      settledAmount: p.openingBalance?.settledAmount ?? 0,
     });
 
   return (
@@ -223,11 +252,40 @@ export const PartiesPage: React.FC = () => {
               label="Type"
               value={form.partyType}
               onChange={(v) => setForm({ ...form, partyType: v })}
+              disabled={form.hadOpening}
               options={[
                 { value: 'CUSTOMER', label: 'Customer' },
                 { value: 'VENDOR', label: 'Vendor' },
               ]}
             />
+            <fieldset className="flex flex-col gap-2 rounded-md border border-slate-200 dark:border-slate-700 p-3">
+              <legend className="px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Opening balance
+              </legend>
+              <div className="grid grid-cols-2 gap-3">
+                <TextInput
+                  label={form.partyType === 'CUSTOMER' ? 'Customer owes you (₹)' : 'You owe this vendor (₹)'}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={form.openingAmount}
+                  onChange={(e) => setForm({ ...form, openingAmount: e.target.value })}
+                />
+                <TextInput
+                  label="As of"
+                  type="date"
+                  max={todayLocal()}
+                  value={form.openingDate}
+                  onChange={(e) => setForm({ ...form, openingDate: e.target.value })}
+                />
+              </div>
+              {form.settledAmount > 0 && (
+                <p data-testid="opening-settled" className="text-xs text-slate-500">
+                  ₹{form.settledAmount} already settled
+                </p>
+              )}
+            </fieldset>
             {formError && (
               <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">
                 {formError}

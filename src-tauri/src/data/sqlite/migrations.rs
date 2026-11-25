@@ -383,6 +383,13 @@ CREATE INDEX idx_sale_items_item_date ON sale_items(item_id, transaction_date DE
 CREATE INDEX idx_purchase_items_item_date ON purchase_items(item_id, transaction_date DESC, purchase_transaction_id DESC);
 "#;
 
+const SCHEMA_V11: &str = r#"
+ALTER TABLE sale_transactions ADD COLUMN is_opening_balance INTEGER NOT NULL DEFAULT 0 CHECK (is_opening_balance IN (0, 1));
+ALTER TABLE purchase_transactions ADD COLUMN is_opening_balance INTEGER NOT NULL DEFAULT 0 CHECK (is_opening_balance IN (0, 1));
+CREATE UNIQUE INDEX ux_sale_opening_party ON sale_transactions(party_id) WHERE is_opening_balance = 1;
+CREATE UNIQUE INDEX ux_purchase_opening_party ON purchase_transactions(party_id) WHERE is_opening_balance = 1;
+"#;
+
 /// All known migrations, ascending and gap-free. Append only; never edit a shipped step.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 },
@@ -407,6 +414,7 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "cash_opening",
         sql: "ALTER TABLE shop_settings ADD COLUMN opening_cash REAL NOT NULL DEFAULT 0 CHECK (opening_cash >= 0);",
     },
+    Migration { version: 11, name: "party_opening_balance", sql: SCHEMA_V11 },
 ];
 
 /// Highest schema version this build knows.

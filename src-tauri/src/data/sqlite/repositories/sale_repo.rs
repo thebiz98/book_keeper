@@ -6,10 +6,10 @@ use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
 use crate::data::contracts::sale_repository::SaleRepository;
-use crate::data::sqlite::code_gen::{next_code, SALE_CODE};
+use crate::data::sqlite::code_gen::{next_code, OPENING_BALANCE_CODE, SALE_CODE};
 use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
-const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total, updated_at";
+const TX_COLS: &str = "id, transaction_code, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total, updated_at, is_opening_balance";
 const ITEM_COLS: &str = "id, sale_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_price, total_amount";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<SaleTransaction> {
@@ -30,6 +30,7 @@ fn map_tx(r: &Row<'_>) -> rusqlite::Result<SaleTransaction> {
         charges_total: r.get(13)?,
         discounts_total: r.get(14)?,
         updated_at: r.get(15)?,
+        is_opening_balance: r.get(16)?,
     })
 }
 
@@ -78,8 +79,12 @@ const PROFIT_REPLACEMENT: &str = "COALESCE((SELECT SUM(o.quantity_depleted * o.u
      FROM stock_outflow_allocations o JOIN return_transactions r ON r.id = o.source_id \
      WHERE o.source_type = 'REPLACEMENT' AND r.return_type = 'CUSTOMER' AND r.original_transaction_id = t.id), 0.0)";
 
+/// An opening-balance bill (FR-35) is not a sale: its profit is 0.
 fn profit_expr() -> String {
-    format!("ROUND(t.total_amount - {PROFIT_COST_NET} - {PROFIT_REFUNDS} - {PROFIT_SCRAP} - {PROFIT_REPLACEMENT}, 2)")
+    format!(
+        "CASE WHEN t.is_opening_balance = 1 THEN 0.0 ELSE \
+         ROUND(t.total_amount - {PROFIT_COST_NET} - {PROFIT_REFUNDS} - {PROFIT_SCRAP} - {PROFIT_REPLACEMENT}, 2) END"
+    )
 }
 
 pub struct SqliteSaleRepository {
@@ -180,11 +185,12 @@ impl SaleRepository for SqliteSaleRepository {
 
     fn create_transaction(&mut self, tx: &SaleTransaction) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO sale_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"),
+            &format!("INSERT INTO sale_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"),
             params![
                 opt_id(tx.id), tx.transaction_code, tx.transaction_date, tx.party_id, tx.party_name,
                 tx.payment_mode, enum_to_sql(&tx.payment_status)?, tx.total_amount, tx.paid_amount, tx.balance_due,
-                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total, tx.updated_at
+                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total, tx.updated_at,
+                tx.is_opening_balance
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -247,6 +253,21 @@ impl SaleRepository for SqliteSaleRepository {
         Ok(rows)
     }
 
+    fn next_opening_code(&self) -> Result<String, AppError> {
+        next_code(&self.conn, "sale_transactions", "transaction_code", &OPENING_BALANCE_CODE)
+    }
+
+    fn find_opening_for_party(&self, party_id: i64) -> Result<Option<SaleTransaction>, AppError> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {TX_COLS} FROM sale_transactions WHERE party_id = ?1 AND is_opening_balance = 1"),
+                params![party_id],
+                map_tx,
+            )
+            .optional()?)
+    }
+
     fn list_sales(
         &self,
         start_date: Option<&str>,
@@ -280,7 +301,7 @@ impl SaleRepository for SqliteSaleRepository {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<SaleHistoryRow>, usize), AppError> {
-        let (w, vals) = history_where(filter, None, &["t.transaction_code", "t.party_name"])?;
+        let (w, vals) = history_where(filter, (filter.include_opening_balance != Some(true)).then_some("t.is_opening_balance = 0"), &["t.transaction_code", "t.party_name"])?;
         let total: i64 = self.conn.query_row(
             &format!("SELECT COUNT(*) FROM sale_transactions t{w}"),
             rusqlite::params_from_iter(vals.iter()),
@@ -294,7 +315,7 @@ impl SaleRepository for SqliteSaleRepository {
             "SELECT t.id, t.transaction_code, t.transaction_date, t.created_at, t.party_id, t.party_name, \
              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_transaction_id = t.id), \
              t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total, \
-             {profit_col} \
+             {profit_col}, t.is_opening_balance \
              FROM sale_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -316,6 +337,7 @@ impl SaleRepository for SqliteSaleRepository {
                     charges_total: r.get(12)?,
                     discounts_total: r.get(13)?,
                     profit: r.get(14)?,
+                    is_opening_balance: r.get(15)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

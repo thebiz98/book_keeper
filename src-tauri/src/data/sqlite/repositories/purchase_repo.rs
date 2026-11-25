@@ -6,10 +6,10 @@ use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::purchase_repository::PurchaseRepository;
-use crate::data::sqlite::code_gen::{next_code, seq_for_source};
+use crate::data::sqlite::code_gen::{next_code, seq_for_source, OPENING_BALANCE_CODE};
 use crate::data::sqlite::{enum_col, enum_to_sql, history_where, SqliteConn};
 
-const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total, updated_at";
+const TX_COLS: &str = "id, transaction_code, source, supplier_invoice_ref, transaction_date, party_id, party_name, payment_mode, payment_status, total_amount, paid_amount, balance_due, notes, created_at, items_subtotal, charges_total, discounts_total, updated_at, is_opening_balance";
 const ITEM_COLS: &str = "id, purchase_transaction_id, item_id, item_name, pack_label, pack_quantity, quantity, unit_cost, total_amount, remaining_quantity";
 
 fn map_tx(r: &Row<'_>) -> rusqlite::Result<PurchaseTransaction> {
@@ -32,6 +32,7 @@ fn map_tx(r: &Row<'_>) -> rusqlite::Result<PurchaseTransaction> {
         charges_total: r.get(15)?,
         discounts_total: r.get(16)?,
         updated_at: r.get(17)?,
+        is_opening_balance: r.get(18)?,
     })
 }
 
@@ -207,12 +208,13 @@ impl PurchaseRepository for SqlitePurchaseRepository {
 
     fn create_transaction(&mut self, tx: &PurchaseTransaction) -> Result<i64, AppError> {
         self.conn.execute(
-            &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"),
+            &format!("INSERT INTO purchase_transactions ({TX_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"),
             params![
                 opt_id(tx.id), tx.transaction_code, enum_to_sql(&tx.source)?, tx.supplier_invoice_ref,
                 tx.transaction_date, tx.party_id, tx.party_name, tx.payment_mode,
                 enum_to_sql(&tx.payment_status)?, tx.total_amount, tx.paid_amount, tx.balance_due,
-                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total, tx.updated_at
+                tx.notes, tx.created_at, tx.items_subtotal, tx.charges_total, tx.discounts_total, tx.updated_at,
+                tx.is_opening_balance
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -341,6 +343,21 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         Ok(rows)
     }
 
+    fn next_opening_code(&self) -> Result<String, AppError> {
+        next_code(&self.conn, "purchase_transactions", "transaction_code", &OPENING_BALANCE_CODE)
+    }
+
+    fn find_opening_for_party(&self, party_id: i64) -> Result<Option<PurchaseTransaction>, AppError> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!("SELECT {TX_COLS} FROM purchase_transactions WHERE party_id = ?1 AND is_opening_balance = 1"),
+                params![party_id],
+                map_tx,
+            )
+            .optional()?)
+    }
+
     fn list_purchases(
         &self,
         start_date: Option<&str>,
@@ -381,7 +398,11 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         // PURCHASE-source only: ADJUSTMENT / OPENING / RETURN headers are not supplier bills (DD-07).
         let (w, vals) = history_where(
             filter,
-            Some("t.source = 'PURCHASE'"),
+            Some(if filter.include_opening_balance == Some(true) {
+                "t.source = 'PURCHASE'"
+            } else {
+                "t.source = 'PURCHASE' AND t.is_opening_balance = 0"
+            }),
             &["t.transaction_code", "t.party_name", "t.supplier_invoice_ref"],
         )?;
         let total: i64 = self.conn.query_row(
@@ -396,7 +417,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
             "SELECT t.id, t.transaction_code, t.supplier_invoice_ref, t.transaction_date, t.created_at, \
              t.party_id, t.party_name, \
              (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_transaction_id = t.id), \
-             t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total \
+             t.total_amount, t.paid_amount, t.balance_due, t.payment_status, t.items_subtotal, t.charges_total, t.discounts_total, t.is_opening_balance \
              FROM purchase_transactions t{w} ORDER BY t.transaction_date DESC, t.id DESC LIMIT ? OFFSET ?"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -418,6 +439,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
                     items_subtotal: r.get(12)?,
                     charges_total: r.get(13)?,
                     discounts_total: r.get(14)?,
+                    is_opening_balance: r.get(15)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
