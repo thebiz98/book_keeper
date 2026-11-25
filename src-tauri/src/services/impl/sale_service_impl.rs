@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, BillPaymentPreview, BillPreview, CreateSalePayload, DeleteBillResult, Paginated,
@@ -100,6 +100,7 @@ fn resolve_sale(
     tx: &mut dyn TransactionContext,
     payload: &CreateSalePayload,
     keep_party: Option<i64>,
+    keep_items: &HashSet<i64>,
 ) -> Result<ResolvedSale, AppError> {
     let party_name = match payload.party_id {
         Some(pid) => {
@@ -124,8 +125,8 @@ fn resolve_sale(
             entity: "Item".to_string(),
             id: line.item_id.to_string(),
         })?;
-        if !item.is_active {
-            return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+        if !item.is_active && !keep_items.contains(&item.id) {
+            return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", item.name)));
         }
         let is_service = item.item_type == ItemType::Service;
         if is_service && line.bundle_id.is_some() {
@@ -343,7 +344,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
 
         // Party and lines; charges and totals (FR-19), then the aggregated stock check across all
         // lines of one item (DD-10) and the payment cross-check (DD-02).
-        let r = resolve_sale(tx, payload, None)?;
+        let r = resolve_sale(tx, payload, None, &HashSet::new())?;
         let (charges, totals) = price_sale(tx, payload, &r, 0.0, fig)?;
         self.check_sale_stock(tx, &r)?;
         let total_amount = totals.total_amount;
@@ -405,6 +406,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
             return Err(locked(reason));
         }
 
+        // FR-45: lines of an item deleted since the sale was made may stay on the bill.
+        let keep_items: HashSet<i64> =
+            tx.sales().list_items_by_transaction_id(sale_id)?.into_iter().map(|l| l.item_id).collect();
+
         // Reverse the old version: stock, lines, charges, upfront cash. Later settlements stay.
         self.inventory_service.reverse_sale_bill_stock(tx, sale_id)?;
         tx.sales().delete_sale_items(sale_id)?;
@@ -413,7 +418,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
             .delete_bill_ledger(tx, TransactionType::Sale, sale_id, &[PaymentKind::Upfront])?;
 
         // Repost through the create rules.
-        let r = resolve_sale(tx, payload, old.party_id)?;
+        let r = resolve_sale(tx, payload, old.party_id, &keep_items)?;
         let party_changed = r.party_id != old.party_id;
         if party_changed && !g.can_change_party {
             return Err(locked_with(

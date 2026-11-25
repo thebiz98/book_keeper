@@ -153,6 +153,12 @@ impl FtsIndex for SqliteFtsIndex {
         for (key, cols) in src {
             self.insert_rows(&tx, key, std::slice::from_ref(&cols))?;
         }
+        // DD-75: compact the segments after a full rebuild.
+        tx.execute(
+            &format!("INSERT INTO {t}({t}) VALUES('optimize')", t = self.spec.table),
+            [],
+        )
+        .map_err(idx_err)?;
         tx.commit().map_err(idx_err)
     }
 

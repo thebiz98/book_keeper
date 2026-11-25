@@ -136,7 +136,7 @@ fn active_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Item, Ap
         .find_by_id(item_id)?
         .ok_or_else(|| AppError::not_found("Item", item_id.to_string()))?;
     if !item.is_active {
-        return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+        return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", item.name)));
     }
     reject_service_return(&item)?;
     Ok(item)
@@ -238,6 +238,9 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                         .find_by_id(line.item_id)?
                         .ok_or_else(|| AppError::not_found("Item", line.item_id.to_string()))?;
                     reject_service_return(&sold)?;
+                    if !sold.is_active {
+                        return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", sold.name)));
+                    }
                     // Refund cap = the sold rate net of the bill-level discount share (FR-19).
                     let s = sale.as_ref().expect("a linked line implies the original sale");
                     let cap = net_unit_price(line.unit_price, s.items_subtotal, s.discounts_total);
@@ -437,6 +440,9 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                 .find_by_id(it.item_id)?
                 .ok_or_else(|| AppError::not_found("Item", it.item_id.to_string()))?;
             reject_service_return(&vendor_item)?;
+            if !vendor_item.is_active {
+                return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", vendor_item.name)));
+            }
             item_names.push(vendor_item.name);
             match it.purchase_item_id {
                 Some(lid) => {

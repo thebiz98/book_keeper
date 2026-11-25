@@ -139,6 +139,64 @@ pub struct ItemSearchResult {
     /// SERVICE only (FR-36): "Can make N" from the components' stock; `None` without components.
     #[serde(default)]
     pub can_make: Option<i64>,
+    /// FR-45: `false` for a deleted item (only `get_item` can return one).
+    #[serde(default = "default_true")]
+    pub is_active: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// FR-45: what deleting an item would do, computed by the backend (DD-56). Writes nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemDeletePreview {
+    pub item_id: i64,
+    pub name: String,
+    pub item_type: ItemType,
+    pub stock: f64,
+    pub base_unit: String,
+    /// `SUM(remaining_quantity * unit_cost)` of the item's lots.
+    pub stock_value: f64,
+    /// Active services that use the item as a component.
+    pub blocking_services: Vec<String>,
+    pub can_delete: bool,
+    /// Why `can_delete` is false (backend sentence).
+    pub reason: Option<String>,
+    /// FR-45 A1 (DD-79): what `delete_item` would do. HARD = never used, removed permanently.
+    pub mode: DeleteMode,
+    /// Why the item is SOFT (where it is used); empty for HARD.
+    pub reasons_used: Vec<String>,
+}
+
+/// FR-45 A1: how a delete is carried out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DeleteMode {
+    /// Never used anywhere: removed permanently.
+    Hard,
+    /// Used in past records: `is_active = 0`, can be restored.
+    Soft,
+}
+
+/// `delete_item` result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeleteItemResult {
+    pub mode: DeleteMode,
+}
+
+/// One row of the Deleted items list (FR-45).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeletedItemRow {
+    pub item_id: i64,
+    pub name: String,
+    pub item_type: ItemType,
+    pub category: Option<String>,
+    pub base_unit: String,
+    pub current_stock: f64,
+    pub stock_value: f64,
+    /// `updated_at` (the delete time: every other write to a deleted item is rejected).
+    pub deleted_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -50,6 +50,11 @@ pub enum AppError {
     /// FR-20: an edit/delete was refused by a guard. `code` is a stable reason code (LLD 14.4).
     #[error("Bill locked: {message}")]
     BillLocked { code: String, message: String },
+
+    /// FR-45 / FR-46: a new record's name equals a deleted one. The UI offers Restore for
+    /// `existing_id` instead of a raw constraint error. `code` is e.g. `ITEM_NAME_DELETED`.
+    #[error("{message}")]
+    DeletedNameClash { field: String, code: String, existing_id: i64, message: String },
 }
 
 pub type DomainResult<T> = Result<T, AppError>;
@@ -119,6 +124,8 @@ mod tests {
             (AppError::OperationNotAllowed("o".into()), json!({"type":"OperationNotAllowed","details":"o"})),
             (AppError::BillLocked { code: "LINKED_RETURNS".into(), message: "m".into() },
              json!({"type":"BillLocked","details":{"code":"LINKED_RETURNS","message":"m"}})),
+            (AppError::DeletedNameClash { field: "name".into(), code: "ITEM_NAME_DELETED".into(), existing_id: 7, message: "m".into() },
+             json!({"type":"DeletedNameClash","details":{"field":"name","code":"ITEM_NAME_DELETED","existing_id":7,"message":"m"}})),
         ];
         for (err, expected) in cases {
             assert_eq!(serde_json::to_value(&err).unwrap(), expected);

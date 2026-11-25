@@ -93,6 +93,7 @@ fn map_item_result(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemSearchResult> 
         matched_bundle_id: None,
         service_cost: r.get(11)?,
         can_make: r.get(12)?,
+        is_active: true,
     })
 }
 

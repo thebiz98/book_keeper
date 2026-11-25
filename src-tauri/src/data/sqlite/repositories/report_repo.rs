@@ -146,15 +146,16 @@ impl ReportRepository for SqliteReportRepository {
 
     fn stock_valuation(&self) -> Result<StockValuationReport, AppError> {
         let (total, lots): (f64, i64) = self.conn.query_row(
-            "SELECT COALESCE(SUM(remaining_quantity * unit_cost), 0.0), COUNT(*) \
-             FROM purchase_items WHERE remaining_quantity > 0",
+            "SELECT COALESCE(SUM(p.remaining_quantity * p.unit_cost), 0.0), COUNT(*) \
+             FROM purchase_items p JOIN items i ON i.id = p.item_id AND i.is_active = 1 \
+             WHERE p.remaining_quantity > 0",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         let mut stmt = self.conn.prepare(
             "SELECT COALESCE(i.category, 'Uncategorized') AS cat, COUNT(DISTINCT i.id), \
                     COALESCE(SUM(p.remaining_quantity * p.unit_cost), 0.0) \
-             FROM purchase_items p JOIN items i ON i.id = p.item_id \
+             FROM purchase_items p JOIN items i ON i.id = p.item_id AND i.is_active = 1 \
              WHERE p.remaining_quantity > 0 GROUP BY cat ORDER BY cat",
         )?;
         let categories_breakdown = stmt
