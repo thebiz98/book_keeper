@@ -408,6 +408,11 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - Only `SETTLEMENT` rows are listed, because those are the only rows editable on their own. Other ledger kinds would appear as rows the user can't act on.
 - *Why (owner, 2026-11-25):* edit/delete existed but were "nested inside the view section". Settlement history across all parties is a daily check.
 
+**DD-73 — Bill print as one items area with charges at its foot (2026-11-25, v1.4 FR-43).**
+- The print is one bordered items area: line rows, a flexible spacer, then charge/discount rows and the Total row. On a single page the spacer pushes the charges to the bottom of the area. A multi-page bill drops the spacer, repeats the `<thead>`, and lets charges follow the last item. CSS print only (`@page A4`, `break-inside: avoid` on rows); no PDF library.
+- The print reads only the stored bill (lines, pack snapshots, charges, totals); it computes nothing (DD-56).
+- *Why (owner, 2026-11-25):* the layout of a familiar shop bill book, with the party at top left and the date at top right.
+
 **DD-71 — Entity review outcomes (2026-11-25, v1.4).**
 - **Doc drift fixed in the HLD:** the ERD now shows `items/parties.updated_at`, return name snapshots, `is_opening_balance`, `opening_cash`, `backup_directory` and `CODE_SEQUENCE`. `balance_due` is documented with `RETURN_CREDIT`. The stale "cash in hand = today" query row is corrected.
 - **Real redundancy removed:** `idx_sale_items_item (item_id)` duplicates the prefix of `idx_sale_items_item_date`; v12 drops it.

@@ -283,6 +283,13 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Actions on each row** (icon buttons with tooltips): **Edit** opens the existing settlement edit form (FR-26: amount, date, notes; same limits and backend checks), and **Delete** asks for a danger confirm that names the amount and bill. After either, the list, the tab's totals, the dues tabs and the header cash refresh.
   * Upfront payments, return credits and refunds are not listed: they change only through bill edit (FR-20) or return delete. The party ledger and bill drawer keep their own Edit / Delete.
   * Keyboard: the tab is reachable like the other two; Up/Down move the highlighted row, Enter opens the bill, E edits, Delete deletes (with confirm).
+* **FR-43: Bill Print Layout** *(added 2026-11-25, v1.4, DD-73; FR-27 rev.)*
+  * **Header:** the shop name, large and centred. Below it, centred and smaller: the address, then phone (and GSTIN when set). Empty fields are omitted, and a thin rule follows.
+  * **Party / date row:** the customer name (vendor on a purchase bill), with phone when known, at the **top left** ("Walk-in" when none). The **date** (`DD-MM-YYYY`) and the bill code ("Bill No. SAL-1001"; supplier invoice ref on a purchase) at the **top right**.
+  * **Items table:** columns **Sl. No** (1, 2, 3…), **Item** (name, with the pack as text when sold in a bundle, e.g. "Pencil HB — Box of 10"), **Qty** (in that pack), **Price** (per pack) and **Amount** (right-aligned).
+  * **Charges and discounts sit inside the items area, at its bottom.** The items area stretches to fill the page, and a clear gap separates the last item from the charge rows. Each charge or discount shows its name in the Item column (discounts as "Less: <name>") and its amount in the Amount column (discounts with "−"). A rule follows, then **Total** in bold with the grand total in the Amount column. Paid, Balance due (when > 0) and notes follow below the total in smaller type.
+  * When the items run past one page, the table header repeats on each page, and the charges and total follow the last item.
+  * **Look:** A4 portrait, about 15 mm margins, one clean font, light horizontal rules (no heavy grid), tabular figures, ₹ amounts right-aligned, and black on white only (prints well on mono printers). Sale and purchase bills share the layout.
 
 ### 2.2. Non-Functional Requirements (NFR)
 
@@ -363,6 +370,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 44. **Dashboard: Cash & Stock row on top, low stock moved up, valuation → Inventory, larger item lookup (FR-40).**
 45. **Imports of parties (with opening balance), expenses, and services with components (FR-41).**
 46. **Settlement History tab on Credit & Dues with direct Edit / Delete (FR-42).**
+47. **Bill print layout: shop header, party left / date right, Sl. No table, charges at the bottom of the items area, total under a rule (FR-43).**
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
@@ -1725,6 +1733,7 @@ Owner requests of 2026-11-25. Same rules as §12 (own branch, phased commits, LL
 |---|---|---|---|---|---|
 | 1 | `feat/dashboard-layout` (D1) | Cash & Stock row on top, low stock moved up, valuation → Inventory, larger item lookup with a fixed search field, trend line chart | FR-40 | — | — |
 | 1b | `feat/settlement-history` (D1b) | Settlement History tab on Credit & Dues with Edit / Delete per row | FR-42 | — | 1 |
+| 1c | `feat/print-layout` (D1c) | New A4 bill print layout | FR-43 | — | 1b |
 | 2 | `feat/service-items` (D2) | Service create/edit with components and Service cost, Can make N, selling services, component FIFO, misc. cost in profit and P&L, not returnable | FR-36, FR-37 | **v12** `service_components`, `items.service_cost`, `sale_items.service_cost_total`, drop `idx_sale_items_item` | 1 |
 | 3 | `feat/item-analytics` (D3) | Item profit and Inventory speed panels on Reports | FR-38, FR-39 | — | 2 |
 | 4 | `feat/imports` (D4) | Items template with services and components, parties import, expenses import | FR-41 | — | 2 |
