@@ -235,7 +235,8 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   };
   const printRef = useRef(doPrint);
   printRef.current = doPrint;
-  const printable = billId !== null && head !== null;
+  // Print is a view-mode action: in edit mode it would print the saved bill, not the edits.
+  const printable = billId !== null && head !== null && mode === 'view';
   useEffect(() => {
     if (!printable) return;
     const onKey = (e: KeyboardEvent) => {
