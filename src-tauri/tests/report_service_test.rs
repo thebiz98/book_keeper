@@ -1,7 +1,7 @@
 // tests/report_service_test.rs
 //! Test Suite: Financial Reporting & Telemetry Dashboard (F5/T7)
 //! Test Cases: TC-REP-001..006, TC-DUES-003, TC-PAY-005 plus trend, low-stock and recent
-//! transactions. Derived from book_keeper_LLD.md Â§6.10 Metric Definitions and Â§11.
+//! transactions. Derived from book_keeper_LLD.md §6.10 Metric Definitions and §11.
 //! All tests pin "today" through `ReportServiceImpl::with_fixed_today` (no real-clock dependence).
 
 mod common;

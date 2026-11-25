@@ -1,7 +1,7 @@
 // tests/e2e_tier3_combinations_test.rs
 //! Test Suite: Tier 3 Pairwise & Multi-Module Combinatorial Integration (TC-T3-CMB-001..010)
 //! 10 multi-feature workflow integration tests covering cross-subsystem interactions.
-//! Derived from TEST_INFRA.md Â§ Feature Inventory and book_keeper_LLD.md.
+//! Derived from TEST_INFRA.md § Feature Inventory and book_keeper_LLD.md.
 
 mod common;
 
@@ -71,7 +71,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
         tx.commit().unwrap();
     }
 
-    // Step 1: Inward 100 pcs @ â‚¹60/pc = â‚¹6,000
+    // Step 1: Inward 100 pcs @ ₹60/pc = ₹6,000
     let pur_payload = CreatePurchasePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -88,7 +88,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
     };
     harness.purchase_service.create_purchase(pur_payload).expect("purchase");
 
-    // Step 2: Sale of 40 pcs @ â‚¹100/pc (leaves 60 pcs)
+    // Step 2: Sale of 40 pcs @ ₹100/pc (leaves 60 pcs)
     let sale_payload = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -136,9 +136,9 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
     };
     harness.inventory_service.create_adjustment(adj_payload).expect("adjustment");
 
-    // Step 5: Stock Valuation Audit: 65 pcs @ â‚¹60 = â‚¹3,900
+    // Step 5: Stock Valuation Audit: 65 pcs @ ₹60 = ₹3,900
     let valuation = harness.report_service.get_stock_valuation_report().expect("valuation");
-    assert_eq!(valuation.total_valuation, 3900.0, "Valuation must reflect 65 * 60 = â‚¹3,900");
+    assert_eq!(valuation.total_valuation, 3900.0, "Valuation must reflect 65 * 60 = ₹3,900");
 
     let mut check_tx = harness.uow.begin_transaction().unwrap();
     let item = check_tx.items().find_by_id(1).unwrap().unwrap();
@@ -163,7 +163,7 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
         tx.commit().unwrap();
     }
 
-    // Step 1: Customer Credit Sale: 30 clipboards @ â‚¹50 = â‚¹1,500 due
+    // Step 1: Customer Credit Sale: 30 clipboards @ ₹50 = ₹1,500 due
     let sale_payload = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-01".to_string(),
@@ -180,11 +180,11 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
     };
     harness.sale_service.create_sale(sale_payload).expect("credit sale");
 
-    // Step 2: Verify aging dues reflects â‚¹1,500
+    // Step 2: Verify aging dues reflects ₹1,500
     let dues = harness.accounting_service.get_party_dues_summary(PartyType::Customer).unwrap();
     assert_eq!(dues[0].balance_due, 1500.0);
 
-    // Step 3: Cash settlement installment of â‚¹600 on 2026-11-15
+    // Step 3: Cash settlement installment of ₹600 on 2026-11-15
     let settle = SettlePaymentPayload {
         party_id: 1,
         transaction_type: TransactionType::Sale,
@@ -196,11 +196,11 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
     };
     harness.accounting_service.settle_bill_payment(settle).expect("settlement");
 
-    // Step 4: Verify remaining balance is â‚¹900
+    // Step 4: Verify remaining balance is ₹900
     let dues_after = harness.accounting_service.get_party_dues_summary(PartyType::Customer).unwrap();
     assert_eq!(dues_after[0].balance_due, 900.0);
 
-    // Step 5: Cash drawer for 2026-11-15 must reflect the â‚¹600 cash inflow
+    // Step 5: Cash drawer for 2026-11-15 must reflect the ₹600 cash inflow
     let drawer_today = harness.accounting_service.calculate_cash_in_hand("2026-11-15").unwrap();
     assert_eq!(drawer_today, 600.0);
 }
@@ -218,7 +218,7 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
         tx.commit().unwrap();
     }
 
-    // Inward: 5 boxes of 10 = 50 base units @ â‚¹80/box (cost â‚¹8/pc)
+    // Inward: 5 boxes of 10 = 50 base units @ ₹80/box (cost ₹8/pc)
     let pur_payload = CreatePurchasePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -235,7 +235,7 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
     };
     harness.purchase_service.create_purchase(pur_payload).expect("bundle inward");
 
-    // Loose sale of 7 base units @ â‚¹15 = â‚¹105
+    // Loose sale of 7 base units @ ₹15 = ₹105
     let sale_payload = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -274,7 +274,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
         tx.commit().unwrap();
     }
 
-    // Purchase 50 units @ â‚¹30 = â‚¹1,500 on credit
+    // Purchase 50 units @ ₹30 = ₹1,500 on credit
     let pur_payload = CreatePurchasePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -291,7 +291,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
     };
     let pur_id = harness.purchase_service.create_purchase(pur_payload).expect("credit purchase").purchase_id;
 
-    // Return 10 units to vendor (debit note â‚¹300)
+    // Return 10 units to vendor (debit note ₹300)
     let ret_payload = VendorReturnPayload {
         return_date: "2026-11-20".to_string(),
         party_id: Some(1),
@@ -307,7 +307,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
     };
     harness.return_service.create_vendor_return(ret_payload).expect("vendor return");
 
-    // Sell 20 units @ â‚¹50 = â‚¹1,000 revenue. COGS = 20 * 30 = â‚¹600. Net profit = â‚¹400.
+    // Sell 20 units @ ₹50 = ₹1,000 revenue. COGS = 20 * 30 = ₹600. Net profit = ₹400.
     let sale_payload = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -347,7 +347,7 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
         tx.commit().unwrap();
     }
 
-    // Total = 2 * 300 = â‚¹600. Cash tendered upfront = â‚¹200. Balance due = â‚¹400.
+    // Total = 2 * 300 = ₹600. Cash tendered upfront = ₹200. Balance due = ₹400.
     let sale_payload = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -364,7 +364,7 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
     };
     harness.sale_service.create_sale(sale_payload).expect("split sale");
 
-    // Subsequent UPI installment of â‚¹300
+    // Subsequent UPI installment of ₹300
     let settle = SettlePaymentPayload {
         party_id: 1,
         transaction_type: TransactionType::Sale,
@@ -376,11 +376,11 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
     };
     harness.accounting_service.settle_bill_payment(settle).expect("settle");
 
-    // Remaining balance must be â‚¹100
+    // Remaining balance must be ₹100
     let dues = harness.accounting_service.get_party_dues_summary(PartyType::Customer).unwrap();
     assert_eq!(dues[0].balance_due, 100.0);
 
-    // Cash flow report reflects â‚¹200 (cash) + â‚¹300 (UPI) = â‚¹500 inflow
+    // Cash flow report reflects ₹200 (cash) + ₹300 (UPI) = ₹500 inflow
     let cash_flow = harness.report_service.get_cash_flow_report("2026-11-01", "2026-11-30").unwrap();
     assert_eq!(cash_flow.sales_cash_inflow, 200.0, "upfront counted once (TC-PAY-005)");
     assert_eq!(cash_flow.customer_settlements_inflow, 300.0);
@@ -412,7 +412,7 @@ fn test_tc_t3_cmb_007_barcode_scan_bundle_multiplier_tender() {
     assert!(!found.is_empty());
     assert!(start.elapsed() < std::time::Duration::from_millis(10));
 
-    // 2. Add 2 packs (10 base units) @ â‚¹45 = â‚¹90
+    // 2. Add 2 packs (10 base units) @ ₹45 = ₹90
     let sale_payload = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -542,7 +542,7 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
         tx.commit().unwrap();
     }
 
-    // Sale 1 executed at initial price â‚¹60.0
+    // Sale 1 executed at initial price ₹60.0
     let sale1 = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
@@ -560,7 +560,7 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
     let s1_summary = harness.sale_service.create_sale(sale1).expect("sale 1");
     assert_eq!(s1_summary.total_amount, 120.0);
 
-    // Update Master Item Price: â‚¹60.0 -> â‚¹75.0
+    // Update Master Item Price: ₹60.0 -> ₹75.0
     {
         let mut tx = harness.uow.begin_transaction().unwrap();
         let mut updated_item = tx.items().find_by_id(1).unwrap().unwrap();
@@ -569,12 +569,12 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
         tx.commit().unwrap();
     }
 
-    // Historical Audit: Sale 1 total must remain strictly â‚¹120.0 (historical immutability)
+    // Historical Audit: Sale 1 total must remain strictly ₹120.0 (historical immutability)
     let s1_details = harness.sale_service.get_sale_details(1).expect("s1 details");
     assert_eq!(s1_details.sale.total_amount, 120.0, "Historical invoice total must NOT change");
     assert_eq!(s1_details.items[0].sale_item.unit_price, 60.0, "Historical line item price must NOT change");
 
-    // Sale 2 executed at new updated price â‚¹75.0
+    // Sale 2 executed at new updated price ₹75.0
     let sale2 = CreateSalePayload {
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),

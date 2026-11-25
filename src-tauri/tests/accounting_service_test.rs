@@ -1,7 +1,7 @@
 // tests/accounting_service_test.rs
 //! Test Suite: Accounting & Dues Settlement (Khata), return credit, party ledger, cash drawer
 //! Test Cases: TC-DUES-001 through TC-DUES-007
-//! Derived from book_keeper_LLD.md Â§ 11.8. Runs the production services on real SQLite.
+//! Derived from book_keeper_LLD.md § 11.8. Runs the production services on real SQLite.
 
 mod common;
 
