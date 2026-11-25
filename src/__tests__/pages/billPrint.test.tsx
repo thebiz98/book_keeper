@@ -76,15 +76,18 @@ describe('BillPrintDocument', () => {
     expect(body).toContain('SAL-1005');
     const lines = Array.from(document.querySelectorAll('[data-testid="print-line"]')).map((r) => r.textContent ?? '');
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('Box of 12 × 2 (24 base)');
+    expect(lines[0]).toContain('Pencil — Box of 12');
+    expect(lines[0]).toContain('1Pencil');
+    expect(lines[1]).toMatch(/^2Eraser/);
     expect(lines[0]).toContain('240.00'); // rate per pack, not per base unit
     expect(lines[0]).toContain('480.00');
     expect(lines[1]).toContain('Eraser');
     const charges = Array.from(document.querySelectorAll('[data-testid="print-charge"]')).map((r) => r.textContent ?? '');
-    expect(charges[0]).toContain('+ Transport');
-    expect(charges[1]).toContain('− Festival');
-    expect(text('print-totals')).toContain('Grand Total');
-    expect(text('print-totals')).toContain('530.00');
+    expect(charges[0]).toContain('Transport');
+    expect(charges[1]).toContain('Less: Festival');
+    expect(charges[1]).toContain('−₹50.00');
+    expect(text('print-total')).toContain('530.00');
+    expect(text('print-subtotal')).toContain('540.00');
     expect(text('print-balance')).toContain('230.00');
     expect(text('print-notes')).toContain('Deliver tomorrow');
   });
@@ -107,7 +110,8 @@ describe('BillPrintDocument', () => {
     expect(body).toContain('Acme Vendor');
     expect(text('print-supplier-ref')).toContain('INV-77');
     expect(text('print-line')).toContain('25.00'); // 100 / 4 cartons
-    expect(text('print-line')).toContain('Carton × 4 (40 base)');
+    expect(text('print-line')).toContain('Notebook — Carton');
+    expect(text('print-bill-meta')).toContain('Date: 21-11-2026');
   });
 });
 
