@@ -214,6 +214,7 @@ export const NewSalePage: React.FC = () => {
               id="sale-date"
               type="date"
               value={invoiceDate}
+              max={todayLocal()}
               onChange={(e) => setInvoiceDate(e.target.value)}
               className="bg-transparent font-mono font-medium text-slate-800 dark:text-slate-200 focus:outline-none"
             />
