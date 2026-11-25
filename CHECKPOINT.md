@@ -178,3 +178,7 @@ Manual checklist:
 - Settle part of it from Credit & Dues: Cash in hand moves by that amount only; edit the party: "₹X already settled" shows, and lowering below it shows the backend error in the dialog.
 - Open the opening bill from the ledger: no Edit, Delete or Print; Settle works. The Type select is disabled while an opening balance exists.
 - Edit the party and clear the amount (nothing settled): the opening bill disappears from dues.
+
+## Branch feat/drawer-new-bundle (FR-29, DD-59; frontend only, v1.3 C8)
+- Delivered: the Unit select of every line in the bill edit drawer (purchase and sale) ends with "+ New bundle...". One `BundleCreationModal` per form; Save adds the bundle to every line of that item and selects it on the requesting line only (sale refills the rate from the backend `defaultRate`). Tests: `src/__tests__/billEdit/drawerNewBundle.test.tsx`.
+- Manual: edit a bill, pick "+ New bundle..." on a line, Cancel (unit unchanged); repeat and create (that line switches, totals update from the preview, other lines of the item list the new option).
