@@ -643,7 +643,7 @@ gantt
   * `RapidBillingRow` (sale): selecting it calls `onOpenBundleModal(item)` and leaves `unit` unchanged; ArrowUp/Down skip it (`options` excludes the sentinel); Enter on the unit select advances to Rate as before. The Bundle button is removed. `Alt+B` (`newBundle` hotkey) and the `newBundle` effect (select the created bundle, refill the rate, refocus the unit select) are unchanged.
   * `NewPurchasePage`: `unitOptions` ends with `{ value: NEW_BUNDLE, label }`; choosing it runs `setIsBundleModalOpen(true)` and keeps `unitChoice`. The New Bundle button and the "Alt+B new" label are removed. `handleBundleCreated` selects the new bundle.
   * Cancel / Esc in `BundleCreationModal` leaves the unit as it was; focus returns to the unit select (the modal restores focus to the previously focused element).
-  * Bill edit drawer line forms keep their per-line Unit select without the sentinel (a row-level modal needs its own state per line; out of scope for C2).
+  * Bill edit drawer line forms get the sentinel in C8 (below).
 * **Inventory.** Each PHYSICAL row gets a `PackagePlus` icon button (`aria-label="Add bundle for {name}"`, `title="Add packaging bundle"`) that opens `BundleCreationModal` with `initialItemId` / `baseUnit`; on create the catalog refreshes (`refreshAll`).
 * **`EntryField`** (`src/components/ui/EntryField.tsx`): `{ label, required?, htmlFor?, helper?, className?, children }`. A label slot of fixed height (`h-4 leading-4 truncate`, `title={label}`), the control, and a helper slot with `min-h-[14px] text-[10px]`, so a row never changes height. Controls inside it are passed no `label` of their own. `QuantityInput` takes `hideConversion` and the page renders the "2 Box x 10 = 20 PCS" line in the helper slot.
 * **Purchase row** (one line, `items-start`): Item (helper: "Selected: X"), Unit, Quantity (helper: conversion), "Purchase Price / {pack} *" (wider), and the Add Line button under an empty label. Placeholder "Search item by name or barcode...".
@@ -660,7 +660,14 @@ gantt
 * `RapidBillingRow` info line (`data-testid="stock-indicator"`): item name | Available | `LotDrawLine` | MRP. The old `Rate:` echo is removed.
 * `LotDrawLine` (`src/components/domain/LotDrawLine.tsx`) shows "Purchase price:" then the open lots as `₹40.00 × 5`. Adjacent lots with an equal `unit_cost` merge (summed quantities, joined with `·`) followed by the base unit. Groups with `draw_quantity > 0` are bold with a blue tint, then `→ cost ₹x for this qty` (`draw_cost`). `shortfall > 0` shows `short by N` in rose. More than 4 groups: show 4 and `+N more` with a `title` listing all. Display formatting only (DD-56).
 * Data: `previewLotDraw(itemId, quantity, priorQuantity)` through `usePreview` (debounced), keyed on (item, base quantity, prior). `quantity` = qty x unitsPerBundle of the chosen unit; `prior` = Σ base units of cart lines with the same `itemId`, passed by `NewSalePage` as the `priorQuantity(itemId)` prop (row mapping only).
-* In-drawer sale edit form: not changed (out of scope).
+* In-drawer sale edit form: sentinel added in C8 (below).
+
+### "+ New bundle..." in the bill edit drawer (FR-29, DD-59, `feat/drawer-new-bundle`, v1.3 C8)
+* Frontend only. `PurchaseEditForm` and `SaleEditForm`: every line's Unit select ends with `NEW_BUNDLE` (label `NEW_BUNDLE_LABEL`), shown only when that select is enabled. The add-line row is an item search only (no unit select), so it has none.
+* One `BundleCreationModal` per form. State `bundleTarget: { lineKey, itemId, baseUnit } | null`. Choosing the sentinel sets the target and leaves the line's unit unchanged; Cancel / Esc clears the target and the modal restores focus to the select.
+* `onBundleCreated(saved)` calls the draft hook's `addBundle(itemId, bundle)` (appends the bundle to every line of that item, no change to the dirty snapshot) and then `setUnit(lineKey, saved.id)` on the target line only. The sale form's `setUnit` refills the rate from the bundle's backend `defaultRate`; the purchase form keeps its Purchase Price, as on a normal unit change.
+* `savedBundleToSearchResult` (`src/lib/billEditDraft.ts`) is row mapping only. All figures still come from `previewPurchase` / `previewSale` (DD-56).
+* Tests (Vitest, per form): sentinel opens the modal for the line's item; Cancel keeps the unit; Save selects the bundle on that line only (other lines of the same item gain it as an option); the sale form refills the rate.
 * Tests (Vitest): merged prices and highlight from a stubbed `previewLotDraw`; no `Rate:` in the indicator; prior quantity is sent.
 
 ## Dashboard cards and cash in hand (FR-32, FR-33, DD-61, DD-62, `feat/dashboard-cash`, v1.3 C5)
