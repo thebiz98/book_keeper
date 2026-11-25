@@ -30,8 +30,14 @@ interface CardSpec {
   rows: RowSpec[];
 }
 
-const Row: React.FC<{ row: RowSpec; onOpen: (route: string) => void }> = ({ row, onOpen }) => (
-  <li>
+/**
+ * `tile`: the row is one cell of the horizontal Cash & Stock strip. Every cell then fills the
+ * full strip height and uses the same large figure as Cash in hand, so the three read as equals.
+ */
+const Row: React.FC<{ row: RowSpec; onOpen: (route: string) => void; tile?: boolean }> = ({ row, onOpen, tile }) => {
+  const big = row.hero || tile;
+  return (
+  <li className={cn(tile && 'flex')}>
     <button
       type="button"
       data-testid={row.testId}
@@ -40,14 +46,16 @@ const Row: React.FC<{ row: RowSpec; onOpen: (route: string) => void }> = ({ row,
         'group w-full flex items-center justify-between gap-3 px-4 text-left cursor-pointer',
         'transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500',
-        row.hero ? 'py-4 bg-slate-50/70 dark:bg-slate-800/30' : 'py-3'
+        tile && 'h-full',
+        big ? 'py-4' : 'py-3',
+        row.hero && 'bg-slate-50/70 dark:bg-slate-800/30'
       )}
     >
       <span className="min-w-0 flex flex-col">
         <span
           className={cn(
             'truncate',
-            row.hero
+            big
               ? 'text-sm font-semibold text-slate-900 dark:text-slate-100'
               : 'text-[13px] font-medium text-slate-700 dark:text-slate-200'
           )}
@@ -66,9 +74,9 @@ const Row: React.FC<{ row: RowSpec; onOpen: (route: string) => void }> = ({ row,
         ) : (
           <CurrencyDisplay
             amount={row.value}
-            size={row.hero ? 'xl' : 'md'}
+            size={big ? 'xl' : 'md'}
             colored={row.colored}
-            className={cn(row.hero ? 'text-2xl font-bold leading-8' : 'font-semibold')}
+            className={cn(big ? 'text-2xl font-bold leading-8' : 'font-semibold')}
           />
         )}
         <ChevronRight
@@ -78,7 +86,8 @@ const Row: React.FC<{ row: RowSpec; onOpen: (route: string) => void }> = ({ row,
       </span>
     </button>
   </li>
-);
+  );
+};
 
 export type SummaryGroup = 'cash' | 'today-dues' | 'all';
 
@@ -195,7 +204,7 @@ export const DashboardSummaryCards: React.FC<{
             )}
           >
             {c.rows.map((r) => (
-              <Row key={r.testId} row={r} onOpen={onNavigate} />
+              <Row key={r.testId} row={r} onOpen={onNavigate} tile={c.id === 'cash' && group === 'cash'} />
             ))}
           </ul>
         </section>

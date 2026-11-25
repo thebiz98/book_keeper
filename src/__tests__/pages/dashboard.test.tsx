@@ -127,6 +127,19 @@ describe('DashboardPage', () => {
     expect(before(q('[data-testid="low-count"]'), q('[data-testid="recent"]'))).toBe(false);
   });
 
+  it('cash row cells fill the strip and share the Cash in hand figure size', async () => {
+    installApi({ ...base, getDashboardMetrics: metrics });
+    render(<DashboardPage />);
+    await waitFor(() => bodyText().includes('1,234.00'));
+    for (const id of ['kpi-cash', 'kpi-expenses', 'kpi-valuation']) {
+      const btn = document.querySelector(`[data-testid="${id}"]`)!;
+      expect(btn.className).toContain('h-full');
+      expect(btn.querySelector('.text-2xl')).not.toBeNull();
+    }
+    // Today / Dues rows keep the compact size.
+    expect(document.querySelector('[data-testid="kpi-sales"] .text-2xl')).toBeNull();
+  });
+
   it('low-stock rows show stock / level and no category caption', async () => {
     installApi({ ...base, getDashboardMetrics: metrics });
     render(<DashboardPage />);
