@@ -1198,6 +1198,37 @@ export class MockApiClient implements ApiClient {
   async writeItemsImportTemplate(destPath: string) {
     return destPath;
   }
+  async validateServiceComponentsImport() {
+    return { ...EMPTY_REPORT, validCount: 2, info: ['1 service(s) will get a new component list (the old list is replaced).'] };
+  }
+  async executeServiceComponentsImport() {
+    return { created: 0, updated: 1, skipped: 0, stockLotsCreated: 0 };
+  }
+  async validatePartiesImport() {
+    return { ...EMPTY_REPORT, validCount: 3, info: ['1 opening balance bill(s) totalling 5000 will be created or updated.'] };
+  }
+  async executePartiesImport() {
+    return { created: 3, updated: 0, skipped: 0, stockLotsCreated: 0 };
+  }
+  async validateExpensesImport() {
+    return { ...EMPTY_REPORT, validCount: 4 };
+  }
+  async executeExpensesImport() {
+    return { created: 4, updated: 0, skipped: 0, stockLotsCreated: 0 };
+  }
+  async writeImportTemplate(_kind: string, destPath: string) {
+    return destPath;
+  }
 }
+
+const EMPTY_REPORT = {
+  validCount: 0,
+  rowsWithErrors: [],
+  duplicates: [],
+  headerIssues: [],
+  warnings: [],
+  lotsToCreate: 0,
+  expectedColumns: [],
+};
 
 export const mockApiClient = new MockApiClient();

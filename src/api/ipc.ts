@@ -226,5 +226,19 @@ export class TauriClient implements ApiClient {
   executeVedbillImport: ApiClient['executeVedbillImport'] = (filePath, conflictStrategy) =>
     invokeCmd('execute_vedbill_import', { filePath, conflictStrategy });
   writeItemsImportTemplate: ApiClient['writeItemsImportTemplate'] = (destPath, format) =>
-    invokeCmd('write_items_import_template', { destPath, format });
+    invokeCmd('write_import_template', { kind: 'ITEMS', destPath, format });
+  validateServiceComponentsImport: ApiClient['validateServiceComponentsImport'] = (filePath) =>
+    invokeCmd('validate_service_components_import', { filePath });
+  executeServiceComponentsImport: ApiClient['executeServiceComponentsImport'] = (filePath) =>
+    invokeCmd('execute_service_components_import', { filePath });
+  validatePartiesImport: ApiClient['validatePartiesImport'] = (filePath, conflictStrategy) =>
+    invokeCmd('validate_parties_import', { filePath, conflictStrategy });
+  executePartiesImport: ApiClient['executePartiesImport'] = (filePath, conflictStrategy) =>
+    invokeCmd('execute_parties_import', { filePath, conflictStrategy });
+  validateExpensesImport: ApiClient['validateExpensesImport'] = (filePath) =>
+    invokeCmd('validate_expenses_import', { filePath });
+  executeExpensesImport: ApiClient['executeExpensesImport'] = (filePath) =>
+    invokeCmd('execute_expenses_import', { filePath });
+  writeImportTemplate: ApiClient['writeImportTemplate'] = (kind, destPath, format) =>
+    invokeCmd('write_import_template', { kind, destPath, format });
 }
