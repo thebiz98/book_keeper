@@ -339,3 +339,37 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - **Why:** the hand-off queued a request that the page consumed in a mount effect. Under StrictMode the effect runs twice, the second `takeBillEdit()` returned null and the page showed a blank bill (same class as `bc66322`). The owner also wanted to add, remove and re-price lines where the bill is shown.
 - **Rules kept:** DD-56 (all figures from `previewPurchase` / `previewSale`), FR-20 guards via `getBillEditGuard`, payload and backend commands unchanged. No schema or IPC change.
 - **Side effect:** the edit never touches the sale cart store, so a sale in progress on the billing screen stays as it is (the "Discard current cart?" confirm is gone).
+
+**DD-58 — Entry dates cannot be in the future (2026-11-25, v1.3 FR-28).**
+- **Decision:** one backend helper, `check_entry_date(field, date, today)`, runs next to `check_date` in every create / update / preview that takes an entry date (sale, purchase, expense, settlement single / batch / edit, returns, stock adjustment, set stock, opening balance). "Today" is `chrono::Local` behind an injectable clock, so tests pin it.
+- **UI:** date inputs get `max = todayLocal()` as input help only (DD-56: the rule and its message come from the backend / preview).
+- *Why:* manual delayed entry (Assumption 4) is always backwards in time. A future date silently moves money and FIFO into days that have not happened yet.
+
+**DD-59 — Bundle create lives in the Unit dropdown; one-line entry rows (2026-11-25, v1.3 FR-29/FR-30).**
+- The Unit select ends with a sentinel option "+ New bundle…". Selecting it opens `BundleCreationModal` and reverts the select to the previous value until the new bundle is saved, so the sentinel is never a real unit. `Alt+B` does the same. The entry-row Bundle buttons are removed. The Item List gets a row icon for the same modal.
+- Entry-row fields use one shared field wrapper: a fixed one-line label slot, the control, and a reserved helper slot. All controls in a row then share the same top and bottom edge, whatever the label or helper text is.
+- No schema or IPC change.
+
+**DD-60 — Sale-row lot prices come from a lot-draw dry run (2026-11-25, v1.3 FR-31).**
+- `preview_lot_draw { item_id, quantity, prior_quantity }` runs the real `InventoryAllocationStrategy` read-only for `prior_quantity + quantity` and reports the slice used by `quantity`, together with all open lots in FIFO order. The UI only formats it (DD-56). `prior_quantity` is the base-unit sum of the same item's lines already in the cart (the same base-unit mapping the payload already uses).
+- *Why:* the old "Rate: ₹x" on the info line only echoed the input. The useful fact at the counter is what the units cost, and that can span lots.
+
+**DD-61 — Dashboard grouped cards (2026-11-25, v1.3 FR-32).**
+- Three cards: Today (sales, purchases), Dues (receivables, payables) and Cash & Stock (cash in hand, today's expenses, inventory valuation). Each row is a link. Net profit leaves the dashboard; it is a period figure that belongs in Reports.
+- `DashboardMetrics.today_net_profit` is removed (so no field is left unused), which also drops the P&L query from the dashboard path.
+
+**DD-62 — Cash in hand is all-time with an opening cash (2026-11-25, v1.3 FR-33).**
+- `cash_in_hand = shop_settings.opening_cash + cash_position(FIRST_DAY, today).net`. The single drawer formula stays `cash_position`; only the range and the opening term change. Schema **v10** adds `opening_cash REAL NOT NULL DEFAULT 0 CHECK (opening_cash >= 0)`.
+- Cash in hand has no edit path. Opening cash is a setup value in Settings.
+- *Why:* the owner counts the physical drawer, which carries over day to day. A daily total that drops to 0 at midnight did not match it.
+
+**DD-63 — Bill profit is computed in the backend, on request (2026-11-25, v1.3 FR-34).**
+- **Bill profit** = `total_amount − Σ allocation cost` − linked-return refund value + restocked return cost − replacement issue cost (scrap units keep their cost as lost). It is computed in SQL per bill only when `include_profit` is true, so the default history query is unchanged.
+- **Line profit** = `line_total − discount share (bill_math::net_unit_price) − net allocation cost`. Charges and return effects are shown as reconciling rows.
+- The toggle is session state in the UI (not persisted). Every app start begins hidden, because customers can see the counter screen.
+
+**DD-64 — Party opening balance as an opening bill (2026-11-25, v1.3 FR-35).**
+- **Decision:** an opening balance is a line-less bill on the party's side (`OB-` code, own `code_sequences` prefix), marked by a new opening-bill flag on `sale_transactions` / `purchase_transactions` (schema **v11**, `ADD COLUMN` with no rebuild) and a partial unique index (one per party). The purchase-side source stays `PURCHASE`, so the settlement path accepts it unchanged.
+- Every sales / purchase aggregate, list, picker, trend, profit and print path excludes flagged bills. Dues, ledger and settlement include them. A test enumerates the excluding queries.
+- Created / updated / removed inside `create_party` / `update_party` (one `BEGIN IMMEDIATE`). The amount cannot go below the settled amount. Bill edit and delete (FR-20) reject opening bills.
+- *Why:* reusing the bill shape gives settlement, the oldest-first fill, ledger rows and dues for free. A bare number on the party would need a second dues model.

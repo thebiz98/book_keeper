@@ -72,6 +72,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
       * Net Sales − COGS (net of returned units, plus replacement units issued) = **Gross Profit**
       * Gross Profit + **Other Income** (sale charges collected + purchase discounts received) − **Inventory Losses** (write-offs, scrap returns) − **Operating Expenses** (FR-18 expenses + purchase charges paid) = **Net Profit**
     * Total Expenses for the period, broken down by expense type.
+  * *(v1.3)* The dashboard shows grouped cards and no longer shows today's net profit (FR-32). Cash in hand is all-time (FR-33). Bill-level and line-level profit are in Sales History (FR-34).
 * **FR-10: Lists & Operational Views**
   * Complete, filterable lists of all Sales, all Purchases, all Expenses, Pending Customer Dues (Receivables), and Pending Vendor Dues (Payables).
   * *(added 2026-11-22, DD-43)* Every list with a header row keeps the **column headers fixed (sticky)** while the rows scroll, so the user always sees what each column means. This is implemented once in the shared table component, so every list gets it.
@@ -88,7 +89,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Dual Entry Points for Bundle Creation**:
     1. *Dedicated Item Master Screen*: Configured during initial item creation or editing (cold start). Bundles can be edited (including the multiplier) or deleted at any time. `units_per_bundle` must be > 1.
   * **Bundles are a data-entry convenience only**: bills record base units sold/bought and the price per base unit, plus a display-only snapshot of the pack used (`pack_label`, `pack_quantity`). Bill lines hold no reference to `ITEM_BUNDLE`, so changing or deleting a bundle never affects history.
-    2. *Inline on the Fly*: An inline `[+ New Bundle]` option / shortcut (`Alt + B`) in the billing/purchase unit dropdown opens a quick modal dialog to define a new bundle name, multiplier, and default price without leaving the screen.
+    2. *Inline on the Fly*: An inline `[+ New Bundle]` option / shortcut (`Alt + B`) in the billing/purchase unit dropdown opens a quick modal dialog to define a new bundle name, multiplier, and default price without leaving the screen. *(v1.3, FR-29: it is an option inside the dropdown, with no separate button; the Item List rows also get an Add bundle action.)*
   * **Dynamic, Self-Learning Presets (Zero UI Hardcoding)**:
     * The system dynamically queries distinct `(bundle_name, units_per_bundle)` combinations from `ITEM_BUNDLE` ordered by usage frequency.
     * When creating a bundle for any item, typing or focusing the bundle field displays contextual suggestions showing both the name and historical size (e.g., `Box (10 units)`, `Box (20 units)`, `Dozen (12 units)`). Selecting a suggestion auto-fills both the label and multiplier while still allowing full custom typing.
@@ -106,7 +107,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
     2. Press `Enter` → Selects top match; item details and price auto-populate; focus jumps to Quantity.
     3. Quantity field defaults to `1` → Press `Enter` to accept or type quantity and press `Enter`.
     4. Focus jumps to Unit / Bundle selector → Defaults to Base Unit (or last used); Arrow keys switch to Box/Bundle if needed; `Alt + B` defines a new bundle → Press `Enter`.
-    5. Focus jumps to Rate (pre-filled with the default base or bundle price, editable) → Press `Enter`.
+    5. Focus jumps to Rate (pre-filled with the default base or bundle price, editable) → Press `Enter`. *(v1.3, FR-31: the info line shows the open lots' purchase prices and the FIFO draw for the quantity.)*
     6. Line item commits to the bill → Focus loops back immediately to Item Search for the next item.
   * **Completing the Sale**: Pressing `Enter` on an empty search field (or pressing `Ctrl + Enter`) opens the **Payment dialog before anything is saved**:
     * Grand Total (₹)
@@ -199,6 +200,48 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Header:** the Shop Profile (shop name, address, phone, GSTIN; empty fields omitted), edited in Settings. **Body:** bill title (Bill / Purchase Bill), code, date, customer/vendor name and phone (Walk-in when none), supplier invoice ref (purchase), lines `# · Item · Qty (pack) · Rate (per pack) · Amount`, then items subtotal, each charge (+) and discount (−) by name, Grand Total, Paid, Balance due (when > 0), status and notes.
   * Kept simple on purpose; customization (logo, footer text, templates, thermal receipts) follows user feedback.
 
+* **FR-28: No Future-Dated Entries** *(added 2026-11-25, v1.3, DD-58)*
+  * No user-entered business date may be after **today** (the shop computer's local date). This covers the sale and purchase date (create and edit), expense date, settlement date (single, batch and settlement edit), customer / vendor return date, stock adjustment and set-stock date, and the party opening-balance date (FR-35).
+  * The **backend** enforces it: the command, and the preview that dry-runs it, rejects the date with a `ValidationError` on that field ("Date cannot be in the future"). The UI date pickers also set `max = today` so a future day cannot be picked; this is input help only, the rule lives in the backend (DD-56).
+  * Filter and report date ranges are not entry dates and stay unrestricted. Existing rows are not changed; editing a bill that already has a future date requires moving it to today or earlier.
+* **FR-29: Inline Bundle Creation from the Unit Dropdown and the Item List** *(added 2026-11-25, v1.3, DD-59; FR-13 rev.)*
+  * On New Sale and New Purchase (and the in-drawer bill edit forms), the Unit dropdown of the entry row ends with a **"+ New bundle…"** option. Choosing it (or `Alt+B`) opens the existing bundle quick-create modal for the selected item. After Save the new bundle is selected in the dropdown and its default rate is filled in. Cancel restores the previous unit. The separate **Bundle** / **New Bundle** buttons are removed from the entry rows.
+  * The option appears only when an item is selected (a bundle belongs to an item).
+  * In the Inventory Item List each row has an **Add bundle** icon action (with tooltip) next to Edit / Adjust / Set stock. It opens the same modal for that item, and the row's bundles refresh after Save.
+* **FR-30: Billing Entry Layout** *(added 2026-11-25, v1.3, DD-59)*
+  * **Purchase entry row:** every input (Item, Unit, Quantity, Purchase Price) sits on one horizontal line with the same top and bottom edge. Each label is a fixed one-line height above its field ("Purchase Price / Box *" fits on one line; any overflow is truncated with the full text as a tooltip). Helper text (the selected item name, "2 Box × 10 = 20 PCS") sits in a reserved line under the inputs, so it never moves them. The Add Line button lines up with the inputs. The search placeholder reads "Search item by name or barcode…" (category left the item UI in FR-24).
+  * **New Sale header:** the customer selector is on the **left** (where the eye already is while adding items) and the invoice number and date are on the **right**.
+  * **New Sale footer:** the totals (Items Subtotal, and when charges exist Charges (+), Discounts (−), Grand Total) are stacked right-aligned **directly above the Complete Sale button**, under the line amounts of the cart. Item / unit counts and Notes move to the left of the footer.
+* **FR-31: Lot Purchase Prices on the Sale Entry Row** *(added 2026-11-25, v1.3, DD-60)*
+  * When an item is picked on the sale entry row, the info line under the row shows the item's **open lots in FIFO order** with their **Purchase Price** and remaining quantity (e.g. `Purchase price: ₹40.00 × 5 · ₹42.50 × 20 PCS`). It replaces the old "Rate: ₹x" echo, which only repeated the Rate input. The MRP and Available figures stay.
+  * The lots that the entered quantity would use (after the units of the same item already on the bill) are highlighted, with the FIFO cost of the entered quantity. This draw comes from a backend dry run (DD-56), never from TS logic. When the quantity exceeds stock the line says so.
+  * Display only: it does not change the sale rate or what is stored. The sale rate stays labelled "Rate".
+* **FR-32: Dashboard Summary Cards** *(added 2026-11-25, v1.3, DD-61; FR-09 rev.)*
+  * The eight separate KPI tiles are replaced by **three grouped cards**. Each card has a title and rows of `label … amount` with a short caption:
+    1. **Today:** Sales (amount, "n bills") and Purchases (amount, "n batches").
+    2. **Dues:** Receivables ("customers owe you") and Payables ("you owe vendors").
+    3. **Cash & Stock:** **Cash in hand** (FR-33, the most prominent figure), Today's expenses, and Inventory valuation.
+  * **Today's Net Profit is removed** from the dashboard (it stays in Reports → P&L).
+  * Each row is a link to where the figure comes from (Sales / Purchase History filtered to today, Credit & Dues, Expenses, Reports valuation), with a hover state and a keyboard focus ring. Amounts use tabular figures, right-aligned. Each card loads and fails on its own (a placeholder while loading, Retry on error). The three cards sit side by side on a normal screen and stack on a narrow one. Light and dark themes are both supported.
+* **FR-33: Cash in Hand** *(added 2026-11-25, v1.3, DD-62; Assumption 8 rev.)*
+  * **Cash in hand** is a running total that starts when the shop starts using the app and **never resets** (it is not a daily drawer total). Cash in hand = **opening cash** + all cash in (sale upfront and settlements, vendor refunds) − all cash out (purchase upfront and settlements, customer refunds, expenses), for every date up to today.
+  * It is **not editable** on any screen. It changes only through the events above (and their edits / deletes). Party opening balances (FR-35) do not change it, because no cash moved.
+  * **Opening cash** is a one-time setup value in Settings ("Cash already in the drawer when you started", ₹, ≥ 0, default 0).
+  * Shown in the header pill ("Cash in hand") and on the dashboard. Reports → Cash Flow for a period is unchanged (it is the movement within the period).
+* **FR-34: Sales / Purchase History Layout, Icon Actions and Bill Profit** *(added 2026-11-25, v1.3, DD-63)*
+  * **Compact columns** (shared Sales and Purchase history view): code and date sit close together; the Items column is narrow and centred; **Chg / Disc** shows `+₹x` and `−₹y` each on its own unbroken line (the sign never wraps away from its amount); Total / Paid / Balance Due are tight right-aligned columns; the status badge is smaller (less padding); the Actions header is centred over its icons.
+  * **Icon actions** (as on the Inventory list: icon buttons with a tooltip and an accessible name): **View** (opens the bill drawer), **Edit** (opens the drawer directly in edit mode; when the FR-20 guard blocks editing the drawer opens in view mode and shows the reason), **Settle** (only when there is a balance due and a party), **Return** (opens Returns for that bill).
+  * **Profit column (sales only):** hidden by default. A small column menu in the table header holds a **"Show profit"** checkbox. When it is ticked, a Profit column appears with each bill's profit, coloured green or red. The choice lasts for the session; every app start begins hidden.
+  * **Bill profit** = bill total (items subtotal + charges − discounts) − the FIFO cost of the units sold. Linked returns and replacements recorded against the bill adjust it: the refund value comes off the revenue, restocked units give their cost back, and scrapped and issued replacement units add cost. Summed over bills, this agrees with the P&L lines for those bills (returns are dated on their own day in the P&L).
+  * **Item-level profit:** while "Show profit" is on, the sale bill drawer's lines table adds **Cost** and **Profit** per line. Line revenue = line total less its share of the bill discount (the same net-rate rule as returns, FR-19). Line cost = its FIFO allocations net of returned units. A footer reconciles the lines with the bill: Σ line profit + charges − return / replacement effects = bill profit.
+  * All profit figures come from the backend (DD-56). Opening-balance bills (FR-35) have no profit.
+* **FR-35: Party Opening Balance** *(added 2026-11-25, v1.3, DD-64; FR-11 "opening dues" brought forward)*
+  * When adding (or editing) a customer or vendor in the Party dialog, the user may enter an **Opening balance**: "Customer owes you (₹)" for a customer and "You owe this vendor (₹)" for a vendor, plus an **As of** date (default today; FR-28).
+  * Saving with an amount > 0 creates **one opening-balance bill** for that party: code `OB-####`, no lines, `total_amount` = the amount, `UNPAID`, no upfront payment. A customer's opening bill is on the sale side and a vendor's is on the purchase side, so dues, Credit & Dues, the party ledger, batch / single settlement and the oldest-first fill treat it like any open bill. It is labelled "Opening balance" wherever it appears.
+  * Opening bills are **not** sales or purchases. They are excluded from the Sales / Purchase history lists, the dashboard Today figures and trend, P&L, bill profit, item history, return pickers, printing and cash. Only their later settlements move cash.
+  * **Correction:** in the Party dialog the amount and date can be changed. The new amount must be ≥ what is already settled against it, or it is rejected with the settled amount named. Setting it to 0 removes the bill when nothing is settled. Opening bills cannot be edited through bill edit (FR-20). Their drawer is read-only with Settle.
+  * At most one opening bill per party.
+
 ### 2.2. Non-Functional Requirements (NFR)
 
 * **NFR-01: Zero External Server Overhead**
@@ -260,6 +303,16 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 30. **Batch settlement with an editable oldest-first split, Settle from any bill view, settlement edit/delete (FR-26).**
 31. **A4 bill printing for sales and purchases (FR-27).**
 
+### 3.1c. In Scope — v1.3 additions (2026-11-25)
+32. **No future-dated entries, enforced in the backend (FR-28).**
+33. **"+ New bundle…" in the Unit dropdown and an Add bundle action in the Item List (FR-29).**
+34. **Billing entry layout: one-line purchase row, customer on the left of the sale header, totals above Complete Sale (FR-30).**
+35. **Lot purchase prices and the FIFO draw on the sale entry row (FR-31).**
+36. **Dashboard grouped cards; Today's Net Profit removed (FR-32).**
+37. **All-time cash in hand with a one-time opening cash setting (FR-33)**, schema v10.
+38. **Compact history columns, icon actions, optional bill Profit column and item-level profit (FR-34).**
+39. **Party opening balance as an `OB-` opening bill (FR-35)**, schema v11.
+
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
    *(v1.2: A4 printing of sale and purchase bills via the system print dialog is in scope, FR-27. Still out: thermal receipts, logos/footers/templates, direct PDF export, printing returns.)*
@@ -272,7 +325,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 8. **Multi-Store / Multi-Branch**: Centralized inventory across multiple physical locations.
 9. **Multi-User Role-Based Access Control (RBAC)**: User roles, permissions, and shift-management logins.
 10. **Exports**: CSV/Excel exports of catalog, registers, daybook, P&L.
-11. **Parties import, opening dues, VedBill migration, restore from backup.**
+11. **Parties import, VedBill migration, restore from backup.** *(Opening dues entered per party moved into scope in v1.3, FR-35.)*
 12. **Archiving / soft-deletion of Items and Parties (FR-17).**
 13. **Service billing (FR-21)**: Selling `SERVICE` items, and services that consume stock items (e.g. photo printing using paper). Only the entity field exists in v1.1.
 14. **Expense extras**: Expenses on credit / unpaid expense bills, expense vendors and payables, recurring expenses, expense attachments, and archiving expense types.
@@ -293,7 +346,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 5. **Stock Valuation Formula**: Total Stock Value = Sum of (Remaining Quantity × Batch Unit Cost) across all active lots.
 6. **Per-Item Low Stock Level** *(rev. 2026-11-22)*: An item is considered running low when its total physical stock across all available batches is strictly less than its own `low_stock_threshold` (default **5** base units; `0` = never low). `is_low_stock` is recomputed whenever stock or the threshold changes. `SERVICE` items are never low.
 7. **Optional Parties**: Retail cash customers or petty-cash supplier runs do not require customer/vendor profile creation; `party_id` is nullable.
-8. **Single Payment Ledger**: Every money event is exactly one `PAYMENT_SETTLEMENT` row with a `kind`: `UPFRONT` (paid at billing), `SETTLEMENT` (later due payment), `RETURN_CREDIT` (non-cash due reduction from a return), `REFUND_OUT` (cash paid back to a customer), `REFUND_IN` (cash received back from a vendor). Bill headers are created with `paid_amount = 0, balance_due = total` and then updated only through the ledger: `paid_amount = Σ(UPFRONT + SETTLEMENT)`, `balance_due = total − paid_amount − Σ RETURN_CREDIT`. Cash in = sale UPFRONT/SETTLEMENT + purchase REFUND_IN; cash out = purchase UPFRONT/SETTLEMENT + sale REFUND_OUT. Daily cash drawer totals are ledger sums by `settlement_date`.
+8. **Single Payment Ledger**: Every money event is exactly one `PAYMENT_SETTLEMENT` row with a `kind`: `UPFRONT` (paid at billing), `SETTLEMENT` (later due payment), `RETURN_CREDIT` (non-cash due reduction from a return), `REFUND_OUT` (cash paid back to a customer), `REFUND_IN` (cash received back from a vendor). Bill headers are created with `paid_amount = 0, balance_due = total` and then updated only through the ledger: `paid_amount = Σ(UPFRONT + SETTLEMENT)`, `balance_due = total − paid_amount − Σ RETURN_CREDIT`. Cash in = sale UPFRONT/SETTLEMENT + purchase REFUND_IN; cash out = purchase UPFRONT/SETTLEMENT + sale REFUND_OUT. Daily cash drawer totals are ledger sums by `settlement_date`. *(v1.3, FR-33)* **Cash in hand** = opening cash (Settings) + all ledger cash in − all ledger cash out − all expenses, up to today; it never resets.
 9. **Deferred Payment Mode (Null in v1 UI)**: The UI minimizes counter friction by not asking for payment instruments (UPI, Card, Net Banking). All upfront cash collections and cash settlements flow directly into the daily cash drawer register. The database retains `payment_mode` as `NULLABLE` for future version extensibility.
 10. **Linked Return Reversal**: When a customer returns units from a sale line, the system walks that line's `SALE_STOCK_ALLOCATION` rows in reverse depletion order, using `quantity_depleted − returned_quantity` as each row's capacity, increments `returned_quantity`, and records the reversed FIFO cost on `RETURN_ITEM.cost_amount`. For `RESTOCKABLE` units it also restores `remaining_quantity` on the original `PURCHASE_ITEM` lots, bringing the item back at its exact historical cost. This makes repeated partial returns safe and keeps COGS net of returns.
 11. **Stock Outflow FIFO Depletion**: Negative adjustments, replacement issues, and vendor returns consume the oldest available lots via the allocation engine and log each lot consumed in `STOCK_OUTFLOW_ALLOCATION` (with `source_type` and `source_id`). This prevents phantom inventory lots and records inventory loss accurately.
@@ -306,6 +359,8 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 18. **Purchase charges are expenses, not cost** *(2026-11-22)*: Purchase charges/discounts never change lot `unit_cost`, FIFO costs or stock valuation. They are P&L lines (Operating Expenses / Other Income) on the purchase's `transaction_date`.
 19. **Edit = reverse then repost** *(2026-11-22)*: A bill edit reverses the old version's effects and posts the new version through the same service code used for creation, inside one transaction, keeping id and code. Back-dated or edited bills follow DD-09: FIFO order is entry order, so re-posted sale lines take the oldest lots available at edit time. Purchase edits update existing lots in place (ids kept, because allocations reference them); new lines create new lots, which are newest in FIFO; removed lines must be unreferenced. The `UPFRONT` row is re-created on the new `transaction_date`.
 20. **Unrecorded stock is valued at entered cost** *(2026-11-22)*: `UNRECORDED_STOCK` adjustments create lots at a user-entered cost (prefilled from the latest lot), unlike other positive adjustments (DD-08), because this stock never had a purchase to take a cost from.
+21. **Today is the shop computer's local date** *(2026-11-25, FR-28)*: the backend takes "today" from the local clock (injectable in tests). An entry dated after it is rejected.
+22. **Opening bills are dues, not trade** *(2026-11-25, FR-35)*: an `OB-` bill carries a party balance that existed before the app. It takes part in dues, settlement and the ledger. It takes no part in sales, purchases, P&L, profit, stock or cash. Its settlements are ordinary cash events.
 
 ---
 
@@ -1436,6 +1491,31 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // preview_stock_adjustment { payload } / preview_set_item_stock { payload } -> result incl. unit cost used and value change
 ```
 
+#### 10. v1.3 Additions (summary — exact payloads live in the LLD)
+
+```typescript
+// --- Entry dates (FR-28): every create/update/preview with an entry date rejects date > today
+//   with ValidationError { field: <date field>, message: "Date cannot be in the future" }.
+
+// --- Sale entry lot draw (FR-31) — inventory_api (read-only dry run, never writes)
+// preview_lot_draw { item_id, quantity, prior_quantity }   // base units; prior = same item already on the bill
+//   -> { lots: [{ purchase_item_id, transaction_code, unit_cost, remaining_quantity, draw_quantity }],
+//        draw_cost, available, shortfall }               // lots in FIFO order; draw from the real allocation strategy
+
+// --- Cash in hand (FR-33) — dashboard_api / settings_api
+// DashboardMetrics: today_net_profit removed; live_cash_in_drawer -> cash_in_hand (all-time, incl. opening cash)
+// ShopSettings gains opening_cash (>= 0); update_shop_settings accepts it     (schema v10)
+
+// --- History profit (FR-34) — sale_api
+// get_sales_history { filter: HistoryFilter & { include_profit?: boolean } } -> rows gain profit: number | null
+// get_sale_details -> lines gain cost_amount, profit; header gains profit summary (lines, charges, discounts, returns, total)
+
+// --- Party opening balance (FR-35) — dues_api / party_api                (schema v11)
+// create_party / update_party payload gains opening_balance?: { amount, as_of_date } | null
+// Party gains opening_balance: { bill_id, transaction_code, amount, as_of_date, settled_amount } | null
+//   amount < settled -> ValidationError(opening_balance.amount); amount 0 + nothing settled -> bill removed
+```
+
 ### 9.4. Atomic Transaction & Concurrency Controls
 * All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`, and the v1.1 commands `create/update/delete_expense`, `create_expense_type`, `create_charge_type`, `update/delete_sale`, `update/delete_purchase`, `delete_return`, `update_item_low_stock_threshold`, `set_item_stock`, and the v1.2 commands `update_lot_purchase_price`, `settle_bills_batch`, `update_settlement`, `delete_settlement`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
 * No operation updates or deletes a committed transaction row except through the cached-value updates defined above (`paid_amount`, `balance_due`, `payment_status`, `remaining_quantity`, `returned_quantity`, `current_stock`, `is_low_stock`) **and the FR-20 / FR-25 / FR-26 correction operations** (`update_*` / `delete_*`, lot price, settlement edit/delete), which reverse and repost all dependent rows in the same transaction.
@@ -1483,3 +1563,18 @@ Same rules as §10 (own branch, phased commits, LLD/UI LLD first, frozen-fixture
 Integer paise (DD-55) is a separate later feature with its own plan.
 
 **Follow-up (2026-11-24):** `refactor/backend-previews`, no schema change. It applies the §5 business-logic rule (DD-56) across the sale, purchase, return, settlement, lot-price and stock screens.
+
+---
+
+## 12. v1.3 Delivery Plan (2026-11-25)
+
+Owner requests of 2026-11-25. Same rules as §10/§11 (own branch, phased commits, LLD / UI LLD first, frozen-fixture migration tests, full gate, thin mock client, DD-56: no business rules in the UI). Branches go **strictly one after another**, each cut from local `main` after the previous merge. Migration numbers are pre-assigned.
+
+| Order | Branch | Feature | Requirements | Schema migration | Depends on |
+|---|---|---|---|---|---|
+| 1 | `feat/entry-layout` (C2) | "+ New bundle…" in the Unit dropdown, Item List Add bundle, one-line purchase row, sale header and footer layout | FR-29, FR-30 | — | C1 |
+| 2 | `feat/no-future-dates` (C3) | Backend rejects future entry dates; pickers capped at today | FR-28 | — | 1 |
+| 3 | `feat/sale-lot-prices` (C4) | Lot purchase prices and FIFO draw on the sale entry row | FR-31 | — | 1 |
+| 4 | `feat/dashboard-cash` (C5) | Dashboard grouped cards, net profit tile removed, all-time cash in hand, opening cash setting | FR-32, FR-33 | **v10** `shop_settings.opening_cash` | 2 |
+| 5 | `feat/history-profit` (C6) | Compact history columns, icon actions, Profit column toggle, item-level profit in the drawer | FR-34 | — | 4 |
+| 6 | `feat/party-opening-balance` (C7) | Opening balance on party create/edit as an `OB-` bill | FR-35 | **v11** opening-bill marker on both bill headers (+ one-per-party index) | 2, 5 |
