@@ -10,14 +10,15 @@ describe('ReportsPage', () => {
 
   it('renders all P&L lines in order, all cash buckets and the category valuation', async () => {
     const api = installApi({
-      getPnLReport: { grossSales: 1000, salesReturns: 100, netSales: 900, cogs: 400, grossProfit: 500, inventoryLosses: 50, netProfit: 400, totalPurchases: 700, salesDiscounts: 0, otherIncome: 0, saleChargesIncome: 0, purchaseDiscountsIncome: 0, purchaseChargesExpense: 0, operatingExpenses: 50, expensesByType: [{ expenseTypeId: 1, expenseTypeName: 'Printer Ink', amount: 30 }, { expenseTypeId: 2, expenseTypeName: 'Tea', amount: 20 }] },
+      getPnLReport: { grossSales: 1000, salesReturns: 100, netSales: 900, cogs: 400, serviceMiscCosts: 25, grossProfit: 475, inventoryLosses: 50, netProfit: 400, totalPurchases: 700, salesDiscounts: 0, otherIncome: 0, saleChargesIncome: 0, purchaseDiscountsIncome: 0, purchaseChargesExpense: 0, operatingExpenses: 50, expensesByType: [{ expenseTypeId: 1, expenseTypeName: 'Printer Ink', amount: 30 }, { expenseTypeId: 2, expenseTypeName: 'Tea', amount: 20 }] },
       getCashFlowReport: { salesCashInflow: 1, customerSettlementsInflow: 2, vendorRefundsInflow: 3, purchaseCashOutflow: 4, vendorSettlementsOutflow: 5, refundsCashOutflow: 6, expensesCashOutflow: 7, totalInflow: 61, totalOutflow: 77, netCashBalance: -16 },
       getStockValuationReport: { totalValuation: 5000, activeLotsCount: 3, categoriesBreakdown: [{ category: 'Uncategorized', itemsCount: 2, valuation: 5000 }] },
     });
     render(<ReportsPage />);
     await waitFor(() => !!document.querySelector('[data-testid="pnl"]') && !!document.querySelector('[data-testid="cashflow"]') && !!document.querySelector('[data-testid="valuation"]'));
     const ids = Array.from(document.querySelectorAll('[data-testid="pnl"] [data-testid]')).map((e) => e.getAttribute('data-testid'));
-    expect(ids).toEqual(['pnl-gross-sales', 'pnl-sales-discounts', 'pnl-sales-returns', 'pnl-net-sales', 'pnl-cogs', 'pnl-gross-profit', 'pnl-other-income', 'pnl-losses', 'pnl-opex', 'pnl-net-profit', 'pnl-purchases']);
+    expect(ids).toEqual(['pnl-gross-sales', 'pnl-sales-discounts', 'pnl-sales-returns', 'pnl-net-sales', 'pnl-cogs', 'pnl-service-misc', 'pnl-gross-profit', 'pnl-other-income', 'pnl-losses', 'pnl-opex', 'pnl-net-profit', 'pnl-purchases']);
+    expect(document.querySelector('[data-testid="pnl-service-misc"]')!.textContent).toContain('₹25.00');
     expect(document.querySelector('[data-testid="pnl-net-profit"]')!.textContent).toContain('₹400.00');
     expect(document.querySelector('[data-testid="pnl-opex"]')!.textContent).toContain('₹50.00');
     const breakdown = Array.from(document.querySelectorAll('[data-opex-breakdown] [data-breakdown]')).map((e) => e.textContent ?? '');

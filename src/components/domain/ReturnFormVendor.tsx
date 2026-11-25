@@ -253,7 +253,7 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
           </div>
           <div>
             <FieldLabel>Add item to return</FieldLabel>
-            <ItemSearchTypeahead onSelectItem={addItem} placeholder="Search item to return..." />
+            <ItemSearchTypeahead physicalOnly onSelectItem={addItem} placeholder="Search item to return..." />
           </div>
           {lines.map((l) => (
             <div key={l.key} className="grid grid-cols-[1fr_2fr_7rem_auto] gap-2 items-end text-xs">

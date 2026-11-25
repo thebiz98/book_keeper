@@ -106,6 +106,21 @@ describe('ReturnFormCustomer', () => {
     expect(document.querySelector('[data-testid="return-result"]')!.textContent).toContain('RET-1');
   });
 
+  it('does not offer service lines of a bill for return (DD-67)', async () => {
+    const d = saleDetail();
+    const svc = {
+      ...d.items[0],
+      saleItem: { ...d.items[0].saleItem, id: 12, itemId: 3, itemName: 'Photo print' },
+      itemName: 'Photo print',
+      isService: true,
+    };
+    installApi({ getSaleDetails: async () => ({ ...d, items: [d.items[0], svc] }) as unknown as SaleDetailView });
+    render(<ReturnFormCustomer initialBillId={5} />);
+    await waitFor(() => bodyText().includes('Notebook'));
+    expect(bodyText()).not.toContain('Photo print');
+    expect(document.querySelector('input[aria-label="Return quantity for Photo print"]')).toBeNull();
+  });
+
   it('defaults the refund rate to the net rate and says it is net of the bill discount (FR-19)', async () => {
     installApi({ getSaleDetails: async () => saleDetail(45), createCustomerReturn: async () => result });
     render(<ReturnFormCustomer initialBillId={5} />);

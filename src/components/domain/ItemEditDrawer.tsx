@@ -10,6 +10,7 @@ import { TextInput } from '../ui/TextInput';
 import { BundleTable } from './BundleTable';
 import { validationField } from './formUtils';
 import { FIELD_MAP, validateItemForm, type ItemFormErrors } from './itemForm';
+import { ServiceComponentsEditor, toComponentInputs, type ComponentRow } from './ServiceComponentsEditor';
 
 export interface ItemEditDrawerProps {
   isOpen: boolean;
@@ -39,6 +40,11 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   const [initialStock, setInitialStock] = useState('');
   const [initialCost, setInitialCost] = useState('');
   const [lowStock, setLowStock] = useState('5');
+  // FR-36: Physical / Service choice (create only; fixed once the item exists).
+  const [kind, setKind] = useState<'PHYSICAL' | 'SERVICE'>('PHYSICAL');
+  const [serviceCost, setServiceCost] = useState('');
+  const [components, setComponents] = useState<ComponentRow[]>([]);
+  const isService = isEdit ? item.itemType === 'SERVICE' : kind === 'SERVICE';
   const [errors, setErrors] = useState<ItemFormErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -59,6 +65,27 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     setInitialStock('');
     setInitialCost('');
     setLowStock(item ? String(item.lowStockThreshold) : '5');
+    setKind(item?.itemType === 'SERVICE' ? 'SERVICE' : 'PHYSICAL');
+    setServiceCost(numText(item?.serviceCost));
+    setComponents([]);
+    if (item?.itemType === 'SERVICE') {
+      let live = true;
+      api
+        .getServiceComponents(item.itemId)
+        .then((rows) => {
+          if (live)
+            setComponents(
+              rows.map((r) => ({ itemId: r.componentItemId, name: r.name, baseUnit: r.baseUnit, qty: String(r.quantityPerUnit) }))
+            );
+        })
+        .catch((err) => live && setFormError(errorMessage(err) || 'Failed to load components'));
+      busy.current = false;
+      setErrors({});
+      setFormError(null);
+      return () => {
+        live = false;
+      };
+    }
     setErrors({});
     setFormError(null);
     busy.current = false;
@@ -68,12 +95,12 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   const handleSave = async () => {
     if (busy.current) return;
     const { errors: errs, values } = validateItemForm(
-      { name, baseUnit, mrp, price, lowStock, initialStock, initialCost },
-      isEdit ? 'edit' : 'create'
+      { name, baseUnit, mrp, price, lowStock, initialStock, initialCost, serviceCost },
+      isService ? 'service' : isEdit ? 'edit' : 'create'
     );
     setErrors(errs);
     if (!values) return;
-    const { mrp: mrpVal, price: priceVal, lowStock: lowVal, stock: stockVal, cost: costVal } = values;
+    const { mrp: mrpVal, price: priceVal, lowStock: lowVal, stock: stockVal, cost: costVal, serviceCost: svcCost } = values;
 
     busy.current = true;
     setSaving(true);
@@ -88,9 +115,19 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
       defaultSalePrice: priceVal as number,
       lowStockThreshold: lowVal as number,
     };
+    const serviceFields = isService ? { serviceCost: svcCost, components: toComponentInputs(components) } : {};
     try {
       if (isEdit) {
-        await api.updateItem(item.itemId, base);
+        await api.updateItem(item.itemId, { ...base, ...serviceFields });
+      } else if (isService) {
+        await api.createItem({
+          ...base,
+          ...serviceFields,
+          itemType: 'SERVICE',
+          initialStock: null,
+          initialCost: null,
+          bundles: null,
+        });
       } else {
         await api.createItem({
           ...base,
@@ -126,9 +163,13 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
       onClose={() => {
         if (!bundleModalOpen.current && !stockDialogOpen.current) onClose();
       }}
-      title={isEdit ? `Edit Item: ${item.name}` : 'Add New Item'}
+      title={isEdit ? `Edit ${isService ? 'Service' : 'Item'}: ${item.name}` : isService ? 'Add New Service' : 'Add New Item'}
       description={
-        isEdit ? 'Stock changes through purchases, sales, returns, adjustments or Set stock.' : undefined
+        isEdit && !isService
+          ? 'Stock changes through purchases, sales, returns, adjustments or Set stock.'
+          : isService
+            ? 'A service has no stock. Selling it uses up its components.'
+            : undefined
       }
       width="lg"
       footer={
@@ -136,14 +177,44 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           onSave={() => void handleSave()}
           onCancel={onClose}
           isSubmitting={saving}
-          saveLabel={isEdit ? 'Save Changes' : 'Save Item'}
+          saveLabel={isEdit ? 'Save Changes' : isService ? 'Save Service' : 'Save Item'}
           saveHotkey="Ctrl+Enter"
         />
       }
     >
       <div className="flex flex-col gap-3" onKeyDown={onKeyDown}>
+        <div className="flex items-center justify-between rounded-md bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs">
+          <span className="text-slate-500">Type</span>
+          <span
+            data-testid="item-type"
+            role="radiogroup"
+            aria-label="Item type"
+            className="inline-flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden"
+          >
+            {(['PHYSICAL', 'SERVICE'] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={isService === (k === 'SERVICE')}
+                data-testid={k === 'SERVICE' ? 'type-service' : 'type-physical'}
+                disabled={isEdit}
+                onClick={() => setKind(k)}
+                className={
+                  'px-3 py-1 font-medium disabled:cursor-not-allowed ' +
+                  (isService === (k === 'SERVICE')
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 disabled:opacity-60')
+                }
+              >
+                {k === 'SERVICE' ? 'Service' : 'Physical'}
+              </button>
+            ))}
+          </span>
+        </div>
+
         <TextInput
-          label="Item Name *"
+          label={isService ? 'Service Name *' : 'Item Name *'}
           value={name}
           onChange={(e) => setName(e.target.value)}
           error={errors.name}
@@ -152,22 +223,36 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
 
         <div className="grid grid-cols-3 gap-3">
           <TextInput
-            label="Base Unit *"
+            label={isService ? 'Unit * (e.g. PRINT)' : 'Base Unit *'}
             value={baseUnit}
             onChange={(e) => setBaseUnit(e.target.value.toUpperCase())}
             error={errors.baseUnit}
           />
-          <TextInput
-            label="MRP (₹, optional)"
-            type="number"
-            min={0}
-            step="any"
-            placeholder="none"
-            value={mrp}
-            onChange={(e) => setMrp(e.target.value)}
-            error={errors.mrp}
-            className="text-right font-mono"
-          />
+          {isService ? (
+            <TextInput
+              label="Service cost (₹/unit, optional)"
+              type="number"
+              min={0}
+              step="any"
+              placeholder="none"
+              value={serviceCost}
+              onChange={(e) => setServiceCost(e.target.value)}
+              error={errors.serviceCost}
+              className="text-right font-mono"
+            />
+          ) : (
+            <TextInput
+              label="MRP (₹, optional)"
+              type="number"
+              min={0}
+              step="any"
+              placeholder="none"
+              value={mrp}
+              onChange={(e) => setMrp(e.target.value)}
+              error={errors.mrp}
+              className="text-right font-mono"
+            />
+          )}
           <TextInput
             label="Sale Price (₹) *"
             type="number"
@@ -180,6 +265,16 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           />
         </div>
 
+        {isService && (
+          <ServiceComponentsEditor
+            rows={components}
+            onChange={setComponents}
+            serviceCost={serviceCost}
+            serviceItemId={item?.itemId}
+          />
+        )}
+
+        {!isService && (
         <div className="flex flex-col gap-1">
           <TextInput
             label="Low Stock Level (base units)"
@@ -193,15 +288,9 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           />
           <p className="text-[10px] text-slate-400">Marked Low Stock when stock falls below this. 0 = never</p>
         </div>
+        )}
 
-        <div className="flex items-center justify-between rounded-md bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs">
-          <span className="text-slate-500">Type</span>
-          <span data-testid="item-type" className="font-medium">
-            {item?.itemType === 'SERVICE' ? 'Service' : 'Physical (stocked item)'}
-          </span>
-        </div>
-
-        {isEdit ? (
+        {isService ? null : isEdit ? (
           <div className="flex items-center justify-between rounded-md bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs">
             <span className="text-slate-500">Stock on hand</span>
             <span className="flex items-center gap-2">
@@ -252,7 +341,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           </p>
         )}
 
-        {isEdit ? (
+        {isService ? null : isEdit ? (
           <div className="mt-2 pt-3 border-t border-slate-100 dark:border-slate-800">
             <BundleTable
               itemId={item.itemId}

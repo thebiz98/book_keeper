@@ -34,6 +34,8 @@ export interface ItemSearchTypeaheadProps {
   /** `inline` renders results in flow inside a scroll container (item lookup dialog). */
   resultsMode?: 'dropdown' | 'inline';
   resultsClassName?: string;
+  /** Hide services (purchases, returns, adjustments and service components take stocked items only, FR-36). */
+  physicalOnly?: boolean;
 }
 
 /** Best match for Enter: results shown -> the highlighted row; else exact (bundle) barcode hit, else the top row. */
@@ -52,6 +54,8 @@ function pickOnEnter(
 }
 
 const searchItems = (q: string) => api.searchItemsFts(q, SEARCH_LIMIT);
+const searchPhysical = async (q: string) =>
+  (await api.searchItemsFts(q, SEARCH_LIMIT * 2)).filter((i) => i.itemType !== 'SERVICE').slice(0, SEARCH_LIMIT);
 
 /** Item typeahead used by billing, purchases, adjustments and returns (thin wrapper over LiveSearchTypeahead). */
 export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
@@ -68,11 +72,12 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
   createLabel,
   resultsMode,
   resultsClassName,
+  physicalOnly = false,
 }) => (
   <LiveSearchTypeahead<ItemSearchResult>
     resultsMode={resultsMode}
     resultsClassName={resultsClassName}
-    search={searchItems}
+    search={physicalOnly ? searchPhysical : searchItems}
     onCreate={onCreate}
     createLabel={createLabel}
     getKey={(i) => i.itemId}
@@ -104,12 +109,18 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <StockStatusBadge
-            currentStock={item.currentStock}
-            isLowStock={item.isLowStock}
-            lowStockThreshold={item.lowStockThreshold}
-            baseUnit={item.baseUnit}
-          />
+          {item.itemType === 'SERVICE' ? (
+            <span data-testid="service-result-tag" className="text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+              Service{item.canMake != null ? ` · can make ${item.canMake}` : ''}
+            </span>
+          ) : (
+            <StockStatusBadge
+              currentStock={item.currentStock}
+              isLowStock={item.isLowStock}
+              lowStockThreshold={item.lowStockThreshold}
+              baseUnit={item.baseUnit}
+            />
+          )}
           <div className="text-right font-mono font-semibold text-xs">
             <CurrencyDisplay amount={item.defaultSalePrice} size="sm" />
           </div>

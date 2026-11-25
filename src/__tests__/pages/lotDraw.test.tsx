@@ -73,10 +73,10 @@ describe('LotDrawLine (FR-31)', () => {
 });
 
 describe('RapidBillingRow info line (FR-31)', () => {
-  it('shows lot prices from previewLotDraw, no Rate text, and sends base units with the prior quantity', async () => {
+  it('shows lot prices from previewLotDraw, no Rate text, and sends base units with the earlier cart lines', async () => {
     const previewLotDraw = vi.fn(async () => drawOf([lot(1, 40, 5, 5), lot(2, 42.5, 20, 5)], { drawCost: 412.5 }));
     installApi({ previewLotDraw });
-    const { container } = render(<RapidBillingRow priorQuantity={(id) => (id === 9 ? 3 : 0)} />);
+    const { container } = render(<RapidBillingRow priorLines={() => [{ itemId: 9, quantity: 3 }]} />);
     act(() => pickItem(makeItem({ itemId: 9, name: 'Pencil', bundles: [box] })));
     await flush();
     await act(async () => {
@@ -88,7 +88,7 @@ describe('RapidBillingRow info line (FR-31)', () => {
     expect(info.textContent).toContain('₹42.50 × 20');
     expect(info.textContent).toContain('→ cost');
     expect(info.textContent).not.toContain('Rate:');
-    expect(previewLotDraw).toHaveBeenLastCalledWith(9, 1, 3);
+    expect(previewLotDraw).toHaveBeenLastCalledWith(9, 1, [{ itemId: 9, quantity: 3 }]);
 
     // 2 boxes of 10 -> 20 base units
     const sel = container.querySelector('[data-testid="bundle-select"]') as HTMLSelectElement;
@@ -97,7 +97,7 @@ describe('RapidBillingRow info line (FR-31)', () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 150));
     });
-    expect(previewLotDraw).toHaveBeenLastCalledWith(9, 20, 3);
+    expect(previewLotDraw).toHaveBeenLastCalledWith(9, 20, [{ itemId: 9, quantity: 3 }]);
   });
 
   it('has no lot text when the preview returns no lots', async () => {
@@ -111,5 +111,43 @@ describe('RapidBillingRow info line (FR-31)', () => {
     const info = container.querySelector('[data-testid="stock-indicator"]') as HTMLElement;
     expect(info.textContent).not.toContain('Purchase price');
     expect(info.textContent).not.toContain('Rate:');
+  });
+});
+
+describe('RapidBillingRow service info line (FR-37)', () => {
+  const svcDraw = (): LotDraw => ({
+    lots: [],
+    drawCost: 10,
+    available: 8,
+    shortfall: 0,
+    components: [
+      { itemId: 1, name: 'Photo paper', baseUnit: 'SHEET', quantity: 4, lots: [], drawCost: 10, available: 20, shortfall: 0 },
+    ],
+    componentsCost: 10,
+    miscCost: 2.5,
+    lineCost: 12.5,
+  });
+
+  it('shows the components, their cost, misc. and line cost from the backend, Can make, and no new-bundle option', async () => {
+    const previewLotDraw = vi.fn(async () => svcDraw());
+    installApi({ previewLotDraw });
+    const { container } = render(
+      <RapidBillingRow onOpenBundleModal={() => undefined} priorLines={() => [{ itemId: 1, quantity: 2 }]} />
+    );
+    act(() => pickItem(makeItem({ itemId: 7, name: 'Photo print', baseUnit: 'PRINT', itemType: 'SERVICE', canMake: 8, bundles: [] })));
+    await flush();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 150));
+    });
+    const info = container.querySelector('[data-testid="stock-indicator"]') as HTMLElement;
+    expect(info.textContent).toContain('Can make: 8 PRINT');
+    expect(info.textContent).not.toContain('Available');
+    expect(info.querySelector('[data-testid="service-component"]')?.textContent).toContain('4 SHEET Photo paper');
+    expect(info.querySelector('[data-testid="service-components-cost"]')?.textContent).toContain('₹10.00');
+    expect(info.querySelector('[data-testid="service-misc-cost"]')?.textContent).toContain('₹2.50');
+    expect(info.querySelector('[data-testid="service-line-cost"]')?.textContent).toContain('₹12.50');
+    expect(previewLotDraw).toHaveBeenLastCalledWith(7, 1, [{ itemId: 1, quantity: 2 }]);
+    const options = Array.from(container.querySelectorAll('[data-testid="bundle-select"] option')).map((o) => o.textContent);
+    expect(options).toEqual(['Base (PRINT)']);
   });
 });

@@ -16,6 +16,11 @@ import type {
   ItemBillRef,
   ItemLot,
   LotDraw,
+  PreviewServiceCostPayload,
+  PriorLine,
+  ServiceComponentInput,
+  ServiceComponentView,
+  ServiceCostPreview,
   ItemSearchResult,
   ItemType,
   LowStockItem,
@@ -305,10 +310,14 @@ export interface CreateItemPayload {
   initialStock: number | null;
   initialCost: number | null;
   bundles: CreateBundlePayload[] | null;
-  /** Optional; omitted => PHYSICAL. SERVICE is rejected by the backend in v1.1. */
+  /** Optional; omitted => PHYSICAL. */
   itemType?: ItemType | null;
   /** Optional; omitted => 5. 0 = never low. */
   lowStockThreshold?: number | null;
+  /** SERVICE only (FR-36). */
+  serviceCost?: number | null;
+  /** SERVICE only (FR-36): the bill of materials. */
+  components?: ServiceComponentInput[] | null;
 }
 
 export interface UpdateItemPayload {
@@ -321,6 +330,10 @@ export interface UpdateItemPayload {
   itemType?: ItemType | null;
   /** Optional; omitted/null => keep the current level. */
   lowStockThreshold?: number | null;
+  /** SERVICE only: full replacement (null clears). */
+  serviceCost?: number | null;
+  /** SERVICE only: a list replaces the components, omitted/null keeps them. */
+  components?: ServiceComponentInput[] | null;
 }
 
 export interface BundleSuggestion {
@@ -686,8 +699,11 @@ export interface ApiClient {
   /** DD-56: dry runs of the stock commands: the unit cost used, the FIFO loss and the value change. */
   previewStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentPreview>;
   previewSetItemStock(payload: SetItemStockPayload): Promise<SetItemStockResult>;
-  /** FR-31: open lots in FIFO order and the draw of `quantity` after `priorQuantity` (base units). */
-  previewLotDraw(itemId: number, quantity: number, priorQuantity: number): Promise<LotDraw>;
+  /** FR-31: open lots in FIFO order and the draw of `quantity` after the earlier cart lines `priorLines` (base units; services expanded by the backend). */
+  previewLotDraw(itemId: number, quantity: number, priorLines: PriorLine[]): Promise<LotDraw>;
+  /** FR-36: cost of one service unit from the unsaved components and Service cost (backend dry run). */
+  previewServiceCost(payload: PreviewServiceCostPayload): Promise<ServiceCostPreview>;
+  getServiceComponents(itemId: number): Promise<ServiceComponentView[]>;
   /**
    * NOTE: get_item_lots is implemented in adjustment_controller.rs but is NOT yet in
    * main.rs generate_handler!. It will reject until the backend registers it.

@@ -489,6 +489,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
           <div ref={searchWrapRef} data-purchase-search data-testid="purchase-item-search">
             <ItemSearchTypeahead
               onSelectItem={chooseItem}
+              physicalOnly
               onCreate={(q) => setQuickName(q)}
               autoFocus
               placeholder="Search item by name or barcode…"
