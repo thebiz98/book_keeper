@@ -1,4 +1,4 @@
-import type { BillEditGuard, ItemSearchResult, PurchaseDetailView } from '@/types';
+import type { BillEditGuard, ItemSearchResult, PurchaseDetailView, SaleDetailView } from '@/types';
 
 export const purchaseDetail = (): PurchaseDetailView =>
   ({
@@ -38,3 +38,28 @@ export const PEN: ItemSearchResult = {
 export const INK: ItemSearchResult = { ...PEN, itemId: 2, name: 'Ink', bundles: [] };
 
 export const search = async (q: string) => (q === 'Pen' ? [PEN] : q === 'Ink' ? [INK] : []);
+
+export const saleDetail = (): SaleDetailView =>
+  ({
+    sale: {
+      id: 5, transactionCode: 'SAL-1005', transactionDate: '2026-11-20', partyId: null, partyName: null, paymentMode: 'CASH',
+      paymentStatus: 'PAID', totalAmount: 100, paidAmount: 100, balanceDue: 0, notes: 'hi', createdAt: '', itemsSubtotal: 100,
+      chargesTotal: 0, discountsTotal: 0, updatedAt: '2026-11-21T10:00:00Z',
+    },
+    party: null, settlements: [], charges: [],
+    items: [
+      {
+        saleItem: { id: 1, saleTransactionId: 5, itemId: 1, itemName: 'Pen', packLabel: null, packQuantity: 2, quantity: 2, unitPrice: 50, totalAmount: 100 },
+        itemName: 'Pen', bundleName: null, returnedQuantity: 0, allocations: [], netUnitPrice: 50,
+      },
+      {
+        saleItem: { id: 2, saleTransactionId: 5, itemId: 2, itemName: 'Ink', packLabel: null, packQuantity: 1, quantity: 1, unitPrice: 30, totalAmount: 30 },
+        itemName: 'Ink', bundleName: null, returnedQuantity: 0, allocations: [], netUnitPrice: 30,
+      },
+    ],
+  }) as unknown as SaleDetailView;
+
+export const saleGuard = (over: Partial<BillEditGuard> = {}): BillEditGuard => ({
+  target: 'SALE', id: 5, code: 'SAL-1005', canEdit: true, canDelete: true, canChangeParty: true, reasons: [],
+  upfrontAmount: 130, appliedAmount: 0, removedCashAmount: 130, removedCreditAmount: 0, lotLimits: [], ...over,
+});

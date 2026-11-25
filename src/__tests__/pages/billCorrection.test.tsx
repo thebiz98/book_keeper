@@ -5,10 +5,10 @@ import { ReturnDetailDrawer } from '@/components/domain/ReturnDetailDrawer';
 import { NewSalePage } from '@/pages/NewSalePage';
 import { useAppStore } from '@/store/useAppStore';
 import { useCartStore } from '@/store/useCartStore';
-import { peekBillEdit, queueBillEdit, takeBillEdit } from '@/pages/billEditHandoff';
+import { queueBillEdit, takeBillEdit } from '@/pages/billEditHandoff';
 import { __resetHotkeys } from '@/hooks/useHotkeys';
 import type { BillEditGuard, SaleDetailView } from '@/types';
-import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText, fakeBillPreview } from './helpers';
+import { installApi, flush, waitFor, click, setInput, bodyText, fakeBillPreview } from './helpers';
 
 const guard = (over: Partial<BillEditGuard> = {}): BillEditGuard => ({
   target: 'SALE', id: 5, code: 'SAL-1005', canEdit: true, canDelete: true, canChangeParty: true, reasons: [],
@@ -45,16 +45,17 @@ describe('BillDetailDrawer actions (FR-20)', () => {
     takeBillEdit();
   });
 
-  it('enables Edit and Delete from the guard and Edit queues the handoff and navigates', async () => {
-    installApi({ getSaleDetails: saleDetail(), getBillEditGuard: guard() });
+  it('enables Edit and Delete from the guard; Edit opens the form in the drawer without navigating', async () => {
+    installApi({ getSaleDetails: saleDetail(), getBillEditGuard: guard(), searchItemsFts: [PEN], previewSale: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p) });
     const onClose = vi.fn();
     render(<BillDetailDrawer kind="SALE" billId={5} onClose={onClose} />);
     await waitFor(() => !!document.querySelector('[data-testid="bill-edit"]:not([disabled])'));
     expect(bodyText()).toContain('Edited 2026-11-21');
     click(document.querySelector('[data-testid="bill-edit"]')!);
-    expect(peekBillEdit()).toEqual({ kind: 'SALE', id: 5 });
-    expect(useAppStore.getState().activeRoute).toBe('sale');
-    expect(onClose).toHaveBeenCalled();
+    await waitFor(() => !!document.querySelector('[data-testid="sale-edit-form"] [data-testid="edit-line"]'));
+    expect(bodyText()).toContain('Editing SAL-1005');
+    expect(useAppStore.getState().activeRoute).not.toBe('sale');
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('disables both buttons and lists the reasons when the guard blocks', async () => {
@@ -69,18 +70,6 @@ describe('BillDetailDrawer actions (FR-20)', () => {
     await waitFor(() => bodyText().includes('RET-1001'));
     expect((document.querySelector('[data-testid="bill-edit"]') as HTMLButtonElement).disabled).toBe(true);
     expect((document.querySelector('[data-testid="bill-delete"]') as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it('asks before replacing a cart in progress', async () => {
-    installApi({ getSaleDetails: saleDetail(), getBillEditGuard: guard() });
-    useCartStore.getState().addItem({ id: 1, name: 'Pen', baseUnit: 'PCS', defaultSalePrice: 5 });
-    render(<BillDetailDrawer kind="SALE" billId={5} onClose={() => {}} />);
-    await waitFor(() => !!document.querySelector('[data-testid="bill-edit"]:not([disabled])'));
-    click(document.querySelector('[data-testid="bill-edit"]')!);
-    expect(peekBillEdit()).toBeNull();
-    expect(bodyText()).toContain('Discard current cart?');
-    click(buttonByText('Discard and edit'));
-    expect(peekBillEdit()).toEqual({ kind: 'SALE', id: 5 });
   });
 
   it('delete needs the typed code, then calls deleteSale and onChanged', async () => {

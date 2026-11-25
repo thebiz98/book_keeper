@@ -13,15 +13,13 @@ import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { PaymentStatusBadge } from '../common/PaymentStatusBadge';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { Button } from '../ui/Button';
-import { useAppStore } from '@/store/useAppStore';
-import { useCartStore } from '@/store/useCartStore';
-import { queueBillEdit } from '@/pages/billEditHandoff';
 import { Pencil, Trash2, DollarSign, Printer } from 'lucide-react';
 import { usePrintBill } from '../print/usePrintBill';
 import { SettlementModal } from './SettlementModal';
 import { SettlementEditModal } from './SettlementEditModal';
 import { refreshAppMetrics } from './navParams';
 import { PurchaseEditForm } from './billEdit/PurchaseEditForm';
+import { SaleEditForm } from './billEdit/SaleEditForm';
 
 export interface BillDetailDrawerProps {
   kind: TransactionType;
@@ -124,9 +122,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   const [loading, setLoading] = useState(false);
   const [guard, setGuard] = useState<BillEditGuard | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const setActiveRoute = useAppStore((s) => s.setActiveRoute);
   const [reloadKey, setReloadKey] = useState(0);
   const [settleOpen, setSettleOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<PaymentSettlement | null>(null);
@@ -155,7 +151,6 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     setGuard(null);
     setActionError(null);
     setConfirmDelete(false);
-    setConfirmDiscard(false);
     setSettleOpen(false);
     setEditingRow(null);
     setDeletingRow(null);
@@ -175,18 +170,9 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     };
   }, [kind, billId, reloadKey]);
 
-  const startEdit = () => {
-    if (billId === null) return;
-    queueBillEdit({ kind, id: billId });
-    setActiveRoute(kind === 'SALE' ? 'sale' : 'purchase');
-    onClose();
-  };
   const onEditClick = () => {
-    if (kind === 'PURCHASE') {
-      setNotice(null);
-      setMode('edit');
-    } else if (useCartStore.getState().items.length > 0) setConfirmDiscard(true);
-    else startEdit();
+    setNotice(null);
+    setMode('edit');
   };
   const leaveEdit = () => {
     setMode('view');
@@ -327,6 +313,9 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     >
       {mode === 'edit' && billId !== null && kind === 'PURCHASE' && (
         <PurchaseEditForm billId={billId} onCancel={requestCancelEdit} onSaved={onEditSaved} onDirtyChange={setEditDirty} />
+      )}
+      {mode === 'edit' && billId !== null && kind === 'SALE' && (
+        <SaleEditForm billId={billId} onCancel={requestCancelEdit} onSaved={onEditSaved} onDirtyChange={setEditDirty} />
       )}
       {mode === 'view' && notice && (
         <p role="status" data-testid="bill-notice" className="mb-2 text-xs text-emerald-700 dark:text-emerald-400">
@@ -557,18 +546,6 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
           if (closing) onClose();
         }}
         onCancel={() => setConfirmLeaveEdit(null)}
-      />
-      <ConfirmDialog
-        isOpen={confirmDiscard}
-        variant="warning"
-        title="Discard current cart?"
-        message="A sale is in progress in the billing screen. Editing this bill replaces it."
-        confirmText="Discard and edit"
-        onConfirm={() => {
-          setConfirmDiscard(false);
-          startEdit();
-        }}
-        onCancel={() => setConfirmDiscard(false)}
       />
     </Drawer>
   );
