@@ -432,6 +432,7 @@ const V8: &str = include_str!("fixtures/schema/v8.sql");
 #[allow(dead_code)]
 const V9: &str = include_str!("fixtures/schema/v9.sql");
 const V10: &str = include_str!("fixtures/schema/v10.sql");
+const V11: &str = include_str!("fixtures/schema/v11.sql");
 /// The shipped v8 fixture is a DDL delta without its `schema_version` row (never edited); chains that
 /// go past v8 record it with this step.
 const V8_RECORD: &str = "INSERT INTO schema_version (version, name) VALUES (8, 'bill_correction'); PRAGMA user_version = 8;";
@@ -963,6 +964,87 @@ fn frozen_v10_fixture_matches_the_migrated_schema() {
         st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()).collect()
     };
     assert_eq!(shape(&from_fixtures), shape(&migrated));
+    drop(from_fixtures);
+    drop(migrated);
+    cleanup(&p1);
+    cleanup(&p2);
+}
+
+const V1_TO_V10: [&str; 11] = [V1, V2, V3, V4, V5, V6, V7, V8, V8_RECORD, V9, V10];
+
+#[test]
+fn v10_database_upgrades_to_v11_adding_the_opening_bill_flag() {
+    let (path, conn) = db_from_fixtures("v10up", &V1_TO_V10);
+    conn.execute_batch(
+        "INSERT INTO parties (name, party_type) VALUES ('Ram', 'CUSTOMER'), ('Shyam', 'VENDOR');
+         INSERT INTO sale_transactions (transaction_code, transaction_date, party_id, payment_status, total_amount, paid_amount, balance_due, created_at)
+           VALUES ('SAL-1001', '2026-01-01', 1, 'UNPAID', 10, 0, 10, 'x');
+         INSERT INTO purchase_transactions (transaction_code, transaction_date, party_id, payment_status, total_amount, paid_amount, balance_due, created_at)
+           VALUES ('PUR-1001', '2026-01-01', 2, 'UNPAID', 10, 0, 10, 'x');",
+    )
+    .unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 11);
+    let flags: (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT is_opening_balance FROM sale_transactions), (SELECT is_opening_balance FROM purchase_transactions)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(flags, (0, 0), "existing bills default to not-opening");
+    let ob_sale = |code: &str| {
+        conn.execute(
+            "INSERT INTO sale_transactions (transaction_code, transaction_date, party_id, payment_status, total_amount, paid_amount, balance_due, created_at, is_opening_balance)
+             VALUES (?1, '2026-01-01', 1, 'UNPAID', 5, 0, 5, 'x', 1)",
+            [code],
+        )
+    };
+    ob_sale("OB-0001").unwrap();
+    assert!(ob_sale("OB-0002").is_err(), "one opening bill per customer");
+    assert!(
+        conn.execute("UPDATE sale_transactions SET is_opening_balance = 2 WHERE id = 1", []).is_err(),
+        "CHECK rejects other flag values"
+    );
+    let ob_purchase = |code: &str| {
+        conn.execute(
+            "INSERT INTO purchase_transactions (transaction_code, transaction_date, party_id, payment_status, total_amount, paid_amount, balance_due, created_at, is_opening_balance)
+             VALUES (?1, '2026-01-01', 2, 'UNPAID', 5, 0, 5, 'x', 1)",
+            [code],
+        )
+    };
+    ob_purchase("OB-0003").unwrap();
+    assert!(ob_purchase("OB-0004").is_err(), "one opening bill per vendor");
+    let before = current_version(&conn).unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(current_version(&conn).unwrap(), before);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn frozen_v11_fixture_matches_the_migrated_schema() {
+    let mut steps = V1_TO_V10.to_vec();
+    steps.push(V11);
+    let (p1, from_fixtures) = db_from_fixtures("v11fx", &steps);
+    let (p2, migrated) = db_from_fixtures("v11mig", &[V1]);
+    run_migrations(&migrated).unwrap();
+    let shape = |c: &Connection| -> Vec<(String, String, i64, Option<String>)> {
+        let mut out = Vec::new();
+        for t in ["sale_transactions", "purchase_transactions"] {
+            let mut st = c
+                .prepare(&format!("SELECT '{t}.' || name, type, \"notnull\", dflt_value FROM pragma_table_info('{t}') ORDER BY name"))
+                .unwrap();
+            out.extend(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()));
+        }
+        let mut st = c
+            .prepare("SELECT name, tbl_name, 0, sql FROM sqlite_master WHERE type = 'index' AND name LIKE 'ux_%_opening_party' ORDER BY name")
+            .unwrap();
+        out.extend(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()));
+        out
+    };
+    assert_eq!(shape(&from_fixtures), shape(&migrated));
+    assert!(shape(&migrated).iter().any(|r| r.0 == "ux_sale_opening_party"));
     drop(from_fixtures);
     drop(migrated);
     cleanup(&p1);
