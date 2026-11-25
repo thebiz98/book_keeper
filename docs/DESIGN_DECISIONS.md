@@ -403,6 +403,11 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - Each kind (items, service components, parties, expenses) has a template writer, a pure parser/validator returning the existing `ImportValidationReport`, and an execute step in one `BEGIN IMMEDIATE` transaction through the normal service code (FR-35 opening bills, FTS sync, code sequences). The parsing core (CSV/XLSX via `csv` / `calamine`, header matching, date and number parsing) is shared.
 - No import of sale / purchase history: replaying FIFO over imported bills is a migration project, not an import.
 
+**DD-72 — Settlement history is a tab on Credit & Dues (2026-11-25, v1.4 FR-42).**
+- A third tab, not a new sidebar page: settlements belong to the khata, and the user already goes there to settle. One new read command, `get_settlement_history`, pages in SQL over `idx_settlements_date`. Edit and delete call the existing `update_settlement` / `delete_settlement` (FR-26), so no rule is duplicated (DD-56).
+- Only `SETTLEMENT` rows are listed, because those are the only rows editable on their own. Other ledger kinds would appear as rows the user can't act on.
+- *Why (owner, 2026-11-25):* edit/delete existed but were "nested inside the view section". Settlement history across all parties is a daily check.
+
 **DD-71 — Entity review outcomes (2026-11-25, v1.4).**
 - **Doc drift fixed in the HLD:** the ERD now shows `items/parties.updated_at`, return name snapshots, `is_opening_balance`, `opening_cash`, `backup_directory` and `CODE_SEQUENCE`. `balance_due` is documented with `RETURN_CREDIT`. The stale "cash in hand = today" query row is corrected.
 - **Real redundancy removed:** `idx_sale_items_item (item_id)` duplicates the prefix of `idx_sale_items_item_date`; v12 drops it.

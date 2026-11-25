@@ -277,6 +277,12 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Parties** (Parties → Import): `name, type (CUSTOMER/VENDOR), phone, notes, opening_balance, as_of_date`. A duplicate is the same name and type, ignoring case; the strategy is *skip* or *update*. An opening balance creates or updates the `OB-` bill under FR-35's rules, and an amount below what is already settled is a row error.
   * **Expenses** (Expenses → Import): `date, expense_type, amount, notes`. A missing expense type is created (case-insensitive match). Rows only insert. A row identical to another in the file or the database (date, type, amount, notes) is a warning, not an error.
   * Dates follow FR-28 (no future dates). Sale / purchase history import stays out of scope (§3.2).
+* **FR-42: Settlement History Tab** *(added 2026-11-25, v1.4, DD-72; FR-26 rev.)*
+  * Credit & Dues gets a third tab, **Settlement History**, beside Customer Receivables and Vendor Payables. It lists every later due payment (`SETTLEMENT` ledger rows) across all parties, newest first.
+  * **Filters** (one row above the table): date range (default: this month), side (*All* / *Received from customers* / *Paid to vendors*), party search (live search, FR-14). **Columns:** Date · Party · Bill (code, "Opening balance" for `OB-` bills; opens the bill drawer) · Side · Amount · Notes · Actions. Paged and sorted in the backend. A summary above the table shows total received, total paid and the row count for the filter.
+  * **Actions on each row** (icon buttons with tooltips): **Edit** opens the existing settlement edit form (FR-26: amount, date, notes; same limits and backend checks), and **Delete** asks for a danger confirm that names the amount and bill. After either, the list, the tab's totals, the dues tabs and the header cash refresh.
+  * Upfront payments, return credits and refunds are not listed: they change only through bill edit (FR-20) or return delete. The party ledger and bill drawer keep their own Edit / Delete.
+  * Keyboard: the tab is reachable like the other two; Up/Down move the highlighted row, Enter opens the bill, E edits, Delete deletes (with confirm).
 
 ### 2.2. Non-Functional Requirements (NFR)
 
@@ -356,6 +362,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 43. **Inventory speed: fast, slow and dead stock (FR-39).**
 44. **Dashboard: Cash & Stock row on top, low stock moved up, valuation → Inventory, larger item lookup (FR-40).**
 45. **Imports of parties (with opening balance), expenses, and services with components (FR-41).**
+46. **Settlement History tab on Credit & Dues with direct Edit / Delete (FR-42).**
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
@@ -1639,6 +1646,12 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // validate/execute_items_import: template gains item_type, service_cost; XLSX sheet "Components"
 // validate/execute_service_components_import, validate/execute_parties_import { strategy: 'SKIP'|'UPDATE' },
 // validate/execute_expenses_import, write_import_template { kind: 'ITEMS'|'SERVICE_COMPONENTS'|'PARTIES'|'EXPENSES', format }
+
+// --- Settlement history (FR-42) — dues_api (read-only; edit/delete reuse update_settlement / delete_settlement)
+// get_settlement_history { from_date, to_date, side?: 'SALE'|'PURCHASE', party_search?, page, page_size }
+//   -> { rows: [{ settlement_id, settlement_date, party_id, party_name, transaction_type, transaction_id,
+//                 transaction_code, is_opening_balance, amount, notes }],
+//        total_received, total_paid, total_count }      // kind = SETTLEMENT only; newest first (date, id)
 ```
 
 ### 9.4. Atomic Transaction & Concurrency Controls
@@ -1710,7 +1723,8 @@ Owner requests of 2026-11-25. Same rules as §12 (own branch, phased commits, LL
 
 | Order | Branch | Feature | Requirements | Schema migration | Depends on |
 |---|---|---|---|---|---|
-| 1 | `feat/dashboard-layout` (D1) | Cash & Stock row on top, low stock moved up, valuation → Inventory, larger item lookup with a fixed search field | FR-40 | — | — |
+| 1 | `feat/dashboard-layout` (D1) | Cash & Stock row on top, low stock moved up, valuation → Inventory, larger item lookup with a fixed search field, trend line chart | FR-40 | — | — |
+| 1b | `feat/settlement-history` (D1b) | Settlement History tab on Credit & Dues with Edit / Delete per row | FR-42 | — | 1 |
 | 2 | `feat/service-items` (D2) | Service create/edit with components and Service cost, Can make N, selling services, component FIFO, misc. cost in profit and P&L, not returnable | FR-36, FR-37 | **v12** `service_components`, `items.service_cost`, `sale_items.service_cost_total`, drop `idx_sale_items_item` | 1 |
 | 3 | `feat/item-analytics` (D3) | Item profit and Inventory speed panels on Reports | FR-38, FR-39 | — | 2 |
 | 4 | `feat/imports` (D4) | Items template with services and components, parties import, expenses import | FR-41 | — | 2 |
