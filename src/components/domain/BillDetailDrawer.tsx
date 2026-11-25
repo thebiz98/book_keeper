@@ -21,6 +21,7 @@ import { usePrintBill } from '../print/usePrintBill';
 import { SettlementModal } from './SettlementModal';
 import { SettlementEditModal } from './SettlementEditModal';
 import { refreshAppMetrics } from './navParams';
+import { PurchaseEditForm } from './billEdit/PurchaseEditForm';
 
 export interface BillDetailDrawerProps {
   kind: TransactionType;
@@ -131,6 +132,19 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   const [editingRow, setEditingRow] = useState<PaymentSettlement | null>(null);
   const [deletingRow, setDeletingRow] = useState<PaymentSettlement | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  /** In-drawer edit (DD-57): the drawer body becomes a form; closing with unsaved changes asks first. */
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [editDirty, setEditDirty] = useState(false);
+  const [confirmLeaveEdit, setConfirmLeaveEdit] = useState<'cancel' | 'close' | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // A different bill always opens in view mode.
+  useEffect(() => {
+    setMode('view');
+    setEditDirty(false);
+    setConfirmLeaveEdit(null);
+    setNotice(null);
+  }, [kind, billId]);
 
   useEffect(() => {
     if (billId === null) return;
@@ -168,9 +182,24 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
     onClose();
   };
   const onEditClick = () => {
-    // The sale cart is global: never silently replace a bill in progress.
-    if (kind === 'SALE' && useCartStore.getState().items.length > 0) setConfirmDiscard(true);
+    if (kind === 'PURCHASE') {
+      setNotice(null);
+      setMode('edit');
+    } else if (useCartStore.getState().items.length > 0) setConfirmDiscard(true);
     else startEdit();
+  };
+  const leaveEdit = () => {
+    setMode('view');
+    setEditDirty(false);
+    setConfirmLeaveEdit(null);
+  };
+  const requestCancelEdit = () => (editDirty ? setConfirmLeaveEdit('cancel') : leaveEdit());
+  /** X / Esc / overlay: while editing with unsaved changes ask first. */
+  const requestClose = () => (mode === 'edit' && editDirty ? setConfirmLeaveEdit('close') : onClose());
+  const onEditSaved = () => {
+    leaveEdit();
+    setNotice('Bill updated');
+    afterMoneyChange();
   };
   const doDelete = async () => {
     if (billId === null) return;
@@ -236,12 +265,13 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
   return (
     <Drawer
       isOpen={billId !== null}
-      onClose={onClose}
+      onClose={requestClose}
+      className={mode === 'edit' ? 'w-[900px]' : undefined}
       title={head ? `${kind === 'SALE' ? 'Invoice' : 'Purchase'} ${head.transactionCode}` : 'Bill details'}
       description={head?.updatedAt ? `Edited ${head.updatedAt.slice(0, 10)}` : undefined}
       width="xl"
       footer={
-        head && (
+        head && mode === 'view' && (
           <div className="flex w-full flex-col gap-2" data-testid="bill-actions">
             {guard && guard.reasons.length > 0 && (
               <ul className="text-[11px] text-amber-700 dark:text-amber-400 list-disc pl-4" data-testid="guard-reasons">
@@ -295,13 +325,21 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
         )
       }
     >
-      {loading && <p className="text-xs text-slate-500">Loading...</p>}
+      {mode === 'edit' && billId !== null && kind === 'PURCHASE' && (
+        <PurchaseEditForm billId={billId} onCancel={requestCancelEdit} onSaved={onEditSaved} onDirtyChange={setEditDirty} />
+      )}
+      {mode === 'view' && notice && (
+        <p role="status" data-testid="bill-notice" className="mb-2 text-xs text-emerald-700 dark:text-emerald-400">
+          {notice}
+        </p>
+      )}
+      {loading && mode === 'view' && <p className="text-xs text-slate-500">Loading...</p>}
       {error && (
         <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">
           {error}
         </p>
       )}
-      {head && (
+      {head && mode === 'view' && (
         <div className="flex flex-col gap-4 text-xs">
           <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-800 p-3 rounded-md">
             <div>
@@ -506,6 +544,20 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({ kind, billId
           </p>
         )}
       </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={confirmLeaveEdit !== null}
+        variant="warning"
+        title="Discard changes?"
+        message={`Leave the edit of ${head?.transactionCode ?? 'this bill'} without saving. The original bill stays as it was.`}
+        confirmText="Discard changes"
+        cancelText="Keep editing"
+        onConfirm={() => {
+          const closing = confirmLeaveEdit === 'close';
+          leaveEdit();
+          if (closing) onClose();
+        }}
+        onCancel={() => setConfirmLeaveEdit(null)}
+      />
       <ConfirmDialog
         isOpen={confirmDiscard}
         variant="warning"
