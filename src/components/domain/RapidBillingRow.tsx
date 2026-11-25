@@ -5,7 +5,8 @@ import React, {
   useImperativeHandle,
   forwardRef,
 } from 'react';
-import { Plus, Package } from 'lucide-react';
+import { Plus } from 'lucide-react';
+import { NEW_BUNDLE, NEW_BUNDLE_LABEL } from '@/lib/bundleSentinel';
 import { cn } from '@/lib/utils';
 import type { ItemBundleSearchResult, SavedBundle, ItemSearchResult } from '@/types';
 import type { BundleInput } from '@/types/store';
@@ -152,6 +153,11 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
 
     const chooseUnit = (next: string, list: ItemBundleSearchResult[] = bundles) => {
       if (!item) return;
+      if (next === NEW_BUNDLE) {
+        // The unit stays as it was; the modal's Cancel leaves it there (FR-29).
+        onOpenBundleModal?.(item);
+        return;
+      }
       setUnit(next);
       const b = next === BASE ? null : list.find((x) => String(x.bundleId) === next) ?? null;
       setRate(String(defaultRate(item, b)));
@@ -292,6 +298,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
                   {b.bundleName}
                 </option>
               ))}
+              {item && onOpenBundleModal && <option value={NEW_BUNDLE}>{NEW_BUNDLE_LABEL}</option>}
             </select>
           </div>
 
@@ -329,21 +336,6 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
           >
             Add
           </Button>
-
-          {onOpenBundleModal && (
-            <Button
-              type="button"
-              variant="outline"
-              size="md"
-              onClick={() => onOpenBundleModal(item)}
-              hotkey="Alt+B"
-              title="Create Packaging Bundle (Alt+B)"
-              leftIcon={<Package className="h-4 w-4" />}
-              className="shrink-0"
-            >
-              Bundle
-            </Button>
-          )}
         </div>
 
         {item && (
