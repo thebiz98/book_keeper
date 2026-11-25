@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
-import { Users, Plus, Search, Pencil, User, Truck, BookOpen } from 'lucide-react';
+import { Users, Plus, Search, Pencil, User, Truck, BookOpen, Upload } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import type { PartyListRow, PartyType } from '@/types';
 import type { CreatePartyPayload } from '@/types/api';
 import { todayLocal } from '@/lib/dates';
 import { PartyLedgerDrawer } from '@/components/domain/PartyLedgerDrawer';
+import { ImportDialog } from '@/components/domain/ImportDialog';
+import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { Button } from '@/components/ui/Button';
@@ -43,6 +45,8 @@ const emptyForm = (partyType: PartyType): PartyForm => ({
 export const PartiesPage: React.FC = () => {
   const [tab, setTab] = useState<PartyType>('CUSTOMER');
   const [ledgerId, setLedgerId] = useState<number | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const refreshMetrics = useAppStore((s) => s.refreshMetrics);
 
   const [form, setForm] = useState<PartyForm | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -131,15 +135,34 @@ export const PartiesPage: React.FC = () => {
           <Users className="h-5 w-5 text-blue-600" />
           <h2 className="text-sm font-bold">Parties Directory</h2>
         </div>
-        <Button
-          variant="primary"
-          size="md"
-          leftIcon={<Plus className="h-4 w-4" />}
-          onClick={() => setForm(emptyForm(tab))}
-        >
-          Add Party
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="md"
+            leftIcon={<Upload className="h-4 w-4" />}
+            onClick={() => setImportOpen(true)}
+          >
+            Import
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
+            leftIcon={<Plus className="h-4 w-4" />}
+            onClick={() => setForm(emptyForm(tab))}
+          >
+            Add Party
+          </Button>
+        </div>
       </div>
+      <ImportDialog
+        kind="PARTIES"
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          load();
+          void refreshMetrics();
+        }}
+      />
 
       <div className="shrink-0 flex flex-wrap items-end justify-between gap-3">
         <Tabs

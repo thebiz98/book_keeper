@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConflictStrategy {
     Skip,
+    /// "Update" in the UI (parties and items); also accepted as `"UPDATE"`.
+    #[serde(alias = "UPDATE")]
     Overwrite,
     AddStock,
 }
@@ -15,6 +17,16 @@ pub enum ConflictStrategy {
 pub enum TemplateFormat {
     Csv,
     Xlsx,
+}
+
+/// What an import file holds (FR-41). Picks the template and the importer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ImportKind {
+    Items,
+    ServiceComponents,
+    Parties,
+    Expenses,
 }
 
 /// One validation problem. `row` is the real sheet row number (header = row 1); for a VedBill
@@ -88,6 +100,9 @@ pub struct ImportValidationReport {
     /// Opening stock lots the import would create for new items (ADD_STOCK may add more for duplicates).
     pub lots_to_create: usize,
     pub expected_columns: Vec<ExpectedColumn>,
+    /// Backend-written summary sentences ("2 opening bills will be created"); shown as is.
+    #[serde(default)]
+    pub info: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

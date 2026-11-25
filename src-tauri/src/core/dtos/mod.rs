@@ -34,7 +34,8 @@ pub use item_dto::{
     ServiceComponentView, ServiceCostPreview, UpdateBundlePayload, UpdateItemPayload,
 };
 pub use import_dto::{
-    ConflictStrategy, ExpectedColumn, HeaderIssue, HeaderIssueKind, ImportDuplicate, ImportRowError, ImportRowWarning,
+    ConflictStrategy, ExpectedColumn, HeaderIssue, HeaderIssueKind, ImportDuplicate, ImportKind, ImportRowError,
+    ImportRowWarning,
     ImportSummary, ImportValidationReport, TemplateFormat,
 };
 pub use pagination::{

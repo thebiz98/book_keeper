@@ -337,3 +337,15 @@ When beginning the Low-Level Design (LLD) and implementation:
 
 ### v1.1 addendum: Low Stock Level column (v4)
 Template A gains an optional last column `Low Stock Level | Decimal | No (Def: 5) | 10 | Low-stock alert level in base units; 0 = never`. New items: blank = 5. OVERWRITE updates the level only when the cell is non-blank. ADD_STOCK ignores it. VedBill has no source field, so 5 is used. `expected_columns` now has 11 entries.
+
+---
+
+## 9. v1.4 addendum: imports of services, parties and expenses (FR-41, DD-70)
+
+All importers share one flow: download a template (CSV or Excel), pick a file, read the dry-run report (header problems, row errors, notes, summary lines; nothing is written), then **Confirm import**, which is all-or-nothing per file. Dates must not be in the future (FR-28). Sale and purchase history import stays out of scope.
+
+* **Items (Inventory > Import Items).** Template A (§4.2) plus two optional columns: `Item Type` (empty = `PHYSICAL`, or `SERVICE`) and `Service Cost` (SERVICE rows only). A SERVICE row must leave Opening Stock and both bundle columns empty; Purchase Cost is optional for it. The Excel template has a second sheet `Components` (`Service Name, Component Name, Quantity Per Unit`): names resolve to your existing items or to items in the same file, components must be physical and active, listed once per service. With *Overwrite details*, a service named in Components gets its list replaced; with *Skip*, existing services are left alone. An existing name with the other type is a row error. Sample: `docs/samples/items_services_import_sample.csv`.
+* **Service components (Inventory > Import Items > Service components (CSV)).** Same three columns; the services must exist already. A service named in the file gets exactly the components listed. Sample: `docs/samples/service_components_import_sample.csv`.
+* **Parties (Parties > Import).** Columns `Name*, Type* (CUSTOMER/VENDOR), Phone, Notes, Opening Balance, As Of Date`. Same name and type (ignoring case) is a duplicate: repeated in the file is an error, existing in the database is skipped or updated (phone and notes when given, opening balance as in FR-35). An opening balance creates the party's `OB-` opening bill; `As Of Date` empty means today; with *Update*, an amount below what is already settled is a row error. (This replaces the older Template B sketch in §4.2.) Sample: `docs/samples/parties_import_sample.csv`.
+* **Expenses (Expenses > Import).** Columns `Date*, Expense Type*, Amount*, Notes`. A type is matched ignoring case and created when new. Rows only insert; a row identical to another row or to a saved expense is a note, not an error. Sample: `docs/samples/expenses_import_sample.csv`.
+* **VedBill.** Services in a VedBill backup now import as `SERVICE` items (no stock, no components).

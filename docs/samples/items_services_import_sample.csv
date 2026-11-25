@@ -1,0 +1,4 @@
+Item Name,Category,Barcode,Base Unit,MRP,Sale Price,Purchase Cost,Opening Stock,Packaging Bundle,Units Per Bundle,Low Stock Level,Item Type,Service Cost
+A4 Paper,Stationery,,SHEET,,1,0.5,500,,,50,PHYSICAL,
+Toner,Stationery,,ML,,2,1.2,200,,,,,
+Photocopy A4,,,PRINT,,2,,,,,,SERVICE,0.2

@@ -10,6 +10,7 @@ pub mod item_service;
 pub mod party_service;
 pub mod payment_service;
 pub mod purchase_service;
+pub mod record_import_service;
 pub mod report_service;
 pub mod return_service;
 pub mod sale_service;

@@ -542,9 +542,14 @@ export interface ImportValidationReport {
   warnings: ImportRowWarning[];
   lotsToCreate: number;
   expectedColumns: ExpectedColumn[];
+  /** Backend-written summary sentences (e.g. "2 opening balance bill(s) ... will be created"). */
+  info?: string[];
 }
 
 export type TemplateFormat = 'CSV' | 'XLSX';
+
+/** What an import file holds (FR-41). */
+export type ImportKind = 'ITEMS' | 'SERVICE_COMPONENTS' | 'PARTIES' | 'EXPENSES';
 
 export interface ImportSummary {
   created: number;
@@ -760,4 +765,15 @@ export interface ApiClient {
   executeVedbillImport(filePath: string, conflictStrategy: ConflictStrategy): Promise<ImportSummary>;
   /** Saves the items-import template; resolves to the final path. */
   writeItemsImportTemplate(destPath: string, format: TemplateFormat): Promise<string>;
+
+  // FR-41 imports
+  validateServiceComponentsImport(filePath: string): Promise<ImportValidationReport>;
+  executeServiceComponentsImport(filePath: string): Promise<ImportSummary>;
+  /** `conflictStrategy`: `SKIP`, or `OVERWRITE` (shown as "Update"). */
+  validatePartiesImport(filePath: string, conflictStrategy: ConflictStrategy): Promise<ImportValidationReport>;
+  executePartiesImport(filePath: string, conflictStrategy: ConflictStrategy): Promise<ImportSummary>;
+  validateExpensesImport(filePath: string): Promise<ImportValidationReport>;
+  executeExpensesImport(filePath: string): Promise<ImportSummary>;
+  /** Saves the template of `kind`; resolves to the final path. */
+  writeImportTemplate(kind: ImportKind, destPath: string, format: TemplateFormat): Promise<string>;
 }
