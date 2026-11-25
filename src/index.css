@@ -35,7 +35,7 @@ body {
 @media print {
   @page {
     size: A4;
-    margin: 12mm;
+    margin: 15mm;
   }
 
   html,
@@ -55,84 +55,114 @@ body {
     display: block !important;
     background: #fff !important;
     color: #000 !important;
-    font-size: 11pt;
+    font-size: 10.5pt;
+    font-family: ui-sans-serif, system-ui, 'Segoe UI', Roboto, Arial, sans-serif;
   }
 
   #print-root,
   #print-root * {
     color: #000 !important;
     background: transparent !important;
-    border-color: #000 !important;
+    border-color: #999 !important;
   }
 
+  /* FR-43: one A4 content area (297mm - 2 x 15mm); the items area stretches so charges sit at its bottom. */
+  #print-root .print-doc {
+    display: flex;
+    flex-direction: column;
+    min-height: 267mm;
+  }
   #print-root .print-shop {
     text-align: center;
-    margin-bottom: 4mm;
+    font-size: 10pt;
+    padding-bottom: 2mm;
+    border-bottom: 0.5pt solid #999;
   }
   #print-root .print-shop h1 {
-    font-size: 18pt;
+    font-size: 20pt;
     font-weight: 700;
     margin: 0 0 1mm;
   }
-  #print-root .print-title {
-    font-size: 13pt;
-    font-weight: 700;
+  #print-root .print-caption {
     text-align: center;
-    margin: 0 0 3mm;
-    border-top: 1px solid #000;
-    border-bottom: 1px solid #000;
-    padding: 1mm 0;
+    font-size: 9pt;
+    margin: 1mm 0 3mm;
   }
-  #print-root .print-meta {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1mm 6mm;
+  #print-root .print-parties {
+    display: flex;
+    justify-content: space-between;
+    gap: 6mm;
     margin-bottom: 4mm;
+  }
+  #print-root .print-party-right {
+    text-align: right;
+  }
+  #print-root .print-items {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
   }
   #print-root .print-lines {
     width: 100%;
+    flex: 1 1 auto;
     border-collapse: collapse;
+    border: 0.5pt solid #999;
+    font-variant-numeric: tabular-nums;
   }
   #print-root .print-lines thead {
     display: table-header-group;
   }
   #print-root .print-lines th {
     text-align: left;
-    border-bottom: 1px solid #000;
+    font-weight: 700;
+    border-bottom: 0.5pt solid #999;
     padding: 1mm 2mm;
   }
   #print-root .print-lines td {
     padding: 1mm 2mm;
-    border-bottom: 1px solid #ccc !important;
+    vertical-align: top;
+  }
+  #print-root .print-lines tbody tr:not(.print-spacer):not(.print-total) td {
+    border-bottom: 0.5pt solid #ddd !important;
   }
   #print-root .print-lines tr {
     break-inside: avoid;
     page-break-inside: avoid;
   }
+  #print-root .print-lines .print-spacer {
+    height: 100%;
+  }
+  #print-root .print-lines .print-spacer td {
+    height: 10mm;
+    padding: 0;
+    border-bottom: 0 !important;
+  }
+  #print-root .print-lines .print-subtotal td {
+    border-top: 0.5pt solid #999 !important;
+  }
+  #print-root .print-lines .print-subtotal,
+  #print-root .print-lines .print-totals tr:not(.print-total) {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  #print-root .print-lines .print-total td {
+    font-weight: 700;
+    border-top: 0.5pt solid #999 !important;
+    border-bottom: 0 !important;
+  }
   #print-root .print-num {
-    width: 8mm;
+    width: 14mm;
   }
   #print-root .print-right {
     text-align: right !important;
   }
-  #print-root .print-totals {
-    width: 70mm;
-    margin: 4mm 0 0 auto;
+  #print-root .print-footer {
+    margin-top: 3mm;
+    font-size: 9.5pt;
     break-inside: avoid;
   }
-  #print-root .print-totals > div {
-    display: flex;
-    justify-content: space-between;
-    padding: 0.5mm 0;
-  }
-  #print-root .print-totals .print-grand {
-    font-weight: 700;
-    border-top: 1px solid #000;
-    border-bottom: 1px solid #000;
-    margin: 1mm 0;
-  }
   #print-root .print-notes {
-    margin-top: 4mm;
+    margin: 2mm 0 0;
     break-inside: avoid;
   }
 }
