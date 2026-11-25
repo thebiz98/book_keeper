@@ -1658,7 +1658,7 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // --- Settlement history (FR-42) — dues_api (read-only; edit/delete reuse update_settlement / delete_settlement)
 // get_settlement_history { from_date, to_date, side?: 'SALE'|'PURCHASE', party_search?, page, page_size }
 //   -> { rows: [{ settlement_id, settlement_date, party_id, party_name, transaction_type, transaction_id,
-//                 transaction_code, is_opening_balance, amount, notes }],
+//                 transaction_code, is_opening_balance, amount, payment_mode, notes }],
 //        total_received, total_paid, total_count }      // kind = SETTLEMENT only; newest first (date, id)
 ```
 

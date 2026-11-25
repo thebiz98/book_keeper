@@ -117,3 +117,43 @@ pub struct PartyLedgerView {
     pub returns: Vec<ReturnTransaction>,
     pub entries: Vec<PartyLedgerEntry>,
 }
+
+/// FR-42: filter and page request for the settlement history tab. `side` limits to one
+/// transaction type (SALE = received from customers, PURCHASE = paid to vendors).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettlementHistoryFilter {
+    pub from_date: String, // "YYYY-MM-DD"
+    pub to_date: String,   // "YYYY-MM-DD"
+    #[serde(default)]
+    pub side: Option<TransactionType>,
+    #[serde(default)]
+    pub party_search: Option<String>,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+/// FR-42: one `SETTLEMENT` ledger row with its bill and party.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettlementHistoryRow {
+    pub settlement_id: i64,
+    pub settlement_date: String,
+    pub party_id: Option<i64>,
+    pub party_name: String,
+    pub transaction_type: TransactionType,
+    pub transaction_id: i64,
+    pub transaction_code: String,
+    pub is_opening_balance: bool,
+    pub amount: f64,
+    /// Prefills the edit form (an edit without it would reset the mode).
+    pub payment_mode: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// FR-42: one page plus totals over the whole filter (ignoring paging).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettlementHistoryPage {
+    pub rows: Vec<SettlementHistoryRow>,
+    pub total_received: f64,
+    pub total_paid: f64,
+    pub total_count: i64,
+}

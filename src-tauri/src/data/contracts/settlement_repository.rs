@@ -1,4 +1,4 @@
-use crate::core::dtos::LedgerTotals;
+use crate::core::dtos::{LedgerTotals, SettlementHistoryFilter, SettlementHistoryPage};
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
 use crate::core::value_objects::{PaymentKind, TransactionType};
@@ -21,6 +21,8 @@ pub trait SettlementRepository {
         from: &str,
         to: &str,
     ) -> Result<Vec<(TransactionType, PaymentKind, f64)>, AppError>;
+    /// FR-42: one page of `SETTLEMENT` rows (newest first) with totals over the whole filter.
+    fn list_settlement_history(&self, filter: &SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError>;
     /// Every ledger row (drawer and cash-flow reports; F5 replaces this with SQL aggregates).
     fn list_all(&self) -> Result<Vec<PaymentSettlement>, AppError>;
     /// FR-20: deletes the bill's rows of the given kinds and returns them.

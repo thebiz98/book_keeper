@@ -187,6 +187,7 @@ The application maintains a persistent desktop shell across all views.
 * **Top Level Tabs:**
   - **Tab 1: Customer Receivables** (Money owed to the shop).
   - **Tab 2: Vendor Payables** (Money owed by the shop).
+  - **Tab 3: Settlement History** (FR-42): every later due payment across all parties, newest first.
 * Header row is fixed; the table fills the page height and scrolls inside itself; the pager stays visible below.
 * **Dues Table:**
   - Columns: `Party Name`, `Phone`, `Unsettled Bills Count`, `Earliest Bill Date`, `Total Invoiced (₹)`, `Total Paid (₹)`, `Net Due Balance (₹)`, `Actions`.
@@ -200,6 +201,14 @@ The application maintains a persistent desktop shell across all views.
   - Behavior: Allocates settlement amount against oldest unpaid bills (FIFO bill settlement). Decrements `balance_due` and updates status to `PAID` when fully settled.
   - Cash Register Impact: Immediately logs cash inflow (customer) or outflow (vendor) in the payment ledger to balance the day's cash drawer.
   - The same modal opened from Sales/Purchase History settles **that bill only** (amount ≤ its balance).
+* **Tab 3 wireframe (FR-42):**
+  ```
+  [Date range: 01 Nov - 25 Nov] [Side: All v] [Party search........]
+  Received Rs 12,400  |  Paid Rs 3,000  |  14 settlements
+  Date | Party | Bill | Side | Amount | Notes | Actions
+  25-11 | Ramesh | SAL-1004 | [Received] | 2,000.00 | cash | [edit][delete]
+  ```
+  Bill code is a button that opens the bill drawer ("Opening balance" for OB bills). Edit opens the settlement edit form; Delete asks a danger confirm naming amount and bill. Up/Down highlight a row, Enter opens the bill, E edits, Delete deletes.
 * **Row action `[View Ledger]`:** party's bills, payments, credits and refunds in date order (`get_party_ledger`).
 
 ---

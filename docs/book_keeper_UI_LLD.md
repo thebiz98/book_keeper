@@ -699,3 +699,11 @@ UI only; no backend, schema or IPC change.
 * **Lookup.** `LiveSearchTypeahead` gains `resultsMode?: 'dropdown' | 'inline'` (default dropdown) and `resultsClassName?`; inline renders the listbox in flow below the input (`shrink-0` input row, list in `flex-1 min-h-0 overflow-y-auto`). `ItemSearchTypeahead` passes both through. `Modal` gains `bodyClassName?` (merged onto the body). `ItemLookupModal` is `size="lg"` with a `h-[70vh] flex flex-col gap-3` wrapper: field on top, selected-item card (`lookup-result`) between field and list, results fill the rest.
 * **Trend chart.** `SalesPurchaseTrendPanel` draws a hand-built SVG line chart (Sales, Purchases; y from 0 with nice ticks, compact rupee labels; legend; crosshair + tooltip on hover and Left/Right keys; `role="img"` summary; Chart/Table toggle). No chart library.
 * **Tests.** dashboard order/valuation route/low-stock caption; typeahead inline vs dropdown; trend chart paths, ticks, tooltip, table.
+
+## Settlement history (FR-42, DD-72, `feat/settlement-history`, v1.4 D1b)
+* `CreditDuesPage` gets a third tab `HISTORY` ("Settlement History", `History` icon) rendering `components/domain/SettlementHistoryView.tsx`.
+* **View.** Filter row: `DateRangePicker` (default first of this month to today), side `Select` (All / Received from customers / Paid to vendors), party `useLiveSearch` field. Summary strip: Received, Paid, count (from the page response). Shared `Table` (sticky header) with `Pager`: Date, Party, Bill (mono code button to `BillDetailDrawer`; "Opening balance" for OB), Side badge, Amount, Notes (truncate + title), Actions (Edit / Delete icon buttons with `aria-label` and `title`). Paging, sorting and totals come from `api.getSettlementHistory`.
+* **Actions.** Edit opens the existing `SettlementEditModal`; Delete opens a danger `ConfirmDialog` naming amount and bill, then `api.deleteSettlement`. After either: reload the history page, the dues summaries (`onChanged` callback to the page) and `refreshMetrics()`. Backend errors show in the modal / confirm.
+* **Keyboard.** `useGridKeyboardNav`: Up/Down, Enter opens the bill, E edits, Delete opens the confirm; keys inside inputs ignored.
+* **Tests (Vitest).** tab renders; filters call the API with the right args; Edit opens the modal for the row; Delete confirm calls `deleteSettlement` then reloads; OB label; empty state.
+

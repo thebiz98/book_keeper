@@ -1,7 +1,9 @@
 //! SQLite implementation of `SettlementRepository`.
 use rusqlite::{params, Row};
 
-use crate::core::dtos::LedgerTotals;
+use crate::core::dtos::{LedgerTotals, SettlementHistoryFilter, SettlementHistoryPage, SettlementHistoryRow};
+use crate::core::money::round2;
+use crate::data::sqlite::fts::fts_prefix_query;
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
 use crate::data::contracts::settlement_repository::SettlementRepository;
@@ -196,6 +198,62 @@ impl SettlementRepository for SqliteSettlementRepository {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    fn list_settlement_history(&self, f: &SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError> {
+        let empty = SettlementHistoryPage { rows: Vec::new(), total_received: 0.0, total_paid: 0.0, total_count: 0 };
+        let side = f.side.as_ref().map(enum_to_sql).transpose()?;
+        let q = f.party_search.as_deref().map(str::trim).filter(|q| !q.is_empty());
+        // Non-blank query with no alphanumeric token matches nothing.
+        let fts = match q {
+            Some(q) => match fts_prefix_query(q) {
+                Some(f) => Some(f),
+                None => return Ok(empty),
+            },
+            None => None,
+        };
+        const FROM_WHERE: &str = "FROM payment_settlements ps \
+             LEFT JOIN sale_transactions st ON ps.transaction_type = 'SALE' AND st.id = ps.transaction_id \
+             LEFT JOIN purchase_transactions pt ON ps.transaction_type = 'PURCHASE' AND pt.id = ps.transaction_id \
+             LEFT JOIN parties p ON p.id = ps.party_id \
+             WHERE ps.kind = 'SETTLEMENT' AND ps.settlement_date >= ?1 AND ps.settlement_date <= ?2 \
+               AND (?3 IS NULL OR ps.transaction_type = ?3) \
+               AND (?4 IS NULL OR ps.party_id IN (SELECT party_id FROM party_search_fts WHERE party_search_fts MATCH ?4))";
+        let (received, paid, count): (f64, f64, i64) = self.conn.query_row(
+            &format!(
+                "SELECT COALESCE(SUM(CASE ps.transaction_type WHEN 'SALE' THEN ps.amount_paid END), 0.0), \
+                        COALESCE(SUM(CASE ps.transaction_type WHEN 'PURCHASE' THEN ps.amount_paid END), 0.0), \
+                        COUNT(*) {FROM_WHERE}"
+            ),
+            params![f.from_date, f.to_date, side, fts],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let limit = i64::from(f.page_size);
+        let offset = i64::from(f.page.saturating_sub(1)) * limit;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT ps.id, ps.settlement_date, ps.party_id, COALESCE(p.name, st.party_name, pt.party_name, ''), \
+                    ps.transaction_type, ps.transaction_id, COALESCE(st.transaction_code, pt.transaction_code, ''), \
+                    COALESCE(st.is_opening_balance, pt.is_opening_balance, 0), ps.amount_paid, ps.notes, ps.payment_mode \
+             {FROM_WHERE} ORDER BY ps.settlement_date DESC, ps.id DESC LIMIT ?5 OFFSET ?6"
+        ))?;
+        let rows = stmt
+            .query_map(params![f.from_date, f.to_date, side, fts, limit, offset], |r| {
+                Ok(SettlementHistoryRow {
+                    settlement_id: r.get(0)?,
+                    settlement_date: r.get(1)?,
+                    party_id: r.get(2)?,
+                    party_name: r.get(3)?,
+                    transaction_type: enum_col(r, 4)?,
+                    transaction_id: r.get(5)?,
+                    transaction_code: r.get(6)?,
+                    is_opening_balance: r.get::<_, i64>(7)? != 0,
+                    amount: r.get(8)?,
+                    notes: r.get(9)?,
+                    payment_mode: r.get(10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(SettlementHistoryPage { rows, total_received: round2(received), total_paid: round2(paid), total_count: count })
     }
 
     fn list_all(&self) -> Result<Vec<PaymentSettlement>, AppError> {
