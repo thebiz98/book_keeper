@@ -714,3 +714,29 @@ UI only; no backend, schema or IPC change.
 * **New Sale and bill edit.** Services are in the search; the unit select has no bundles and no "+ New bundle..." for services. The info line under a row renders `LotDraw.components` (component draws, components cost, misc cost, line cost) from `preview_lot_draw`; all rows send `prior_lines` (item id + base quantity of earlier rows, a pure mapping).
 * **Reports.** P&L shows "Less: Service misc. costs" under COGS (`data-testid="pnl-service-misc"`).
 * **Tests (vitest).** service form (type switch, component rows, backend preview line from the mock), item list service row and hidden actions, sale info line for a service, P&L line.
+
+## Bill print layout (FR-43, DD-73, `feat/print-layout`, v1.4 D1c)
+* **No Rust, no schema.** Only `BillPrintDocument.tsx` and the print CSS in `src/index.css` change (FR-27 plumbing, `usePrintBill`, entry points unchanged). Party phone comes from `detail.party` (already in the detail view).
+* **Structure** (top to bottom): `header.print-shop` (name 20pt bold, address, `Phone:`, `GSTIN:`, rule) -> small caption `Bill` / `Purchase Bill` -> `.print-parties` (left: party name bold + phone, "Walk-in" when none; right: `Date: DD-MM-YYYY`, `Bill No. <code>`, purchase `Supplier Inv: <ref>`) -> one `table.print-lines` (`thead` Sl. No / Item / Qty / Price / Amount, repeats per page) -> `.print-footer` (Paid, Balance due when > 0, Status, Notes).
+* **Table body:** lines (Item = name + ` — <pack_label>` when sold in a pack; Qty = pack quantity, loose = base quantity; Price = per-pack rate as FR-27), then `tr.print-spacer`, `tr.print-subtotal` ("Items subtotal" = stored `items_subtotal`, always shown), charge rows (`Less: <name>`, `−` amount for discounts), `tr.print-total` (stored `total_amount`). No arithmetic on totals in TS (DD-56); the only calculation is the existing per-pack rate and the date reformat.
+* **Charges at the bottom (pure CSS):** `.print-doc` is a flex column with `min-height` of one A4 content area (297mm - 2 x 15mm = 267mm); the table wrapper is `flex: 1` and the table `height: 100%`, so the spacer row (`height: 100%`, `min-height: 10mm`) absorbs leftover height. When the bill runs over a page the spacer collapses to its 10 mm minimum and the charges follow the last line. No JS measuring.
+* **Look:** `@page { size: A4; margin: 15mm }`, system sans, 10.5pt, rules 0.5pt #999, no row shading, black on white forced, `break-inside: avoid` on rows, subtotal / charge rows `break-after: avoid` so the block is not split from the Total.
+```
+            SHARMA STORES
+        12 Main Road  Phone: 98765
+ ---------------------------------------
+ Ravi Kumar                Date: 20-11-2026
+ 98xxxxxx                  Bill No. SAL-1005
+ +-----+------------------+-----+------+--------+
+ |Sl.No| Item             | Qty |Price | Amount |
+ |  1  | Pencil - Box x12 |  2  |240.00| 480.00 |
+ |  2  | Eraser           |  3  | 20.00|  60.00 |
+ |     |   (spacer)       |     |      |        |
+ |     | Items subtotal   |     |      | 540.00 |
+ |     | Transport        |     |      |  40.00 |
+ |     | Less: Festival   |     |      | -50.00 |
+ |     | Total            |     |      | 530.00 |
+ +-----+------------------+-----+------+--------+
+ Paid 300.00   Balance due 230.00   PARTIAL
+```
+* **Tests (Vitest, `billPrint.test.tsx`):** header order; party left / date + code right; Sl. No; pack text in the item cell; subtotal row after the spacer; charges after the subtotal and before Total (`Less:` and `−`); Total = stored `total_amount`; purchase vendor + supplier ref; walk-in fallback.
