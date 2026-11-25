@@ -433,6 +433,7 @@ const V8: &str = include_str!("fixtures/schema/v8.sql");
 const V9: &str = include_str!("fixtures/schema/v9.sql");
 const V10: &str = include_str!("fixtures/schema/v10.sql");
 const V11: &str = include_str!("fixtures/schema/v11.sql");
+const V12: &str = include_str!("fixtures/schema/v12.sql");
 /// The shipped v8 fixture is a DDL delta without its `schema_version` row (never edited); chains that
 /// go past v8 record it with this step.
 const V8_RECORD: &str = "INSERT INTO schema_version (version, name) VALUES (8, 'bill_correction'); PRAGMA user_version = 8;";
@@ -1045,6 +1046,76 @@ fn frozen_v11_fixture_matches_the_migrated_schema() {
     };
     assert_eq!(shape(&from_fixtures), shape(&migrated));
     assert!(shape(&migrated).iter().any(|r| r.0 == "ux_sale_opening_party"));
+    drop(from_fixtures);
+    drop(migrated);
+    cleanup(&p1);
+    cleanup(&p2);
+}
+
+const V1_TO_V11: [&str; 12] = [V1, V2, V3, V4, V5, V6, V7, V8, V8_RECORD, V9, V10, V11];
+
+#[test]
+fn v11_database_upgrades_to_v12_adding_service_tables_and_columns() {
+    let (path, conn) = db_from_fixtures("v11up", &V1_TO_V11);
+    conn.execute_batch(
+        "INSERT INTO items (name) VALUES ('Paper'), ('Print');
+         INSERT INTO sale_transactions (transaction_code, transaction_date, payment_status, total_amount, paid_amount, balance_due, created_at)
+           VALUES ('SAL-1001', '2026-01-01', 'PAID', 10, 10, 0, 'x');
+         INSERT INTO sale_items (sale_transaction_id, item_id, item_name, pack_quantity, quantity, unit_price, total_amount, transaction_date)
+           VALUES (1, 1, 'Paper', 1, 1, 10, 10, '2026-01-01');",
+    )
+    .unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert!(current_version(&conn).unwrap() >= 12);
+    let (sc, st): (Option<f64>, Option<f64>) = conn
+        .query_row("SELECT (SELECT service_cost FROM items WHERE id = 1), (SELECT service_cost_total FROM sale_items WHERE id = 1)", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((sc, st), (None, None), "existing rows default to NULL");
+    conn.execute("INSERT INTO service_components (service_item_id, component_item_id, quantity_per_unit) VALUES (2, 1, 1.5)", []).unwrap();
+    assert!(conn.execute("INSERT INTO service_components (service_item_id, component_item_id, quantity_per_unit) VALUES (2, 1, 2)", []).is_err(), "pair is unique");
+    assert!(conn.execute("INSERT INTO service_components (service_item_id, component_item_id, quantity_per_unit) VALUES (2, 2, 1)", []).is_err(), "no self reference");
+    assert!(conn.execute("INSERT INTO service_components (service_item_id, component_item_id, quantity_per_unit) VALUES (1, 2, 0)", []).is_err(), "quantity must be positive");
+    assert!(conn.execute("UPDATE items SET service_cost = -1 WHERE id = 2", []).is_err());
+    assert!(conn.execute("UPDATE sale_items SET service_cost_total = -1 WHERE id = 1", []).is_err());
+    let dropped: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_sale_items_item'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(dropped, 0, "the prefix-duplicate index is gone");
+    let kept: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_sale_items_item_date'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(kept, 1);
+    let before = current_version(&conn).unwrap();
+    run_migrations(&conn).unwrap();
+    assert_eq!(current_version(&conn).unwrap(), before);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn frozen_v12_fixture_matches_the_migrated_schema() {
+    let mut steps = V1_TO_V11.to_vec();
+    steps.push(V12);
+    let (p1, from_fixtures) = db_from_fixtures("v12fx", &steps);
+    let (p2, migrated) = db_from_fixtures("v12mig", &[V1]);
+    run_migrations(&migrated).unwrap();
+    let shape = |c: &Connection| -> Vec<(String, String, i64, Option<String>)> {
+        let mut out = Vec::new();
+        for t in ["items", "sale_items", "service_components"] {
+            let mut st = c
+                .prepare(&format!("SELECT '{t}.' || name, type, \"notnull\", dflt_value FROM pragma_table_info('{t}') ORDER BY name"))
+                .unwrap();
+            out.extend(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()));
+        }
+        let mut st = c
+            .prepare("SELECT name, tbl_name, 0, sql FROM sqlite_master WHERE type = 'index' AND (name LIKE 'idx_service_%' OR name LIKE 'idx_sale_items_%') ORDER BY name")
+            .unwrap();
+        out.extend(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()));
+        out
+    };
+    assert_eq!(shape(&from_fixtures), shape(&migrated));
+    assert!(shape(&migrated).iter().any(|r| r.0 == "idx_service_components_component"));
+    assert!(!shape(&migrated).iter().any(|r| r.0 == "idx_sale_items_item"));
     drop(from_fixtures);
     drop(migrated);
     cleanup(&p1);

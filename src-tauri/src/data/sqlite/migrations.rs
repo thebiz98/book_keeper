@@ -390,6 +390,21 @@ CREATE UNIQUE INDEX ux_sale_opening_party ON sale_transactions(party_id) WHERE i
 CREATE UNIQUE INDEX ux_purchase_opening_party ON purchase_transactions(party_id) WHERE is_opening_balance = 1;
 "#;
 
+const SCHEMA_V12: &str = r#"
+CREATE TABLE service_components (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_item_id INTEGER NOT NULL REFERENCES items(id),
+  component_item_id INTEGER NOT NULL REFERENCES items(id),
+  quantity_per_unit REAL NOT NULL CHECK (quantity_per_unit > 0),
+  UNIQUE (service_item_id, component_item_id),
+  CHECK (service_item_id <> component_item_id)
+);
+CREATE INDEX idx_service_components_component ON service_components(component_item_id);
+ALTER TABLE items ADD COLUMN service_cost REAL CHECK (service_cost IS NULL OR service_cost >= 0);
+ALTER TABLE sale_items ADD COLUMN service_cost_total REAL CHECK (service_cost_total IS NULL OR service_cost_total >= 0);
+DROP INDEX IF EXISTS idx_sale_items_item;
+"#;
+
 /// All known migrations, ascending and gap-free. Append only; never edit a shipped step.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 },
@@ -415,6 +430,7 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: "ALTER TABLE shop_settings ADD COLUMN opening_cash REAL NOT NULL DEFAULT 0 CHECK (opening_cash >= 0);",
     },
     Migration { version: 11, name: "party_opening_balance", sql: SCHEMA_V11 },
+    Migration { version: 12, name: "service_items", sql: SCHEMA_V12 },
 ];
 
 /// Highest schema version this build knows.
