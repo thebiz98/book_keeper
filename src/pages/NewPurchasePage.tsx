@@ -11,7 +11,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import type {
   BillPreview,
   CreatePurchasePayload,
-  ItemBundle,
+  SavedBundle,
   ItemSearchResult,
   PaymentStatus,
   PreviewPurchasePayload,
@@ -222,7 +222,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
       ]
     : [{ value: BASE, label: 'Select an item first' }];
 
-  const handleBundleCreated = (b: ItemBundle) => {
+  const handleBundleCreated = (b: SavedBundle) => {
     setSelectedItem((cur) =>
       cur && cur.itemId === b.itemId
         ? {
@@ -234,6 +234,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
                 bundleName: b.bundleName,
                 unitsPerBundle: b.unitsPerBundle,
                 bundlePrice: b.defaultBundlePrice,
+                defaultRate: b.defaultRate,
                 barcode: b.barcode,
               },
             ],

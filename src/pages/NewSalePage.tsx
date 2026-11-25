@@ -9,7 +9,7 @@ import type {
   BillEditGuard,
   BillPreview,
   CreateSalePayload,
-  ItemBundle,
+  SavedBundle,
   ItemSearchResult,
   PaymentStatus,
   PreviewSalePayload,
@@ -72,7 +72,7 @@ export const NewSalePage: React.FC = () => {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
   const [bundleItem, setBundleItem] = useState<ItemSearchResult | null>(null);
-  const [newBundle, setNewBundle] = useState<{ bundle: ItemBundle; seq: number } | null>(null);
+  const [newBundle, setNewBundle] = useState<{ bundle: SavedBundle; seq: number } | null>(null);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** FR-20: the stored payment status and old upfront payment of the bill being edited (dialog prefill). */

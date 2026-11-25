@@ -6,7 +6,7 @@ const item = (bundles: ItemSearchResult['bundles'] = []): ItemSearchResult => ({
   itemId: 1, name: 'Pen', category: null, barcode: 'B1', baseUnit: 'PCS', itemType: 'PHYSICAL', mrp: 12,
   defaultSalePrice: 10, currentStock: 5, isLowStock: false, lowStockThreshold: 5, bundles, matchedBundleId: null,
 });
-const box = { bundleId: 7, bundleName: 'Box of 10', unitsPerBundle: 10, bundlePrice: null, barcode: null };
+const box = { bundleId: 7, bundleName: 'Box of 10', unitsPerBundle: 10, bundlePrice: null, defaultRate: 0, barcode: null };
 
 const saleLine = (over: Partial<SaleItem> = {}): SaleItem => ({
   id: 1, saleTransactionId: 1, itemId: 1, itemName: 'Pen', packLabel: 'Box of 10', packQuantity: 3, quantity: 30,

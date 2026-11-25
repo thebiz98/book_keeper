@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
-import { round2 } from '@/lib/money';
 import { startOfMonth, todayLocal } from '@/lib/dates';
 import type { CashFlowReport, PnLReport, StockValuationReport } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
@@ -83,8 +82,8 @@ export const ReportsPage: React.FC = () => {
 
   const p = pnl.data;
   const c = cash.data;
-  const inflow = c ? round2(c.salesCashInflow + c.customerSettlementsInflow + c.vendorRefundsInflow) : 0;
-  const outflow = c ? round2(c.purchaseCashOutflow + c.vendorSettlementsOutflow + c.refundsCashOutflow + c.expensesCashOutflow) : 0;
+  const inflow = c?.totalInflow ?? 0;
+  const outflow = c?.totalOutflow ?? 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -156,13 +155,13 @@ export const ReportsPage: React.FC = () => {
               <Line testId="cf-sales" label="Sale upfront cash" amount={c.salesCashInflow} />
               <Line testId="cf-cust" label="Customer settlements" amount={c.customerSettlementsInflow} />
               <Line testId="cf-vref" label="Vendor refunds received" amount={c.vendorRefundsInflow} />
-              <Line label="Total inflow" amount={inflow} strong />
+              <Line testId="cf-total-inflow" label="Total inflow" amount={inflow} strong />
               <p className="text-[11px] font-semibold uppercase text-slate-400 mt-2">Outflows</p>
               <Line testId="cf-purch" label="Purchase upfront cash" amount={c.purchaseCashOutflow} />
               <Line testId="cf-vset" label="Vendor settlements" amount={c.vendorSettlementsOutflow} />
               <Line testId="cf-refunds" label="Customer refunds paid" amount={c.refundsCashOutflow} />
               <Line testId="cf-expenses" label="Store expenses" amount={c.expensesCashOutflow} />
-              <Line label="Total outflow" amount={outflow} strong />
+              <Line testId="cf-total-outflow" label="Total outflow" amount={outflow} strong />
               <Line testId="cf-net" label="Net Cash Balance" amount={c.netCashBalance} strong />
             </div>
           )}

@@ -17,6 +17,7 @@ import type {
   ExpenseType,
   ExpenseListResponse,
   ItemBundle,
+  SavedBundle,
   ItemSearchResult,
   Paginated,
   Party,
@@ -59,6 +60,11 @@ const nowIso = () => new Date().toISOString();
 const localDate = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+/** Mock stand-in for the backend's bundle_default_rate (DD-56); the real rule lives in Rust. */
+function mockDefaultRate(b: ItemBundle, itemPrice: number): number {
+  return b.defaultBundlePrice ?? Math.round(itemPrice * b.unitsPerBundle * 100) / 100;
+}
+
 function paginate<T>(all: T[], page?: number | null, limit?: number | null): Paginated<T> {
   const p = page ?? 1;
   const l = limit ?? 50;
@@ -83,6 +89,7 @@ function toSearchResult(i: MockItem, matchedBundleId: number | null = null): Ite
       bundleName: b.bundleName,
       unitsPerBundle: b.unitsPerBundle,
       bundlePrice: b.defaultBundlePrice,
+      defaultRate: mockDefaultRate(b, i.defaultSalePrice),
       barcode: b.barcode,
     })),
     matchedBundleId,
@@ -598,7 +605,7 @@ export class MockApiClient implements ApiClient {
   async getBundleSuggestions() {
     return structuredClone(initialBundleSuggestions);
   }
-  async createBundle(payload: Parameters<ApiClient['createBundle']>[0]): Promise<ItemBundle> {
+  async createBundle(payload: Parameters<ApiClient['createBundle']>[0]): Promise<SavedBundle> {
     const bundle: ItemBundle = {
       id: this.nextBundleId++,
       itemId: payload.itemId ?? 0,
@@ -608,18 +615,19 @@ export class MockApiClient implements ApiClient {
       defaultBundlePrice: payload.defaultBundlePrice,
       barcode: payload.barcode,
     };
-    this.items.find((i) => i.id === payload.itemId)?.bundles.push(bundle);
-    return bundle;
+    const owner = this.items.find((i) => i.id === payload.itemId);
+    owner?.bundles.push(bundle);
+    return { ...bundle, defaultRate: mockDefaultRate(bundle, owner?.defaultSalePrice ?? 0) };
   }
   async updateBundle(
     bundleId: number,
     payload: Parameters<ApiClient['updateBundle']>[1]
-  ): Promise<ItemBundle> {
+  ): Promise<SavedBundle> {
     for (const i of this.items) {
       const b = i.bundles.find((x) => x.id === bundleId);
       if (b) {
         Object.assign(b, payload);
-        return { ...b };
+        return { ...b, defaultRate: mockDefaultRate(b, i.defaultSalePrice) };
       }
     }
     throw notFound('ItemBundle', bundleId);
@@ -1027,6 +1035,8 @@ export class MockApiClient implements ApiClient {
       vendorSettlementsOutflow: 200,
       refundsCashOutflow: 100,
       expensesCashOutflow: 350,
+      totalInflow: 4500,
+      totalOutflow: 2150,
       netCashBalance: 2350,
     };
   }

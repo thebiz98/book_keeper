@@ -4,7 +4,7 @@ import { act } from 'react';
 import { byText, click, flush, inputByLabel, installApi, key, makeItem, typeInto } from './testHelpers';
 import { InventoryPage } from '@/pages/InventoryPage';
 
-const dozen = { bundleId: 7, bundleName: 'Dozen', unitsPerBundle: 12, bundlePrice: 500, barcode: 'B-1' };
+const dozen = { bundleId: 7, bundleName: 'Dozen', unitsPerBundle: 12, bundlePrice: 500, defaultRate: 500, barcode: 'B-1' };
 const rows = [
   makeItem({ itemId: 1, name: 'Classmate Notebook', bundles: [dozen], mrp: 50, currentStock: 3, isLowStock: true }),
   makeItem({ itemId: 2, name: 'Gel Pen', category: 'Pens', mrp: null, bundles: [], currentStock: 0 }),

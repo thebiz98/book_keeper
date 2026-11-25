@@ -7,8 +7,7 @@ import React, {
 } from 'react';
 import { Plus, Package } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { round2 } from '@/lib/money';
-import type { ItemBundle, ItemBundleSearchResult, ItemSearchResult } from '@/types';
+import type { ItemBundleSearchResult, SavedBundle, ItemSearchResult } from '@/types';
 import type { BundleInput } from '@/types/store';
 import { useEscapeLayer, useHotkeyAction } from '@/hooks/useHotkeys';
 import { Button } from '../ui/Button';
@@ -32,7 +31,7 @@ export interface RapidBillingRowProps {
   /** Alt+B / Bundle button. The selected item (if any) is passed so the modal can preselect it. */
   onOpenBundleModal?: (item: ItemSearchResult | null) => void;
   /** A bundle just created through the modal; it is added to the unit list and selected. */
-  newBundle?: { bundle: ItemBundle; seq: number } | null;
+  newBundle?: { bundle: SavedBundle; seq: number } | null;
   autoFocus?: boolean;
   className?: string;
 }
@@ -58,7 +57,7 @@ function toBundleInput(b: ItemBundleSearchResult, mrp: number | null): BundleInp
 
 function defaultRate(item: ItemSearchResult, bundle: ItemBundleSearchResult | null): number {
   if (!bundle) return item.defaultSalePrice;
-  return bundle.bundlePrice ?? round2(item.defaultSalePrice * bundle.unitsPerBundle);
+  return bundle.defaultRate;
 }
 
 const inputClass =
@@ -130,6 +129,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
         bundleName: b.bundleName,
         unitsPerBundle: b.unitsPerBundle,
         bundlePrice: b.defaultBundlePrice,
+        defaultRate: b.defaultRate,
         barcode: b.barcode,
       };
       setBundles((prev) => (prev.some((x) => x.bundleId === b.id) ? prev : [...prev, row]));

@@ -30,7 +30,7 @@ vi.mock('@/components/domain/PartySelector', () => ({
 
 import { NewPurchasePage } from '@/pages/NewPurchasePage';
 
-const box = { bundleId: 5, bundleName: 'Box', unitsPerBundle: 25, bundlePrice: null, barcode: null };
+const box = { bundleId: 5, bundleName: 'Box', unitsPerBundle: 25, bundlePrice: null, defaultRate: 0, barcode: null };
 
 function mount(over: Record<string, unknown> = {}) {
   const api = installApi({

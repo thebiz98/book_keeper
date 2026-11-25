@@ -12,7 +12,7 @@ import type {
   DashboardMetrics,
   Expense,
   ExpenseType,
-  ItemBundle,
+  SavedBundle,
   ItemBillRef,
   ItemLot,
   ItemSearchResult,
@@ -581,8 +581,8 @@ export interface ApiClient {
   /** Sets the per-item low stock level (>= 0; 0 = never) and returns the refreshed row. */
   updateItemLowStockThreshold(itemId: number, threshold: number): Promise<ItemSearchResult>;
   getBundleSuggestions(): Promise<BundleSuggestion[]>;
-  createBundle(payload: CreateBundlePayload): Promise<ItemBundle>;
-  updateBundle(bundleId: number, payload: UpdateBundlePayload): Promise<ItemBundle>;
+  createBundle(payload: CreateBundlePayload): Promise<SavedBundle>;
+  updateBundle(bundleId: number, payload: UpdateBundlePayload): Promise<SavedBundle>;
   deleteBundle(bundleId: number): Promise<void>;
 
   // Dues & Ledger
