@@ -1,5 +1,5 @@
 use crate::core::constants::EPS;
-use crate::core::entities::{SaleStockAllocation, StockOutflowAllocation};
+use crate::core::entities::{PurchaseItem, SaleStockAllocation, StockOutflowAllocation};
 use crate::core::error::AppError;
 use crate::core::value_objects::OutflowSourceType;
 use crate::data::contracts::unit_of_work::TransactionContext;
@@ -76,6 +76,14 @@ pub trait InventoryAllocationStrategy: Send + Sync {
         quantity: f64,
     ) -> Result<OutflowDepletionResult, AppError>;
 
+    /// FR-31: lots with `remaining_quantity > EPS` in the order this strategy would deplete them
+    /// (FIFO = oldest first). Read-only.
+    fn open_lots_in_draw_order(
+        &self,
+        uow: &mut dyn TransactionContext,
+        item_id: i64,
+    ) -> Result<Vec<PurchaseItem>, AppError>;
+
     /// FR-20: pure replay of the customer-return reversal walk. `allocs` are a sale line's
     /// allocations (any order), `qtys` the quantities of its `RETURNED` lines in id order. Returns,
     /// per quantity, the `(allocation_id, take)` pairs the real walk took (latest allocation id
@@ -144,6 +152,14 @@ impl<T: InventoryAllocationStrategy + ?Sized> InventoryAllocationStrategy for st
         quantity: f64,
     ) -> Result<OutflowDepletionResult, AppError> {
         (**self).deplete_lots_for_outflow(uow, source_type, source_id, item_id, quantity)
+    }
+
+    fn open_lots_in_draw_order(
+        &self,
+        uow: &mut dyn TransactionContext,
+        item_id: i64,
+    ) -> Result<Vec<PurchaseItem>, AppError> {
+        (**self).open_lots_in_draw_order(uow, item_id)
     }
 
     fn replay_reversals(&self, allocs: &[SaleStockAllocation], qtys: &[f64]) -> Vec<Vec<(i64, f64)>> {

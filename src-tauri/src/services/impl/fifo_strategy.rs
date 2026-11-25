@@ -79,6 +79,16 @@ impl FifoStrategy {
 }
 
 impl InventoryAllocationStrategy for FifoStrategy {
+    fn open_lots_in_draw_order(
+        &self,
+        uow: &mut dyn TransactionContext,
+        item_id: i64,
+    ) -> Result<Vec<PurchaseItem>, AppError> {
+        let (mut lots, _) = Self::active_lots_oldest_first(uow, item_id)?;
+        lots.retain(|l| l.remaining_quantity > EPS);
+        Ok(lots)
+    }
+
     fn validate_stock_availability(
         &self,
         uow: &mut dyn TransactionContext,

@@ -159,6 +159,27 @@ pub struct ItemLot {
     pub unit_cost: f64,
 }
 
+/// One open lot in a sale-row lot draw (FR-31).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LotDrawLot {
+    pub purchase_item_id: i64,
+    pub transaction_code: String,
+    pub source: LotSource,
+    pub unit_cost: f64,
+    pub remaining_quantity: f64,
+    /// Part of the requested quantity taken from this lot, after `prior_quantity` is consumed first.
+    pub draw_quantity: f64,
+}
+
+/// Read-only FIFO draw for the sale entry row (FR-31, DD-60).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LotDraw {
+    pub lots: Vec<LotDrawLot>,
+    pub draw_cost: f64,
+    pub available: f64,
+    pub shortfall: f64,
+}
+
 /// One bill that contains an item (Item details drawer, FR-23). Each bill appears once per item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ItemBillRef {

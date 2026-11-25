@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
+    ItemBillRef, ItemLot, LotDraw, Paginated, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult,
 };
 use crate::core::entities::{PurchaseItem, StockAdjustment};
@@ -144,6 +144,10 @@ pub trait InventoryService: Send + Sync {
 
     /// DD-56: dry run of `set_item_stock` in a transaction that is dropped. Same errors as the command.
     fn preview_set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError>;
+
+    /// FR-31 / DD-60: read-only draw of `quantity` base units after `prior_quantity` already on the
+    /// bill, over the open lots in the strategy's order. Unknown item -> NotFound; SERVICE -> no lots.
+    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_quantity: f64) -> Result<LotDraw, AppError>;
 
     /// Lot inspector (all sources, oldest first).
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;
@@ -298,6 +302,10 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
 
     fn preview_set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
         (**self).preview_set_item_stock(payload)
+    }
+
+    fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_quantity: f64) -> Result<LotDraw, AppError> {
+        (**self).preview_lot_draw(item_id, quantity, prior_quantity)
     }
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {

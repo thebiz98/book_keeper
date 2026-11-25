@@ -46,6 +46,12 @@ impl LifoStrategy {
 }
 
 impl InventoryAllocationStrategy for LifoStrategy {
+    fn open_lots_in_draw_order(&self, uow: &mut dyn TransactionContext, item_id: i64) -> Result<Vec<book_keeper::core::entities::PurchaseItem>, AppError> {
+        let mut lots = uow.purchases().get_active_lots_for_item(item_id)?;
+        lots.sort_by_key(|l| std::cmp::Reverse(l.id));
+        Ok(lots)
+    }
+
     fn validate_stock_availability(&self, uow: &mut dyn TransactionContext, item_id: i64, q: f64) -> Result<(), AppError> {
         Self::plan(uow, item_id, q).map(|_| ())
     }
