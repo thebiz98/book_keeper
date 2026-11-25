@@ -2482,3 +2482,10 @@ Equivalence (preview equals the command, field by field), no side effects (row c
 
 * **Not covered.** Report from/to filters (`report_service_impl`, `check_date` only), internal source-lot creation, imports.
 * **Tests.** Per family: today passes, tomorrow is rejected with the field above; the preview returns the same `{field, message}`; an existing future-dated bill (inserted through the repo) is rejected on edit without a date change.
+
+## 19. Sale-Row Lot Draw (FR-31, DD-60, no schema, `feat/sale-lot-prices`, v1.3 C4)
+* **Command.** `preview_lot_draw { item_id, quantity, prior_quantity }` (`adjustment_controller`, `InventoryService::preview_lot_draw`). Quantities are base units, finite and >= 0, else `ValidationError { field }`. Read-only: runs in `begin_read()`; nothing is written.
+* **Strategy hook.** `InventoryAllocationStrategy::open_lots_in_draw_order(uow, item_id) -> Vec<PurchaseItem>` returns lots with `remaining_quantity > EPS` in the strategy's depletion order (FIFO: lowest `purchase_item.id`). The ordering stays in the strategy; the service never sorts.
+* **DTO.** `LotDraw { lots: [LotDrawLot { purchase_item_id, transaction_code, source, unit_cost, remaining_quantity, draw_quantity }], draw_cost, available, shortfall }`.
+* **Algorithm.** `skip = prior_quantity`; for each lot in order: `after_skip = max(0, remaining - skip)`, `skip = max(0, skip - remaining)`, `draw = min(after_skip, left)`, `left -= draw`. `draw_cost = Σ draw × unit_cost`; `available = Σ remaining`; `shortfall = max(0, prior + quantity - available)` (EPS-clamped to 0). Unknown item -> `NotFound`; SERVICE item -> empty `lots`, `available` 0, `shortfall` 0. Lot code and source come from `list_lots_for_item`, joined by `purchase_item_id`.
+* **Tests (`tests/lot_draw_test.rs`).** Multi-lot draw with prior quantity, shortfall, no rows written, SERVICE item, unknown item, invalid quantity.
