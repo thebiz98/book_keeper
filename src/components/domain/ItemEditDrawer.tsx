@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from '@/api';
-import { errorMessage } from '@/api/errors';
-import type { ItemSearchResult } from '@/types';
+import { deletedNameClash, errorMessage } from '@/api/errors';
+import type { DeleteMode, ItemSearchResult } from '@/types';
+import { ItemDeleteDialog } from './ItemDeleteDialog';
 import { Drawer } from '../ui/Drawer';
 import { Button } from '../ui/Button';
 import { FormActions } from '../ui/FormActions';
@@ -20,6 +21,10 @@ export interface ItemEditDrawerProps {
   item: ItemSearchResult | null;
   /** Called after a successful save or any bundle change. */
   onSaved: () => void;
+  /** FR-45: after the item was deleted (the drawer has been closed). */
+  onDeleted?: (name: string, mode: DeleteMode) => void;
+  /** FR-45: after a deleted item was restored from the name-clash action; open it in edit. */
+  onRestoredOpen?: (itemId: number) => void;
 }
 
 const numText = (n: number | null | undefined) => (n === null || n === undefined ? '' : String(n));
@@ -30,6 +35,8 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   onClose,
   item,
   onSaved,
+  onDeleted,
+  onRestoredOpen,
 }) => {
   const isEdit = item !== null;
   const itemId = item?.itemId;
@@ -55,6 +62,11 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
   const [stockOpen, setStockOpen] = useState(false);
   const stockDialogOpen = useRef(false);
   stockDialogOpen.current = stockOpen;
+  // FR-45: delete confirm and the "name belongs to a deleted item" restore action.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const deleteDialogOpen = useRef(false);
+  deleteDialogOpen.current = deleteOpen;
+  const [clash, setClash] = useState<{ existingId: number } | null>(null);
 
   // Re-seed the form only when the drawer opens or a different item is chosen, so a bundle
   // refresh (new `item` object, same id) does not wipe unsaved edits.
@@ -70,6 +82,8 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     setKind(item?.itemType === 'SERVICE' ? 'SERVICE' : 'PHYSICAL');
     setServiceCost(numText(item?.serviceCost));
     setComponents([]);
+    setClash(null);
+    setDeleteOpen(false);
     if (item?.itemType === 'SERVICE') {
       let live = true;
       api
@@ -101,6 +115,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
       isService ? 'service' : isEdit ? 'edit' : 'create'
     );
     setErrors(errs);
+    setClash(null);
     if (!values) return;
     const { mrp: mrpVal, price: priceVal, lowStock: lowVal, stock: stockVal, cost: costVal, serviceCost: svcCost } = values;
 
@@ -141,6 +156,12 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
       onSaved();
       onClose();
     } catch (err) {
+      const dn = deletedNameClash(err);
+      if (dn && dn.code === 'ITEM_NAME_DELETED') {
+        setErrors({ name: dn.message });
+        setClash({ existingId: dn.existingId });
+        return;
+      }
       const f = validationField(err);
       const key = f ? FIELD_MAP[f] : undefined;
       if (key) setErrors({ [key]: errorMessage(err) });
@@ -151,8 +172,23 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     }
   };
 
+  const restoreClash = async () => {
+    if (!clash || busy.current) return;
+    busy.current = true;
+    try {
+      await api.restoreItem(clash.existingId);
+      onSaved();
+      onClose();
+      onRestoredOpen?.(clash.existingId);
+    } catch (err) {
+      setFormError(errorMessage(err) || 'Failed to restore item');
+    } finally {
+      busy.current = false;
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (bundleModalOpen.current || stockDialogOpen.current || lotModalOpen.current) return;
+    if (bundleModalOpen.current || stockDialogOpen.current || lotModalOpen.current || deleteDialogOpen.current) return;
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void handleSave();
@@ -163,7 +199,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     <Drawer
       isOpen={isOpen}
       onClose={() => {
-        if (!bundleModalOpen.current && !stockDialogOpen.current && !lotModalOpen.current) onClose();
+        if (!bundleModalOpen.current && !stockDialogOpen.current && !lotModalOpen.current && !deleteDialogOpen.current) onClose();
       }}
       title={isEdit ? `Edit ${isService ? 'Service' : 'Item'}: ${item.name}` : isService ? 'Add New Service' : 'Add New Item'}
       description={
@@ -175,13 +211,28 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
       }
       width="lg"
       footer={
-        <FormActions
-          onSave={() => void handleSave()}
-          onCancel={onClose}
-          isSubmitting={saving}
-          saveLabel={isEdit ? 'Save Changes' : isService ? 'Save Service' : 'Save Item'}
-          saveHotkey="Ctrl+Enter"
-        />
+        <div className="flex w-full items-center gap-3">
+          {isEdit && (
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              data-testid="item-delete-button"
+              disabled={saving}
+              onClick={() => setDeleteOpen(true)}
+            >
+              Delete {isService ? 'service' : 'item'}
+            </Button>
+          )}
+          <FormActions
+            className="ml-auto"
+            onSave={() => void handleSave()}
+            onCancel={onClose}
+            isSubmitting={saving}
+            saveLabel={isEdit ? 'Save Changes' : isService ? 'Save Service' : 'Save Item'}
+            saveHotkey="Ctrl+Enter"
+          />
+        </div>
       }
     >
       <div className="flex flex-col gap-3" onKeyDown={onKeyDown}>
@@ -222,6 +273,19 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           error={errors.name}
           autoFocus
         />
+        {clash && (
+          <div>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              data-testid="item-restore-clash"
+              onClick={() => void restoreClash()}
+            >
+              Restore &apos;{name.trim()}&apos;
+            </Button>
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-3">
           <TextInput
@@ -381,6 +445,18 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           <p className="text-xs text-slate-400">Save the item first to add packaging bundles.</p>
         )}
       </div>
+      {isEdit && (
+        <ItemDeleteDialog
+          itemId={deleteOpen ? item.itemId : null}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={(n, mode) => {
+            setDeleteOpen(false);
+            onSaved();
+            onClose();
+            onDeleted?.(n, mode);
+          }}
+        />
+      )}
       {isEdit && (
         <SetStockDialog
           isOpen={stockOpen}

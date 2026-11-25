@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    BundleSuggestion, CreateBundlePayload, CatalogFilter, CreateItemPayload, ItemSearchResult, Paginated, SavedBundle,
+    BundleSuggestion, CreateBundlePayload, CatalogFilter, CreateItemPayload, DeleteItemResult, DeletedItemRow, ItemDeletePreview, ItemSearchResult, Paginated, SavedBundle,
     ServiceComponentView, UpdateBundlePayload, UpdateItemPayload,
 };
 use crate::core::error::AppError;
@@ -24,6 +24,20 @@ pub trait ItemService: Send + Sync {
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError>;
     /// FR-36: the components of a service with their names, units and current stock.
     fn get_service_components(&self, item_id: i64) -> Result<Vec<ServiceComponentView>, AppError>;
+    /// FR-45: read-only dry run of a delete: stock, stock value, blocking services, `can_delete`.
+    fn preview_item_delete(&self, item_id: i64) -> Result<ItemDeletePreview, AppError>;
+    /// FR-45: soft delete (`is_active = 0`). Blocked while an active service uses it as a component.
+    /// A1 (DD-79): a never-used item is removed permanently (`HARD`), any other is soft-deleted.
+    fn delete_item(&self, item_id: i64) -> Result<DeleteItemResult, AppError>;
+    /// FR-45: reverse of `delete_item`; a service needs all its components active.
+    fn restore_item(&self, item_id: i64) -> Result<(), AppError>;
+    /// FR-45: deleted items (name `LIKE`, newest delete first), default page size 10.
+    fn list_deleted_items(
+        &self,
+        search: Option<String>,
+        page: Option<usize>,
+        page_size: Option<usize>,
+    ) -> Result<Paginated<DeletedItemRow>, AppError>;
 }
 
 impl<T: ItemService + ?Sized> ItemService for std::sync::Arc<T> {
@@ -73,5 +87,26 @@ impl<T: ItemService + ?Sized> ItemService for std::sync::Arc<T> {
 
     fn get_service_components(&self, item_id: i64) -> Result<Vec<ServiceComponentView>, AppError> {
         (**self).get_service_components(item_id)
+    }
+
+    fn preview_item_delete(&self, item_id: i64) -> Result<ItemDeletePreview, AppError> {
+        (**self).preview_item_delete(item_id)
+    }
+
+    fn delete_item(&self, item_id: i64) -> Result<DeleteItemResult, AppError> {
+        (**self).delete_item(item_id)
+    }
+
+    fn restore_item(&self, item_id: i64) -> Result<(), AppError> {
+        (**self).restore_item(item_id)
+    }
+
+    fn list_deleted_items(
+        &self,
+        search: Option<String>,
+        page: Option<usize>,
+        page_size: Option<usize>,
+    ) -> Result<Paginated<DeletedItemRow>, AppError> {
+        (**self).list_deleted_items(search, page, page_size)
     }
 }

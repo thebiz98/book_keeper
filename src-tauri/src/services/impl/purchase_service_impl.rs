@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, CreatePurchasePayload, DeleteBillResult, Paginated, PurchaseDetailView, PurchaseHistoryRow,
@@ -97,6 +98,7 @@ fn resolve_purchase(
     tx: &mut dyn TransactionContext,
     payload: &CreatePurchasePayload,
     keep_party: Option<i64>,
+    keep_items: &HashSet<i64>,
 ) -> Result<ResolvedPurchase, AppError> {
     let party_name = match payload.party_id {
         Some(pid) => {
@@ -120,8 +122,8 @@ fn resolve_purchase(
             entity: "Item".to_string(),
             id: line.item_id.to_string(),
         })?;
-        if !item.is_active {
-            return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+        if !item.is_active && !keep_items.contains(&item.id) {
+            return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", item.name)));
         }
         if item.item_type == crate::core::value_objects::ItemType::Service {
             return Err(validation("item_id", format!("'{}' is a service item and cannot be purchased", item.name)));
@@ -248,7 +250,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             return Err(validation("purchase_item_id", "purchase_item_id is only valid when editing a purchase"));
         }
 
-        let r = resolve_purchase(tx, payload, None)?;
+        let r = resolve_purchase(tx, payload, None, &HashSet::new())?;
         // Charges (FR-19), totals and the payment cross-check (DD-02).
         let (charges, totals) = price_purchase(tx, payload, &r, 0.0, fig)?;
         let total_amount = totals.total_amount;
@@ -320,7 +322,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         self.payment_service
             .delete_bill_ledger(tx, TransactionType::Purchase, purchase_id, &[PaymentKind::Upfront])?;
 
-        let r = resolve_purchase(tx, payload, old.party_id)?;
+        // FR-45: lines of an item deleted since the purchase was made may stay on the bill.
+        let keep_items: HashSet<i64> =
+            tx.purchases().list_items_by_transaction_id(purchase_id)?.into_iter().map(|l| l.item_id).collect();
+        let r = resolve_purchase(tx, payload, old.party_id, &keep_items)?;
         let party_changed = r.party_id != old.party_id;
         if party_changed && !g.can_change_party {
             return Err(locked_with(

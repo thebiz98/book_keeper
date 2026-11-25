@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use crate::core::dtos::{
-    BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, ItemBundleSearchResult,
+    BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, DeletedItemRow, ItemBundleSearchResult,
+    ItemDeletePreview, DeleteItemResult, DeleteMode,
     ItemSearchResult, PageRequest, Paginated, SavedBundle, ServiceComponentInput, ServiceComponentView,
     UpdateBundlePayload, UpdateItemPayload,
 };
@@ -80,7 +81,7 @@ pub fn component_rule_violation(
         return Some(format!("Component '{}' is a service; only physical items can be components", item.name));
     }
     if !item.is_active {
-        return Some(format!("Component '{}' is inactive", item.name));
+        return Some(format!("Component '{}' is deleted. Restore it first.", item.name));
     }
     if already_listed {
         return Some(format!("Component '{}' is listed more than once", item.name));
@@ -183,10 +184,32 @@ pub fn ensure_item_name_unique(
 ) -> Result<(), AppError> {
     if let Some(it) = tx.items().find_by_name(&clean_name(name))? {
         if Some(it.id) != exclude_item_id {
+            if !it.is_active {
+                return Err(deleted_name_clash(&it));
+            }
             return Err(invalid("name", format!("An item named '{}' already exists", it.name)));
         }
     }
     Ok(())
+}
+
+/// FR-45: the name belongs to a deleted item; the UI offers Restore for `existing_id`.
+pub fn deleted_name_clash(it: &Item) -> AppError {
+    AppError::DeletedNameClash {
+        field: "name".to_string(),
+        code: "ITEM_NAME_DELETED".to_string(),
+        existing_id: it.id,
+        message: format!("'{}' was deleted. Restore it from Deleted items instead of creating it again.", it.name),
+    }
+}
+
+/// FR-45 / Y3: every write to a deleted item is refused except restore.
+pub fn ensure_item_active(item: &Item) -> Result<(), AppError> {
+    if item.is_active {
+        Ok(())
+    } else {
+        Err(invalid("item_id", format!("'{}' is deleted. Restore it first.", item.name)))
+    }
 }
 
 /// Bundle name must be unique per item (case-insensitive).
@@ -226,7 +249,12 @@ pub fn to_search_result(i: Item, bundles: Vec<ItemBundleSearchResult>) -> ItemSe
         matched_bundle_id: None,
         service_cost: i.service_cost,
         can_make: None,
+        is_active: i.is_active,
     }
+}
+
+fn component_block_message(name: &str, services: &[String]) -> String {
+    format!("'{name}' is a component of: {}. Remove it from those services first.", services.join(", "))
 }
 
 fn not_found(entity: &str, id: i64) -> AppError {
@@ -450,6 +478,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
 
         let mut tx = self.uow.begin_transaction()?;
         let mut existing = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        ensure_item_active(&existing)?;
         // FR-36: the type is fixed once the item exists.
         if payload.item_type.is_some_and(|t| t != existing.item_type) {
             return Err(invalid("item_type", "Item type cannot be changed"));
@@ -502,7 +531,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
     fn update_low_stock_threshold(&self, item_id: i64, threshold: f64) -> Result<ItemSearchResult, AppError> {
         validate_low_stock_threshold(threshold)?;
         let mut tx = self.uow.begin_transaction()?;
-        tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let current = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        ensure_item_active(&current)?;
         tx.items().update_low_stock_threshold(item_id, threshold, &chrono::Utc::now().to_rfc3339())?;
         let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
         let bundles = tx
@@ -528,6 +558,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
 
         let mut tx = self.uow.begin_transaction()?;
         let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        ensure_item_active(&item)?;
         if item.item_type == ItemType::Service {
             return Err(invalid("item_id", format!("'{}' is a service item; services cannot have bundles", item.name)));
         }
@@ -544,6 +575,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let mut tx = self.uow.begin_transaction()?;
         let existing = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| not_found("ItemBundle", bundle_id))?;
         let item = tx.items().find_by_id(existing.item_id)?.ok_or_else(|| not_found("Item", existing.item_id))?;
+        ensure_item_active(&item)?;
         // A bundle stays on its item; the payload has no item_id.
         let bundle = Self::validate_and_build_bundle(&mut *tx, existing.item_id, Some(bundle_id), &payload)?;
         tx.bundles().update(&bundle)?;
@@ -558,6 +590,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let mut tx = self.uow.begin_transaction()?;
         let existing = tx.bundles().find_by_id(bundle_id)?.ok_or_else(|| not_found("ItemBundle", bundle_id))?;
         let item = tx.items().find_by_id(existing.item_id)?.ok_or_else(|| not_found("Item", existing.item_id))?;
+        ensure_item_active(&item)?;
         // DD-28: no reference guard; bills keep their pack_label snapshot.
         tx.bundles().delete(bundle_id)?;
         let bundles = tx.bundles().find_by_item_id(existing.item_id)?;
@@ -569,6 +602,108 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError> {
         let mut tx = self.uow.begin_read()?;
         tx.bundles().get_bundle_suggestions()
+    }
+
+    fn preview_item_delete(&self, item_id: i64) -> Result<ItemDeletePreview, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let blocking_services = tx.items().services_using_active(item_id)?;
+        let stock_value = tx.items().stock_value(item_id)?;
+        let reasons_used = tx.items().usage_reasons(item_id)?;
+        let mode = if reasons_used.is_empty() { DeleteMode::Hard } else { DeleteMode::Soft };
+        // A deleted item can still be removed permanently when it was never used (DD-79).
+        let reason = if !item.is_active && mode == DeleteMode::Soft {
+            Some(format!("'{}' is already deleted.", item.name))
+        } else if item.is_active && !blocking_services.is_empty() {
+            Some(component_block_message(&item.name, &blocking_services))
+        } else {
+            None
+        };
+        Ok(ItemDeletePreview {
+            item_id,
+            name: item.name,
+            item_type: item.item_type,
+            stock: item.current_stock,
+            base_unit: item.base_unit,
+            stock_value,
+            blocking_services,
+            can_delete: reason.is_none(),
+            reason,
+            mode,
+            reasons_used,
+        })
+    }
+
+    fn delete_item(&self, item_id: i64) -> Result<DeleteItemResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let used = !tx.items().usage_reasons(item_id)?.is_empty();
+        if !item.is_active && used {
+            return Err(invalid("item_id", format!("'{}' is already deleted", item.name)));
+        }
+        if item.is_active {
+            let services = tx.items().services_using_active(item_id)?;
+            if !services.is_empty() {
+                return Err(AppError::BillLocked {
+                    code: "ITEM_IS_COMPONENT".to_string(),
+                    message: component_block_message(&item.name, &services),
+                });
+            }
+        }
+        let mode = if used {
+            tx.items().set_active(item_id, false, &chrono::Utc::now().to_rfc3339())?;
+            DeleteMode::Soft
+        } else {
+            tx.items().hard_delete(item_id)?;
+            DeleteMode::Hard
+        };
+        tx.commit()?;
+        // DD-75: the name row and every bundle barcode row leave the index.
+        self.search_indexer.remove_item(item_id)?;
+        Ok(DeleteItemResult { mode })
+    }
+
+    fn restore_item(&self, item_id: i64) -> Result<(), AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        if item.is_active {
+            return Err(invalid("item_id", format!("'{}' is not deleted", item.name)));
+        }
+        if item.item_type == ItemType::Service {
+            for c in tx.service_components().list_for_service(item_id)? {
+                let comp = tx
+                    .items()
+                    .find_by_id(c.component_item_id)?
+                    .ok_or_else(|| not_found("Item", c.component_item_id))?;
+                if !comp.is_active {
+                    return Err(invalid(
+                        "components",
+                        format!("Component '{}' is deleted. Restore it first.", comp.name),
+                    ));
+                }
+            }
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.items().set_active(item_id, true, &now)?;
+        let restored = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
+        let bundles = tx.bundles().find_by_item_id(item_id)?;
+        tx.commit()?;
+        self.reindex(&restored, &bundles)
+    }
+
+    fn list_deleted_items(
+        &self,
+        search: Option<String>,
+        page: Option<usize>,
+        page_size: Option<usize>,
+    ) -> Result<Paginated<DeletedItemRow>, AppError> {
+        let req = PageRequest::new(page, page_size.or(Some(10)))?;
+        let mut tx = self.uow.begin_read()?;
+        let (mut rows, total) = tx.items().list_inactive(search.as_deref().unwrap_or(""), req.offset(), req.limit)?;
+        for r in &mut rows {
+            r.can_purge = tx.items().usage_reasons(r.item_id)?.is_empty();
+        }
+        Ok(Paginated::new(rows, total, req.page, req.limit))
     }
 
     fn get_service_components(&self, item_id: i64) -> Result<Vec<ServiceComponentView>, AppError> {

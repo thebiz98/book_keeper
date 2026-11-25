@@ -168,6 +168,9 @@ pub struct SaleItemDetail {
     /// True for a service line (FR-37): not returnable, so return pickers skip it.
     #[serde(default)]
     pub is_service: bool,
+    /// FR-45: the item was deleted since the sale; return pickers disable the line (the backend rejects it).
+    #[serde(default)]
+    pub item_deleted: bool,
     /// `line total - bill discount share - cost_amount` (FR-34).
     pub profit: f64,
 }

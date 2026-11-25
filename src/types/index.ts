@@ -71,6 +71,40 @@ export interface ItemSearchResult {
   serviceCost?: number | null;
   /** SERVICE only (FR-36): "Can make N" from component stock; null without components. */
   canMake?: number | null;
+  /** FR-45: false for a deleted item (opened read-only from history). Absent = active. */
+  isActive?: boolean;
+}
+
+/** FR-45 A1 (DD-79): HARD = never used, removed permanently; SOFT = moved to Deleted items. */
+export type DeleteMode = 'HARD' | 'SOFT';
+
+/** FR-45: backend dry run of a delete. Every figure and sentence comes from the backend (DD-56). */
+export interface ItemDeletePreview {
+  itemId: number;
+  name: string;
+  itemType: ItemType;
+  stock: number;
+  baseUnit: string;
+  stockValue: number;
+  blockingServices: string[];
+  canDelete: boolean;
+  reason: string | null;
+  mode: DeleteMode;
+  reasonsUsed: string[];
+}
+
+/** One row of the Deleted items list (FR-45). */
+export interface DeletedItemRow {
+  itemId: number;
+  name: string;
+  itemType: ItemType;
+  category: string | null;
+  baseUnit: string;
+  currentStock: number;
+  stockValue: number;
+  deletedAt: string;
+  /** A1: never used, so "Delete permanently" is offered. */
+  canPurge?: boolean;
 }
 
 /** One component of a service (FR-36): base units of a physical item per service unit. */
@@ -265,6 +299,8 @@ export interface SaleItemDetail {
   miscCost?: number;
   /** Service lines are not returnable (DD-67); return pickers skip them. */
   isService?: boolean;
+  /** FR-45: the item was deleted after the sale; return pickers disable the line. */
+  itemDeleted?: boolean;
 }
 
 /** Reconciliation of a sale's profit (FR-34): linesProfit + charges + returnAdjustment = total. */

@@ -72,7 +72,7 @@ fn item_history_page(page: Option<usize>, limit: Option<usize>) -> Result<PageRe
 /// Active and PHYSICAL (FR-21): the only items whose stock may be adjusted.
 fn require_stockable(item: &Item) -> Result<(), AppError> {
     if !item.is_active {
-        return Err(validation("item_id", format!("Item '{}' is inactive", item.name)));
+        return Err(validation("item_id", format!("'{}' is deleted. Restore it first.", item.name)));
     }
     if item.item_type != ItemType::Physical {
         return Err(validation("item_id", format!("'{}' is a service item and has no stock", item.name)));

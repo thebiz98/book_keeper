@@ -1,7 +1,9 @@
 //! SQLite implementation of `ItemRepository`.
 use rusqlite::{params, OptionalExtension, Row};
 
+use crate::core::dtos::DeletedItemRow;
 use crate::core::entities::Item;
+use crate::core::money::round2;
 use crate::core::stock_rules::LOW_STOCK_SQL;
 use crate::core::error::AppError;
 use crate::data::contracts::ItemRepository;
@@ -169,6 +171,137 @@ impl ItemRepository for SqliteItemRepository {
             params![item_id, threshold, updated_at],
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
+    }
+
+    fn set_active(&mut self, id: i64, active: bool, updated_at: &str) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE items SET is_active = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, active as i64, updated_at],
+        )?;
+        if n == 0 { Err(not_found(id)) } else { Ok(()) }
+    }
+
+    fn list_inactive(&self, search: &str, offset: usize, limit: usize) -> Result<(Vec<DeletedItemRow>, usize), AppError> {
+        let like = format!(
+            "%{}%",
+            search.trim().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+        );
+        let total: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM items WHERE is_active = 0 AND name LIKE ?1 ESCAPE '\\'",
+            params![like],
+            |r| r.get(0),
+        )?;
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT i.id, i.name, i.item_type, i.category, i.base_unit, i.current_stock, \
+                    COALESCE(s.v, 0.0), i.updated_at \
+             FROM items i \
+             LEFT JOIN (SELECT item_id, SUM(remaining_quantity * unit_cost) AS v FROM purchase_items \
+                        WHERE remaining_quantity > 0 GROUP BY item_id) s ON s.item_id = i.id \
+             WHERE i.is_active = 0 AND i.name LIKE ?1 ESCAPE '\\' \
+             ORDER BY i.updated_at DESC, i.id LIMIT ?2 OFFSET ?3",
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![like, limit, offset], |r| {
+                Ok(DeletedItemRow {
+                    item_id: r.get(0)?,
+                    name: r.get(1)?,
+                    item_type: enum_col(r, 2)?,
+                    category: r.get(3)?,
+                    base_unit: r.get(4)?,
+                    current_stock: r.get(5)?,
+                    stock_value: round2(r.get(6)?),
+                    deleted_at: r.get(7)?,
+                    can_purge: false,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((rows, total.max(0) as usize))
+    }
+
+    fn services_using_active(&self, component_id: i64) -> Result<Vec<String>, AppError> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT s.name FROM service_components c JOIN items s ON s.id = c.service_item_id \
+             WHERE c.component_item_id = ?1 AND s.is_active = 1 ORDER BY s.name COLLATE NOCASE, s.id",
+        )?;
+        let rows = stmt.query_map(params![component_id], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    fn usage_reasons(&self, item_id: i64) -> Result<Vec<String>, AppError> {
+        let c: [i64; 6] = self.conn.query_row(
+            "SELECT \
+               (SELECT COUNT(DISTINCT sale_transaction_id) FROM sale_items WHERE item_id = ?1), \
+               (SELECT COUNT(*) FROM return_items WHERE item_id = ?1), \
+               (SELECT COUNT(*) FROM stock_adjustments WHERE item_id = ?1), \
+               (SELECT COUNT(*) FROM purchase_items p JOIN purchase_transactions t ON t.id = p.purchase_transaction_id \
+                 WHERE p.item_id = ?1 AND t.source <> 'OPENING'), \
+               (SELECT COUNT(*) FROM purchase_items p JOIN purchase_transactions t ON t.id = p.purchase_transaction_id \
+                 WHERE p.item_id = ?1 AND t.source = 'OPENING' AND (p.remaining_quantity < p.quantity \
+                   OR EXISTS (SELECT 1 FROM sale_stock_allocations a WHERE a.purchase_item_id = p.id) \
+                   OR EXISTS (SELECT 1 FROM stock_outflow_allocations o WHERE o.purchase_item_id = p.id))), \
+               (SELECT COUNT(*) FROM service_components WHERE component_item_id = ?1)",
+            params![item_id],
+            |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?]),
+        )?;
+        let mut out = Vec::new();
+        if c[0] > 0 {
+            out.push(format!("sold in {} bill(s)", c[0]));
+        }
+        if c[1] > 0 {
+            out.push(format!("in {} return line(s)", c[1]));
+        }
+        if c[2] > 0 {
+            out.push(format!("{} stock adjustment(s)", c[2]));
+        }
+        if c[3] > 0 {
+            out.push(format!("{} purchase or adjustment lot(s)", c[3]));
+        }
+        if c[4] > 0 {
+            out.push("its opening stock was used".to_string());
+        }
+        if c[5] > 0 {
+            out.push(format!("a component of {} service(s)", c[5]));
+        }
+        Ok(out)
+    }
+
+    fn hard_delete(&mut self, item_id: i64) -> Result<(), AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT p.purchase_transaction_id FROM purchase_items p \
+             JOIN purchase_transactions t ON t.id = p.purchase_transaction_id \
+             WHERE p.item_id = ?1 AND t.source = 'OPENING'",
+        )?;
+        let headers = stmt.query_map(params![item_id], |r| r.get::<_, i64>(0))?.collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        self.conn.execute(
+            "DELETE FROM purchase_items WHERE item_id = ?1 AND purchase_transaction_id IN \
+             (SELECT id FROM purchase_transactions WHERE source = 'OPENING')",
+            params![item_id],
+        )?;
+        for h in headers {
+            // Imported lots share one OPN- header per date: drop it only when it is left empty.
+            self.conn.execute(
+                "DELETE FROM purchase_transactions WHERE id = ?1 AND source = 'OPENING' \
+                 AND NOT EXISTS (SELECT 1 FROM purchase_items WHERE purchase_transaction_id = ?1)",
+                params![h],
+            )?;
+        }
+        self.conn.execute("DELETE FROM item_bundles WHERE item_id = ?1", params![item_id])?;
+        self.conn.execute("DELETE FROM service_components WHERE service_item_id = ?1", params![item_id])?;
+        let n = self.conn.execute("DELETE FROM items WHERE id = ?1", params![item_id])?;
+        if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
+    }
+
+    fn stock_value(&self, item_id: i64) -> Result<f64, AppError> {
+        let v: f64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(remaining_quantity * unit_cost), 0.0) FROM purchase_items \
+             WHERE item_id = ?1 AND remaining_quantity > 0",
+            params![item_id],
+            |r| r.get(0),
+        )?;
+        Ok(round2(v))
     }
 
     fn recompute_low_stock_flags(&mut self) -> Result<usize, AppError> {

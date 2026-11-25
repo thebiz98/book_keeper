@@ -63,6 +63,31 @@ pub async fn get_service_components(state: State<'_, AppState>, item_id: i64) ->
     super::run_blocking(move || svc.get_service_components(item_id)).await
 }
 #[tauri::command]
+pub async fn preview_item_delete(state: State<'_, AppState>, item_id: i64) -> Result<ItemDeletePreview, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.preview_item_delete(item_id)).await
+}
+#[tauri::command]
+pub async fn delete_item(state: State<'_, AppState>, item_id: i64) -> Result<DeleteItemResult, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.delete_item(item_id)).await
+}
+#[tauri::command]
+pub async fn restore_item(state: State<'_, AppState>, item_id: i64) -> Result<(), AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.restore_item(item_id)).await
+}
+#[tauri::command]
+pub async fn list_deleted_items(
+    state: State<'_, AppState>,
+    search: Option<String>,
+    page: Option<usize>,
+    page_size: Option<usize>,
+) -> Result<Paginated<DeletedItemRow>, AppError> {
+    let svc = state.item_service.clone();
+    super::run_blocking(move || svc.list_deleted_items(search, page, page_size)).await
+}
+#[tauri::command]
 pub async fn get_item(state: State<'_, AppState>, item_id: i64) -> Result<ItemSearchResult, AppError> {
     let svc = state.item_service.clone();
     super::run_blocking(move || svc.get_item(item_id)).await

@@ -425,7 +425,7 @@ pub(crate) fn check_against_db(
     let mut duplicates = Vec::new();
     for row in parsed {
         let existing = tx.items().find_by_name(&row.name)?;
-        if let Some(e) = &existing {
+        if let Some(e) = existing.as_ref().filter(|e| e.is_active) {
             duplicates.push(ImportDuplicate { row: row.row, name: row.name.clone(), existing_item_id: e.id });
         }
         let mut clash = false;
@@ -433,6 +433,13 @@ pub(crate) fn check_against_db(
             errors.push(ImportRowError { row: row.row, name: Some(row.name.clone()), field: field.to_string(), message });
             true
         };
+        if let Some(e) = existing.as_ref().filter(|e| !e.is_active) {
+            // FR-45: a deleted item is never updated by an import; it must be restored first.
+            clash = fail(
+                display(H_NAME),
+                format!("\"{}\" was deleted. Restore it from Deleted items first (code ITEM_NAME_DELETED).", e.name),
+            );
+        }
         if let Some(e) = &existing {
             if let Some(t) = row.item_type {
                 if t != e.item_type {
