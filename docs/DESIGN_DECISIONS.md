@@ -420,3 +420,28 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - **Kept as is:** purchase headers carry two markers (`source`, `is_opening_balance`). An opening bill is always `source = PURCHASE`. A rebuild to merge them is not worth the migration risk. Polymorphic references (`payment_settlements.transaction_id`, `bill_charges.transaction_id`, `stock_outflow_allocations.source_id`, `return_transactions.original_transaction_id`) stay without SQL FKs, guarded by the services.
 - **Cash in hand is not stored** (see HLD §6.2 "Derived, not stored").
 - **Recommended later, not scheduled:** a read-only "Verify data" check that recomputes every cache above and reports orphans of the polymorphic references; integer paise (DD-55).
+
+**DD-74 — Soft delete reuses `is_active`; no archive table, no migration (2026-11-25, v1.5 FR-45 / FR-46).**
+- `items.is_active` and `parties.is_active` (INTEGER 0/1 with a CHECK, since v1) are the delete flag. SQLite has no boolean type, so 0/1 is the standard form, and read paths already filter on it (DD-17).
+- A separate "deleted items" table was rejected. `sale_items`, `purchase_items`, `return_items`, `stock_adjustments`, `service_components`, bill headers and `payment_settlements` reference these rows by id (FK). Moving rows out would break the FKs, and every history query would need a second join.
+- "Deleted on" is `updated_at`: every write to a deleted record is rejected except restore, so `updated_at` stays the delete time. The UI says **Delete** and **Deleted items**; the record is never physically removed.
+
+**DD-75 — Search indexes hold active rows only (2026-11-25, v1.5).**
+- `item_search_fts` and `party_search_fts` rows come from `WHERE is_active = 1` sources (`fts_specs.rs`). Delete reindexes the key after commit (DD-24), which removes the name row and every bundle-barcode row. Restore reindexes it back. Every search query also joins `is_active = 1`, so a stale row is never shown.
+- The startup check (`ensure_search_index` / `ensure_fts_index`) compares active count with indexed count and rebuilds on a mismatch, so a crash between commit and reindex heals itself. A rebuild ends with FTS5 `optimize` to compact segments. Index size follows the active rows only.
+- The Deleted lists don't use FTS: they are small, so `name LIKE ?` over `WHERE is_active = 0` with SQL paging is enough.
+
+**DD-76 — Item delete rules (2026-11-25, v1.5 FR-45; owner decisions).**
+- Delete with stock is allowed after a confirm that shows the stock value (owner). The lots stay untouched; Inventory value excludes deleted items by joining `items.is_active = 1`, and a restore brings the value back exactly.
+- A physical item used as a component of an active service can't be deleted: the service would become unsellable.
+- New returns and replacements of a deleted item are rejected with "Restore the item first" (owner). Otherwise returned stock would land on a hidden item.
+- Bill edits may keep existing lines of a deleted item, the same way they keep a deactivated party (`keep_party`). Without this rule, deleting an item would lock every old bill that contains it.
+- Names stay unique including deleted items (`UNIQUE COLLATE NOCASE`). A clash returns `ITEM_NAME_DELETED` with the id, so the UI offers Restore instead of a raw constraint error.
+
+**DD-77 — Party delete rules (2026-11-25, v1.5 FR-46; owner asked for parties too).**
+- Deleting is blocked while any bill of the party has `balance_due > 0`: hiding a party with money owed would hide that money from the khata.
+- Credit & Dues summaries drop their `is_active = 1` filter (a party with dues shows with a Deleted badge). That covers the rare case where a later bill edit leaves a due on a deleted party. Settlements on such a party are allowed.
+- New returns against a deleted party's bill are rejected with "Restore the party first", the same rule as items.
+
+**DD-78 — Lots in the item edit screen reuse FR-25 (2026-11-25, v1.5 FR-44).**
+- An item has no purchase price of its own; each lot has one (FR-25 terminology). The edit screen embeds the existing editable `LotInspector` (`get_item_lots`) and `LotPriceEditModal` (`update_lot_purchase_price`), so no backend change and no rule is duplicated (DD-56).

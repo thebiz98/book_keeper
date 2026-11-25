@@ -118,7 +118,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * *(v1.2)* The result screen offers **Print bill (P)** (FR-27). Receipt/thermal printing stays out of scope.
 * **FR-16: Optional Maximum Retail Price (MRP)**
   * The system supports recording an optional Maximum Retail Price (MRP in ₹) on items and bundles. This serves as a printed reference price distinct from the shop's actual selling price (`default_sale_price`), allowing price-to-MRP comparisons.
-* **FR-17: Soft-Deletion & Archival Integrity** *(deferred to v2)*
+* **FR-17: Soft-Deletion & Archival Integrity** *(deferred to v2; superseded in v1.5 by FR-45 items and FR-46 parties)*
   * v1: Items and Parties cannot be deleted or archived at all. The `is_active` column is kept (always `1` in v1) and read paths already filter on it, so v2 can add archiving without schema changes.
   * v2 intent: Deletion acts as a soft archive (`is_active = 0`), hiding records from active search and selection lists while maintaining referential integrity for past bills, audit trails, and financial reports.
 * **FR-18: Store Expenses** *(added 2026-11-22, DD-35)*
@@ -291,6 +291,30 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * When the items run past one page, the table header repeats on each page, and the charges and total follow the last item.
   * **Look:** A4 portrait, about 15 mm margins, one clean font, light horizontal rules (no heavy grid), tabular figures, ₹ amounts right-aligned, and black on white only (prints well on mono printers). Sale and purchase bills share the layout.
 
+* **FR-44: Lots and Purchase Price in the Item Edit Screen** *(added 2026-11-25, v1.5, DD-78; FR-25 rev.)*
+  * Editing a **physical** item shows a **Lots & Purchase Price** section below the item fields: every lot of the item (open lots first in FIFO order, then used-up lots, greyed out) with Date, Source / bill code, Qty, Remaining, **Purchase Price** and an Edit action.
+  * Clicking a row's Edit opens the existing FR-25 lot price editor. It shows the backend preview of the effect on the bill (new total, paid, balance) before Save. All FR-25 rules and locks apply unchanged (customer-return lots read-only, vendor-returned lots locked, linked returns lock the bill, total below applied money rejected).
+  * Each lot is edited on its own. After a save, the lots list, the item's stock line and any open lists refresh. The item form's own fields are not affected and keep any unsaved edits.
+  * Services have no lots, so the section is not shown for them.
+* **FR-45: Delete and Restore Items (soft delete)** *(added 2026-11-25, v1.5, DD-74..DD-76; FR-17 rev.)*
+  * **Delete** (Item edit screen, danger action with confirm): sets `items.is_active = 0`. Nothing is physically removed. Past sales, purchases, returns, adjustments, reports, item profit and printed bills keep showing the item by name, because they reference it by id.
+  * The confirm dialog shows a backend preview: current stock and its value ("12 PCS worth ₹840 will leave Inventory value"). Deleting an item **with stock is allowed**. Its lots are left untouched, so a restore brings the same stock and value back.
+  * **A deleted item is hidden from:** live search and every typeahead (billing, purchases, returns, adjustments, service components, header item lookup), the Item List, categories, low stock, Inventory value (dashboard and stock valuation by category) and the Dead-stock class of Inventory speed. History-based reports (item profit, P&L, sales history) still include its past lines.
+  * **Blocked:** deleting a physical item that is a component of an active (not deleted) service. The error names those services, so the user edits or deletes them first.
+  * **Old bills:** editing an existing sale or purchase bill may keep lines of a deleted item as they are (quantity and price may change, like any line). A deleted item can't be added as a new line. Deleting an old bill restores its stock to the deleted item's lots as usual.
+  * **Returns:** a new customer or vendor return, or replacement, of a deleted item is rejected with "'<name>' is deleted. Restore the item first." Deleting an existing return is allowed.
+  * **Deleted items** button on the Inventory page opens a list of deleted items (name search, paged in the backend): Name, Type, Category, Stock, Stock value, Deleted on, **Restore**. Restore sets `is_active = 1` and puts the item back in search. A service can be restored only when all its components are active; otherwise the error names them.
+  * **Names stay unique, including deleted items.** Creating or importing an item whose name matches a deleted item is rejected with "'<name>' is in Deleted items. Restore it instead." The create form offers a **Restore** action from that error; the import report shows it as a row error.
+  * A deleted item can't be edited (fields, bundles, low-stock level, set stock, adjustments); restore it first. Its details drawer opens read-only from past bills and reports, with a "Deleted" badge and Restore.
+* **FR-46: Delete and Restore Parties (soft delete)** *(added 2026-11-25, v1.5, DD-74, DD-75, DD-77; FR-17 rev.)*
+  * **Delete** (Party edit screen, danger action with confirm): sets `parties.is_active = 0`. Past bills, returns, settlements and the party ledger keep showing the party by name.
+  * **Blocked while the party has dues:** any of its bills (including an `OB-` opening bill) with `balance_due > 0`. The error and the confirm preview show the amount and the number of open bills, so the user settles them first.
+  * **A deleted party is hidden from:** party live search and every party picker (new sale, new purchase, returns, quick-create), and the Parties list.
+  * **Old bills:** editing an existing bill keeps its deleted party (as today). A deleted party can't be chosen on a new bill or moved onto another bill. A new return against a bill of a deleted party is rejected with "'<name>' is deleted. Restore the party first."
+  * **Safety net for dues:** if a later bill edit leaves a due on a deleted party, Credit & Dues still lists that party, with a "Deleted" badge, and settling it works as normal. Dues lists never filter on `is_active`.
+  * **Deleted parties** button on the Parties page: Name, Type, Phone, Deleted on, **Restore** (name/phone search, paged in the backend).
+  * Party names are not unique, so creating a party with a deleted party's name is allowed. The parties import matches only active parties for *skip* / *update*.
+
 ### 2.2. Non-Functional Requirements (NFR)
 
 * **NFR-01: Zero External Server Overhead**
@@ -372,6 +396,11 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 46. **Settlement History tab on Credit & Dues with direct Edit / Delete (FR-42).**
 47. **Bill print layout: shop header, party left / date right, Sl. No table, charges at the bottom of the items area, total under a rule (FR-43).**
 
+### 3.1e. In Scope — v1.5 additions (2026-11-25)
+48. **Lots with an editable Purchase Price in the Item edit screen (FR-44).**
+49. **Delete (soft) and restore items, with a Deleted items list (FR-45).**
+50. **Delete (soft) and restore parties, with a Deleted parties list (FR-46).**
+
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
    *(v1.2: A4 printing of sale and purchase bills via the system print dialog is in scope, FR-27. Still out: thermal receipts, logos/footers/templates, direct PDF export, printing returns.)*
@@ -385,7 +414,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 9. **Multi-User Role-Based Access Control (RBAC)**: User roles, permissions, and shift-management logins.
 10. **Exports**: CSV/Excel exports of catalog, registers, daybook, P&L.
 11. **Restore from backup; import of sale / purchase history.** *(Opening dues entered per party moved into scope in v1.3, FR-35. Parties and expenses import moved into scope in v1.4, FR-41. VedBill inventory migration exists.)*
-12. **Archiving / soft-deletion of Items and Parties (FR-17).**
+12. ~~**Archiving / soft-deletion of Items and Parties (FR-17)**~~ — *moved into scope by FR-45 / FR-46 (v1.5).* Still out: hard (physical) delete, bulk delete, auto-purge of deleted records, and deleting expense types or charge types.
 13. ~~**Service billing (FR-21)**~~ — *moved into scope by FR-36/FR-37 (v1.4).* Still out: bundles of a service, returns of a service, services as components of other services, and a component's item history listing the service bills that consumed it.
 14. **Expense extras**: Expenses on credit / unpaid expense bills, expense vendors and payables, recurring expenses, expense attachments, and archiving expense types.
 15. **Charge/discount extras**: Percentage discounts, per-line (item-level) discounts, tax-as-a-charge, landed-cost allocation of purchase charges into lot costs, and archiving charge types.
@@ -410,7 +439,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 10. **Linked Return Reversal**: When a customer returns units from a sale line, the system walks that line's `SALE_STOCK_ALLOCATION` rows in reverse depletion order, using `quantity_depleted − returned_quantity` as each row's capacity, increments `returned_quantity`, and records the reversed FIFO cost on `RETURN_ITEM.cost_amount`. For `RESTOCKABLE` units it also restores `remaining_quantity` on the original `PURCHASE_ITEM` lots, bringing the item back at its exact historical cost. This makes repeated partial returns safe and keeps COGS net of returns.
 11. **Stock Outflow FIFO Depletion**: Negative adjustments, replacement issues, and vendor returns consume the oldest available lots via the allocation engine and log each lot consumed in `STOCK_OUTFLOW_ALLOCATION` (with `source_type` and `source_id`). This prevents phantom inventory lots and records inventory loss accurately.
 12. **Optional MRP Tracking**: `mrp` is stored as an optional reference attribute on `ITEM` and `ITEM_BUNDLE`, representing printed pack pricing distinct from the shop's actual selling price.
-13. **Soft-Delete Archiving (v2)**: `ITEM` and `PARTY` carry an `is_active` flag reserved for v2 archiving; v1 never deletes or archives them.
+13. **Soft-Delete** *(v1.5, FR-45 / FR-46)*: `ITEM` and `PARTY` are never physically deleted. Delete sets `is_active = 0`, restore sets it back to `1`. Search indexes hold active rows only (DD-75). Every reference from history is by id and stays valid.
 14. **Lot Sources**: Every stock lot is a `PURCHASE_ITEM` under a `PURCHASE_TRANSACTION` whose `source` is `PURCHASE` (real supplier bill), `ADJUSTMENT` (found stock), `OPENING` (import opening stock) or `RETURN` (unlinked restockable customer return). Non-`PURCHASE` headers carry `total_amount = 0`, no party, status `PAID`, and their own code prefix (`ADJ-`, `OPN-`, `RTL-`). All purchase lists, counts, totals, payables and vendor-return pickers include only `source = PURCHASE`.
 15. **FIFO Order**: Lots are consumed in entry order (ascending `PURCHASE_ITEM.id`).
 16. **Expenses are standalone cash-out events** *(2026-11-22)*: An `EXPENSE` row is itself the money event (always cash, paid on `expense_date`); it does not create `PAYMENT_SETTLEMENT` rows, because it has no bill, no party and no due. Assumption 8 still holds for every bill. Cash out for any period = ledger cash out + Σ `EXPENSE.amount` by `expense_date`.
@@ -1662,8 +1691,30 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 //        total_received, total_paid, total_count }      // kind = SETTLEMENT only; newest first (date, id)
 ```
 
+#### 12. v1.5 Additions (summary — exact payloads live in the LLD)
+
+```typescript
+// --- Lots in item edit (FR-44): no new command; reuses get_item_lots + update_lot_purchase_price (FR-25)
+
+// --- Item delete / restore (FR-45) — item_api
+// preview_item_delete { item_id } -> { stock, base_unit, stock_value, blocking_services: [{ item_id, name }], can_delete }  // read-only
+// delete_item { item_id }  -> ()   // BillLocked ITEM_IS_COMPONENT when blocking_services is non-empty
+// restore_item { item_id } -> ()   // ValidationError when a service has an inactive component
+// list_deleted_items { search?, page, page_size } -> Paginated<{ item_id, name, item_type, category, current_stock,
+//                                                              base_unit, stock_value, deleted_at }>
+// create_item / items import: name of a deleted item -> ValidationError(name, code ITEM_NAME_DELETED, existing_item_id)
+// ItemSearchResult (get_item) gains is_active
+
+// --- Party delete / restore (FR-46) — party_api
+// preview_party_delete { party_id } -> { open_bills_count, balance_due_total, can_delete }  // read-only
+// delete_party { party_id } -> ()   // BillLocked PARTY_HAS_DUES when balance_due_total > 0
+// restore_party { party_id } -> ()
+// list_deleted_parties { search?, party_type?, page, page_size } -> Paginated<{ party_id, name, party_type, phone, deleted_at }>
+// PartyDueSummary gains is_active (dues lists include deleted parties with dues)
+```
+
 ### 9.4. Atomic Transaction & Concurrency Controls
-* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`, and the v1.1 commands `create/update/delete_expense`, `create_expense_type`, `create_charge_type`, `update/delete_sale`, `update/delete_purchase`, `delete_return`, `update_item_low_stock_threshold`, `set_item_stock`, and the v1.2 commands `update_lot_purchase_price`, `settle_bills_batch`, `update_settlement`, `delete_settlement`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
+* All state-mutating operations (`create_sale`, `create_purchase`, `settle_bill_payment`, `create_customer_return`, `create_vendor_return`, `create_stock_adjustment`, `create_item`, `update_item`, `create_bundle`, `update_bundle`, `delete_bundle`, `create_party`, `update_party`, `update_shop_settings`, `execute_items_import`, and the v1.1 commands `create/update/delete_expense`, `create_expense_type`, `create_charge_type`, `update/delete_sale`, `update/delete_purchase`, `delete_return`, `update_item_low_stock_threshold`, `set_item_stock`, and the v1.2 commands `update_lot_purchase_price`, `settle_bills_batch`, `update_settlement`, `delete_settlement`, and the v1.5 commands `delete_item`, `restore_item`, `delete_party`, `restore_party`) are wrapped within SQLite **`BEGIN IMMEDIATE`** transactions in Rust.
 * No operation updates or deletes a committed transaction row except through the cached-value updates defined above (`paid_amount`, `balance_due`, `payment_status`, `remaining_quantity`, `returned_quantity`, `current_stock`, `is_low_stock`) **and the FR-20 / FR-25 / FR-26 correction operations** (`update_*` / `delete_*`, lot price, settlement edit/delete), which reverse and repost all dependent rows in the same transaction.
 * This guarantees that FIFO lot allocation and inventory decrement operate in complete isolation, preventing double-depletion or race conditions even under rapid scanning.
 
@@ -1737,3 +1788,13 @@ Owner requests of 2026-11-25. Same rules as §12 (own branch, phased commits, LL
 | 2 | `feat/service-items` (D2) | Service create/edit with components and Service cost, Can make N, selling services, component FIFO, misc. cost in profit and P&L, not returnable | FR-36, FR-37 | **v12** `service_components`, `items.service_cost`, `sale_items.service_cost_total`, drop `idx_sale_items_item` | 1 |
 | 3 | `feat/item-analytics` (D3) | Item profit and Inventory speed panels on Reports | FR-38, FR-39 | — | 2 |
 | 4 | `feat/imports` (D4) | Items template with services and components, parties import, expenses import | FR-41 | — | 2 |
+
+## 14. v1.5 Delivery Plan (2026-11-25)
+
+Owner requests of 2026-11-25. Same rules as §12 and §13 (own branch, phased commits, LLD / UI LLD first, full gate, DD-56). Branches go **strictly one after another**, each cut from local `main` after the previous merge. **No schema migration** in v1.5: `is_active` exists since v1 (DD-74).
+
+| Order | Branch | Feature | Requirements | Schema migration | Depends on |
+|---|---|---|---|---|---|
+| 1 | `feat/lots-in-item-edit` (E1) | Lots & Purchase Price section in the Item edit screen, per-lot edit via FR-25 | FR-44 | — | — |
+| 2 | `feat/item-delete` (E2) | Delete / restore items, delete preview, guards, valuation and search exclusion, Deleted items list | FR-45 | — | 1 |
+| 3 | `feat/party-delete` (E3) | Delete / restore parties, dues guard, Deleted parties list (reuses E2's list component) | FR-46 | — | 2 |
