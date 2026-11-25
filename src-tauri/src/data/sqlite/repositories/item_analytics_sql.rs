@@ -62,15 +62,30 @@ fn profit_order(key: &str) -> &'static str {
     }
 }
 
-pub(super) fn item_profit(conn: &SqliteConn, q: &ReportListQuery) -> Result<ItemProfitReport, AppError> {
-    let ctes = format!(
+/// Statement prefix: `?1`/`?2` = range, `?3` = search; ends with the filtered CTE `flt`.
+pub fn profit_ctes() -> String {
+    format!(
         "WITH {line}, agg AS (SELECT l.item_id AS item_id, COALESCE(i.name, MAX(l.snap)) AS name, \
            COALESCE(i.base_unit, '') AS base_unit, SUM(l.qty) AS qty, SUM(l.rev) AS revenue, \
            SUM(l.cost) AS cost, SUM(l.rev) - SUM(l.cost) AS profit \
          FROM line l LEFT JOIN items i ON i.id = l.item_id GROUP BY l.item_id), \
          flt AS (SELECT * FROM agg WHERE (?3 IS NULL OR instr(lower(name), lower(?3)) > 0))",
         line = line_cte()
-    );
+    )
+}
+
+/// The page statement (`?4` = limit, `?5` = offset), exposed so tests can EXPLAIN it.
+pub fn profit_page_sql(order: &str, desc: bool) -> String {
+    format!(
+        "{} SELECT item_id, name, base_unit, qty, revenue, cost, profit FROM flt \n         ORDER BY ({ord}) IS NULL, ({ord}) {d}, name COLLATE NOCASE, item_id LIMIT ?4 OFFSET ?5",
+        profit_ctes(),
+        ord = profit_order(order),
+        d = dir(desc)
+    )
+}
+
+pub(super) fn item_profit(conn: &SqliteConn, q: &ReportListQuery) -> Result<ItemProfitReport, AppError> {
+    let ctes = profit_ctes();
     let (count, revenue, cost): (i64, f64, f64) = conn.query_row(
         &format!("{ctes} SELECT COUNT(*), COALESCE(SUM(revenue), 0.0), COALESCE(SUM(cost), 0.0) FROM flt"),
         params![q.from, q.to, q.search],
@@ -152,18 +167,13 @@ fn class_of(s: &str) -> SpeedClass {
     }
 }
 
-pub(super) fn inventory_speed(
-    conn: &SqliteConn,
-    q: &ReportListQuery,
-    class: Option<&str>,
-    days: u32,
-) -> Result<InventorySpeedReport, AppError> {
-    let days_f = f64::from(days.max(1));
-    // `units`: depleted minus returned units per physical item, through the allocation's lot, so
-    // direct sales and service consumption share one path (X4). Driven by the bill date index.
-    // `classed`: rank over items with units out > 0 only, before any search / class filter;
-    // k = ceil(0.2 n) >= 1, top wins on overlap; units out 0 with stock on hand = DEAD.
-    let ctes = "WITH units AS (SELECT pi.item_id AS item_id, SUM(a.quantity_depleted - a.returned_quantity) AS u \
+/// `?1`/`?2` = range, `?3` = search, `?4` = days, `?5` = class filter; ends with the CTE `flt`.
+///
+/// `units`: depleted minus returned units per physical item, through the allocation's lot, so
+/// direct sales and service consumption share one path (X4). Driven by the bill date index.
+/// `classed`: rank over items with units out > 0 only, before any search / class filter;
+/// k = ceil(0.2 n) >= 1, top wins on overlap; units out 0 with stock on hand = DEAD.
+const SPEED_CTES: &str = "WITH units AS (SELECT pi.item_id AS item_id, SUM(a.quantity_depleted - a.returned_quantity) AS u \
            FROM sale_transactions s \
            JOIN sale_items si ON si.sale_transaction_id = s.id \
            JOIN sale_stock_allocations a ON a.sale_item_id = si.id \
@@ -185,6 +195,25 @@ pub(super) fn inventory_speed(
          srch AS (SELECT * FROM classed WHERE (?3 IS NULL OR instr(lower(name), lower(?3)) > 0)), \
          flt AS (SELECT * FROM srch WHERE (?5 IS NULL OR cls = ?5))";
 
+/// The page statement (`?6` = limit, `?7` = offset), exposed so tests can EXPLAIN it.
+pub fn speed_page_sql(order: &str, desc: bool) -> String {
+    let ord = speed_order(order);
+    format!(
+        "{SPEED_CTES} SELECT item_id, name, base_unit, u, stock, cls FROM flt \
+         ORDER BY ({ord}) IS NULL, ({ord}) {d}, name COLLATE NOCASE, item_id LIMIT ?6 OFFSET ?7",
+        d = dir(desc)
+    )
+}
+
+pub(super) fn inventory_speed(
+    conn: &SqliteConn,
+    q: &ReportListQuery,
+    class: Option<&str>,
+    days: u32,
+) -> Result<InventorySpeedReport, AppError> {
+    let days_f = f64::from(days.max(1));
+    let ctes = SPEED_CTES;
+
     let mut counts = SpeedCounts::default();
     {
         let mut stmt = conn.prepare(&format!("{ctes} SELECT cls, COUNT(*) FROM srch GROUP BY cls"))?;
@@ -205,13 +234,7 @@ pub(super) fn inventory_speed(
         params![q.from, q.to, q.search, days_f, class],
         |r| r.get(0),
     )?;
-    let ord = speed_order(q.order);
-    let sql = format!(
-        "{ctes} SELECT item_id, name, base_unit, u, stock, cls FROM flt \
-         ORDER BY ({ord}) IS NULL, ({ord}) {d}, name COLLATE NOCASE, item_id LIMIT ?6 OFFSET ?7",
-        d = dir(q.desc)
-    );
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare(&speed_page_sql(q.order, q.desc))?;
     let rows = stmt
         .query_map(params![q.from, q.to, q.search, days_f, class, q.limit as i64, q.offset as i64], |r| {
             let (u, stock): (f64, f64) = (r.get(3)?, r.get(4)?);
