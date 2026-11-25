@@ -15,6 +15,8 @@ export interface ModalProps {
   /** Enter (when focus is not in an input, button or link) runs this once. */
   defaultConfirmAction?: () => void;
   className?: string;
+  /** Extra classes for the body (e.g. `overflow-hidden` when the content manages its own scroll). */
+  bodyClassName?: string;
   /** Element to focus on open; default is the first control in the body, else the dialog. */
   initialFocusRef?: React.RefObject<HTMLElement | null>;
   /** Backdrop click closes the modal (default true). */
@@ -31,6 +33,7 @@ export const Modal: React.FC<ModalProps> = ({
   size = 'md',
   defaultConfirmAction,
   className,
+  bodyClassName,
   initialFocusRef,
   closeOnBackdrop = true,
 }) => {
@@ -121,7 +124,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Body */}
-        <div data-modal-body className="p-5 overflow-y-auto flex-1">{children}</div>
+        <div data-modal-body className={cn('p-5 overflow-y-auto flex-1', bodyClassName)}>{children}</div>
 
         {/* Footer */}
         {footer && (

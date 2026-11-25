@@ -188,3 +188,8 @@ Manual checklist:
 - New Purchase laid out like New Sale (vendor left; Item, Qty, Unit, Price; cart column order; shared `BillFooterTotals`; Clear (Esc) + Record bottom right).
 - Sales vs Purchases trend removed from the dashboard; optional collapsed panel on Financial Reports.
 - Manual: New Purchase with Standard Vendor + UNPAID, click Record: the message shows above the button. Pick a vendor: it records. Compare New Sale and New Purchase side by side (light and dark). Dashboard has no chart; Reports > "Sales vs Purchases trend" opens it and 7D / 30D / 1Y switch.
+
+
+## Branch feat/dashboard-layout (FR-40, DD-69; frontend only, v1.4 D1)
+Delivered: dashboard grid (full-width Cash & Stock row; Today/Dues over Recent transactions beside Low stock; `DashboardSummaryCards` `group` prop; valuation row opens Inventory; low-stock caption is `stock / level unit`); `LiveSearchTypeahead` `resultsMode="inline"` + `resultsClassName` (passed through `ItemSearchTypeahead`), `Modal` `bodyClassName`, larger F4 lookup dialog (only the results list scrolls; typing again drops the selected card); Reports trend is a hand-built SVG line chart (legend, crosshair tooltip, Left/Right keys, Chart/Table toggle). Test note: `summary-cards` testid now sits on each of the two card groups.
+- **Manual check (light and dark):** resize the window narrow and wide (cash cells stack, Today/Dues stack, low stock drops under); F4 with 30+ matches scrolls only the list and the field stays put; select an item then type again; Reports trend: 7D/30D/1Y, hover and Left/Right, Table toggle, orange line legible in dark theme.

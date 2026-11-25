@@ -31,6 +31,9 @@ export interface ItemSearchTypeaheadProps {
   /** Enables the "+ Create" row and Enter-on-no-match; receives the trimmed query. */
   onCreate?: (query: string) => void;
   createLabel?: (query: string) => string;
+  /** `inline` renders results in flow inside a scroll container (item lookup dialog). */
+  resultsMode?: 'dropdown' | 'inline';
+  resultsClassName?: string;
 }
 
 /** Best match for Enter: results shown -> the highlighted row; else exact (bundle) barcode hit, else the top row. */
@@ -63,8 +66,12 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
   disabled = false,
   onCreate,
   createLabel,
+  resultsMode,
+  resultsClassName,
 }) => (
   <LiveSearchTypeahead<ItemSearchResult>
+    resultsMode={resultsMode}
+    resultsClassName={resultsClassName}
     search={searchItems}
     onCreate={onCreate}
     createLabel={createLabel}

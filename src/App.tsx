@@ -55,14 +55,23 @@ export const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }>
         onClose();
       }}
       title="Item Stock & Rate Lookup (F4)"
-      size="md"
+      size="lg"
+      bodyClassName="overflow-hidden"
     >
-      <div className="flex flex-col gap-4">
-        <ItemSearchTypeahead onSelectItem={setItem} autoFocus clearOnSelect={false} />
+      {/* Fixed-height column: the field stays on top, only the results list scrolls. Typing again
+          drops the selected-item card and brings the list back. */}
+      <div className="flex h-[70vh] flex-col gap-3" onInputCapture={() => setItem(null)}>
+        <ItemSearchTypeahead
+          onSelectItem={setItem}
+          autoFocus
+          clearOnSelect={false}
+          resultsMode="inline"
+          className={item ? undefined : 'flex-1'}
+        />
         {item && (
           <div
             data-testid="lookup-result"
-            className="rounded-md border border-slate-200 dark:border-slate-800 p-3 text-sm flex flex-col gap-1"
+            className="shrink-0 rounded-md border border-slate-200 dark:border-slate-800 p-3 text-sm flex flex-col gap-1"
           >
             <span className="font-semibold">{item.name}</span>
             <StockStatusBadge currentStock={item.currentStock} baseUnit={item.baseUnit} />

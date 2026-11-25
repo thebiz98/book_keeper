@@ -104,7 +104,7 @@ describe('DashboardPage', () => {
       'kpi-receivables': 'dues',
       'kpi-payables': 'dues',
       'kpi-expenses': 'expenses',
-      'kpi-valuation': 'reports',
+      'kpi-valuation': 'inventory',
       'kpi-cash': 'reports',
     };
     for (const [id, route] of Object.entries(expected)) {
@@ -113,4 +113,25 @@ describe('DashboardPage', () => {
       expect(useAppStore.getState().activeRoute, id).toBe(route);
     }
   });
-});
+
+  it('puts the cash row above Today/Dues, and the low-stock panel beside them', async () => {
+    installApi({ ...base, getDashboardMetrics: metrics });
+    render(<DashboardPage />);
+    await waitFor(() => bodyText().includes('1,234.00'));
+    const q = (s: string) => document.querySelector(s)!;
+    const before = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before(q('[data-testid="card-cash"]'), q('[data-testid="card-today"]'))).toBe(true);
+    expect(before(q('[data-testid="card-today"]'), q('[data-testid="card-dues"]'))).toBe(true);
+    expect(before(q('[data-testid="card-dues"]'), q('[data-testid="recent"]'))).toBe(true);
+    expect(before(q('[data-testid="card-today"]'), q('[data-testid="low-count"]'))).toBe(true);
+    expect(before(q('[data-testid="low-count"]'), q('[data-testid="recent"]'))).toBe(false);
+  });
+
+  it('low-stock rows show stock / level and no category caption', async () => {
+    installApi({ ...base, getDashboardMetrics: metrics });
+    render(<DashboardPage />);
+    await waitFor(() => bodyText().includes('Pencil'));
+    expect(bodyText()).toContain('2 / 5 PCS');
+    expect(bodyText()).not.toContain('Uncategorized');
+    expect(bodyText()).not.toContain('Misc');
+  });});
