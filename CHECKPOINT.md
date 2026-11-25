@@ -132,3 +132,11 @@ Windows 11 ARM64 (verified 2026-11-22): requires VS Build Tools 2022 with the **
 - Tests: `src/__tests__/billEdit/` (draft hooks, purchase and sale drawer flows incl. StrictMode); page edit tests deleted.
 - **Manual check (tauri dev):** open a purchase, Edit: the form shows in the drawer (no navigation); change a quantity, a Purchase Price and a unit and watch the totals follow; add a line (price is required before Save); remove a line; a lot already sold cannot be removed and shows "Used: N"; a vendor-returned lot's price is greyed. Raise the total of a paid bill and Save: it becomes partial with a balance. Cancel after a change asks to discard; Esc / X do the same. Edit a sale with a cart in progress on the billing screen: the cart is untouched afterwards. "Bill updated" shows after Save and the history list refreshes.
 
+
+## Branch feat/entry-layout (FR-29, FR-30, DD-59; frontend only, v1.3 C2)
+Delivered: "+ New bundle…" last option in the Unit dropdown (sale row, purchase row; sentinel in `src/lib/bundleSentinel.ts`), Bundle / New Bundle buttons removed (Alt+B kept), Inventory "Add bundle" icon (PHYSICAL rows, `Boxes` icon because `PackagePlus` is already Set stock), `EntryField` and the one-line purchase row, New Sale header (customer left, invoice right) and footer (totals stacked above Clear / Complete Sale). Bill edit drawer line selects do not get the sentinel (per-line modal state; deferred).
+Manual checklist:
+- Sale and purchase: pick an item, choose "+ New bundle…" (and Alt+B): modal opens, Save selects the bundle and fills the rate; Cancel / Esc keeps the old unit and focus returns to the Unit select.
+- Purchase row stays one line and does not jump when picking an item or a Box unit; label "Purchase Price / Box *" is not wrapped; light and dark.
+- Inventory: Add bundle icon on a physical row; the Bundles count refreshes after Save; absent on services.
+- New Sale: customer on the left, invoice and date on the right; totals right-aligned above Complete Sale, with and without charges.
