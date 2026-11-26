@@ -389,8 +389,23 @@ export interface CustomerReturnPayload {
 
 export interface VendorReturnItemPayload {
   itemId: number;
+  /** DD-86: the exact lot returned; null is refused with `VENDOR_LOT_REQUIRED`. */
   purchaseItemId: number | null;
   quantity: number;
+}
+
+/** DD-86: one lot a vendor return may take (from `listVendorReturnLots`), in backend order. */
+export interface VendorReturnLot {
+  purchaseItemId: number;
+  purchaseId: number;
+  purchaseCode: string;
+  transactionDate: string;
+  /** Gross lot cost. */
+  unitCost: number;
+  /** Lot cost net of that bill's discount share: the value credited per unit (DD-87). */
+  netUnitCost: number;
+  remainingQuantity: number;
+  baseUnit: string;
 }
 
 /** Vendor returns must use settlementType REFUND. Unit cost comes from the lot. */
@@ -409,10 +424,12 @@ export interface ReturnResult {
   returnCode: string;
   creditedAmount: number;
   cashRefunded: number;
-  /** Value of the returned lines (customer: qty x refund rate; vendor: the lot cost removed). */
+  /** Value of the returned lines (customer: qty x refund rate; vendor: qty x lot cost net of the bill discount). */
   totalAmount: number;
   /** Replacement only: value of the issued items at their sale price; 0 otherwise. */
   issuedValue: number;
+  /** Vendor only: the bill discount share given back (gross cost - value, DD-87); 0 otherwise. */
+  discountReversed: number;
 }
 
 /** DD-56: one problem a preview found; the same field and message the real command would raise. */
@@ -767,6 +784,8 @@ export interface ApiClient {
   /** DD-56: dry runs of the return commands (same result and errors, nothing saved). */
   previewCustomerReturn(payload: CustomerReturnPayload): Promise<ReturnResult>;
   previewVendorReturn(payload: VendorReturnPayload): Promise<ReturnResult>;
+  /** DD-86: lots of `itemId` a return to `partyId` may take (only `purchaseId`'s when given). */
+  listVendorReturnLots(itemId: number, partyId: number, purchaseId?: number | null): Promise<VendorReturnLot[]>;
   getReturnDetails(returnId: number): Promise<ReturnDetailView>;
   /** FR-20: newest return of a bill first; rejects with `BillLocked` otherwise. */
   deleteReturn(returnId: number): Promise<DeleteReturnResult>;

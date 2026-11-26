@@ -581,12 +581,14 @@ export interface PnLReport {
   totalPurchases: number;
   /** Σ sale discounts (FR-19). */
   salesDiscounts: number;
-  /** saleChargesIncome + purchaseDiscountsIncome. */
+  /** saleChargesIncome + purchaseDiscountsIncome - purchaseDiscountReversed. */
   otherIncome: number;
   /** Expenses + purchaseChargesExpense. */
   operatingExpenses: number;
   saleChargesIncome: number;
   purchaseDiscountsIncome: number;
+  /** DD-87: discount share given back by vendor returns (already inside otherIncome). */
+  purchaseDiscountReversed?: number;
   purchaseChargesExpense: number;
   expensesByType: ExpenseTypeTotal[];
 }

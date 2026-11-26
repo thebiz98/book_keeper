@@ -165,6 +165,8 @@ export class TauriClient implements ApiClient {
     invokeCmd('preview_customer_return', { payload });
   previewVendorReturn: ApiClient['previewVendorReturn'] = (payload) =>
     invokeCmd('preview_vendor_return', { payload });
+  listVendorReturnLots: ApiClient['listVendorReturnLots'] = (itemId, partyId, purchaseId) =>
+    invokeCmd('list_vendor_return_lots', { itemId, partyId, purchaseId: purchaseId ?? null });
   getReturnDetails: ApiClient['getReturnDetails'] = (returnId) =>
     invokeCmd('get_return_details', { returnId });
   deleteReturn: ApiClient['deleteReturn'] = (returnId) => invokeCmd('delete_return', { returnId });
