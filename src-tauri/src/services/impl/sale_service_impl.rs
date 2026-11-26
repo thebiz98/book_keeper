@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, BillPaymentPreview, BillPreview, CreateSalePayload, DeleteBillResult, Paginated,
-    PreviewSalePayload, RecordPaymentPayload, SaleDetailView, SaleItemDetail, SaleHistoryRow,
+    PreviewSaleLinePayload, PreviewSalePayload, RecordPaymentPayload, SaleLinePreview, SaleDetailView, SaleItemDetail, SaleHistoryRow,
     SaleSummaryResponse, SalesHistoryFilter, ProfitSummary,
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
@@ -520,6 +520,28 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                 })
             }),
         )
+    }
+
+    fn preview_sale_line(&self, payload: PreviewSaleLinePayload) -> Result<SaleLinePreview, AppError> {
+        let qty = payload.bundle_quantity;
+        if !qty.is_finite() || qty < 0.0 {
+            return Err(validation("bundle_quantity", "Quantity must be 0 or more"));
+        }
+        if !payload.unit_price.is_finite() || payload.unit_price < 0.0 {
+            return Err(validation("unit_price", "unit_price must be a non-negative number"));
+        }
+        let unit_price = match payload.entered_total {
+            None => payload.unit_price,
+            Some(t) if !t.is_finite() || t < 0.0 => {
+                return Err(validation("entered_total", "Total must be 0 or more"));
+            }
+            Some(_) if qty <= 0.0 => {
+                return Err(validation("entered_total", "Enter a quantity before the total"));
+            }
+            // DD-82: full precision, so round2(qty × rate) gives the typed total back.
+            Some(t) => t / qty,
+        };
+        Ok(SaleLinePreview { line_total: round2(qty * unit_price), unit_price })
     }
 
     fn delete_sale(&self, sale_id: i64) -> Result<DeleteBillResult, AppError> {
