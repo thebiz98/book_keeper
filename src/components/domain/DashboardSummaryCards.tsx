@@ -19,6 +19,8 @@ interface RowSpec {
   /** The single most prominent figure of a card. */
   hero?: boolean;
   colored?: boolean;
+  /** With `colored`: a positive figure is money the shop owes, so it shows red (FR-49). */
+  invertColors?: boolean;
 }
 
 interface CardSpec {
@@ -76,6 +78,7 @@ const Row: React.FC<{ row: RowSpec; onOpen: (route: string) => void; tile?: bool
             amount={row.value}
             size={big ? 'xl' : 'md'}
             colored={row.colored}
+            invertColors={row.invertColors}
             className={cn(big ? 'text-[21px] font-bold leading-7' : 'font-semibold')}
           />
         )}
@@ -132,6 +135,7 @@ export const DashboardSummaryCards: React.FC<{
           caption: 'customers owe you',
           value: m?.customerReceivables ?? null,
           route: 'dues',
+          colored: true,
         },
         {
           testId: 'kpi-payables',
@@ -139,6 +143,8 @@ export const DashboardSummaryCards: React.FC<{
           caption: 'you owe vendors',
           value: m?.vendorPayables ?? null,
           route: 'dues',
+          colored: true,
+          invertColors: true,
         },
       ],
     },

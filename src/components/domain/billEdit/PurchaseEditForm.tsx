@@ -296,7 +296,7 @@ export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCa
           onPaidInput={(n) => dr.setHeader({ paidInput: n })}
           applied={preview.totals?.appliedAmount ?? dr.applied}
         />
-        <EditTotals totals={preview.totals} balanceDue={preview.balanceDue} />
+        <EditTotals totals={preview.totals} balanceDue={preview.balanceDue} payable />
       </div>
 
       <div className="sticky bottom-0 -mx-5 -mb-5 px-5 py-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-2">

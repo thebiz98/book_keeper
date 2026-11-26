@@ -208,7 +208,7 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
       header: 'Balance Due',
       align: 'right',
       className: tight,
-      render: (r) => <CurrencyDisplay amount={r.balanceDue} colored />,
+      render: (r) => <CurrencyDisplay amount={r.balanceDue} colored invertColors={!isSale} />,
     },
     ...(showProfit
       ? [

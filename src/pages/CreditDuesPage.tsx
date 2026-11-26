@@ -82,7 +82,7 @@ const OpenBillsPanel: React.FC<{
               <CurrencyDisplay amount={b.paidAmount} size="sm" />
             </TableCell>
             <TableCell className="text-right">
-              <CurrencyDisplay amount={b.balanceDue} size="sm" colored />
+              <CurrencyDisplay amount={b.balanceDue} size="sm" colored invertColors={party.partyType === 'VENDOR'} />
             </TableCell>
             <TableCell className="text-center">
               <PaymentStatusBadge status={b.paymentStatus} />
@@ -181,7 +181,7 @@ export const CreditDuesPage: React.FC = () => {
       key: 'bal',
       header: 'Net Due Balance',
       align: 'right',
-      render: (d) => <CurrencyDisplay amount={d.balanceDue} colored className="font-bold" />,
+      render: (d) => <CurrencyDisplay amount={d.balanceDue} colored invertColors={!isCustomer} className="font-bold" />,
     },
     {
       key: 'actions',
@@ -220,7 +220,7 @@ export const CreditDuesPage: React.FC = () => {
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
             {isCustomer ? 'Total Receivables Owed' : 'Total Payables Due'}
           </span>
-          {error ? <span className="text-xl text-slate-400">-</span> : <CurrencyDisplay amount={totalOutstanding} size="xl" colored />}
+          {error ? <span className="text-xl text-slate-400">-</span> : <CurrencyDisplay amount={totalOutstanding} size="xl" colored invertColors={!isCustomer} />}
         </div>
         )}
       </div>

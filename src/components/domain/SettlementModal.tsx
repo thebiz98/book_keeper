@@ -121,7 +121,7 @@ const SingleBillSettlement: React.FC<SettlementModalProps> = ({
               Bill Balance Due
             </span>
             <div className="text-xl font-bold font-mono">
-              <CurrencyDisplay amount={totalDue} size="xl" colored />
+              <CurrencyDisplay amount={totalDue} size="xl" colored invertColors={!isCustomer} />
             </div>
           </div>
           <div className="text-right">
