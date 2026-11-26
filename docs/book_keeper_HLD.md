@@ -38,7 +38,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * Validation sums the required base quantity per item across all cart lines (the same item on several lines is checked in aggregate). The same guard applies to negative adjustments, vendor returns, and replacement issues.
 * **FR-05: Real-Time Low Stock Monitoring**
   * *(rev. 2026-11-22)* Each item has its own **low stock level** (`ITEM.low_stock_threshold`, base units, default **5**, ≥ 0). The system flags an item as "Low Stock" when its total aggregated stock across all batches drops below that level (`current_stock < low_stock_threshold`). A level of `0` means the item is never flagged.
-  * The level is set per item: in the Item List (an inline-editable **Low Stock Level** column, which replaces the Barcode column) and in the Item edit drawer. Changing it recomputes `is_low_stock` immediately.
+  * The level is set per item: in the Item details drawer (Edit button, FR-50; the inline Item List column of v1.1 was removed 2026-11-26) and in the Item edit drawer. Changing it recomputes `is_low_stock` immediately.
   * Low stock items are surfaced on the Home / Dashboard screen, each with its own level.
   * Applies only to `PHYSICAL` items (FR-21).
 * **FR-06: Symmetrical Credit & Dues Management**
@@ -326,6 +326,10 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **FR-49: Vendor dues in red, customer dues in green** *(added 2026-11-26, v1.6; widened 2026-11-26)*
   * Money the shop owes (a positive vendor balance / payable) shows **red**; money customers owe (a positive customer balance / receivable) shows **green**.
   * Applies everywhere a due is shown: Parties page, party ledger, Dues page (tab total, party rows, open bills), the settle dialogs, bill history Balance Due, bill detail and bill edit balance, and the Dashboard Dues card (Receivables green, Payables red).
+* **FR-50: Low Stock Level edited in the item details panel, not the Item List** *(added 2026-11-26, v1.6, DD-83; amends FR-05 rev.)*
+  * The Item List no longer has a **Low Stock Level** column (it was too easy to change by accident). The Status badge and the "Show Only Low Stock" toggle stay.
+  * The **Item details** drawer shows the level with a small **Edit** button. Edit turns it into an input (text selected) with **Save** / **Cancel**; Enter saves, Esc cancels. Empty, negative or non-numeric input shows an inline error and is not sent; an unchanged value just closes the editor. Saving calls `update_item_low_stock_threshold` and the Status badge updates from the server row.
+  * Not editable for services or deleted items (shown read-only). The Item edit drawer keeps its Low Stock Level field.
 
 ### 2.2. Non-Functional Requirements (NFR)
 
@@ -417,6 +421,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 51. **Editable item total on the sale entry row; a typed total sets that line's rate (FR-47).**
 52. **Picked item name stays in the search box; one row per lot on New Sale (FR-48).**
 53. **Vendor dues in red, customer dues in green, everywhere a due is shown (FR-49).**
+54. **Low Stock Level moves from the Item List to the item details panel (FR-50).**
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
@@ -1826,3 +1831,5 @@ Owner requests of 2026-11-26. Same rules as §12 to §14 (own branch, phased com
 | 1 | `fix/vendor-dues-colour` (G1) | Vendor dues in red | FR-49 | — | — |
 | 2 | `feat/entry-row-clarity` (G3) | Picked name stays in the search box, one lot per row | FR-48 | — | 1 |
 | 3 | `feat/sale-line-rate` (G2) | Editable item total → that line's rate (replaces the reverted `feat/sale-line-total`, whose v13 never ships) | FR-47 | — | 2 |
+| 4 | `fix/dues-colour-everywhere` (G4) | Dues colours everywhere | FR-49 | — | 3 |
+| 5 | `feat/low-stock-in-details` (G5) | Low Stock Level column removed from the Item List; edited in the item details drawer | FR-50 | — | 4 |
