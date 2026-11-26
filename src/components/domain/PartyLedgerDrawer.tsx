@@ -98,7 +98,12 @@ export const PartyLedgerDrawer: React.FC<PartyLedgerDrawerProps> = ({ partyId, o
           )}
           <div className="flex items-center justify-between p-3 rounded-md bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-500">Current balance</span>
-            <CurrencyDisplay amount={ledger.currentBalance} size="lg" colored />
+            <CurrencyDisplay
+              amount={ledger.currentBalance}
+              size="lg"
+              colored
+              invertColors={ledger.party.partyType === 'VENDOR'}
+            />
           </div>
           {ledger.entries.length === 0 ? (
             <p className="text-slate-500">No ledger entries yet.</p>

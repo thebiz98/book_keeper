@@ -245,7 +245,7 @@ export const PartiesPage: React.FC = () => {
                     {p.transactionCount}
                   </TableCell>
                   <TableCell align="right">
-                    <CurrencyDisplay amount={p.outstandingBalance} colored size="sm" />
+                    <CurrencyDisplay amount={p.outstandingBalance} colored invertColors={tab === 'VENDOR'} size="sm" />
                   </TableCell>
                   <TableCell className="text-center">
                     <div className="flex justify-center gap-1">

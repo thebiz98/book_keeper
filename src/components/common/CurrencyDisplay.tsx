@@ -8,6 +8,8 @@ export interface CurrencyDisplayProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'hero';
   colored?: boolean;
   showSign?: boolean;
+  /** With `colored`: positive is red and negative green (money owed by the shop, e.g. vendor dues). */
+  invertColors?: boolean;
   className?: string;
 }
 
@@ -17,6 +19,7 @@ export const CurrencyDisplay: React.FC<CurrencyDisplayProps> = ({
   size = 'md',
   colored = false,
   showSign = false,
+  invertColors = false,
   className,
 }) => {
   // Round first so sub-paisa noise never renders as "-₹0.00".
@@ -48,10 +51,12 @@ export const CurrencyDisplay: React.FC<CurrencyDisplayProps> = ({
 
   let colorClass = 'text-slate-900 dark:text-slate-100';
   if (colored) {
+    const good = 'text-emerald-600 dark:text-emerald-400';
+    const bad = 'text-rose-600 dark:text-rose-400';
     if (isPositive) {
-      colorClass = 'text-emerald-600 dark:text-emerald-400';
+      colorClass = invertColors ? bad : good;
     } else if (isNegative) {
-      colorClass = 'text-rose-600 dark:text-rose-400';
+      colorClass = invertColors ? good : bad;
     }
   }
 
