@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, LotDraw, LotDrawComponent, OpeningQuantityResult, UpdateOpeningQuantityPayload, LotDrawLot, PageRequest, Paginated, PreviewServiceCostPayload, PriorLine,
+    ItemBillRef, ItemLot, LotDraw, LotDrawComponent, OpeningQuantityResult, UpdateOpeningQuantityPayload, AdjustmentUndoGuard, AdjustmentUndoReason, LotDrawLot, PageRequest, Paginated, PreviewServiceCostPayload, PriorLine,
     ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult,
 };
@@ -353,6 +353,80 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
         })
     }
 
+    /// Body of `undo_stock_adjustment` inside the caller's transaction; shared with the guard (DD-56, FR-52).
+    /// Every refusal is a `BillLocked` error so the caller can show its message.
+    fn undo_adjustment_in_tx(&self, tx: &mut dyn TransactionContext, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError> {
+        let adj = tx
+            .adjustments()
+            .find_by_id(adjustment_id)?
+            .ok_or_else(|| AppError::not_found("StockAdjustment", adjustment_id.to_string()))?;
+        let item = find_item(tx, adj.item_id)?;
+        if !item.is_active {
+            return Err(locked("ITEM_DELETED", format!("'{}' is deleted. Restore the item first.", item.name)));
+        }
+        let (loss_removed, value_change);
+        if adj.quantity < 0.0 {
+            let mut back = 0.0;
+            let mut loss = 0.0;
+            for o in tx.outflow_allocations().delete_by_source(OutflowSourceType::Adjustment, adjustment_id)? {
+                let lot = tx
+                    .purchases()
+                    .find_purchase_item_by_id(o.purchase_item_id)?
+                    .ok_or_else(|| AppError::not_found("PurchaseItem", o.purchase_item_id.to_string()))?;
+                let restored = lot.remaining_quantity + o.quantity_depleted;
+                if restored > lot.quantity + EPS {
+                    return Err(locked(
+                        "LOT_OVERFLOW",
+                        format!("Putting the stock back would exceed lot {} of '{}'", lot.id, lot.item_name),
+                    ));
+                }
+                tx.purchases().update_remaining_quantity(lot.id, restored)?;
+                back += o.quantity_depleted;
+                loss += o.quantity_depleted * o.unit_cost;
+            }
+            if back > 0.0 {
+                tx.items().apply_stock_delta(item.id, back)?;
+            }
+            loss_removed = round2(loss);
+            value_change = loss_removed;
+        } else {
+            let headers: Vec<_> = tx
+                .purchases()
+                .find_adjustment_headers(adjustment_id)?
+                .into_iter()
+                .filter(|h| super::purchase_service_impl::adjustment_id_from_notes(h.notes.as_deref()) == Some(adjustment_id))
+                .collect();
+            if headers.is_empty() {
+                return Err(locked("ADJUSTMENT_LOT_MISSING", "The stock lot created by this adjustment was not found"));
+            }
+            for h in headers {
+                for lot in tx.purchases().list_items_by_transaction_id(h.id)? {
+                    self.remove_purchase_lot(tx, lot.id).map_err(|e| match e {
+                        AppError::BillLocked { code, .. } if code == "CONSUMED_LINE_REMOVED" => locked(
+                            "ADJUSTMENT_STOCK_USED",
+                            "Stock added by this adjustment has already been sold or used. Delete those sales first.",
+                        ),
+                        other => other,
+                    })?;
+                }
+                tx.purchases().delete_transaction(h.id)?;
+            }
+            loss_removed = 0.0;
+            value_change = -round2(adj.quantity * adj.unit_cost.unwrap_or(0.0));
+        }
+        tx.adjustments().delete_adjustment(adjustment_id)?;
+        Ok(AdjustmentUndoGuard {
+            can_undo: true,
+            reason: None,
+            quantity: adj.quantity,
+            item_id: item.id,
+            item_name: item.name,
+            base_unit: item.base_unit,
+            loss_removed,
+            value_change,
+        })
+    }
+
     /// Body of `update_opening_lot_quantity` inside the caller's transaction; shared with the preview (DD-56).
     fn update_opening_quantity_in_tx(
         &self,
@@ -684,6 +758,38 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
     fn preview_opening_lot_quantity(&self, p: UpdateOpeningQuantityPayload) -> Result<OpeningQuantityResult, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let result = self.update_opening_quantity_in_tx(&mut *tx, &p);
+        tx.rollback()?; // never committed
+        result
+    }
+
+    fn undo_stock_adjustment(&self, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.undo_adjustment_in_tx(&mut *tx, adjustment_id)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    fn get_adjustment_undo_guard(&self, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let adj = tx
+            .adjustments()
+            .find_by_id(adjustment_id)?
+            .ok_or_else(|| AppError::not_found("StockAdjustment", adjustment_id.to_string()))?;
+        let item = find_item(&mut *tx, adj.item_id)?;
+        let result = match self.undo_adjustment_in_tx(&mut *tx, adjustment_id) {
+            Ok(g) => Ok(g),
+            Err(AppError::BillLocked { code, message }) => Ok(AdjustmentUndoGuard {
+                can_undo: false,
+                reason: Some(AdjustmentUndoReason { code, message }),
+                quantity: adj.quantity,
+                item_id: item.id,
+                item_name: item.name,
+                base_unit: item.base_unit,
+                loss_removed: 0.0,
+                value_change: 0.0,
+            }),
+            Err(e) => Err(e),
+        };
         tx.rollback()?; // never committed
         result
     }

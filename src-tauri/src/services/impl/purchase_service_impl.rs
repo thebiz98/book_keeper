@@ -88,6 +88,18 @@ fn validate_purchase_shape(payload: &CreatePurchasePayload) -> Result<(), AppErr
     Ok(())
 }
 
+/// FR-25 / FR-52: the adjustment id a positive adjustment's lot header links to
+/// (`"Stock adjustment #{id}: {reason}"` in its notes).
+pub(crate) fn adjustment_id_from_notes(notes: Option<&str>) -> Option<i64> {
+    notes?
+        .strip_prefix("Stock adjustment #")?
+        .split(':')
+        .next()?
+        .trim()
+        .parse::<i64>()
+        .ok()
+}
+
 fn clean_ref(r: Option<&str>) -> Option<String> {
     r.map(|r| r.trim().to_string()).filter(|r| !r.is_empty())
 }
@@ -468,13 +480,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             // OPENING / ADJUSTMENT: re-cost only (the vendor-return lock lives in edit_purchase_lot).
             self.inventory_service.edit_purchase_lot(tx, lot.id, &edit)?;
             if header.source == LotSource::Adjustment {
-                let adj_id = header
-                    .notes
-                    .as_deref()
-                    .and_then(|n| n.strip_prefix("Stock adjustment #"))
-                    .and_then(|n| n.split(':').next())
-                    .and_then(|n| n.trim().parse::<i64>().ok());
-                if let Some(id) = adj_id {
+                if let Some(id) = adjustment_id_from_notes(header.notes.as_deref()) {
                     tx.adjustments().update_unit_cost(id, new_cost)?;
                 }
             }

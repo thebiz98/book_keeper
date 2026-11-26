@@ -1,6 +1,6 @@
 use crate::core::dtos::{
     ItemBillRef, ItemLot, LotDraw, OpeningQuantityResult, Paginated, PreviewServiceCostPayload, PriorLine, ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
-    StockAdjustmentPreview, StockAdjustmentResult, UpdateOpeningQuantityPayload,
+    StockAdjustmentPreview, StockAdjustmentResult, UpdateOpeningQuantityPayload, AdjustmentUndoGuard,
 };
 use crate::core::entities::{PurchaseItem, StockAdjustment};
 use crate::core::error::AppError;
@@ -151,6 +151,15 @@ pub trait InventoryService: Send + Sync {
 
     /// DD-56: dry run of `update_opening_lot_quantity` in a transaction that is dropped. Same errors.
     fn preview_opening_lot_quantity(&self, payload: UpdateOpeningQuantityPayload) -> Result<OpeningQuantityResult, AppError>;
+
+    /// FR-52 / DD-85: removes a stock adjustment and its effect (own transaction). A reduction gives its units
+    /// back to the lots they came from; an increase removes the lot it created (refused once sold or used).
+    /// Unknown id -> NotFound; a deleted item or used stock -> `BillLocked`.
+    fn undo_stock_adjustment(&self, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError>;
+
+    /// DD-56: dry run of `undo_stock_adjustment` in a transaction that is dropped. A refusal is returned as
+    /// `can_undo = false` with the reason, not as an error; an unknown id is NotFound.
+    fn get_adjustment_undo_guard(&self, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError>;
 
     /// FR-31 / DD-60 / FR-37: read-only draw of `quantity` base units after the `prior_lines` already on the
     /// bill (service lines count as their components), over the open lots in the strategy order. A SERVICE
@@ -321,6 +330,14 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
 
     fn preview_opening_lot_quantity(&self, payload: UpdateOpeningQuantityPayload) -> Result<OpeningQuantityResult, AppError> {
         (**self).preview_opening_lot_quantity(payload)
+    }
+
+    fn undo_stock_adjustment(&self, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError> {
+        (**self).undo_stock_adjustment(adjustment_id)
+    }
+
+    fn get_adjustment_undo_guard(&self, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError> {
+        (**self).get_adjustment_undo_guard(adjustment_id)
     }
 
     fn preview_lot_draw(&self, item_id: i64, quantity: f64, prior_lines: &[PriorLine]) -> Result<LotDraw, AppError> {

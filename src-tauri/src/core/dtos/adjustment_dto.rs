@@ -77,3 +77,26 @@ pub struct OpeningQuantityResult {
     /// True when quantity 0 removed the (unused) opening lot.
     pub lot_removed: bool,
 }
+
+/// Why an adjustment cannot be undone (machine code plus the message to show).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdjustmentUndoReason {
+    pub code: String,
+    pub message: String,
+}
+
+/// `get_adjustment_undo_guard` result (FR-52, DD-85): what undoing the adjustment would do, or why it cannot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdjustmentUndoGuard {
+    pub can_undo: bool,
+    pub reason: Option<AdjustmentUndoReason>,
+    /// The adjustment's signed quantity (negative = reduction).
+    pub quantity: f64,
+    pub item_id: i64,
+    pub item_name: String,
+    pub base_unit: String,
+    /// Reduction: the Inventory Losses amount that disappears; 0 for an increase.
+    pub loss_removed: f64,
+    /// Effect on stock value: positive for a reduction undone, negative for an increase undone.
+    pub value_change: f64,
+}

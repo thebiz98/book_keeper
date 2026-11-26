@@ -84,5 +84,7 @@ pub trait PurchaseRepository {
     /// Like [`Self::is_lot_referenced`] but ignoring return lines of one return (its own link).
     fn is_lot_referenced_except_return(&self, lot_id: i64, return_id: i64) -> Result<bool, AppError>;
     /// `RETURN`-source lots of item `item_id` whose header notes equal `note`, lowest id first.
+    /// FR-52: the `ADJUSTMENT` headers whose notes start `Stock adjustment #{id}:` (the lot link of a positive adjustment).
+    fn find_adjustment_headers(&self, adjustment_id: i64) -> Result<Vec<PurchaseTransaction>, AppError>;
     fn find_return_lots_by_note(&self, note: &str, item_id: i64) -> Result<Vec<PurchaseItem>, AppError>;
 }

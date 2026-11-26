@@ -195,6 +195,16 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         )?)
     }
 
+    fn find_adjustment_headers(&self, adjustment_id: i64) -> Result<Vec<PurchaseTransaction>, AppError> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {TX_COLS} FROM purchase_transactions WHERE source = 'ADJUSTMENT' AND notes LIKE ?1 ORDER BY id"
+        ))?;
+        let rows = stmt
+            .query_map(params![format!("Stock adjustment #{adjustment_id}:%")], map_tx)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     fn find_return_lots_by_note(&self, note: &str, item_id: i64) -> Result<Vec<PurchaseItem>, AppError> {
         let cols = ITEM_COLS.split(", ").map(|c| format!("pi.{c}")).collect::<Vec<_>>().join(", ");
         self.query_items(
