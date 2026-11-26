@@ -337,6 +337,21 @@ fn sale_edit_cannot_clear_the_party_when_later_payments_exist() {
 }
 
 #[test]
+fn sale_with_a_later_settlement_deletes_cleanly() {
+    let e = env();
+    seed_party(&e.db, 1, "A", PartyType::Customer);
+    let p = e.stocked(1, 10.0, 5.0);
+    let id = e.sell(Some(1), Unpaid, 0.0, &[(1, 2.0, 100.0)]);
+    e.acct.settle_bill_payment(settle_payload(1, TransactionType::Sale, Some(id), 50.0)).unwrap();
+    let g = e.sales.get_sale_edit_guard(id).unwrap();
+    assert!(g.can_delete, "{:?}", g.reasons);
+    e.sales.delete_sale(id).unwrap();
+    assert_eq!((e.stock(1), e.count("sale_transactions")), (10.0, 0));
+    assert_eq!(e.count("payment_settlements") as usize, e.ledger(TransactionType::Purchase, p).len());
+    e.check();
+}
+
+#[test]
 fn linked_return_locks_a_sale_until_the_return_is_deleted() {
     let e = env();
     e.stocked(1, 10.0, 5.0);
