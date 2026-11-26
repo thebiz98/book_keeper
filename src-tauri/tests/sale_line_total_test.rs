@@ -137,6 +137,13 @@ fn adjustments_are_summed_into_one_line_per_effect_next_to_manual_charges() {
     p.charges = vec![BillChargeInput { charge_type_id: delivery, amount: 30.0 }];
     let pv = e.sales.preview_sale(None, preview(&p)).unwrap();
     assert_eq!(pv.line_adjustments, vec![-5.0, -2.0, 1.0, 0.0, 0.0]);
+    assert_eq!(
+        pv.adjustment_lines,
+        vec![
+            PreviewChargeLine { name: s("Item extra charge"), effect: ChargeEffect::Charge, amount: 1.0 },
+            PreviewChargeLine { name: s("Item discount"), effect: ChargeEffect::Discount, amount: 7.0 },
+        ]
+    );
     let id = e.sales.create_sale(p).unwrap().sale_id;
     assert_eq!(
         e.charges(id),

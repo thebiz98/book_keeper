@@ -5,7 +5,7 @@ use crate::core::dtos::charge_dto::BillChargeInput;
 use crate::core::dtos::purchase_dto::{CreatePurchaseItemPayload, CreatePurchasePayload};
 use crate::core::dtos::sale_dto::{CreateSaleItemPayload, CreateSalePayload};
 use crate::core::error::AppError;
-use crate::core::value_objects::PaymentStatus;
+use crate::core::value_objects::{ChargeEffect, PaymentStatus};
 
 /// One problem a preview found: the same `field` and `message` the real command would raise.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,6 +47,9 @@ pub struct BillPreview {
     /// FR-47: signed extra charge (+) / discount (−) per line from an edited item total; 0 for none.
     #[serde(default)]
     pub line_adjustments: Vec<f64>,
+    /// FR-47: the bill lines those adjustments become ("Item extra charge" / "Item discount").
+    #[serde(default)]
+    pub adjustment_lines: Vec<PreviewChargeLine>,
     pub items_subtotal: f64,
     pub charges_total: f64,
     pub discounts_total: f64,
@@ -58,6 +61,14 @@ pub struct BillPreview {
     /// `None` when the payload carried no payment status (totals and stock checks only).
     pub payment: Option<BillPaymentPreview>,
     pub errors: Vec<PreviewError>,
+}
+
+/// A derived charge / discount line shown before Save (FR-47).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PreviewChargeLine {
+    pub name: String,
+    pub effect: ChargeEffect,
+    pub amount: f64,
 }
 
 /// FR-47: one sale entry-row line, for the Total box before Add (no database).

@@ -1,7 +1,7 @@
 //! Bill math shared by sale/purchase creation and (FR-20) bill edit/delete: charge line
 //! validation and resolution, totals, the discounted net rate and the payment cross-checks.
 //! Shared by create and (v8) edit paths; never begins a transaction.
-use crate::core::dtos::{BillChargeInput, BillPaymentPreview, BillPreview, PreviewError};
+use crate::core::dtos::{BillChargeInput, BillPaymentPreview, BillPreview, PreviewChargeLine, PreviewError};
 use crate::core::entities::BillCharge;
 use crate::core::error::AppError;
 use crate::core::money::{round2, MONEY_EPS};
@@ -82,6 +82,8 @@ pub struct BillFigures {
     pub line_totals: Vec<f64>,
     /// FR-47: signed adjustment per line (sale only; empty on purchases).
     pub line_adjustments: Vec<f64>,
+    /// FR-47: the bill lines the adjustments became.
+    pub adjustment_lines: Vec<PreviewChargeLine>,
     pub totals: Option<BillTotals>,
     pub applied: f64,
     pub open: f64,
@@ -118,6 +120,7 @@ pub fn bill_preview(
     Ok(BillPreview {
         line_totals: fig.line_totals,
         line_adjustments: fig.line_adjustments,
+        adjustment_lines: fig.adjustment_lines,
         items_subtotal: t.items_subtotal,
         charges_total: t.charges_total,
         discounts_total: t.discounts_total,

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, BillPaymentPreview, BillPreview, CreateSalePayload, DeleteBillResult, Paginated,
-    PreviewSaleLinePayload, PreviewSalePayload, RecordPaymentPayload, SaleLinePreview, SaleDetailView, SaleItemDetail, SaleHistoryRow,
+    PreviewChargeLine, PreviewSaleLinePayload, PreviewSalePayload, RecordPaymentPayload, SaleLinePreview, SaleDetailView, SaleItemDetail, SaleHistoryRow,
     SaleSummaryResponse, SalesHistoryFilter, ProfitSummary,
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
@@ -201,7 +201,12 @@ fn price_sale(
     let mut charges = resolve_bill_charges(tx, TransactionType::Sale, &payload.charges)?;
     // FR-47 / DD-81: edited item totals become bill-level extra charge / discount lines.
     let adjustments: Vec<f64> = r.lines.iter().map(|l| l.adjustment).collect();
-    charges.extend(line_adjustment_charges(tx, &adjustments)?);
+    let derived = line_adjustment_charges(tx, &adjustments)?;
+    fig.adjustment_lines = derived
+        .iter()
+        .map(|c| PreviewChargeLine { name: c.charge_name.clone(), effect: c.effect, amount: c.amount })
+        .collect();
+    charges.extend(derived);
     fig.line_adjustments = adjustments;
     let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
     let totals = compute_bill_totals(&line_totals, &charges)?;
