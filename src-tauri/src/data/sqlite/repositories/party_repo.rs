@@ -1,9 +1,9 @@
 //! SQLite implementation of `PartyRepository`.
 use rusqlite::{params, OptionalExtension, Row};
 
-use crate::core::dtos::PartyDueSummary;
+use crate::core::dtos::{DeletedPartyRow, PartyDueSummary};
 use crate::core::entities::{Party, PartyListRow, PartyOpeningBalance};
-use crate::core::money::round2;
+use crate::core::money::{round2, MONEY_EPS};
 use crate::core::error::AppError;
 use crate::core::value_objects::PartyType;
 use crate::data::contracts::PartyRepository;
@@ -160,6 +160,90 @@ impl PartyRepository for SqlitePartyRepository {
         Ok(rows)
     }
 
+    fn set_active(&mut self, id: i64, active: bool, updated_at: &str) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE parties SET is_active = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, active as i64, updated_at],
+        )?;
+        if n == 0 {
+            return Err(AppError::NotFound { entity: "Party".to_string(), id: id.to_string() });
+        }
+        Ok(())
+    }
+
+    fn hard_delete(&mut self, id: i64) -> Result<(), AppError> {
+        let n = self.conn.execute("DELETE FROM parties WHERE id = ?1", params![id])?;
+        if n == 0 {
+            return Err(AppError::NotFound { entity: "Party".to_string(), id: id.to_string() });
+        }
+        Ok(())
+    }
+
+    fn reference_count(&self, id: i64) -> Result<i64, AppError> {
+        let (a, b, c, d) = self.reference_breakdown(id)?;
+        Ok(a + b + c + d)
+    }
+
+    fn reference_breakdown(&self, id: i64) -> Result<(i64, i64, i64, i64), AppError> {
+        Ok(self.conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM sale_transactions WHERE party_id = ?1), \
+                    (SELECT COUNT(*) FROM purchase_transactions WHERE party_id = ?1), \
+                    (SELECT COUNT(*) FROM return_transactions WHERE party_id = ?1), \
+                    (SELECT COUNT(*) FROM payment_settlements WHERE party_id = ?1)",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )?)
+    }
+
+    fn open_dues(&self, id: i64, party_type: PartyType) -> Result<(i64, f64), AppError> {
+        let (table, source_filter) = match party_type {
+            PartyType::Customer => ("sale_transactions", ""),
+            PartyType::Vendor => ("purchase_transactions", " AND source = 'PURCHASE'"),
+        };
+        let (n, sum): (i64, f64) = self.conn.query_row(
+            &format!(
+                "SELECT COUNT(*), COALESCE(SUM(balance_due), 0.0) FROM {table} \
+                 WHERE party_id = ?1 AND balance_due > {MONEY_EPS}{source_filter}"
+            ),
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok((n, round2(sum)))
+    }
+
+    fn list_inactive(&self, search: &str, offset: usize, limit: usize) -> Result<(Vec<DeletedPartyRow>, usize), AppError> {
+        let q = search.trim();
+        let like = format!("%{}%", q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let digits: String = q.chars().filter(char::is_ascii_digit).collect();
+        // A query without digits matches no phone (an empty pattern would match everything).
+        let phone_like = if digits.is_empty() { None } else { Some(format!("%{digits}%")) };
+        let filter = "is_active = 0 AND (name LIKE ?1 ESCAPE '\\' OR (?2 IS NOT NULL AND \
+                      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', '') LIKE ?2))";
+        let total: i64 = self.conn.query_row(
+            &format!("SELECT COUNT(*) FROM parties WHERE {filter}"),
+            params![like, phone_like],
+            |r| r.get(0),
+        )?;
+        let mut stmt = self.conn.prepare_cached(&format!(
+            "SELECT id, name, party_type, phone, updated_at FROM parties WHERE {filter} \
+             ORDER BY updated_at DESC, id LIMIT ?3 OFFSET ?4"
+        ))?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![like, phone_like, limit, offset], |r| {
+                Ok(DeletedPartyRow {
+                    party_id: r.get(0)?,
+                    name: r.get(1)?,
+                    party_type: enum_col(r, 2)?,
+                    phone: r.get(3)?,
+                    deleted_at: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((rows, total.max(0) as usize))
+    }
+
     fn get_party_due_summary(&self, party_type: PartyType) -> Result<Vec<PartyDueSummary>, AppError> {
         // Customers owe on sales; vendors are owed on PURCHASE-source purchases only (DD-07).
         // One grouped query over the open bills of every party of the type.
@@ -169,9 +253,9 @@ impl PartyRepository for SqlitePartyRepository {
         };
         let sql = format!(
             "SELECT p.id, p.name, p.phone, COUNT(t.id), MIN(t.transaction_date), \
-                    SUM(t.total_amount), SUM(t.paid_amount), SUM(t.balance_due) \
+                    SUM(t.total_amount), SUM(t.paid_amount), SUM(t.balance_due), p.is_active \
              FROM parties p JOIN {table} t ON t.party_id = p.id AND t.balance_due > 0{source_filter} \
-             WHERE p.party_type = ?1 AND p.is_active = 1 \
+             WHERE p.party_type = ?1 \
              GROUP BY p.id ORDER BY p.name COLLATE NOCASE, p.id"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -187,6 +271,7 @@ impl PartyRepository for SqlitePartyRepository {
                     total_invoiced: r.get(5)?,
                     total_paid: r.get(6)?,
                     balance_due: r.get(7)?,
+                    is_active: r.get(8)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

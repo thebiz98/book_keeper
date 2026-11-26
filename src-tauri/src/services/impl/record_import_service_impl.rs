@@ -240,7 +240,8 @@ fn check_parties(
     strategy: ConflictStrategy,
 ) -> Result<PartyChecked, AppError> {
     let mut known: HashMap<(String, PartyType), Party> = HashMap::new();
-    for p in tx.parties().list(None, false)? {
+    // FR-46: duplicates are matched among active parties only.
+    for p in tx.parties().list(None, true)? {
         known.insert((p.name.to_lowercase(), p.party_type), p);
     }
     let update = strategy == ConflictStrategy::Overwrite;

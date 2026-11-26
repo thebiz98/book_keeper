@@ -19,6 +19,13 @@ pub struct PartyDueSummary {
     pub total_paid: f64,
     /// Σ `balance_due` of the open bills.
     pub balance_due: f64,
+    /// FR-46: false for a deleted party that still has dues (UI shows a "Deleted" badge).
+    #[serde(default = "default_true")]
+    pub is_active: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Cash settlement of dues (DD-04). `transaction_id = Some(bill)` settles that bill
