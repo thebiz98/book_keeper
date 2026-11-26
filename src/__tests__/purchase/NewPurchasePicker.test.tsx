@@ -22,7 +22,8 @@ describe('NewPurchasePage item picker (real typeahead)', () => {
     ) ?? (Array.from(container.querySelectorAll('span')).find((s) => s.textContent === 'Camlin Ink') as HTMLElement);
     click(hit);
     await flush();
-    expect(container.querySelector('[data-testid="selected-item"]')?.textContent).toContain('Camlin Ink');
+    expect((container.querySelector('[data-testid="item-search-input"]') as HTMLInputElement).value).toBe('Camlin Ink');
+    expect(container.querySelector('[data-testid="selected-item"]')?.textContent).toContain('PCS');
   });
 
   it('pre-selects an item queued by the dashboard Inward action', async () => {
@@ -33,7 +34,8 @@ describe('NewPurchasePage item picker (real typeahead)', () => {
     const { container } = render(<NewPurchasePage />);
     await flush(20);
     expect(api.searchItemsFts).toHaveBeenCalledWith('Camlin Ink', 8);
-    expect(container.querySelector('[data-testid="selected-item"]')?.textContent).toContain('Camlin Ink');
+    expect((container.querySelector('[data-testid="item-search-input"]') as HTMLInputElement).value).toBe('Camlin Ink');
+    expect(container.querySelector('[data-testid="selected-item"]')?.textContent).toContain('PCS');
   });
 
   it('pre-selects by id via the catalog when only an id is given', async () => {
@@ -43,6 +45,7 @@ describe('NewPurchasePage item picker (real typeahead)', () => {
     const { container } = render(<NewPurchasePage initialItemId={4} />);
     await flush(20);
     expect(api.getItemsCatalog).toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="selected-item"]')?.textContent).toContain('Camlin Ink');
+    expect((container.querySelector('[data-testid="item-search-input"]') as HTMLInputElement).value).toBe('Camlin Ink');
+    expect(container.querySelector('[data-testid="selected-item"]')?.textContent).toContain('PCS');
   });
 });

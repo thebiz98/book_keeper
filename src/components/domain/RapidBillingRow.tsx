@@ -272,6 +272,15 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
               autoFocus={autoFocus}
               onSelectItem={() => undefined}
               onSelect={(it, info) => handleSelectItem(it, info.matchedBundleId)}
+              selectedLabel={item?.name ?? null}
+              onQueryChange={(q) => {
+                // FR-48: once the text is not the picked name any more, nothing is picked.
+                if (item && q !== item.name) clearEntry(false);
+              }}
+              onLabelEnter={() => {
+                qtyRef.current?.focus();
+                qtyRef.current?.select();
+              }}
               onEmptyEnter={onCompleteBill}
               onCreate={(q) => setQuickName(q)}
             />
@@ -358,34 +367,31 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
         {item && (
           <div
             data-testid="stock-indicator"
-            className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-mono text-slate-600 dark:text-slate-300 pl-1"
+            className="flex flex-col gap-1 text-xs font-mono text-slate-600 dark:text-slate-300 pl-1"
           >
-            <span className="font-sans font-semibold text-slate-900 dark:text-slate-100">{item.name}</span>
-            {isService ? (
-              <span data-testid="can-make">
-                Can make: {item.canMake != null ? fmtQty(item.canMake) : '—'} {item.baseUnit}
-              </span>
-            ) : (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+              {isService ? (
+                <span data-testid="can-make">
+                  Can make: {item.canMake != null ? fmtQty(item.canMake) : '—'} {item.baseUnit}
+                </span>
+              ) : (
+                <span>
+                  Available: {fmtQty(item.currentStock)} {item.baseUnit}
+                </span>
+              )}
+              <span>|</span>
+              {serviceDraw && (
+                <>
+                  <ServiceDrawLine draw={serviceDraw} />
+                  <span>|</span>
+                </>
+              )}
               <span>
-                Available: {fmtQty(item.currentStock)} {item.baseUnit}
+                MRP: {mrpShown != null ? <CurrencyDisplay amount={mrpShown} size="sm" /> : '—'}
               </span>
-            )}
-            <span>|</span>
-            {draw && (
-              <>
-                <LotDrawLine draw={draw} baseUnit={item.baseUnit} />
-                <span>|</span>
-              </>
-            )}
-            {serviceDraw && (
-              <>
-                <ServiceDrawLine draw={serviceDraw} />
-                <span>|</span>
-              </>
-            )}
-            <span>
-              MRP: {mrpShown != null ? <CurrencyDisplay amount={mrpShown} size="sm" /> : '—'}
-            </span>
+            </div>
+            {/* FR-48: one row per lot, below the stock line. */}
+            {draw && <LotDrawLine draw={draw} baseUnit={item.baseUnit} />}
           </div>
         )}
 

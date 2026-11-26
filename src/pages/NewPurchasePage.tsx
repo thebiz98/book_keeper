@@ -480,8 +480,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
           helper={
             selectedItem && (
               <span data-testid="selected-item" title={selectedItem.name}>
-                Selected: <b className="text-slate-800 dark:text-slate-200">{selectedItem.name}</b> (
-                {selectedItem.baseUnit})
+                Base unit: <b className="text-slate-800 dark:text-slate-200">{selectedItem.baseUnit}</b>
               </span>
             )
           }
@@ -489,6 +488,21 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
           <div ref={searchWrapRef} data-purchase-search data-testid="purchase-item-search">
             <ItemSearchTypeahead
               onSelectItem={chooseItem}
+              selectedLabel={selectedItem?.name ?? null}
+              onQueryChange={(q) => {
+                // FR-48: once the text is not the picked name any more, nothing is picked.
+                if (selectedItem && q !== selectedItem.name) {
+                  setSelectedItem(null);
+                  setUnitChoice(BASE);
+                  setQuantity(1);
+                  setDraftError(null);
+                }
+              }}
+              onLabelEnter={() => {
+                const q = document.getElementById('purchase-qty') as HTMLInputElement | null;
+                q?.focus();
+                q?.select();
+              }}
               physicalOnly
               onCreate={(q) => setQuickName(q)}
               autoFocus
