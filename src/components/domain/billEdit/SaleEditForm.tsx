@@ -63,7 +63,8 @@ export const SaleEditForm: React.FC<SaleEditFormProps> = ({ billId, onCancel, on
     errors: preview.errors,
     settlementsToMove: dr.settlementsToMove,
     newPartyName: pickedPartyName,
-    ready: dr.load.status === 'ready' && !dr.incomplete && !preview.pending,
+    // E3: an untouched form never saves (button and Ctrl+S alike).
+    ready: dr.load.status === 'ready' && dr.dirty && !dr.incomplete && !preview.pending,
     buildPayload: () => dr.toPayload(preview.paidToSend ?? 0),
     send: (payload) => api.updateSale(billId, payload),
     onSaved,

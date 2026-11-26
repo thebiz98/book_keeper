@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchBundle, purchaseLineToDraft, saleLineToCart } from '@/lib/billEditDraft';
+import { lineBundle, purchaseLineToDraft, saleLineToCart } from '@/lib/billEditDraft';
 import type { ItemSearchResult, PurchaseItem, SaleItem } from '@/types';
 
 const item = (bundles: ItemSearchResult['bundles'] = []): ItemSearchResult => ({
@@ -14,15 +14,21 @@ const saleLine = (over: Partial<SaleItem> = {}): SaleItem => ({
 });
 
 describe('billEditDraft', () => {
-  it('reuses the bundle when name and multiplier match and rebuilds the rate', () => {
-    expect(matchBundle(saleLine(), item([box]))?.bundleId).toBe(7);
-    const c = saleLineToCart(saleLine(), item([box]));
+  it('uses the bundle the backend named for the line and rebuilds the rate', () => {
+    expect(lineBundle(7, item([box]))?.bundleId).toBe(7);
+    const c = saleLineToCart(saleLine(), item([box]), 7);
     expect(c).toMatchObject({ bundleId: 7, bundleName: 'Box of 10', quantity: 3, unitsPerBundle: 10, rate: 90 });
   });
 
-  it('falls back to base units when the bundle is gone or changed', () => {
-    for (const i of [item([]), item([{ ...box, unitsPerBundle: 12 }]), null]) {
-      const c = saleLineToCart(saleLine(), i);
+  it('E4: a renamed bundle or item keeps the pack, because the match is by id, not by name', () => {
+    const renamed = { ...box, bundleName: 'Carton' };
+    const c = saleLineToCart(saleLine({ itemName: 'Old name' }), { ...item([renamed]), name: 'New name' }, 7);
+    expect(c).toMatchObject({ bundleId: 7, quantity: 3, unitsPerBundle: 10, rate: 90 });
+  });
+
+  it('falls back to base units when the backend named no bundle or the item is unknown', () => {
+    for (const [i, id] of [[item([box]), null], [item([]), 7], [null, 7]] as const) {
+      const c = saleLineToCart(saleLine(), i, id);
       expect(c).toMatchObject({ bundleId: undefined, quantity: 30, unitsPerBundle: 1, rate: 9 });
     }
   });
@@ -32,7 +38,7 @@ describe('billEditDraft', () => {
       id: 42, purchaseTransactionId: 1, itemId: 1, itemName: 'Pen', packLabel: 'Box of 10', packQuantity: 2,
       quantity: 20, unitCost: 4, totalAmount: 80, remainingQuantity: 15,
     };
-    expect(purchaseLineToDraft(lot, item([box]))).toMatchObject({ purchaseItemId: 42, bundleId: 7, quantity: 2, unitCost: 40, unitsPerBundle: 10 });
-    expect(purchaseLineToDraft(lot, null)).toMatchObject({ purchaseItemId: 42, bundleId: null, quantity: 20, unitCost: 4, packLabel: 'BASE' });
+    expect(purchaseLineToDraft(lot, item([box]), 7)).toMatchObject({ purchaseItemId: 42, bundleId: 7, quantity: 2, unitCost: 40, unitsPerBundle: 10 });
+    expect(purchaseLineToDraft(lot, null, 7)).toMatchObject({ purchaseItemId: 42, bundleId: null, quantity: 20, unitCost: 4, packLabel: 'BASE' });
   });
 });

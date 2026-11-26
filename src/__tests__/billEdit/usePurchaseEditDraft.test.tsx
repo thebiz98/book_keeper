@@ -4,12 +4,12 @@ import { render } from '../testUtils';
 import { installApi, flush, waitFor } from '../pages/helpers';
 import { usePurchaseEditDraft, type PurchaseEditDraftApi } from '@/components/domain/billEdit/usePurchaseEditDraft';
 import type { BillEditGuard } from '@/types';
-import { purchaseDetail, purchaseGuard, INK, search } from './fixtures';
+import { purchaseDetail, purchaseGuard, INK, search, getItem } from './fixtures';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function mount(strict = false, g: BillEditGuard = purchaseGuard()) {
-  installApi({ getPurchaseDetails: purchaseDetail(), getBillEditGuard: g, searchItemsFts: search });
+  installApi({ getPurchaseDetails: purchaseDetail(), getBillEditGuard: g, searchItemsFts: search, getItem });
   const out: { current: PurchaseEditDraftApi } = { current: undefined as unknown as PurchaseEditDraftApi };
   const Probe: React.FC = () => {
     out.current = usePurchaseEditDraft(8);
@@ -41,7 +41,7 @@ describe('usePurchaseEditDraft', () => {
   it('seeds PARTIAL with the stored upfront amount when the bill is not paid', async () => {
     const detail = purchaseDetail();
     detail.purchase.paymentStatus = 'PARTIAL';
-    installApi({ getPurchaseDetails: detail, getBillEditGuard: purchaseGuard({ upfrontAmount: 50 }), searchItemsFts: search });
+    installApi({ getPurchaseDetails: detail, getBillEditGuard: purchaseGuard({ upfrontAmount: 50 }), searchItemsFts: search, getItem });
     const out: { current: PurchaseEditDraftApi } = { current: undefined as unknown as PurchaseEditDraftApi };
     const Probe: React.FC = () => {
       out.current = usePurchaseEditDraft(8);

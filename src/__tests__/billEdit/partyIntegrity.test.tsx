@@ -3,7 +3,7 @@ import { render } from '../testUtils';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText, fakeBillPreview } from '../pages/helpers';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { DeletedReferenceAlert } from '@/components/common/DeletedReferenceAlert';
-import { saleDetail, saleGuard, search } from './fixtures';
+import { saleDetail, saleGuard, search, getItem } from './fixtures';
 import type { PreviewError } from '@/types';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,7 +29,7 @@ function mount(preview: (p: PreviewIn) => unknown, extra: Record<string, unknown
   const api = installApi({
     getSaleDetails: saleDetail(),
     getBillEditGuard: saleGuard({ settlementsToMove: { count: 2, amount: 1500 } }),
-    searchItemsFts: search,
+    searchItemsFts: search, getItem,
     previewSale: preview,
     updateSale: { saleId: 5, transactionCode: 'SAL-1005', totalAmount: 0, paidAmount: 0, balanceDue: 0, changeAmount: 0, paymentStatus: 'PAID' },
     getDashboardMetrics: { cashInHand: 0 },

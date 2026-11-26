@@ -4,7 +4,7 @@ import { render } from '../testUtils';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText, fakeBillPreview } from '../pages/helpers';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { useCartStore } from '@/store/useCartStore';
-import { saleDetail, saleGuard, search, INK, PEN } from './fixtures';
+import { saleDetail, saleGuard, search, INK, PEN, getItem } from './fixtures';
 import type { BillEditGuard } from '@/types';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -30,7 +30,7 @@ function mount(opts: { guard?: BillEditGuard; preview?: (p: never) => unknown; s
   const api = installApi({
     getSaleDetails: saleDetail(),
     getBillEditGuard: opts.guard ?? saleGuard(),
-    searchItemsFts: search,
+    searchItemsFts: search, getItem,
     previewSale: opts.preview ?? (async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p)),
     updateSale: { saleId: 5, transactionCode: 'SAL-1005', totalAmount: 0, paidAmount: 0, balanceDue: 0, changeAmount: 0, paymentStatus: 'PAID' },
     getDashboardMetrics: { cashInHand: 0 },
@@ -73,8 +73,8 @@ describe('BillDetailDrawer sale edit (C1, DD-57)', () => {
     const [id, payload] = api.updateSale.mock.calls[0];
     expect(id).toBe(5);
     expect(payload.items).toEqual([
-      { itemId: 1, bundleId: 5, bundleQuantity: 2, unitPrice: PEN.bundles[0].defaultRate },
-      { itemId: 2, bundleId: null, bundleQuantity: 3, unitPrice: 40 },
+      { itemId: 1, bundleId: 5, bundleQuantity: 2, unitPrice: PEN.bundles[0].defaultRate, saleItemId: 1 },
+      { itemId: 2, bundleId: null, bundleQuantity: 3, unitPrice: 40, saleItemId: 2 },
     ]);
     expect(payload).toMatchObject({ transactionDate: '2026-11-20', paymentStatus: 'PAID', notes: 'hi' });
     expect(api.previewSale.mock.calls.at(-1)![1]).toBe(5);
@@ -96,8 +96,8 @@ describe('BillDetailDrawer sale edit (C1, DD-57)', () => {
     click(q('[data-testid="edit-save"]'));
     await flush();
     expect(api.updateSale.mock.calls[0][1].items).toEqual([
-      { itemId: 2, bundleId: null, bundleQuantity: 1, unitPrice: 30 },
-      { itemId: INK.itemId, bundleId: null, bundleQuantity: 1, unitPrice: 11 },
+      { itemId: 2, bundleId: null, bundleQuantity: 1, unitPrice: 30, saleItemId: 2 },
+      { itemId: INK.itemId, bundleId: null, bundleQuantity: 1, unitPrice: 11, saleItemId: null },
     ]);
   });
 

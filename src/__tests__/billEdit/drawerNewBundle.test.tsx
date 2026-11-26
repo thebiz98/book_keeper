@@ -3,7 +3,7 @@ import { render } from '../testUtils';
 import { installApi, flush, waitFor, click, setInput, fakeBillPreview } from '../pages/helpers';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { NEW_BUNDLE } from '@/lib/bundleSentinel';
-import { purchaseDetail, purchaseGuard, saleDetail, saleGuard, search } from './fixtures';
+import { purchaseDetail, purchaseGuard, saleDetail, saleGuard, search, getItem } from './fixtures';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,7 +33,7 @@ function mount(kind: 'PURCHASE' | 'SALE') {
     getPurchaseDetails: purchaseDetail(),
     getSaleDetails: saleDetail(),
     getBillEditGuard: kind === 'PURCHASE' ? purchaseGuard() : saleGuard(),
-    searchItemsFts: search,
+    searchItemsFts: search, getItem,
     previewPurchase: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p),
     previewSale: async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p),
     getBundleSuggestions: [],
