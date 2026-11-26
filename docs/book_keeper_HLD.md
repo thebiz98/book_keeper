@@ -323,8 +323,9 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **FR-48: Clearer entry rows on New Sale and New Purchase** *(added 2026-11-26, v1.6)*
   * The picked item's name **stays in the search box** (the details stay below). Editing the text un-picks the item (qty / unit / rate disabled until a new pick); Enter picks the new top match. Enter on the unchanged name moves to Qty. After Add the box clears.
   * New Sale shows the open lots' purchase prices **one row per lot** (lot code, price, remaining, "uses N" when the entered quantity draws from it; first 5, then "+N more"), from `preview_lot_draw`.
-* **FR-49: Vendor dues in red** *(added 2026-11-26, v1.6)*
-  * On the Parties page Vendors tab and in a vendor's ledger, a positive outstanding balance (money the shop owes) shows red. Customer balances keep green.
+* **FR-49: Vendor dues in red, customer dues in green** *(added 2026-11-26, v1.6; widened 2026-11-26)*
+  * Money the shop owes (a positive vendor balance / payable) shows **red**; money customers owe (a positive customer balance / receivable) shows **green**.
+  * Applies everywhere a due is shown: Parties page, party ledger, Dues page (tab total, party rows, open bills), the settle dialogs, bill history Balance Due, bill detail and bill edit balance, and the Dashboard Dues card (Receivables green, Payables red).
 
 ### 2.2. Non-Functional Requirements (NFR)
 
@@ -415,7 +416,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 ### 3.1f. In Scope — v1.6 additions (2026-11-26)
 51. **Editable item total on the sale entry row; a typed total sets that line's rate (FR-47).**
 52. **Picked item name stays in the search box; one row per lot on New Sale (FR-48).**
-53. **Vendor dues in red (FR-49).**
+53. **Vendor dues in red, customer dues in green, everywhere a due is shown (FR-49).**
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
