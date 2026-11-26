@@ -62,3 +62,26 @@ describe('ConfirmDialog requireText (FR-20 typed delete)', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ConfirmDialog pending guard (G8)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('ignores repeat clicks and Enter while an async confirm is pending, and locks Cancel', async () => {
+    let release: () => void = () => {};
+    const onConfirm = vi.fn(() => new Promise<void>((res) => (release = res)));
+    const onCancel = vi.fn();
+    render(<ConfirmDialog isOpen title="Delete?" message="Sure?" confirmText="Delete" onConfirm={onConfirm} onCancel={onCancel} />);
+    click(buttonByText('Delete'));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    click(buttonByText('Delete'));
+    enter(document.querySelector('[role="dialog"]')!);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect((buttonByText('Cancel') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => {
+      release();
+    });
+    expect((buttonByText('Cancel') as HTMLButtonElement).disabled).toBe(false);
+  });
+});

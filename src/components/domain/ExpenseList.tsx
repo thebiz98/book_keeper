@@ -199,7 +199,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ reloadKey, onEdit, onD
             : ''
         }
         confirmText="Delete"
-        onConfirm={() => void confirmDelete()}
+        onConfirm={confirmDelete}
         onCancel={() => setDeleting(null)}
       />
     </div>

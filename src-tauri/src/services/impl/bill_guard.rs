@@ -18,6 +18,19 @@ pub const PARTY_REQUIRED_WITH_PAYMENTS: &str = "PARTY_REQUIRED_WITH_PAYMENTS";
 pub const NEWER_RETURN: &str = "NEWER_RETURN";
 pub const OPENING_BALANCE: &str = "OPENING_BALANCE";
 
+/// Says which tool changes this stock record instead (G8: always point to the right place).
+fn not_a_purchase_message(code: &str, source: LotSource) -> String {
+    match source {
+        LotSource::Opening => format!(
+            "{code} is the item's opening stock, not a supplier purchase. Change its quantity from the item's Lots & Purchase Price."
+        ),
+        LotSource::Adjustment => format!(
+            "{code} came from a stock adjustment, not a supplier purchase. Undo it in Adjustments history."
+        ),
+        _ => format!("{code} is a stock record, not a supplier purchase, and cannot be edited or deleted here."),
+    }
+}
+
 /// The `BillLocked` error for one guard reason.
 pub fn locked(reason: &GuardReason) -> AppError {
     AppError::BillLocked { code: reason.code.clone(), message: reason.message.clone() }
@@ -143,7 +156,7 @@ pub fn evaluate_purchase_guard(tx: &mut dyn TransactionContext, purchase_id: i64
     if p.source != LotSource::Purchase {
         g.reasons.push(reason(
             NOT_A_PURCHASE,
-            format!("{} is a stock record, not a supplier purchase, and cannot be edited or deleted here.", p.transaction_code),
+            not_a_purchase_message(&p.transaction_code, p.source),
             true,
             true,
         ));

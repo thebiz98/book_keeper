@@ -135,6 +135,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [guard, setGuard] = useState<BillEditGuard | null>(null);
+  const [guardError, setGuardError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -167,6 +168,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
     setPurchase(null);
     setError(null);
     setGuard(null);
+    setGuardError(null);
     setActionError(null);
     setConfirmDelete(false);
     setSettleOpen(false);
@@ -186,7 +188,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
           if (g.canEdit) setMode('edit');
         }
       })
-      .catch(() => {}); // the actions simply stay disabled when the pre-check fails
+      .catch((e) => live && setGuardError(errorMessage(e))); // shown in the footer with Retry; actions stay disabled
     const p =
       kind === 'SALE'
         ? api.getSaleDetails(billId).then((d) => live && setSale(d))
@@ -214,6 +216,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
     setNotice('Bill updated');
     afterMoneyChange();
   };
+  /** Returns the Promise so ConfirmDialog stays busy (no double delete from Enter + click). */
   const doDelete = async () => {
     if (billId === null) return;
     setActionError(null);
@@ -246,6 +249,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
     }
   };
 
+  const guardPending = guard === null && guardError === null;
   const head = sale?.sale ?? purchase?.purchase ?? null;
   const settlements = sale?.settlements ?? purchase?.settlements ?? [];
   const canSettle = !!head && head.balanceDue > 0 && head.partyId !== null;
@@ -295,7 +299,20 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
       footer={
         head && mode === 'view' && (
           <div className="flex w-full flex-col gap-2" data-testid="bill-actions">
-            {!isOpening && guard && guard.reasons.length > 0 && (
+            {guardError && (
+              <div role="alert" data-testid="guard-error" className="flex items-center gap-2 text-[11px] text-rose-600 dark:text-rose-400">
+                <span>Could not check whether this bill can be changed: {guardError}</span>
+                <Button variant="outline" size="sm" data-testid="guard-retry" onClick={() => setReloadKey((k) => k + 1)}>
+                  Retry
+                </Button>
+              </div>
+            )}
+            {actionError && !confirmDelete && (
+              <p role="alert" data-testid="action-error" className="text-[11px] text-rose-600 dark:text-rose-400">
+                {actionError}
+              </p>
+            )}
+            {guard && guard.reasons.length > 0 && (
               <ul className="text-[11px] text-amber-700 dark:text-amber-400 list-disc pl-4" data-testid="guard-reasons">
                 {guard.reasons.map((r) => (
                   <li key={r.code}>{r.message}</li>
@@ -332,6 +349,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
                   size="sm"
                   data-testid="bill-edit"
                   disabled={!guard?.canEdit}
+                  title={guardPending ? 'Checking…' : undefined}
                   onClick={onEditClick}
                 >
                   Edit
@@ -343,6 +361,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
                   size="sm"
                   data-testid="bill-delete"
                   disabled={!guard?.canDelete}
+                  title={guardPending ? 'Checking…' : undefined}
                   onClick={() => setConfirmDelete(true)}
                 >
                   Delete

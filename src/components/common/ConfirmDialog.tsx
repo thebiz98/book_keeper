@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
@@ -11,7 +11,8 @@ export interface ConfirmDialogProps {
   confirmText?: string;
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'primary';
-  onConfirm: () => void;
+  /** May return a Promise: the dialog then stays busy (Confirm loading, Cancel/Esc off, repeats ignored) until it settles. */
+  onConfirm: () => void | Promise<unknown>;
   onCancel: () => void;
   /**
    * Typed confirmation (FR-20 deletes): Confirm stays disabled, and Enter does nothing, until the
@@ -40,8 +41,31 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   }, [isOpen, requireText]);
 
   const canConfirm = requireText === undefined || typed.trim() === requireText;
+  const pendingRef = useRef(false);
+  const [pending, setPending] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  // One guarded path for the button click, the Enter hotkey and the Modal default action.
   const confirm = () => {
-    if (canConfirm) onConfirm();
+    if (!canConfirm || pendingRef.current) return;
+    const r = onConfirm();
+    if (r && typeof (r as Promise<unknown>).then === 'function') {
+      pendingRef.current = true;
+      setPending(true);
+      const done = () => {
+        pendingRef.current = false;
+        if (mounted.current) setPending(false);
+      };
+      (r as Promise<unknown>).then(done, done);
+    }
+  };
+  const cancel = () => {
+    if (!pendingRef.current) onCancel();
   };
 
   const getIcon = () => {
@@ -63,16 +87,16 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onCancel}
+      onClose={cancel}
       title={title}
       size="sm"
-      defaultConfirmAction={canConfirm ? onConfirm : undefined}
+      defaultConfirmAction={canConfirm ? confirm : undefined}
       footer={
         <>
-          <Button variant="outline" size="sm" onClick={onCancel} hotkey="Esc">
+          <Button variant="outline" size="sm" onClick={cancel} disabled={pending} hotkey="Esc">
             {cancelText}
           </Button>
-          <Button variant={getButtonVariant()} size="sm" onClick={confirm} disabled={!canConfirm} hotkey="Enter">
+          <Button variant={getButtonVariant()} size="sm" onClick={confirm} disabled={!canConfirm} isLoading={pending} hotkey="Enter">
             {confirmText}
           </Button>
         </>
