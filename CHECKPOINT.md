@@ -254,3 +254,7 @@ Delivered: vendor dues / payables red and customer dues / receivables green ever
 ## Branch feat/low-stock-in-details (FR-50, DD-83; frontend only, v1.6 G5)
 Delivered: the Item List has no Low Stock Level column (`LowStockLevelCell` removed); the Item details drawer shows the level with an Edit button (`LowStockLevelField`: Save / Cancel, Enter saves, Esc cancels without closing the drawer). Read-only for services and deleted items. The Item edit drawer keeps its field.
 - **Manual check (light and dark):** Inventory: no Low Stock Level column, Status badges unchanged. Click an item row: the drawer shows "Low Stock Level 5 PCS" and a pencil. Pencil, type 2, Enter: the drawer shows 2 and the row's Status badge updates. Pencil, type -1, Enter: "Enter 0 or more", nothing saved. Esc cancels and the drawer stays open. A service item and a deleted item show the level without a pencil.
+
+## Branch fix/bill-delete-messages (frontend + one guard message, v1.6 G8)
+Delivered: bill delete always says why. Guard fetch error with Retry, OB- reason visible, "Checking..." title, footer action errors, `ConfirmDialog` pending guard (no double delete), source-specific NOT_A_PURCHASE text (OPN- / ADJ-), Item details reloads after a bill change. No schema or rule change.
+- **Manual check:** open a purchase whose stock was sold: Delete disabled, reason shown. Open an OB- bill: reason visible, no buttons. Delete a plain sale from an item's Sales tab: the item's stock and Sales list refresh. Press Enter twice fast on a delete confirm: one delete.
