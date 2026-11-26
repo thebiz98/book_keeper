@@ -316,6 +316,17 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Restore lives in one place:** the **Deleted parties** button on the Parties page opens one list with customers and vendors together: Name, Type, Phone, Deleted on, **Restore** (name/phone search, paged in the backend). No other screen has a Restore action; screens that show a deleted party (bill drawer, ledger, dues rows) show at most a small "Deleted" badge.
   * Party names are not unique, so creating a party with a deleted party's name is allowed. The parties import matches only active parties for *skip* / *update*.
 
+* **FR-47: Edit the item total on the sale entry row** *(added 2026-11-26, v1.6, DD-81)*
+  * The New Sale entry row has a **Total** box after Rate. It is prefilled with the backend line total (`round2(qty × rate)`, from `preview_sale_line`), follows qty / unit / rate until the cashier types in it, and resets to the computed total if qty, unit or rate change after that. Enter in Rate moves to Total; Enter in Total adds the line.
+  * A typed total above the line total adds the difference as an **extra charge**; below it, as a **discount**. The row shows "Extra ₹x" / "Discount ₹x" before Add, the cart line shows a `+₹x` / `−₹x` tag, and the bill footer shows Charges (+) / Discounts (−).
+  * The line keeps `qty × rate`; the difference is stored as bill-level `BILL_CHARGE` lines of two system charge types, "Item extra charge" and "Item discount" (one line of each at most per bill, summed over the lines). FR-19 accounting, returns (net rate), profit and FR-20 edit apply unchanged; on edit these are ordinary charge lines.
+  * Changing a cart line's qty, unit or rate drops its adjustment. Purchases are unchanged.
+* **FR-48: Clearer entry rows on New Sale and New Purchase** *(added 2026-11-26, v1.6)*
+  * The picked item's name **stays in the search box** (the details stay below). Editing the text un-picks the item (qty / unit / rate disabled until a new pick); Enter picks the new top match. Enter on the unchanged name moves to Qty. After Add the box clears.
+  * New Sale shows the open lots' purchase prices **one row per lot** (lot code, price, remaining, "uses N" when the entered quantity draws from it; first 5, then "+N more"), from `preview_lot_draw`.
+* **FR-49: Vendor dues in red** *(added 2026-11-26, v1.6)*
+  * On the Parties page Vendors tab and in a vendor's ledger, a positive outstanding balance (money the shop owes) shows red. Customer balances keep green.
+
 ### 2.2. Non-Functional Requirements (NFR)
 
 * **NFR-01: Zero External Server Overhead**
@@ -401,6 +412,11 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 48. **Lots with an editable Purchase Price in the Item edit screen (FR-44).**
 49. **Delete (soft) and restore items, with a Deleted items list (FR-45).**
 50. **Delete (soft) and restore parties, with a Deleted parties list (FR-46).**
+
+### 3.1f. In Scope — v1.6 additions (2026-11-26)
+51. **Editable item total on the sale entry row; the difference becomes an extra charge or discount (FR-47).**
+52. **Picked item name stays in the search box; one row per lot on New Sale (FR-48).**
+53. **Vendor dues in red (FR-49).**
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
@@ -1800,3 +1816,13 @@ Owner requests of 2026-11-25. Same rules as §12 and §13 (own branch, phased co
 | 1 | `feat/lots-in-item-edit` (E1) | Lots & Purchase Price section in the Item edit screen, per-lot edit via FR-25 | FR-44 | — | — |
 | 2 | `feat/item-delete` (E2) | Delete / restore items, delete preview, guards, valuation and search exclusion, Deleted items list | FR-45 | — | 1 |
 | 3 | `feat/party-delete` (E3) | Delete / restore parties, dues guard, Deleted parties list (reuses E2's list component) | FR-46 | — | 2 |
+
+## 15. v1.6 Delivery Plan (2026-11-26)
+
+Owner requests of 2026-11-26. Same rules as §12 to §14 (own branch, phased commits, full gate, DD-56). Branches go one after another, each cut from local `main` after the previous merge.
+
+| Order | Branch | Feature | Requirements | Schema migration | Depends on |
+|---|---|---|---|---|---|
+| 1 | `fix/vendor-dues-colour` (G1) | Vendor dues in red | FR-49 | — | — |
+| 2 | `feat/entry-row-clarity` (G3) | Picked name stays in the search box, one lot per row | FR-48 | — | 1 |
+| 3 | `feat/sale-line-total` (G2) | Editable item total → item extra charge / discount | FR-47 | **v13** `charge_types.system_key` + two system types | 2 |
