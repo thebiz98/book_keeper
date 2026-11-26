@@ -25,10 +25,6 @@ pub struct CreateSaleItemPayload {
     pub bundle_id: Option<i64>, // Write-time helper only (multiplier + label); not stored (DD-28)
     pub bundle_quantity: f64,   // Units entered in selected packaging
     pub unit_price: f64,        // Rate charged per selected bundle/unit (₹); required
-    /// FR-47 / DD-81: the line total the cashier typed. The line keeps `qty × rate`; the difference
-    /// becomes an "Item extra charge" (above) or "Item discount" (below) bill charge line.
-    #[serde(default)]
-    pub entered_total: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

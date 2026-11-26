@@ -70,8 +70,7 @@ const CATALOG_STEPS: &[(&str, &str)] = &[
     ("items", "DELETE FROM items"),
     ("parties", "DELETE FROM parties"),
     ("expense_types", "DELETE FROM expense_types"),
-    // FR-47: the two system types (edited item totals) are part of the schema, not the catalog.
-    ("charge_types", "DELETE FROM charge_types WHERE system_key IS NULL"),
+    ("charge_types", "DELETE FROM charge_types"),
     ("code_sequences", "DELETE FROM code_sequences"),
 ];
 

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, BillPaymentPreview, BillPreview, CreateSalePayload, DeleteBillResult, Paginated,
-    PreviewChargeLine, PreviewSaleLinePayload, PreviewSalePayload, RecordPaymentPayload, SaleLinePreview, SaleDetailView, SaleItemDetail, SaleHistoryRow,
+    PreviewSalePayload, RecordPaymentPayload, SaleDetailView, SaleItemDetail, SaleHistoryRow,
     SaleSummaryResponse, SalesHistoryFilter, ProfitSummary,
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
@@ -13,9 +13,8 @@ use crate::services::r#impl::bill_guard::{
     TOTAL_BELOW_APPLIED,
 };
 use crate::services::r#impl::bill_math::{
-    bill_preview, compute_bill_totals, delete_bill_charges, insert_bill_charges, line_adjustment,
-    line_adjustment_charges, line_total, net_unit_price, resolve_bill_charges, sale_payment_split,
-    validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
+    bill_preview, compute_bill_totals, delete_bill_charges, insert_bill_charges, net_unit_price,
+    resolve_bill_charges, sale_payment_split, validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
 };
 use crate::core::value_objects::{ItemType, PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
@@ -56,8 +55,6 @@ struct ResolvedSaleLine {
     pack_quantity: f64,
     base_qty: f64,
     line_total: f64,
-    /// FR-47: signed difference between the typed total and `line_total` (0 when none).
-    adjustment: f64,
     /// SERVICE lines (FR-37): component item ids with the base quantity this line consumes.
     components: Vec<(i64, f64)>,
     /// SERVICE lines: `round2(service_cost x quantity)`; `None` without a Service cost.
@@ -93,7 +90,6 @@ fn validate_sale_shape(payload: &CreateSalePayload) -> Result<(), AppError> {
         if !line.unit_price.is_finite() || line.unit_price < 0.0 {
             return Err(validation("unit_price", "unit_price must be a non-negative number"));
         }
-        line_adjustment(0.0, line.entered_total)?;
     }
     Ok(())
 }
@@ -156,8 +152,7 @@ fn resolve_sale(
             None => (1.0, None),
         };
         let base_qty = line.bundle_quantity * multiplier;
-        let line_total = line_total(line.bundle_quantity, line.unit_price);
-        let adjustment = line_adjustment(line_total, line.entered_total)?;
+        let line_total = round2(line.bundle_quantity * line.unit_price);
         let mut components: Vec<(i64, f64)> = Vec::new();
         let mut service_cost_total = None;
         if is_service {
@@ -177,7 +172,6 @@ fn resolve_sale(
             pack_quantity: line.bundle_quantity,
             base_qty,
             line_total,
-            adjustment,
             components,
             service_cost_total,
         });
@@ -198,16 +192,7 @@ fn price_sale(
     applied: f64,
     fig: &mut BillFigures,
 ) -> Result<(Vec<ResolvedCharge>, BillTotals), AppError> {
-    let mut charges = resolve_bill_charges(tx, TransactionType::Sale, &payload.charges)?;
-    // FR-47 / DD-81: edited item totals become bill-level extra charge / discount lines.
-    let adjustments: Vec<f64> = r.lines.iter().map(|l| l.adjustment).collect();
-    let derived = line_adjustment_charges(tx, &adjustments)?;
-    fig.adjustment_lines = derived
-        .iter()
-        .map(|c| PreviewChargeLine { name: c.charge_name.clone(), effect: c.effect, amount: c.amount })
-        .collect();
-    charges.extend(derived);
-    fig.line_adjustments = adjustments;
+    let charges = resolve_bill_charges(tx, TransactionType::Sale, &payload.charges)?;
     let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
     let totals = compute_bill_totals(&line_totals, &charges)?;
     fig.set_totals(&line_totals, totals, applied);
@@ -535,18 +520,6 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                 })
             }),
         )
-    }
-
-    fn preview_sale_line(&self, payload: PreviewSaleLinePayload) -> Result<SaleLinePreview, AppError> {
-        if !payload.bundle_quantity.is_finite() || payload.bundle_quantity < 0.0 {
-            return Err(validation("bundle_quantity", "Quantity must be 0 or more"));
-        }
-        if !payload.unit_price.is_finite() || payload.unit_price < 0.0 {
-            return Err(validation("unit_price", "unit_price must be a non-negative number"));
-        }
-        let total = line_total(payload.bundle_quantity, payload.unit_price);
-        let adjustment = line_adjustment(total, payload.entered_total)?;
-        Ok(SaleLinePreview { line_total: total, adjustment })
     }
 
     fn delete_sale(&self, sale_id: i64) -> Result<DeleteBillResult, AppError> {

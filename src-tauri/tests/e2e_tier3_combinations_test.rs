@@ -100,7 +100,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 40.0,
-            unit_price: 100.0, entered_total: None,
+            unit_price: 100.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("sale");
@@ -175,7 +175,7 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 30.0,
-            unit_price: 50.0, entered_total: None,
+            unit_price: 50.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("credit sale");
@@ -247,7 +247,7 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 7.0,
-            unit_price: 15.0, entered_total: None,
+            unit_price: 15.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("loose sale");
@@ -319,7 +319,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 20.0,
-            unit_price: 50.0, entered_total: None,
+            unit_price: 50.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("sale created");
@@ -359,7 +359,7 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: 300.0, entered_total: None,
+            unit_price: 300.0,
         }],
     };
     harness.sale_service.create_sale(sale_payload).expect("split sale");
@@ -424,7 +424,7 @@ fn test_tc_t3_cmb_007_barcode_scan_bundle_multiplier_tender() {
             item_id: 1,
             bundle_id: Some(1),
             bundle_quantity: 2.0,
-            unit_price: 45.0, entered_total: None,
+            unit_price: 45.0,
         }],
     };
     let summary = harness.sale_service.create_sale(sale_payload).expect("sale");
@@ -515,7 +515,7 @@ fn test_tc_t3_cmb_009_shop_settings_profile_and_sale_summary() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: 40.0, entered_total: None,
+            unit_price: 40.0,
         }],
     };
     let summary = harness.sale_service.create_sale(sale_payload).expect("sale");
@@ -554,7 +554,7 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: 60.0, entered_total: None,
+            unit_price: 60.0,
         }],
     };
     let s1_summary = harness.sale_service.create_sale(sale1).expect("sale 1");
@@ -586,7 +586,7 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: 75.0, entered_total: None,
+            unit_price: 75.0,
         }],
     };
     let s2_summary = harness.sale_service.create_sale(sale2).expect("sale 2");

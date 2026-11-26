@@ -45,8 +45,7 @@ pub use pagination::{
 pub use party_dto::{DeletePartyResult, DeletedPartyRow, PartyDeletePreview};
 pub use payment_dto::{LedgerCashSummary, LedgerTotals, RecordPaymentPayload, RecordRefundPayload};
 pub use preview_dto::{
-    BillPaymentPreview, BillPreview, PreviewChargeLine, PreviewError, PreviewPurchasePayload, PreviewSaleLinePayload, PreviewSalePayload,
-    SaleLinePreview, StockAdjustmentPreview,
+    BillPaymentPreview, BillPreview, PreviewError, PreviewPurchasePayload, PreviewSalePayload, StockAdjustmentPreview,
 };
 pub use purchase_dto::{
     CreatePurchaseItemPayload, CreatePurchasePayload, PurchaseDetailView, PurchaseHistoryFilter,

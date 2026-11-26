@@ -1,7 +1,7 @@
 //! Bill math shared by sale/purchase creation and (FR-20) bill edit/delete: charge line
 //! validation and resolution, totals, the discounted net rate and the payment cross-checks.
 //! Shared by create and (v8) edit paths; never begins a transaction.
-use crate::core::dtos::{BillChargeInput, BillPaymentPreview, BillPreview, PreviewChargeLine, PreviewError};
+use crate::core::dtos::{BillChargeInput, BillPaymentPreview, BillPreview, PreviewError};
 use crate::core::entities::BillCharge;
 use crate::core::error::AppError;
 use crate::core::money::{round2, MONEY_EPS};
@@ -10,48 +10,6 @@ use crate::data::contracts::unit_of_work::TransactionContext;
 
 /// At most this many charge/discount lines per bill.
 pub const MAX_CHARGE_LINES: usize = 50;
-
-/// `system_key` of the charge type that takes the positive line adjustments (FR-47).
-pub const LINE_EXTRA_KEY: &str = "LINE_EXTRA";
-/// `system_key` of the charge type that takes the negative line adjustments (FR-47).
-pub const LINE_DISCOUNT_KEY: &str = "LINE_DISCOUNT";
-
-/// A sale or purchase line total: `round2(qty × rate)`.
-pub fn line_total(quantity: f64, unit_price: f64) -> f64 {
-    round2(quantity * unit_price)
-}
-
-/// FR-47 / DD-81: signed difference between the typed line total and the line total
-/// (`> 0` extra charge, `< 0` discount, `0` none). `entered_total` must be finite and `>= 0`.
-pub fn line_adjustment(line_total: f64, entered_total: Option<f64>) -> Result<f64, AppError> {
-    let Some(entered) = entered_total else { return Ok(0.0) };
-    if !entered.is_finite() || entered < 0.0 {
-        return Err(validation("entered_total", "The item total must be 0 or more"));
-    }
-    let diff = round2(round2(entered) - line_total);
-    Ok(if diff.abs() < MONEY_EPS { 0.0 } else { diff })
-}
-
-/// FR-47: the line adjustments as at most one "Item extra charge" and one "Item discount" line.
-pub fn line_adjustment_charges(
-    tx: &mut dyn TransactionContext,
-    adjustments: &[f64],
-) -> Result<Vec<ResolvedCharge>, AppError> {
-    let extra = round2(adjustments.iter().filter(|a| **a > 0.0).sum::<f64>());
-    let discount = round2(-adjustments.iter().filter(|a| **a < 0.0).sum::<f64>());
-    let mut out = Vec::new();
-    for (key, amount) in [(LINE_EXTRA_KEY, extra), (LINE_DISCOUNT_KEY, discount)] {
-        if amount < MONEY_EPS {
-            continue;
-        }
-        let ct = tx
-            .charge_types()
-            .find_by_system_key(key)?
-            .ok_or_else(|| AppError::DatabaseError(format!("The system charge type {key} is missing")))?;
-        out.push(ResolvedCharge { charge_type_id: ct.id, charge_name: ct.name, effect: ct.effect, amount });
-    }
-    Ok(out)
-}
 
 /// A charge line after type resolution: amount rounded, name and effect snapshotted.
 #[derive(Debug, Clone, PartialEq)]
@@ -80,10 +38,6 @@ fn validation(field: &str, message: impl Into<String>) -> AppError {
 #[derive(Debug, Clone, Default)]
 pub struct BillFigures {
     pub line_totals: Vec<f64>,
-    /// FR-47: signed adjustment per line (sale only; empty on purchases).
-    pub line_adjustments: Vec<f64>,
-    /// FR-47: the bill lines the adjustments became.
-    pub adjustment_lines: Vec<PreviewChargeLine>,
     pub totals: Option<BillTotals>,
     pub applied: f64,
     pub open: f64,
@@ -119,8 +73,6 @@ pub fn bill_preview(
     });
     Ok(BillPreview {
         line_totals: fig.line_totals,
-        line_adjustments: fig.line_adjustments,
-        adjustment_lines: fig.adjustment_lines,
         items_subtotal: t.items_subtotal,
         charges_total: t.charges_total,
         discounts_total: t.discounts_total,

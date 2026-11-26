@@ -405,30 +405,6 @@ ALTER TABLE sale_items ADD COLUMN service_cost_total REAL CHECK (service_cost_to
 DROP INDEX IF EXISTS idx_sale_items_item;
 "#;
 
-/// FR-47 / DD-81: two system charge types for edited sale line totals. A type that already has the
-/// name (same effect, usable on sales) is adopted; a clashing one gets an "(auto)" twin.
-const SCHEMA_V13: &str = r#"
-ALTER TABLE charge_types ADD COLUMN system_key TEXT;
-CREATE UNIQUE INDEX ux_charge_types_system_key ON charge_types(system_key) WHERE system_key IS NOT NULL;
-UPDATE charge_types SET system_key = 'LINE_EXTRA'
- WHERE id = (SELECT id FROM charge_types WHERE name = 'Item extra charge' COLLATE NOCASE
-              AND effect = 'CHARGE' AND applies_to IN ('SALE', 'BOTH') AND is_active = 1);
-UPDATE charge_types SET system_key = 'LINE_DISCOUNT'
- WHERE id = (SELECT id FROM charge_types WHERE name = 'Item discount' COLLATE NOCASE
-              AND effect = 'DISCOUNT' AND applies_to IN ('SALE', 'BOTH') AND is_active = 1);
-INSERT INTO charge_types (name, effect, applies_to, system_key)
-SELECT CASE WHEN EXISTS (SELECT 1 FROM charge_types WHERE name = 'Item extra charge' COLLATE NOCASE)
-            THEN 'Item extra charge (auto)' ELSE 'Item extra charge' END, 'CHARGE', 'SALE', 'LINE_EXTRA'
- WHERE NOT EXISTS (SELECT 1 FROM charge_types WHERE system_key = 'LINE_EXTRA');
-INSERT INTO charge_types (name, effect, applies_to, system_key)
-SELECT CASE WHEN EXISTS (SELECT 1 FROM charge_types WHERE name = 'Item discount' COLLATE NOCASE)
-            THEN 'Item discount (auto)' ELSE 'Item discount' END, 'DISCOUNT', 'SALE', 'LINE_DISCOUNT'
- WHERE NOT EXISTS (SELECT 1 FROM charge_types WHERE system_key = 'LINE_DISCOUNT');
-INSERT INTO charge_type_search_fts (charge_type_id, name)
-SELECT id, name FROM charge_types
- WHERE system_key IS NOT NULL AND id NOT IN (SELECT charge_type_id FROM charge_type_search_fts);
-"#;
-
 /// All known migrations, ascending and gap-free. Append only; never edit a shipped step.
 pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 1, name: "aligned_schema", sql: SCHEMA_V1 },
@@ -455,7 +431,6 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration { version: 11, name: "party_opening_balance", sql: SCHEMA_V11 },
     Migration { version: 12, name: "service_items", sql: SCHEMA_V12 },
-    Migration { version: 13, name: "line_total_adjustments", sql: SCHEMA_V13 },
 ];
 
 /// Highest schema version this build knows.

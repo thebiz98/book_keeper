@@ -52,7 +52,6 @@ fn main() {
             purchase_controller::create_purchase,
             sale_controller::create_sale,
             sale_controller::preview_sale,
-            sale_controller::preview_sale_line,
             purchase_controller::preview_purchase,
             purchase_controller::preview_lot_purchase_price,
             return_controller::preview_customer_return,

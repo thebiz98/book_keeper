@@ -76,7 +76,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
                 item_id: 1,
                 bundle_id: None,
                 bundle_quantity: 40.0,
-                unit_price: 10.0, entered_total: None,
+                unit_price: 10.0,
             }],
         };
         sale_service.create_sale(sale_payload).unwrap();
@@ -152,7 +152,7 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 20.0,
-            unit_price: 60.0, entered_total: None,
+            unit_price: 60.0,
         }],
     };
     sale_service.create_sale(sale_payload).unwrap();
@@ -220,7 +220,7 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
-            unit_price: 300.0, entered_total: None,
+            unit_price: 300.0,
         }],
     };
     sale_service.create_sale(sale_payload).unwrap();
@@ -343,7 +343,7 @@ fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
             item_id: 42,
             bundle_id: None,
             bundle_quantity: 4.0,
-            unit_price: 25.0, entered_total: None,
+            unit_price: 25.0,
         }],
     };
     let summary = sale_service.create_sale(sale_payload).expect("sale succeeds");

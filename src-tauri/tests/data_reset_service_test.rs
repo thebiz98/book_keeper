@@ -58,7 +58,7 @@ fn seed(app: &AppState) -> i64 {
             charges: vec![],
             transaction_date: "2026-11-21".into(), party_id: Some(party), payment_mode: Some("CASH".into()),
             payment_status: PaymentStatus::Partial, paid_amount: 50.0, notes: None,
-            items: vec![CreateSaleItemPayload { item_id: item, bundle_id: None, bundle_quantity: 12.0, unit_price: 10.0, entered_total: None }],
+            items: vec![CreateSaleItemPayload { item_id: item, bundle_id: None, bundle_quantity: 12.0, unit_price: 10.0 }],
         })
         .unwrap();
     item
@@ -130,7 +130,7 @@ fn seed_sale_again(app: &AppState, item: i64) {
             charges: vec![],
             transaction_date: "2026-11-22".into(), party_id: None, payment_mode: Some("CASH".into()),
             payment_status: PaymentStatus::Paid, paid_amount: 20.0, notes: None,
-            items: vec![CreateSaleItemPayload { item_id: item, bundle_id: None, bundle_quantity: 2.0, unit_price: 10.0, entered_total: None }],
+            items: vec![CreateSaleItemPayload { item_id: item, bundle_id: None, bundle_quantity: 2.0, unit_price: 10.0 }],
         })
         .unwrap();
 }
@@ -211,21 +211,16 @@ fn bill_charges_cleared_by_transactions_and_types_by_all() {
             charges: vec![BillChargeInput { charge_type_id: t.id, amount: 5.0 }],
             transaction_date: "2026-11-22".into(), party_id: None, payment_mode: None,
             payment_status: PaymentStatus::Paid, paid_amount: 15.0, notes: None,
-            items: vec![CreateSaleItemPayload { item_id: 1, bundle_id: None, bundle_quantity: 1.0, unit_price: 10.0, entered_total: None }],
+            items: vec![CreateSaleItemPayload { item_id: 1, bundle_id: None, bundle_quantity: 1.0, unit_price: 10.0 }],
         })
         .unwrap();
     assert_eq!(count(&e.db, "bill_charges"), 1);
     e.app.data_reset_service.reset(ResetScope::Transactions, e.backups.to_str().unwrap()).unwrap();
     assert_eq!(count(&e.db, "bill_charges"), 0);
-    assert_eq!(count(&e.db, "charge_types"), 3, "types kept (Transport + the two FR-47 system types)");
+    assert_eq!(count(&e.db, "charge_types"), 1, "types kept");
     assert_eq!(e.app.charge_type_service.search_charge_types("tra", TransactionType::Sale, None).unwrap().len(), 1);
     e.app.data_reset_service.reset(ResetScope::All, e.backups.to_str().unwrap()).unwrap();
-    assert_eq!(count(&e.db, "charge_types"), 2, "only the FR-47 system types survive");
-    let system: i64 = rusqlite::Connection::open(&e.db)
-        .unwrap()
-        .query_row("SELECT COUNT(*) FROM charge_types WHERE system_key IS NOT NULL", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(system, 2);
-    assert_eq!(count(&e.db, "charge_type_search_fts"), 2);
+    assert_eq!(count(&e.db, "charge_types"), 0);
+    assert_eq!(count(&e.db, "charge_type_search_fts"), 0);
     assert!(e.app.charge_type_service.search_charge_types("tra", TransactionType::Sale, None).unwrap().is_empty());
 }
