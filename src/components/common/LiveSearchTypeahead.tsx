@@ -30,8 +30,18 @@ export interface LiveSearchTypeaheadProps<T> {
   minChars?: number;
   autoFocus?: boolean;
   disabled?: boolean;
-  /** Clear the query after a selection (default true). */
+  /** Clear the query after a selection (default true). Ignored when `selectedLabel` is used. */
   clearOnSelect?: boolean;
+  /**
+   * Controlled "picked" text (FR-48): a string keeps the picked name in the box (no search runs
+   * for it); going back to null clears the box, unless the user has already typed something else.
+   * Leave undefined for the default clear-on-select behaviour.
+   */
+  selectedLabel?: string | null;
+  /** Every edit of the input text (lets the parent un-pick when the text no longer matches). */
+  onQueryChange?: (query: string) => void;
+  /** Enter on the unchanged `selectedLabel` (e.g. move on to the quantity). */
+  onLabelEnter?: () => void;
   className?: string;
   inputRef?: React.MutableRefObject<HTMLInputElement | null>;
   /**
@@ -67,6 +77,9 @@ export function LiveSearchTypeahead<T>({
   autoFocus = false,
   disabled = false,
   clearOnSelect = true,
+  selectedLabel,
+  onQueryChange,
+  onLabelEnter,
   className,
   inputRef: externalInputRef,
   resultsMode = 'dropdown',
@@ -83,7 +96,8 @@ export function LiveSearchTypeahead<T>({
         () => [] as T[]
       ),
   });
-  const { query, setQuery, results, resultsFor, isLoading, showSpinner, flush, reset } = live;
+  const { query, setQuery, results, resultsFor, isLoading, showSpinner, flush, reset, showText } = live;
+  const controlled = selectedLabel !== undefined;
 
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -94,8 +108,25 @@ export function LiveSearchTypeahead<T>({
   queryRef.current = query;
   const highlightedRef = useRef(0);
   highlightedRef.current = highlightedIndex;
-  const cb = useRef({ onSelect, onCreate, onEmptyEnter, pickOnEnter });
-  cb.current = { onSelect, onCreate, onEmptyEnter, pickOnEnter };
+  const cb = useRef({ onSelect, onCreate, onEmptyEnter, pickOnEnter, onLabelEnter });
+  cb.current = { onSelect, onCreate, onEmptyEnter, pickOnEnter, onLabelEnter };
+  const labelRef = useRef<string | null | undefined>(selectedLabel);
+  labelRef.current = selectedLabel;
+
+  // FR-48: show the picked name; clear it when the parent un-picks (but never wipe what the user is typing).
+  const prevLabel = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!controlled) return;
+    const before = prevLabel.current;
+    prevLabel.current = selectedLabel;
+    if (selectedLabel) {
+      showText(selectedLabel);
+      setIsOpen(false);
+    } else if (before && queryRef.current === before) {
+      reset();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLabel, controlled]);
 
   const setInput = (el: HTMLInputElement | null) => {
     localInputRef.current = el;
@@ -146,7 +177,9 @@ export function LiveSearchTypeahead<T>({
   const inline = resultsMode === 'inline';
 
   const closeAfterSelect = () => {
-    if (clearOnSelect) reset();
+    // Controlled: drop the results but keep the text; the selectedLabel effect then shows the name.
+    if (controlled) showText(queryRef.current);
+    else if (clearOnSelect) reset();
     else setIsOpen(false);
   };
 
@@ -164,6 +197,11 @@ export function LiveSearchTypeahead<T>({
     const q = queryRef.current.trim();
     if (!q) {
       cb.current.onEmptyEnter?.();
+      return;
+    }
+    const label = labelRef.current;
+    if (label && q === label.trim()) {
+      cb.current.onLabelEnter?.();
       return;
     }
     let items: T[];
@@ -228,9 +266,14 @@ export function LiveSearchTypeahead<T>({
           autoComplete="off"
           disabled={disabled}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            onQueryChange?.(e.target.value);
+          }}
           onKeyDown={handleKeyDown}
-          onFocus={() => {
+          onFocus={(e) => {
+            // A picked name is selected on focus, so typing replaces it at once.
+            if (selectedLabel && e.currentTarget.value === selectedLabel) e.currentTarget.select();
             if (optionCount > 0) setIsOpen(true);
           }}
           placeholder={placeholder}
