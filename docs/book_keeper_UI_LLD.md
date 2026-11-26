@@ -800,7 +800,7 @@ All rules stay in the backend (DD-56): the UI renders preview and guard fields a
 
 ### Shared: `DELETED_REFERENCE` with Restore (DD-90, ships in H3, used from H2 on)
 * `errors.ts` gains the `DeletedReference` variant `{ entity: 'ITEM' | 'PARTY', id, name, message }`.
-* `DeletedReferenceAlert` (`components/domain/DeletedReferenceAlert.tsx`): shows the message and a **Restore '<name>'** button (`deleted-ref-restore`). Restore calls `restoreItem(id)` / `restoreParty(id)`, then the caller's `onRestored()`, which re-runs the preview. The form keeps its draft; the user continues where they were. Used by the bill edit forms, the settle dialogs, the return forms and the lot price modal (any `usePreview` caller: `usePreview` exposes the typed error so the form can render the alert in place of the plain error line).
+* `DeletedReferenceAlert` (`components/common/DeletedReferenceAlert.tsx`, shipped in H2): shows the message and a **Restore '<name>'** button (`deleted-ref-restore`). Restore calls `restoreItem(id)` / `restoreParty(id)`, then the caller's `onRestored()`, which re-runs the preview. The form keeps its draft; the user continues where they were. Used by the bill edit forms, the settle dialogs, the return forms and the lot price modal (any `usePreview` caller: a preview error with `deleted` set renders the alert in place of the plain error line; `usePreview({ refreshKey })` re-runs the preview after the restore). The bill edit forms get it through `billEdit/useBillEditSave` (also the move-payments dialog).
 * **Tests (Vitest).** Restore calls the right API and re-runs the preview; the draft survives.
 
 ### Vendor return lot picker (FR-53, DD-86, H1)
