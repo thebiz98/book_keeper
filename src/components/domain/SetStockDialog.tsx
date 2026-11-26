@@ -52,6 +52,8 @@ export const SetStockDialog: React.FC<SetStockDialogProps> = ({ isOpen, onClose,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SetItemStockResult | null>(null);
+  /** Only a hint: the item has an Opening lot (a read of its lots; no rule is applied here). */
+  const [hasOpeningLot, setHasOpeningLot] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -64,6 +66,18 @@ export const SetStockDialog: React.FC<SetStockDialogProps> = ({ isOpen, onClose,
     setResult(null);
     setTypedCost(null);
   }, [isOpen, item.itemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let live = true;
+    setHasOpeningLot(false);
+    Promise.resolve(api.getItemLots?.(item.itemId))
+      .then((lots) => live && setHasOpeningLot((lots ?? []).some((l) => l.source === 'OPENING')))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [isOpen, item.itemId]);
 
   const cost = typedCost !== null && typedCost > 0 ? typedCost : null;
   const noteVal = notes.trim() || null;
@@ -238,6 +252,11 @@ export const SetStockDialog: React.FC<SetStockDialogProps> = ({ isOpen, onClose,
               </span>
             )}
             {preview.errors.length === 0 && view !== null && delta === 0 && <span>No change</span>}
+            {preview.errors.length === 0 && down && hasOpeningLot && (
+              <span data-testid="opening-hint" className="block text-slate-500">
+                Opening stock was entered wrong? Edit the Opening lot in Lots &amp; Purchase Price instead. That isn&apos;t a loss.
+              </span>
+            )}
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="setstock-notes" className="text-xs font-medium text-slate-700 dark:text-slate-300">

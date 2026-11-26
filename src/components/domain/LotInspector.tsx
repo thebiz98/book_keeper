@@ -6,6 +6,7 @@ import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { STOCK_EPS } from '../common/StockStatusBadge';
 import { Pencil } from 'lucide-react';
 import { LotPriceEditModal } from './LotPriceEditModal';
+import { OpeningQtyEditModal } from './OpeningQtyEditModal';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 
 const SOURCE_LABEL: Record<LotSource, string> = {
@@ -47,10 +48,11 @@ export interface LotInspectorProps {
 export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, editable = false, onChanged, onModalToggle }) => {
   const [lots, setLots] = useState<ItemLot[] | null>(null);
   const [editing, setEditing] = useState<ItemLot | null>(null);
+  const [editingQty, setEditingQty] = useState<ItemLot | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const modalOpen = editing !== null;
+  const modalOpen = editing !== null || editingQty !== null;
   useEffect(() => {
     onModalToggle?.(modalOpen);
     return () => onModalToggle?.(false);
@@ -139,12 +141,33 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, ed
                     <Pencil size={12} />
                   </button>
                 )}
+                {l.source === 'OPENING' && (
+                  <button
+                    type="button"
+                    aria-label={`Edit quantity of ${l.transactionCode}`}
+                    className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    onClick={() => setEditingQty(l)}
+                  >
+                    Edit quantity
+                  </button>
+                )}
               </TableCell>
             )}
           </TableRow>
         ))}
       </TableBody>
     </Table>
+    {editable && (
+      <OpeningQtyEditModal
+        lot={editingQty}
+        baseUnit={baseUnit}
+        onClose={() => setEditingQty(null)}
+        onSaved={() => {
+          setReloadKey((k) => k + 1);
+          onChanged?.();
+        }}
+      />
+    )}
     {editable && (
       <LotPriceEditModal
         lot={editing}

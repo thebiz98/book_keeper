@@ -596,3 +596,107 @@ fn item_create_with_opening_stock_goes_through_inventory_service() {
     let mut r = db.begin_read().unwrap();
     assert_stock_invariant(&mut *r);
 }
+
+// ---- G6: edit opening quantity (FR-51, DD-84) ----
+
+use book_keeper::services::contracts::report_service::ReportService;
+use book_keeper::services::contracts::sale_service::SaleService;
+use common::ledger::{sale_payload, DAY};
+
+/// Item with opening 6 @ 10, plus the id of its opening lot.
+fn opening_env() -> (TestDb, Inv, i64, i64) {
+    let db = TestDb::new();
+    let inv = InventoryServiceImpl::new(FifoStrategy, db.clone());
+    let items = ItemServiceImpl::new(db.clone(), Arc::new(db.indexer()), inv.clone());
+    let id = items
+        .create_item(CreateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,
+            name: "Pen".into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,
+            default_sale_price: 15.0, initial_stock: Some(6.0), initial_cost: Some(10.0), bundles: None })
+        .unwrap();
+    let lot = inv.get_item_lots(id).unwrap()[0].purchase_item_id;
+    (db, inv, id, lot)
+}
+
+fn oq(lot: i64, quantity: f64) -> UpdateOpeningQuantityPayload {
+    UpdateOpeningQuantityPayload { purchase_item_id: lot, quantity }
+}
+
+#[test]
+fn g6_edit_opening_quantity_after_a_sale_is_not_a_loss() {
+    let (db, inv, id, lot) = opening_env();
+    let sales = common::SaleServiceImpl::new(inv.clone(), common::PaymentServiceImpl, db.clone());
+    let sale = sales.create_sale(sale_payload(None, PaymentStatus::Paid, 15.0, &[(id, None, 1.0, 15.0)])).unwrap().sale_id;
+    let rep = common::ReportServiceImpl::with_fixed_today(db.clone(), "2026-11-26");
+    let before = rep.get_pnl_report(DAY, DAY).unwrap();
+    assert_eq!(before.inventory_losses, 0.0);
+
+    // Preview is a dry run.
+    let p = inv.preview_opening_lot_quantity(oq(lot, 1.0)).unwrap();
+    assert_eq!((p.old_quantity, p.new_quantity, p.consumed, p.old_stock, p.new_stock, p.value_change), (6.0, 1.0, 1.0, 5.0, 0.0, -50.0));
+    assert_eq!(stock(&db, id), (5.0, false));
+
+    let r = inv.update_opening_lot_quantity(oq(lot, 1.0)).unwrap();
+    assert_eq!((r.new_stock, r.lot_removed), (0.0, false));
+    assert_eq!(stock(&db, id), (0.0, true));
+    assert_eq!(adjustment_rows(&inv, id).len(), 0);
+    let after = rep.get_pnl_report(DAY, DAY).unwrap();
+    assert_eq!((after.inventory_losses, after.cogs), (0.0, before.cogs));
+    {
+        let mut r = db.begin_read().unwrap();
+        let l = r.purchases().find_purchase_item_by_id(lot).unwrap().unwrap();
+        assert_eq!((l.quantity, l.remaining_quantity, l.pack_quantity, l.total_amount, l.unit_cost), (1.0, 0.0, 1.0, 10.0, 10.0));
+        assert_stock_invariant(&mut *r);
+    }
+
+    // Deleting the sale gives the one unit back.
+    sales.delete_sale(sale).unwrap();
+    assert_eq!(stock(&db, id).0, 1.0);
+    let mut r = db.begin_read().unwrap();
+    assert_stock_invariant(&mut *r);
+}
+
+#[test]
+fn g6_below_consumed_non_opening_and_invalid_are_refused() {
+    let (db, inv, id, lot) = opening_env();
+    let sales = common::SaleServiceImpl::new(inv.clone(), common::PaymentServiceImpl, db.clone());
+    sales.create_sale(sale_payload(None, PaymentStatus::Paid, 30.0, &[(id, None, 2.0, 15.0)])).unwrap();
+    match inv.update_opening_lot_quantity(oq(lot, 1.0)) {
+        Err(AppError::BillLocked { code, .. }) => assert_eq!(code, "LOT_BELOW_CONSUMED"),
+        other => panic!("{other:?}"),
+    }
+    // 0 is refused too while any of it is used.
+    match inv.update_opening_lot_quantity(oq(lot, 0.0)) {
+        Err(AppError::BillLocked { code, .. }) => assert_eq!(code, "LOT_BELOW_CONSUMED"),
+        other => panic!("{other:?}"),
+    }
+    assert!(inv.update_opening_lot_quantity(oq(lot, -1.0)).is_err());
+    assert!(inv.preview_opening_lot_quantity(oq(lot, f64::NAN)).is_err());
+    assert_eq!(stock(&db, id).0, 4.0);
+
+    // A purchase lot is not opening stock.
+    let mut tx = db.begin_transaction().unwrap();
+    seed_empty_item(&mut *tx, 99);
+    seed_purchase_lot(&inv, &mut *tx, 77, 99, 5.0, 3.0);
+    tx.commit().unwrap();
+    match inv.update_opening_lot_quantity(oq(77, 3.0)) {
+        Err(AppError::ValidationError { message, .. }) => assert!(message.contains("opening stock")),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(stock(&db, 99), (5.0, false));
+}
+
+#[test]
+fn g6_edit_up_and_to_zero_when_unused() {
+    let (db, inv, id, lot) = opening_env();
+    let r = inv.update_opening_lot_quantity(oq(lot, 9.0)).unwrap();
+    assert_eq!((r.new_stock, r.value_change), (9.0, 30.0));
+    assert_eq!(stock(&db, id), (9.0, false));
+
+    let r = inv.update_opening_lot_quantity(oq(lot, 0.0)).unwrap();
+    assert!(r.lot_removed);
+    assert_eq!(stock(&db, id), (0.0, true));
+    assert_eq!(lot_count(&db, id), 0);
+    let mut r = db.begin_read().unwrap();
+    assert!(r.purchases().find_purchase_item_by_id(lot).unwrap().is_none());
+    assert_stock_invariant(&mut *r);
+}

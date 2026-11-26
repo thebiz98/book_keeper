@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, LotDraw, LotDrawComponent, LotDrawLot, PageRequest, Paginated, PreviewServiceCostPayload, PriorLine,
+    ItemBillRef, ItemLot, LotDraw, LotDrawComponent, OpeningQuantityResult, UpdateOpeningQuantityPayload, LotDrawLot, PageRequest, Paginated, PreviewServiceCostPayload, PriorLine,
     ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult,
 };
@@ -352,6 +352,70 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
             value_change,
         })
     }
+
+    /// Body of `update_opening_lot_quantity` inside the caller's transaction; shared with the preview (DD-56).
+    fn update_opening_quantity_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        p: &UpdateOpeningQuantityPayload,
+    ) -> Result<OpeningQuantityResult, AppError> {
+        if !p.quantity.is_finite() || p.quantity < 0.0 {
+            return Err(validation("quantity", "Quantity must be a finite number, 0 or more"));
+        }
+        let lot = tx
+            .purchases()
+            .find_purchase_item_by_id(p.purchase_item_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseItem", p.purchase_item_id.to_string()))?;
+        let header = tx
+            .purchases()
+            .find_transaction_by_id(lot.purchase_transaction_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseTransaction", lot.purchase_transaction_id.to_string()))?;
+        if header.source != LotSource::Opening {
+            return Err(validation("purchase_item_id", "Only opening stock can be edited here"));
+        }
+        let old_stock = find_item(tx, lot.item_id)?.current_stock;
+        let consumed = lot.quantity - lot.remaining_quantity;
+        if p.quantity + EPS < consumed {
+            // Checked here so 0 gets the floor message, not edit_purchase_lot's "must be positive".
+            return Err(locked(
+                "LOT_BELOW_CONSUMED",
+                format!("'{}': at least {consumed} already used, quantity cannot go below that", lot.item_name),
+            ));
+        }
+        let mut lot_removed = false;
+        if p.quantity <= EPS && consumed <= EPS {
+            // Unused lot: remove it, and its header when nothing else hangs off it (OPN headers are not bills).
+            self.remove_purchase_lot(tx, lot.id)?;
+            if tx.purchases().list_items_by_transaction_id(header.id)?.is_empty() {
+                tx.purchases().delete_transaction(header.id)?;
+            }
+            lot_removed = true;
+        } else {
+            let edit = LotEdit {
+                item_id: lot.item_id,
+                item_name: lot.item_name.clone(),
+                pack_label: lot.pack_label.clone(),
+                pack_quantity: p.quantity,
+                quantity: p.quantity,
+                unit_cost: lot.unit_cost,
+                total_amount: round2(p.quantity * lot.unit_cost),
+            };
+            self.edit_purchase_lot(tx, lot.id, &edit)?;
+        }
+        let new_stock = find_item(tx, lot.item_id)?.current_stock;
+        Ok(OpeningQuantityResult {
+            purchase_item_id: lot.id,
+            item_id: lot.item_id,
+            old_quantity: lot.quantity,
+            new_quantity: if lot_removed { 0.0 } else { p.quantity },
+            consumed,
+            unit_cost: lot.unit_cost,
+            old_stock,
+            new_stock,
+            value_change: round2((p.quantity - lot.quantity) * lot.unit_cost),
+            lot_removed,
+        })
+    }
 }
 
 impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for InventoryServiceImpl<S, U> {
@@ -606,6 +670,20 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
     fn preview_set_item_stock(&self, p: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let result = self.set_item_stock_in_tx(&mut *tx, &p);
+        tx.rollback()?; // never committed
+        result
+    }
+
+    fn update_opening_lot_quantity(&self, p: UpdateOpeningQuantityPayload) -> Result<OpeningQuantityResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.update_opening_quantity_in_tx(&mut *tx, &p)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    fn preview_opening_lot_quantity(&self, p: UpdateOpeningQuantityPayload) -> Result<OpeningQuantityResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let result = self.update_opening_quantity_in_tx(&mut *tx, &p);
         tx.rollback()?; // never committed
         result
     }

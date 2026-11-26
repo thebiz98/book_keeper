@@ -54,3 +54,13 @@ pub async fn preview_service_cost(state: State<'_, AppState>, payload: PreviewSe
     let svc = state.inventory_service.clone();
     super::run_blocking(move || svc.preview_service_cost(payload)).await
 }
+#[tauri::command]
+pub async fn update_opening_lot_quantity(state: State<'_, AppState>, payload: UpdateOpeningQuantityPayload) -> Result<OpeningQuantityResult, AppError> {
+    let svc = state.inventory_service.clone();
+    super::run_blocking(move || svc.update_opening_lot_quantity(payload)).await
+}
+#[tauri::command]
+pub async fn preview_opening_lot_quantity(state: State<'_, AppState>, payload: UpdateOpeningQuantityPayload) -> Result<OpeningQuantityResult, AppError> {
+    let svc = state.inventory_service.clone();
+    super::run_blocking(move || svc.preview_opening_lot_quantity(payload)).await
+}

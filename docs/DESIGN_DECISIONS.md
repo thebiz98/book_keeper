@@ -464,3 +464,8 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 **DD-83 — Low Stock Level is edited in the item details drawer, not inline in the Item List (2026-11-26, v1.6 FR-50; owner request). Amends DD-45.**
 - The always-an-input column of DD-45 made the level too easy to change by accident while moving through the list, and the level is not first-class information on that page. The column and `LowStockLevelCell` are removed.
 - The details drawer shows the level read-only with an explicit Edit → Save / Cancel step. Same command (`update_item_low_stock_threshold`) and validation; no backend change. The Status badge (server flag) stays in the list.
+
+**DD-84 — Opening quantity is corrected in place; it is not an adjustment (2026-11-26, v1.6 FR-51; owner request).**
+- An item entered with opening 6 when only 1 ever existed cannot be fixed with Set stock: that posts a COUNT_CORRECTION whose allocations count as Inventory Losses. A wrong entry is not shrinkage.
+- `update_opening_lot_quantity` / `preview_opening_lot_quantity` edit the OPENING lot through the same `edit_purchase_lot` a bill edit uses: the floor is the already-used quantity (`LOT_BELOW_CONSUMED`), remaining and the item stock cache follow. Quantity 0 on an unused lot removes the lot and its OPN header. Cost is kept; line total = round2(qty x cost). OPN headers stay at total 0 (DD-07: not a bill), so nothing else changes.
+- No `stock_adjustments` row and no allocation, hence no P&L loss and COGS of earlier sales unchanged. Deleting a sale later gives its units back to the lot as usual. The preview is a dry run of the same body (DD-56); the dialog holds no rule.
