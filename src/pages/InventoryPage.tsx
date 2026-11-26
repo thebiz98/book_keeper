@@ -21,7 +21,6 @@ import { ItemDeleteDialog } from '@/components/domain/ItemDeleteDialog';
 import type { Paginated } from '@/types/api';
 import { useGridKeyboardNav } from '@/hooks/useGridKeyboardNav';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
-import { LowStockLevelCell } from '@/components/domain/LowStockLevelCell';
 import { StockAdjustmentModal } from '@/components/domain/StockAdjustmentModal';
 import { SetStockDialog } from '@/components/domain/SetStockDialog';
 import { BundleCreationModal } from '@/components/domain/BundleCreationModal';
@@ -35,7 +34,7 @@ import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 
 const PAGE_SIZE = 50;
-const COLS = 10;
+const COLS = 9;
 
 const EMPTY_PAGE: Paginated<ItemSearchResult> = { items: [], total: 0, page: 1, limit: PAGE_SIZE };
 
@@ -244,7 +243,6 @@ export const InventoryPage: React.FC = () => {
               <TableHead>Base Unit</TableHead>
               <TableHead align="right">Current Stock</TableHead>
               <TableHead className="text-center">Status</TableHead>
-              <TableHead align="right">Low Stock Level</TableHead>
               <TableHead align="right">MRP</TableHead>
               <TableHead align="right">Sale Price</TableHead>
               <TableHead className="text-center">Bundles</TableHead>
@@ -331,19 +329,6 @@ export const InventoryPage: React.FC = () => {
                             isLowStock={item.isLowStock}
                             lowStockThreshold={item.lowStockThreshold}
                             baseUnit={item.baseUnit}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell align="right">
-                        {isService ? (
-                          <span className="text-slate-400">—</span>
-                        ) : (
-                          <LowStockLevelCell
-                            itemId={item.itemId}
-                            itemName={item.name}
-                            value={item.lowStockThreshold}
-                            baseUnit={item.baseUnit}
-                            onSaved={patchRow}
                           />
                         )}
                       </TableCell>
@@ -505,6 +490,7 @@ export const InventoryPage: React.FC = () => {
       <ItemDetailsDrawer
         item={detailsItem ? (items.find((i) => i.itemId === detailsItem.itemId) ?? detailsItem) : null}
         onClose={() => setDetailsItem(null)}
+        onItemUpdated={patchRow}
         onEdit={(item) => {
           setDetailsItem(null);
           setEditingItem(item);
