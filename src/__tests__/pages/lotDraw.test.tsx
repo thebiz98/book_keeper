@@ -45,26 +45,42 @@ beforeEach(() => {
 });
 
 describe('LotDrawLine (FR-31)', () => {
-  it('merges adjacent equal prices, highlights the drawn group and shows the cost', () => {
+  it('shows one row per lot (equal prices are not merged), highlights drawn lots and shows the cost', () => {
     const d = drawOf([lot(1, 40, 5, 5), lot(2, 40, 3, 1), lot(3, 42.5, 20, 0)], { drawCost: 240 });
     const { container } = render(<LotDrawLine draw={d} baseUnit="PCS" />);
-    const groups = Array.from(container.querySelectorAll('[data-testid="lot-group"]'));
-    expect(groups.map((g) => g.textContent)).toEqual(['₹40.00 × 8', '₹42.50 × 20']);
-    expect(groups[0].getAttribute('data-drawn')).toBe('true');
-    expect(groups[0].className).toContain('font-bold');
-    expect(groups[1].getAttribute('data-drawn')).toBe('false');
-    expect(container.textContent).toContain('PCS');
+    const rows = Array.from(container.querySelectorAll('[data-testid="lot-row"]'));
+    expect(rows).toHaveLength(3);
+    expect(rows[0].textContent).toContain('PUR-1');
+    expect(rows[0].textContent).toContain('₹40.00');
+    expect(rows[0].textContent).toContain('× 5 PCS left');
+    expect(rows[0].textContent).toContain('uses 5');
+    expect(rows[1].textContent).toContain('uses 1');
+    expect(rows[0].getAttribute('data-drawn')).toBe('true');
+    expect(rows[0].className).toContain('font-bold');
+    expect(rows[2].getAttribute('data-drawn')).toBe('false');
+    expect(rows[2].textContent).not.toContain('uses');
     expect(container.querySelector('[data-testid="lot-draw-cost"]')?.textContent).toContain('₹240.00');
     expect(container.querySelector('[data-testid="lot-shortfall"]')).toBeNull();
   });
 
-  it('shows the shortfall in rose and caps the groups at four with a tooltip', () => {
-    const lots = [1, 2, 3, 4, 5, 6].map((i) => lot(i, 10 + i, 2, 0));
+  it('tags opening and unrecorded lots', () => {
+    const d = drawOf([
+      { ...lot(1, 40, 5, 0), source: 'OPENING', transactionCode: 'OPN-1' },
+      { ...lot(2, 41, 5, 0), source: 'ADJUSTMENT', transactionCode: 'ADJ-1' },
+    ]);
+    const { container } = render(<LotDrawLine draw={d} baseUnit="PCS" />);
+    const rows = Array.from(container.querySelectorAll('[data-testid="lot-row"]'));
+    expect(rows[0].textContent).toContain('(opening)');
+    expect(rows[1].textContent).toContain('(unrecorded)');
+  });
+
+  it('shows the shortfall in rose and caps the rows at five with a tooltip', () => {
+    const lots = [1, 2, 3, 4, 5, 6, 7].map((i) => lot(i, 10 + i, 2, 0));
     const { container } = render(<LotDrawLine draw={drawOf(lots, { shortfall: 3 })} baseUnit="PCS" />);
-    expect(container.querySelectorAll('[data-testid="lot-group"]')).toHaveLength(4);
+    expect(container.querySelectorAll('[data-testid="lot-row"]')).toHaveLength(5);
     const more = container.querySelector('[data-testid="lot-more"]') as HTMLElement;
     expect(more.textContent).toBe('+2 more');
-    expect(more.title).toContain('₹16.00 × 2');
+    expect(more.title).toContain('PUR-6 ₹16.00 × 2 PCS left');
     const short = container.querySelector('[data-testid="lot-shortfall"]') as HTMLElement;
     expect(short.textContent).toBe('short by 3');
     expect(short.className).toContain('rose');
@@ -83,9 +99,9 @@ describe('RapidBillingRow info line (FR-31)', () => {
       await new Promise((r) => setTimeout(r, 150));
     });
     const info = container.querySelector('[data-testid="stock-indicator"]') as HTMLElement;
-    expect(info.textContent).toContain('Purchase price:');
-    expect(info.textContent).toContain('₹40.00 × 5');
-    expect(info.textContent).toContain('₹42.50 × 20');
+    expect(info.textContent).toContain('Purchase price per lot');
+    expect(info.textContent).toContain('₹40.00× 5 PCS left');
+    expect(info.textContent).toContain('₹42.50× 20 PCS left');
     expect(info.textContent).toContain('→ cost');
     expect(info.textContent).not.toContain('Rate:');
     expect(previewLotDraw).toHaveBeenLastCalledWith(9, 1, [{ itemId: 9, quantity: 3 }]);
