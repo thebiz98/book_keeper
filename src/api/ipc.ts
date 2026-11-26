@@ -48,6 +48,7 @@ export class TauriClient implements ApiClient {
   deleteSale: ApiClient['deleteSale'] = (saleId) => invokeCmd('delete_sale', { saleId });
   previewSale: ApiClient['previewSale'] = (payload, saleId) =>
     invokeCmd('preview_sale', { payload, saleId: saleId ?? null });
+  previewSaleLine: ApiClient['previewSaleLine'] = (payload) => invokeCmd('preview_sale_line', { payload });
 
   // --- Purchases ---
   getNextPurchaseCode: ApiClient['getNextPurchaseCode'] = () =>

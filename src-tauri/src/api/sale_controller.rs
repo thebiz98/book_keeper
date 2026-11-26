@@ -39,3 +39,9 @@ pub async fn preview_sale(state: State<'_, AppState>, payload: PreviewSalePayloa
     let svc = state.sale_service.clone();
     super::run_blocking(move || svc.preview_sale(sale_id, payload)).await
 }
+/// FR-47: entry-row line total and the adjustment of a typed total (no database).
+#[tauri::command]
+pub async fn preview_sale_line(state: State<'_, AppState>, payload: PreviewSaleLinePayload) -> Result<SaleLinePreview, AppError> {
+    let svc = state.sale_service.clone();
+    super::run_blocking(move || svc.preview_sale_line(payload)).await
+}

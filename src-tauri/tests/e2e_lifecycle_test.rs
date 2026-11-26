@@ -119,7 +119,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 120.0,
-            unit_price: 10.0,
+            unit_price: 10.0, entered_total: None,
         }],
     };
     let sale_summary = sale_service.create_sale(sale_payload).expect("sale succeeds");

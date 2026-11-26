@@ -35,7 +35,9 @@ export interface CartState {
     item: ItemInput,
     quantity?: number,
     bundle?: BundleInput | null,
-    rate?: number
+    rate?: number,
+    /** FR-47: typed line total; such a line never merges with another. */
+    enteredTotal?: number | null
   ) => boolean;
   updateQuantity: (lineId: string, quantity: number) => boolean;
   /** Switch a line's unit; sets bundleId and the suggested rate. */
@@ -77,9 +79,10 @@ const initialState = {
 export const useCartStore = create<CartState>((set, get) => ({
   ...initialState,
 
-  addItem: (item, quantity = 1, bundle = null, rate) => {
+  addItem: (item, quantity = 1, bundle = null, rate, enteredTotal = null) => {
     if (!validQty(quantity)) return false;
     if (rate !== undefined && !validRate(rate)) return false;
+    if (enteredTotal != null && !validRate(enteredTotal)) return false;
 
     const multiplier = bundle ? bundle.unitsPerBundle : 1;
     if (!validQty(multiplier)) return false;
@@ -89,9 +92,12 @@ export const useCartStore = create<CartState>((set, get) => ({
       rate ?? (bundle ? bundle.salePrice ?? item.defaultSalePrice * multiplier : item.defaultSalePrice);
     const bundleId = bundle?.id;
 
-    const existingIndex = items.findIndex(
-      (i) => i.itemId === item.id && i.bundleId === bundleId && i.rate === unitRate
-    );
+    const existingIndex =
+      enteredTotal != null
+        ? -1
+        : items.findIndex(
+            (i) => i.itemId === item.id && i.bundleId === bundleId && i.rate === unitRate && i.enteredTotal == null
+          );
 
     let updated: CartLine[];
     if (existingIndex >= 0) {
@@ -113,6 +119,7 @@ export const useCartStore = create<CartState>((set, get) => ({
           rate: unitRate,
           mrp: bundle?.mrp ?? item.mrp,
           defaultSalePrice: item.defaultSalePrice,
+          enteredTotal,
         },
       ];
     }
@@ -126,7 +133,9 @@ export const useCartStore = create<CartState>((set, get) => ({
     const index = items.findIndex((i) => i.lineId === lineId);
     if (index === -1) return false;
     const updated = [...items];
-    updated[index] = { ...items[index], quantity };
+    // FR-47: an edited total belonged to the old quantity, so the adjustment is dropped.
+    const line = items[index];
+    updated[index] = { ...line, quantity, enteredTotal: quantity === line.quantity ? line.enteredTotal : null };
     set({ items: updated, ...countsFor(updated) });
     return true;
   },
@@ -148,6 +157,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       unitsPerBundle: multiplier,
       rate,
       mrp: bundle?.mrp ?? line.mrp,
+      enteredTotal: null,
     };
     set({ items: updated, ...countsFor(updated) });
     return true;
@@ -159,7 +169,8 @@ export const useCartStore = create<CartState>((set, get) => ({
     const index = items.findIndex((i) => i.lineId === lineId);
     if (index === -1) return false;
     const updated = [...items];
-    updated[index] = { ...items[index], rate };
+    const line = items[index];
+    updated[index] = { ...line, rate, enteredTotal: rate === line.rate ? line.enteredTotal : null };
     set({ items: updated, ...countsFor(updated) });
     return true;
   },

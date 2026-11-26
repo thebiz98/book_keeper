@@ -59,6 +59,11 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
   onDone,
   invoiceCode,
 }) => {
+  // FR-47: the item extra charge / discount lines come from the backend preview, after the manual ones.
+  const breakdown = useMemo(
+    () => [...(charges ?? []), ...(totals?.adjustmentLines ?? [])],
+    [charges, totals?.adjustmentLines]
+  );
   const [status, setStatus] = useState<PaymentStatus>('PAID');
   const [cashStr, setCashStr] = useState('');
   /** True once the cashier typed in the cash box: the PAID prefill then stops following the total. */
@@ -268,12 +273,12 @@ export const SaleSummaryModal: React.FC<SaleSummaryModalProps> = ({
           )}
         </div>
 
-        {mode === 'payment' && charges && charges.length > 0 && (
+        {mode === 'payment' && breakdown.length > 0 && (
           <div data-testid="payment-breakdown" className="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
             <BillTotalsSummary
               compact
               itemsSubtotal={totals?.itemsSubtotal ?? 0}
-              lines={charges}
+              lines={breakdown}
               grandTotal={totals?.totalAmount ?? 0}
             />
           </div>

@@ -17,6 +17,8 @@ export interface CartItem {
   rate: number;
   mrp?: number | null;
   defaultSalePrice?: number;
+  /** FR-47: the line total the cashier typed (null = qty × rate); cleared when qty, unit or rate change. */
+  enteredTotal?: number | null;
 }
 
 export interface ItemInput {

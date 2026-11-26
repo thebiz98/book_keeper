@@ -434,6 +434,7 @@ const V9: &str = include_str!("fixtures/schema/v9.sql");
 const V10: &str = include_str!("fixtures/schema/v10.sql");
 const V11: &str = include_str!("fixtures/schema/v11.sql");
 const V12: &str = include_str!("fixtures/schema/v12.sql");
+const V13: &str = include_str!("fixtures/schema/v13.sql");
 /// The shipped v8 fixture is a DDL delta without its `schema_version` row (never edited); chains that
 /// go past v8 record it with this step.
 const V8_RECORD: &str = "INSERT INTO schema_version (version, name) VALUES (8, 'bill_correction'); PRAGMA user_version = 8;";
@@ -832,12 +833,13 @@ fn charge_tables_enforce_checks() {
     assert!(
         conn.execute("INSERT INTO charge_types (name, effect, default_amount) VALUES ('X', 'CHARGE', 0)", []).is_err()
     );
-    conn.execute("INSERT INTO charge_types (id, name, effect) VALUES (1, 'Transport', 'CHARGE')", []).unwrap();
+    // Ids 1 and 2 are the FR-47 system types on a fresh database.
+    conn.execute("INSERT INTO charge_types (id, name, effect) VALUES (100, 'Transport', 'CHARGE')", []).unwrap();
     assert!(conn.execute("INSERT INTO charge_types (name, effect) VALUES ('transport', 'CHARGE')", []).is_err());
     let ins = |amount: f64| {
         conn.execute(
             "INSERT INTO bill_charges (transaction_type, transaction_id, charge_type_id, charge_name, effect, amount)
-             VALUES ('SALE', 1, 1, 'Transport', 'CHARGE', ?1)",
+             VALUES ('SALE', 1, 100, 'Transport', 'CHARGE', ?1)",
             [amount],
         )
     };
@@ -1121,6 +1123,98 @@ fn frozen_v12_fixture_matches_the_migrated_schema() {
     assert_eq!(shape(&from_fixtures), shape(&migrated));
     assert!(shape(&migrated).iter().any(|r| r.0 == "idx_service_components_component"));
     assert!(!shape(&migrated).iter().any(|r| r.0 == "idx_sale_items_item"));
+    drop(from_fixtures);
+    drop(migrated);
+    cleanup(&p1);
+    cleanup(&p2);
+}
+
+const V1_TO_V12: [&str; 13] = [V1, V2, V3, V4, V5, V6, V7, V8, V8_RECORD, V9, V10, V11, V12];
+
+/// (name, effect, applies_to, system_key) of every charge type, by id.
+fn charge_types(c: &Connection) -> Vec<(String, String, String, Option<String>)> {
+    c.prepare("SELECT name, effect, applies_to, system_key FROM charge_types ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+fn s4(n: &str, e: &str, a: &str, k: Option<&str>) -> (String, String, String, Option<String>) {
+    (n.into(), e.into(), a.into(), k.map(Into::into))
+}
+
+#[test]
+fn v12_database_upgrades_to_v13_with_two_system_charge_types() {
+    let (path, conn) = db_from_fixtures("v12up", &V1_TO_V12);
+    conn.execute("INSERT INTO charge_types (name, effect, applies_to) VALUES ('Transport', 'CHARGE', 'BOTH')", []).unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert_eq!(current_version(&conn).unwrap(), 13);
+    assert_eq!(
+        charge_types(&conn),
+        vec![
+            s4("Transport", "CHARGE", "BOTH", None),
+            s4("Item extra charge", "CHARGE", "SALE", Some("LINE_EXTRA")),
+            s4("Item discount", "DISCOUNT", "SALE", Some("LINE_DISCOUNT")),
+        ]
+    );
+    let indexed: i64 = conn
+        .query_row("SELECT COUNT(*) FROM charge_type_search_fts WHERE charge_type_id IN (2, 3)", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(indexed, 2, "the new types are searchable rows of the index");
+    assert!(
+        conn.execute("UPDATE charge_types SET system_key = 'LINE_EXTRA' WHERE id = 1", []).is_err(),
+        "system_key is unique"
+    );
+    run_migrations(&conn).unwrap();
+    assert_eq!(current_version(&conn).unwrap(), 13);
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn v13_adopts_a_matching_type_and_twins_a_clashing_one() {
+    let (path, conn) = db_from_fixtures("v12adopt", &V1_TO_V12);
+    conn.execute_batch(
+        "INSERT INTO charge_types (name, effect, applies_to) VALUES ('item discount', 'DISCOUNT', 'BOTH');
+         INSERT INTO charge_types (name, effect, applies_to) VALUES ('Item extra charge', 'DISCOUNT', 'SALE');",
+    )
+    .unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert_eq!(
+        charge_types(&conn),
+        vec![
+            s4("item discount", "DISCOUNT", "BOTH", Some("LINE_DISCOUNT")),
+            s4("Item extra charge", "DISCOUNT", "SALE", None),
+            s4("Item extra charge (auto)", "CHARGE", "SALE", Some("LINE_EXTRA")),
+        ]
+    );
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn frozen_v13_fixture_matches_the_migrated_schema() {
+    let mut steps = V1_TO_V12.to_vec();
+    steps.push(V13);
+    let (p1, from_fixtures) = db_from_fixtures("v13fx", &steps);
+    let (p2, migrated) = db_from_fixtures("v13mig", &[V1]);
+    run_migrations(&migrated).unwrap();
+    let shape = |c: &Connection| -> Vec<(String, String, i64, Option<String>)> {
+        let mut st = c
+            .prepare("SELECT 'charge_types.' || name, type, \"notnull\", dflt_value FROM pragma_table_info('charge_types') ORDER BY name")
+            .unwrap();
+        let mut out: Vec<_> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()).collect();
+        let mut st = c
+            .prepare("SELECT name, tbl_name, 0, sql FROM sqlite_master WHERE type = 'index' AND name = 'ux_charge_types_system_key'")
+            .unwrap();
+        out.extend(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().map(|x| x.unwrap()));
+        out
+    };
+    assert_eq!(shape(&from_fixtures), shape(&migrated));
+    assert!(shape(&migrated).iter().any(|r| r.0 == "charge_types.system_key"));
+    assert_eq!(charge_types(&from_fixtures), charge_types(&migrated));
     drop(from_fixtures);
     drop(migrated);
     cleanup(&p1);
