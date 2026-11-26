@@ -74,7 +74,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
             payment_mode: Some("CASH".to_string()),
             payment_status: PaymentStatus::Paid, paid_amount: 400.0,
             notes: None,
-            items: vec![CreateSaleItemPayload {
+            items: vec![CreateSaleItemPayload { sale_item_id: None,
                 item_id: 1,
                 bundle_id: None,
                 bundle_quantity: 40.0,
@@ -151,7 +151,7 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
         payment_mode: None,
         payment_status: PaymentStatus::Unpaid, paid_amount: 0.0,
         notes: Some("Monthly school credit".to_string()),
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 20.0,
@@ -220,7 +220,7 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 600.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
@@ -344,7 +344,7 @@ fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 100.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 42,
             bundle_id: None,
             bundle_quantity: 4.0,

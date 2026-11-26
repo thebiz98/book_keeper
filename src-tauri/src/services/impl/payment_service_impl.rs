@@ -4,7 +4,7 @@ use crate::core::error::AppError;
 use crate::core::money::{round2, MONEY_EPS};
 use crate::core::value_objects::{PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::TransactionContext;
-use crate::services::contracts::payment_service::PaymentService;
+use crate::services::contracts::payment_service::{BillUpfront, PaymentService};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PaymentServiceImpl;
@@ -206,6 +206,60 @@ impl PaymentService for PaymentServiceImpl {
     ) -> Result<(), AppError> {
         uow.settlements()
             .update_party_for_transaction(tx_type, tx_id, party_id, &[PaymentKind::Upfront, PaymentKind::Settlement])
+    }
+
+    fn set_bill_upfront(&self, uow: &mut dyn TransactionContext, u: BillUpfront) -> Result<(), AppError> {
+        if !u.amount.is_finite() || u.amount < 0.0 {
+            return Err(validation("amount_paid", "Upfront amount must be 0 or more"));
+        }
+        let amount = round2(u.amount);
+        let rows: Vec<PaymentSettlement> = uow
+            .settlements()
+            .list_by_transaction(u.tx_type, u.tx_id)?
+            .into_iter()
+            .filter(|s| s.kind == PaymentKind::Upfront)
+            .collect();
+        let (first, extra) = match rows.split_first() {
+            Some((f, rest)) => (Some(f.clone()), rest.to_vec()),
+            None => (None, Vec::new()),
+        };
+        // A bill carries one UPFRONT row; any older duplicates fold into the kept one.
+        for r in &extra {
+            uow.settlements().delete_settlement(r.id)?;
+        }
+        match first {
+            Some(row) if amount <= 0.0 => uow.settlements().delete_settlement(row.id)?,
+            Some(row) => {
+                let changed = (row.amount_paid - amount).abs() > 1e-9
+                    || row.settlement_date != u.date
+                    || row.payment_mode != u.payment_mode;
+                if changed {
+                    uow.settlements().update_settlement(&PaymentSettlement {
+                        amount_paid: amount,
+                        settlement_date: u.date.clone(),
+                        payment_mode: u.payment_mode.clone(),
+                        ..row
+                    })?;
+                }
+            }
+            None if amount > 0.0 => {
+                uow.settlements().create_settlement(&PaymentSettlement {
+                    id: 0,
+                    settlement_date: u.date.clone(),
+                    party_id: u.party_id,
+                    kind: PaymentKind::Upfront,
+                    transaction_type: u.tx_type,
+                    transaction_id: Some(u.tx_id),
+                    return_id: None,
+                    amount_paid: amount,
+                    payment_mode: u.payment_mode.clone(),
+                    notes: Some(u.notes.clone()),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                })?;
+            }
+            None => {}
+        }
+        recompute_bill(uow, u.tx_type, u.tx_id)
     }
 
     fn recompute(&self, uow: &mut dyn TransactionContext, tx_type: TransactionType, tx_id: i64) -> Result<(), AppError> {

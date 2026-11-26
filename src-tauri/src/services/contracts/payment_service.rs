@@ -3,6 +3,20 @@ use crate::core::error::AppError;
 use crate::core::value_objects::{PaymentKind, TransactionType};
 use crate::data::contracts::unit_of_work::TransactionContext;
 
+/// The UPFRONT cash a bill edit leaves on the bill (DD-89).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BillUpfront {
+    pub tx_type: TransactionType,
+    pub tx_id: i64,
+    pub party_id: Option<i64>,
+    /// The bill date (the cash moves with it).
+    pub date: String,
+    pub amount: f64,
+    pub payment_mode: Option<String>,
+    /// Notes of a newly created row.
+    pub notes: String,
+}
+
 /// The only writer of the payment ledger and of the cached bill money fields
 /// (`paid_amount`, `balance_due`, `payment_status`). See DD-01 and LLD §6.4.
 pub trait PaymentService: Send + Sync {
@@ -41,6 +55,12 @@ pub trait PaymentService: Send + Sync {
         tx_id: i64,
         party_id: Option<i64>,
     ) -> Result<(), AppError>;
+
+    /// DD-89 bill edit: sets the bill's UPFRONT cash to `upfront` **in place**. An existing row
+    /// keeps its id (amount, date and mode rewritten only when they differ); it is deleted only when
+    /// `upfront` is 0 and created only when there was none. Recomputes the bill (DD-01), so an
+    /// amount above what is open is refused like any payment.
+    fn set_bill_upfront(&self, uow: &mut dyn TransactionContext, upfront: BillUpfront) -> Result<(), AppError>;
 
     /// FR-20: rebuilds the bill's cached money fields from its ledger (DD-01).
     fn recompute(&self, uow: &mut dyn TransactionContext, tx_type: TransactionType, tx_id: i64) -> Result<(), AppError>;
@@ -85,6 +105,10 @@ impl<T: PaymentService + ?Sized> PaymentService for std::sync::Arc<T> {
         party_id: Option<i64>,
     ) -> Result<(), AppError> {
         (**self).repoint_bill_party(uow, tx_type, tx_id, party_id)
+    }
+
+    fn set_bill_upfront(&self, uow: &mut dyn TransactionContext, upfront: BillUpfront) -> Result<(), AppError> {
+        (**self).set_bill_upfront(uow, upfront)
     }
 
     fn recompute(&self, uow: &mut dyn TransactionContext, tx_type: TransactionType, tx_id: i64) -> Result<(), AppError> {

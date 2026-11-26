@@ -49,7 +49,7 @@ fn sqlite_end_to_end_smoke() {
             payment_status: PaymentStatus::Paid, paid_amount: 30.0,
             payment_mode: Some("CASH".to_string()),
             notes: None,
-            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 3.0, unit_price: 10.0 }],
+            items: vec![CreateSaleItemPayload { sale_item_id: None, item_id, bundle_id: None, bundle_quantity: 3.0, unit_price: 10.0 }],
         })
         .expect("sale");
 
@@ -63,7 +63,7 @@ fn sqlite_end_to_end_smoke() {
             payment_status: PaymentStatus::Paid, paid_amount: 10.0,
             payment_mode: Some("CASH".to_string()),
             notes: None,
-            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: 10.0 }],
+            items: vec![CreateSaleItemPayload { sale_item_id: None, item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: 10.0 }],
         })
         .expect("second auto-coded sale must not collide on transaction_code");
     assert_ne!(second.transaction_code, "SAL-1001");
@@ -104,7 +104,7 @@ fn sales_history_honours_start_end_date_filter() {
             charges: vec![],
             transaction_date: date.into(), party_id: None, payment_status: PaymentStatus::Paid, paid_amount: 5.0,
             payment_mode: Some("CASH".into()), notes: None,
-            items: vec![CreateSaleItemPayload { item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: 5.0 }],
+            items: vec![CreateSaleItemPayload { sale_item_id: None, item_id, bundle_id: None, bundle_quantity: 1.0, unit_price: 5.0 }],
         }).expect("sale");
     }
     // Frontend shape: start_date / end_date only.

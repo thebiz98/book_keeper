@@ -118,7 +118,7 @@ fn test_e2e_5_step_lifecycle_scenario() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 1200.0,
         notes: Some("Retail Counter Sale".to_string()),
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 120.0,

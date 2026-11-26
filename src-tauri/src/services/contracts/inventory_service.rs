@@ -85,6 +85,21 @@ pub trait InventoryService: Send + Sync {
         restock: bool,
     ) -> Result<f64, AppError>;
 
+    /// DD-89 change-only sale edit: gives back `quantity` units the sale line drew from `item_id`
+    /// (the line's item, or one component of a service line), newest allocation first, shrinking
+    /// the allocations and restocking the lots and the cache. Returns the released FIFO cost.
+    fn release_sale_line(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        item_id: i64,
+        quantity: f64,
+    ) -> Result<f64, AppError>;
+
+    /// DD-89: gives back everything the sale line drew (an item change or a removed line); the
+    /// line keeps no allocation. Returns the released FIFO cost.
+    fn release_whole_sale_line(&self, uow: &mut dyn TransactionContext, sale_item_id: i64) -> Result<f64, AppError>;
+
     /// Creates a non-purchase lot (Adjustment / Opening / Return) under its own zero-value
     /// header (own code sequence, party None, PAID, no ledger row) and increments the cache.
     /// Cost: explicit, else the item's latest lot cost, else `ValidationError(unit_cost)`.
@@ -275,6 +290,20 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
         restock: bool,
     ) -> Result<f64, AppError> {
         (**self).reverse_sale_line(uow, sale_item_id, item_id, quantity, restock)
+    }
+
+    fn release_sale_line(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        item_id: i64,
+        quantity: f64,
+    ) -> Result<f64, AppError> {
+        (**self).release_sale_line(uow, sale_item_id, item_id, quantity)
+    }
+
+    fn release_whole_sale_line(&self, uow: &mut dyn TransactionContext, sale_item_id: i64) -> Result<f64, AppError> {
+        (**self).release_whole_sale_line(uow, sale_item_id)
     }
 
     fn create_source_lot(

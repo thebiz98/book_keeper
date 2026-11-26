@@ -277,7 +277,7 @@ fn sale_payload(qty: f64, status: PaymentStatus, paid: f64, party: Option<i64>) 
         payment_status: status,
         paid_amount: paid,
         notes: None,
-        items: vec![CreateSaleItemPayload { item_id: 1, bundle_id: None, bundle_quantity: qty, unit_price: 100.0 }],
+        items: vec![CreateSaleItemPayload { sale_item_id: None, item_id: 1, bundle_id: None, bundle_quantity: qty, unit_price: 100.0 }],
     }
 }
 
@@ -346,7 +346,7 @@ fn tc_rep_unrec_2_later_sale_and_writeoff_use_the_entered_cost() {
         payment_status: PaymentStatus::Paid,
         paid_amount: 3500.0,
         notes: None,
-        items: vec![CreateSaleItemPayload { item_id: 1, bundle_id: None, bundle_quantity: 35.0, unit_price: 100.0 }],
+        items: vec![CreateSaleItemPayload { sale_item_id: None, item_id: 1, bundle_id: None, bundle_quantity: 35.0, unit_price: 100.0 }],
     })
     .unwrap();
     let rs = svc(&uow);

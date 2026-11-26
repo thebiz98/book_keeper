@@ -255,8 +255,11 @@ fn test_sale_validation_party_item_bundle_and_numbers() {
         sales.create_sale(sale_payload(Some(77), PaymentStatus::Paid, 10.0, &ok)),
         Err(AppError::NotFound { .. })
     ));
-    // Inactive / unknown item; bundle of another item.
-    assert_eq!(field_of(sales.create_sale(sale_payload(None, PaymentStatus::Paid, 1.0, &[(3, None, 1.0, 1.0)])).unwrap_err()), "item_id");
+    // Deleted (DD-90: DeletedReference ITEM) / unknown item; bundle of another item.
+    assert!(matches!(
+        sales.create_sale(sale_payload(None, PaymentStatus::Paid, 1.0, &[(3, None, 1.0, 1.0)])),
+        Err(AppError::DeletedReference { ref entity, id: 3, .. }) if entity == "ITEM"
+    ));
     assert!(matches!(
         sales.create_sale(sale_payload(None, PaymentStatus::Paid, 1.0, &[(99, None, 1.0, 1.0)])),
         Err(AppError::NotFound { .. })

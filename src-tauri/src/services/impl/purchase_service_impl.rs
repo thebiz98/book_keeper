@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+
 use std::sync::Arc;
 use crate::core::dtos::{
     BillEditGuard, CreatePurchasePayload, DeleteBillResult, Paginated, PurchaseDetailView, PurchaseHistoryRow,
@@ -13,10 +13,13 @@ use crate::services::r#impl::bill_guard::{
     PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
 };
 use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party};
+use crate::services::r#impl::item_guard::{ensure_active_item, require_active_item};
 use crate::services::r#impl::bill_math::{
-    bill_preview, compute_bill_totals, delete_bill_charges, lot_price_upfront, insert_bill_charges, purchase_upfront, resolve_bill_charges,
+    apply_bill_charges_edit, bill_preview, compute_bill_totals, delete_bill_charges, lot_price_upfront, insert_bill_charges,
+    plan_bill_charges_edit, purchase_upfront, resolve_bill_charges, resolve_line_bundle, units_per_pack,
     validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
 };
+use crate::services::contracts::payment_service::BillUpfront;
 use crate::core::value_objects::{LotSource, PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::{InventoryService, LotEdit};
@@ -106,12 +109,13 @@ fn clean_ref(r: Option<&str>) -> Option<String> {
 }
 
 /// Vendor must be an active vendor (an edit may keep its current, since-deactivated vendor); every
-/// line: active item, bundle belongs to the item, cost normalised to base units.
+/// line: bundle belongs to the item, cost normalised to base units. A deleted item is
+/// `DeletedReference(ITEM)` unless `edit` (the lot diff then decides, DD-90).
 fn resolve_purchase(
     tx: &mut dyn TransactionContext,
     payload: &CreatePurchasePayload,
     keep_party: Option<i64>,
-    keep_items: &HashSet<i64>,
+    edit: bool,
 ) -> Result<ResolvedPurchase, AppError> {
     let party_name = match payload.party_id {
         Some(pid) => {
@@ -135,8 +139,8 @@ fn resolve_purchase(
             entity: "Item".to_string(),
             id: line.item_id.to_string(),
         })?;
-        if !item.is_active && !keep_items.contains(&item.id) {
-            return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", item.name)));
+        if !edit {
+            ensure_active_item(&item)?;
         }
         if item.item_type == crate::core::value_objects::ItemType::Service {
             return Err(validation("item_id", format!("'{}' is a service item and cannot be purchased", item.name)));
@@ -201,6 +205,37 @@ fn check_purchase_payment(
     Ok(upfront)
 }
 
+/// Notes of a purchase's UPFRONT ledger row.
+const INWARD_NOTE: &str = "Supplier Inward Payment";
+
+/// DD-89 / E2: the edit a kept lot needs, or `None` when the line is unchanged. A lot whose item
+/// did not change keeps its `item_name` snapshot, and its `pack_label` while the units per pack are
+/// the same (a renamed bundle is not a change).
+fn lot_edit(o: &PurchaseItem, l: &ResolvedPurchaseLine) -> Option<LotEdit> {
+    const E: f64 = 1e-9;
+    let unit_cost = l.line_total / l.base_qty;
+    let item_changed = l.item.id != o.item_id;
+    let same_pack = (units_per_pack(l.base_qty, l.pack_quantity) - units_per_pack(o.quantity, o.pack_quantity)).abs() <= E;
+    let unchanged = !item_changed
+        && same_pack
+        && (l.base_qty - o.quantity).abs() <= E
+        && (l.pack_quantity - o.pack_quantity).abs() <= E
+        && (l.line_total - o.total_amount).abs() <= E
+        && (unit_cost - o.unit_cost).abs() <= E;
+    if unchanged {
+        return None;
+    }
+    Some(LotEdit {
+        item_id: l.item.id,
+        item_name: if item_changed { l.item.name.clone() } else { o.item_name.clone() },
+        pack_label: if item_changed || !same_pack { l.pack_label.clone() } else { o.pack_label.clone() },
+        pack_quantity: l.pack_quantity,
+        quantity: l.base_qty,
+        unit_cost,
+        total_amount: l.line_total,
+    })
+}
+
 fn new_lot(purchase_id: i64, l: &ResolvedPurchaseLine) -> PurchaseItem {
     PurchaseItem {
         id: 0,
@@ -238,7 +273,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
                     settlement_date: payload.transaction_date.clone(),
                     amount_paid: upfront,
                     payment_mode: payload.payment_mode.clone(),
-                    notes: Some("Supplier Inward Payment".to_string()),
+                    notes: Some(INWARD_NOTE.to_string()),
                 },
             )?;
         }
@@ -263,7 +298,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             return Err(validation("purchase_item_id", "purchase_item_id is only valid when editing a purchase"));
         }
 
-        let r = resolve_purchase(tx, payload, None, &HashSet::new())?;
+        let r = resolve_purchase(tx, payload, None, false)?;
         // Charges (FR-19), totals and the payment cross-check (DD-02).
         let (charges, totals) = price_purchase(tx, payload, &r, 0.0, fig)?;
         let total_amount = totals.total_amount;
@@ -330,15 +365,8 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             return Err(locked(reason));
         }
 
-        // Reverse what is not kept in place: charges and the upfront cash. Later settlements stay.
-        delete_bill_charges(tx, TransactionType::Purchase, purchase_id)?;
-        self.payment_service
-            .delete_bill_ledger(tx, TransactionType::Purchase, purchase_id, &[PaymentKind::Upfront])?;
-
-        // FR-45: lines of an item deleted since the purchase was made may stay on the bill.
-        let keep_items: HashSet<i64> =
-            tx.purchases().list_items_by_transaction_id(purchase_id)?.into_iter().map(|l| l.item_id).collect();
-        let r = resolve_purchase(tx, payload, old.party_id, &keep_items)?;
+        // DD-89: lots, charges and the UPFRONT row are kept in place; only what changed is written.
+        let r = resolve_purchase(tx, payload, old.party_id, true)?;
         let party_changed = r.party_id != old.party_id;
         if party_changed && !g.can_change_party {
             return Err(locked_with(
@@ -355,20 +383,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         if party_changed {
             settlements_move_check(&g, r.party_name.as_deref(), payload.confirm_move_settlements)?;
         }
-        let (charges, totals) = price_purchase(tx, payload, &r, g.applied_amount, fig)?;
-        let total_amount = totals.total_amount;
-        if total_amount + MONEY_EPS < g.applied_amount {
-            return Err(locked_with(
-                TOTAL_BELOW_APPLIED,
-                format!("The new total \u{20b9}{total_amount:.2} is below the \u{20b9}{:.2} already applied to this bill", g.applied_amount),
-            ));
-        }
-        let open = round2((total_amount - g.applied_amount).max(0.0));
-        let upfront = if with_payment {
-            check_purchase_payment(payload.payment_status, round2(payload.paid_amount), open, r.party_id)?
-        } else {
-            0.0
-        };
+        // E9: stored charge rows stay unless the user changed them.
+        let charge_plan = plan_bill_charges_edit(tx, TransactionType::Purchase, purchase_id, &payload.charges)?;
+        let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
+        let totals = compute_bill_totals(&line_totals, &charge_plan.charges)?;
+        fig.set_totals(&line_totals, totals, g.applied_amount);
 
         // Lots: kept lines update in place (ids kept: allocations point at them), the rest are
         // removed (if unreferenced) or created.
@@ -385,25 +404,49 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
                 kept.push(lid);
             }
         }
+        // Per kept lot, the edit to write (`None` = unchanged). E2: a lot whose item did not change
+        // keeps its `item_name`, and its `pack_label` while the units per pack are the same.
+        let mut edits: Vec<Option<LotEdit>> = Vec::with_capacity(r.lines.len());
+        for l in &r.lines {
+            let Some(o) = l.purchase_item_id.and_then(|lid| old_lots.iter().find(|o| o.id == lid)) else {
+                // DD-90: a new line of a deleted item.
+                ensure_active_item(&l.item)?;
+                edits.push(None);
+                continue;
+            };
+            let edit = lot_edit(o, l);
+            if edit.is_some() {
+                // DD-90: a changed lot of a deleted item (its old or its new item).
+                require_active_item(tx, o.item_id)?;
+                ensure_active_item(&l.item)?;
+            }
+            edits.push(edit);
+        }
+        for lot in old_lots.iter().filter(|o| !kept.contains(&o.id)) {
+            require_active_item(tx, lot.item_id)?;
+        }
+        let total_amount = totals.total_amount;
+        if total_amount + MONEY_EPS < g.applied_amount {
+            return Err(locked_with(
+                TOTAL_BELOW_APPLIED,
+                format!("The new total \u{20b9}{total_amount:.2} is below the \u{20b9}{:.2} already applied to this bill", g.applied_amount),
+            ));
+        }
+        let open = round2((total_amount - g.applied_amount).max(0.0));
+        let upfront = if with_payment {
+            check_purchase_payment(payload.payment_status, round2(payload.paid_amount), open, r.party_id)?
+        } else {
+            0.0
+        };
+
         for lot in old_lots.iter().filter(|o| !kept.contains(&o.id)) {
             self.inventory_service.remove_purchase_lot(tx, lot.id)?;
         }
-        for l in &r.lines {
-            match l.purchase_item_id {
-                Some(lid) => self.inventory_service.edit_purchase_lot(
-                    tx,
-                    lid,
-                    &LotEdit {
-                        item_id: l.item.id,
-                        item_name: l.item.name.clone(),
-                        pack_label: l.pack_label.clone(),
-                        pack_quantity: l.pack_quantity,
-                        quantity: l.base_qty,
-                        unit_cost: l.line_total / l.base_qty,
-                        total_amount: l.line_total,
-                    },
-                )?,
-                None => self.inventory_service.add_stock_for_purchase(tx, &new_lot(purchase_id, l))?,
+        for (l, edit) in r.lines.iter().zip(&edits) {
+            match (l.purchase_item_id, edit) {
+                (Some(lid), Some(e)) => self.inventory_service.edit_purchase_lot(tx, lid, e)?,
+                (Some(_), None) => {}
+                (None, _) => self.inventory_service.add_stock_for_purchase(tx, &new_lot(purchase_id, l))?,
             }
         }
 
@@ -423,12 +466,29 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             ..old.clone()
         };
         tx.purchases().update_header_for_edit(&header)?;
-        insert_bill_charges(tx, TransactionType::Purchase, purchase_id, &charges)?;
+        apply_bill_charges_edit(tx, TransactionType::Purchase, purchase_id, &charge_plan)?;
         if party_changed {
             self.payment_service.repoint_bill_party(tx, TransactionType::Purchase, purchase_id, r.party_id)?;
         }
-        self.payment_service.recompute(tx, TransactionType::Purchase, purchase_id)?;
-        self.record_upfront(tx, purchase_id, r.party_id, payload, upfront)?;
+        if with_payment {
+            // DD-89: the UPFRONT row is updated in place (created only when none, deleted at 0).
+            self.payment_service.set_bill_upfront(
+                tx,
+                BillUpfront {
+                    tx_type: TransactionType::Purchase,
+                    tx_id: purchase_id,
+                    party_id: r.party_id,
+                    date: payload.transaction_date.clone(),
+                    amount: upfront,
+                    payment_mode: payload.payment_mode.clone(),
+                    notes: INWARD_NOTE.to_string(),
+                },
+            )?;
+        } else {
+            // Preview without a payment (rolled back): the cash is unknown, so it is left out.
+            self.payment_service
+                .delete_bill_ledger(tx, TransactionType::Purchase, purchase_id, &[PaymentKind::Upfront])?;
+        }
         let after = tx
             .purchases()
             .find_transaction_by_id(purchase_id)?
@@ -707,10 +767,17 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
             // DD-30 / DD-28: bills read the write-time snapshots, not the live catalog.
             let item_name = item.item_name.clone();
             let bundle_name = item.pack_label.clone();
+            let bundle_id = resolve_line_bundle(
+                &mut *tx,
+                item.item_id,
+                item.pack_label.as_deref(),
+                units_per_pack(item.quantity, item.pack_quantity),
+            )?;
             details.push(PurchaseItemDetail {
                 purchase_item: item,
                 item_name,
                 bundle_name,
+                bundle_id,
             });
         }
         let settlements = tx.settlements().list_by_transaction(TransactionType::Purchase, purchase_id)?;

@@ -148,7 +148,7 @@ pub fn sale_payload(
         notes: None,
         items: lines
             .iter()
-            .map(|&(item_id, bundle_id, bundle_quantity, unit_price)| CreateSaleItemPayload {
+            .map(|&(item_id, bundle_id, bundle_quantity, unit_price)| CreateSaleItemPayload { sale_item_id: None,
                 item_id,
                 bundle_id,
                 bundle_quantity,
