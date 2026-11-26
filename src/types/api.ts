@@ -784,8 +784,9 @@ export interface ApiClient {
   /** DD-56: dry runs of the return commands (same result and errors, nothing saved). */
   previewCustomerReturn(payload: CustomerReturnPayload): Promise<ReturnResult>;
   previewVendorReturn(payload: VendorReturnPayload): Promise<ReturnResult>;
-  /** DD-86: lots of `itemId` a return to `partyId` may take (only `purchaseId`'s when given). */
-  listVendorReturnLots(itemId: number, partyId: number, purchaseId?: number | null): Promise<VendorReturnLot[]>;
+  /** DD-86: lots of `itemId` a return to `partyId` may take (only `purchaseId`'s when given; a null
+   *  party only with a walk-in bill's `purchaseId`). */
+  listVendorReturnLots(itemId: number, partyId: number | null, purchaseId?: number | null): Promise<VendorReturnLot[]>;
   getReturnDetails(returnId: number): Promise<ReturnDetailView>;
   /** FR-20: newest return of a bill first; rejects with `BillLocked` otherwise. */
   deleteReturn(returnId: number): Promise<DeleteReturnResult>;

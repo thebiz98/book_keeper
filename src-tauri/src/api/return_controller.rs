@@ -49,7 +49,7 @@ pub async fn preview_vendor_return(state: State<'_, AppState>, payload: VendorRe
 pub async fn list_vendor_return_lots(
     state: State<'_, AppState>,
     item_id: i64,
-    party_id: i64,
+    party_id: Option<i64>,
     purchase_id: Option<i64>,
 ) -> Result<Vec<VendorReturnLot>, AppError> {
     let svc = state.return_service.clone();

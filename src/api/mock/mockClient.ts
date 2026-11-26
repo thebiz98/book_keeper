@@ -937,7 +937,7 @@ export class MockApiClient implements ApiClient {
   async previewVendorReturn(_payload: Parameters<ApiClient['previewVendorReturn']>[0]) {
     return { returnId: 0, returnCode: '', creditedAmount: 0, cashRefunded: 0, totalAmount: 0, issuedValue: 0, discountReversed: 0 };
   }
-  async listVendorReturnLots(itemId: number, _partyId: number, purchaseId?: number | null) {
+  async listVendorReturnLots(itemId: number, _partyId: number | null, purchaseId?: number | null) {
     // DD-27 thin stub: one fixed lot (no eligibility rule lives here).
     return [
       {

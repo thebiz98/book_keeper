@@ -447,9 +447,10 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             purchase.as_ref().and_then(|p| p.party_id),
             purchase.is_some(),
         )?;
-        let (Some(party_id), Some(party_name)) = (party_id, party_name) else {
+        // A walk-in bill (no vendor) is returned linked to that bill only; else a vendor is needed.
+        if party_id.is_none() && purchase.is_none() {
             return Err(validation("party_id", "Choose the vendor the goods go back to"));
-        };
+        }
 
         // ---- Per line: the exact lot (DD-86), eligibility, simulated draw (R10), value (DD-87) --
         struct Line {
@@ -474,7 +475,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                 .purchases()
                 .find_transaction_by_id(lot.purchase_transaction_id)?
                 .ok_or_else(|| AppError::not_found("PurchaseTransaction", lot.purchase_transaction_id.to_string()))?;
-            if let Some(why) = vendor_return_ineligibility(&header, party_id, &party_name, purchase.as_ref()) {
+            if let Some(why) = vendor_return_ineligibility(&header, party_id, party_name.as_deref(), purchase.as_ref()) {
                 return Err(locked("VENDOR_LOT_NOT_ELIGIBLE", format!("{why} ('{}', lot {})", lot.item_name, header.transaction_code)));
             }
             if lot.item_id != it.item_id {
@@ -503,8 +504,8 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             return_code: return_code.clone(),
             return_date: payload.return_date.clone(),
             return_type: ReturnType::Vendor,
-            party_id: Some(party_id),
-            party_name: Some(party_name),
+            party_id,
+            party_name,
             original_transaction_id: payload.original_purchase_id,
             settlement_type: SettlementType::Refund,
             total_amount: total,
@@ -536,7 +537,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         let (credited, cash) = self.settle(
             tx,
             TransactionType::Purchase,
-            Some(party_id),
+            party_id,
             payload.original_purchase_id,
             return_id,
             &payload.return_date,
@@ -559,11 +560,26 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         &self,
         tx: &mut dyn TransactionContext,
         item_id: i64,
-        party_id: i64,
+        party_id: Option<i64>,
         purchase_id: Option<i64>,
     ) -> Result<Vec<VendorReturnLot>, AppError> {
         active_item(tx, item_id)?;
-        resolve_party(tx, Some(party_id), None, false)?;
+        match (party_id, purchase_id) {
+            (Some(pid), _) => {
+                resolve_party(tx, Some(pid), None, false)?;
+            }
+            // Walk-in bill: only that bill's lots, and only when the bill has no vendor.
+            (None, Some(bid)) => {
+                let bill = tx
+                    .purchases()
+                    .find_transaction_by_id(bid)?
+                    .ok_or_else(|| AppError::not_found("PurchaseTransaction", bid.to_string()))?;
+                if bill.party_id.is_some() {
+                    return Ok(Vec::new());
+                }
+            }
+            (None, None) => return Err(validation("party_id", "Choose the vendor the goods go back to")),
+        }
         tx.purchases().list_vendor_return_lots(item_id, party_id, purchase_id)
     }
 }
@@ -636,7 +652,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
     fn list_vendor_return_lots(
         &self,
         item_id: i64,
-        party_id: i64,
+        party_id: Option<i64>,
         purchase_id: Option<i64>,
     ) -> Result<Vec<VendorReturnLot>, AppError> {
         let mut tx = self.uow.begin_read()?;

@@ -148,7 +148,7 @@ fn r1_vendor_return_without_a_lot_is_refused_and_never_draws_other_lots() {
     assert_eq!(code_of(&r), "VENDOR_LOT_REQUIRED");
     assert_eq!((e.stock(), e.return_count(), e.remaining(a_lot)), (stock, 0, 10.0), "nothing written");
     // The picker offers only vendor A's purchase lot.
-    let lots = e.rets.list_vendor_return_lots(ITEM, A, None).unwrap();
+    let lots = e.rets.list_vendor_return_lots(ITEM, Some(A), None).unwrap();
     assert_eq!(lots.iter().map(|l| l.purchase_item_id).collect::<Vec<_>>(), vec![a_lot]);
     e.invariants();
 }
@@ -319,16 +319,16 @@ fn list_vendor_return_lots_returns_only_eligible_lots_in_id_order() {
         e.inv.create_source_lot(&mut *tx, LotSource::Opening, DAY, ITEM, 4.0, Some(90.0), None).unwrap();
         tx.commit().unwrap();
     }
-    let lots = e.rets.list_vendor_return_lots(ITEM, A, None).unwrap();
+    let lots = e.rets.list_vendor_return_lots(ITEM, Some(A), None).unwrap();
     assert_eq!(lots.iter().map(|l| l.purchase_item_id).collect::<Vec<_>>(), vec![lot1, lot3]);
     assert_eq!((lots[0].unit_cost, lots[0].net_unit_cost, lots[0].remaining_quantity), (100.0, 90.0, 10.0));
     assert_eq!((lots[1].net_unit_cost, lots[0].purchase_id), (100.0, bill1));
     assert_eq!(lots[0].base_unit, "PCS");
-    let only_bill = e.rets.list_vendor_return_lots(ITEM, A, Some(bill1)).unwrap();
+    let only_bill = e.rets.list_vendor_return_lots(ITEM, Some(A), Some(bill1)).unwrap();
     assert_eq!(only_bill.len(), 1);
     // A used-up lot drops out.
     e.rets.create_vendor_return(vr(None, Some(A), &[(Some(lot3), 10.0)])).unwrap();
-    assert_eq!(e.rets.list_vendor_return_lots(ITEM, A, None).unwrap().len(), 1);
+    assert_eq!(e.rets.list_vendor_return_lots(ITEM, Some(A), None).unwrap().len(), 1);
     // A deleted item is refused.
     {
         let mut tx = e.db.begin_transaction().unwrap();
@@ -337,5 +337,40 @@ fn list_vendor_return_lots_returns_only_eligible_lots_in_id_order() {
         tx.items().update(&it).unwrap();
         tx.commit().unwrap();
     }
-    assert!(e.rets.list_vendor_return_lots(ITEM, A, None).is_err());
+    assert!(e.rets.list_vendor_return_lots(ITEM, Some(A), None).is_err());
+}
+
+#[test]
+fn walk_in_bill_is_returned_linked_with_no_party() {
+    let e = env();
+    // A new walk-in purchase must be paid; an unpaid one exists in older or imported data.
+    let (unpaid, lot1) = {
+        let mut tx = e.db.begin_transaction().unwrap();
+        tx.purchases().create_transaction(&common::fixtures::create_test_purchase_tx(900, "PUR-0900", None, 1000.0, 0.0, DAY)).unwrap();
+        let lot = common::fixtures::create_test_purchase_lot(900, 900, ITEM, None, 10.0, 10.0, 100.0, 10.0);
+        e.inv.add_stock_for_purchase(&mut *tx, &lot).unwrap();
+        tx.commit().unwrap();
+        (900, 900)
+    };
+    let paid = e.purchases.create_purchase(purchase_payload(None, PaymentStatus::Paid, 1000.0, &[(ITEM, None, 10.0, 100.0)])).unwrap().purchase_id;
+    let lot2 = e.db.begin_read().unwrap().purchases().list_items_by_transaction_id(paid).unwrap()[0].id;
+    // The picker offers only that bill's lot; without a bill a party is required.
+    let lots = e.rets.list_vendor_return_lots(ITEM, None, Some(unpaid)).unwrap();
+    assert_eq!(lots.iter().map(|l| l.purchase_item_id).collect::<Vec<_>>(), vec![lot1]);
+    assert!(e.rets.list_vendor_return_lots(ITEM, None, None).is_err());
+    assert!(matches!(e.rets.create_vendor_return(vr(None, None, &[(Some(lot1), 1.0)])), Err(AppError::ValidationError { .. })));
+    // Another walk-in bill's lot is not on the linked bill; a vendor's lot is refused too.
+    assert_eq!(code_of(&e.rets.create_vendor_return(vr(Some(unpaid), None, &[(Some(lot2), 1.0)]))), "VENDOR_LOT_NOT_ELIGIBLE");
+    let (_, a_lot) = e.buy(A, PaymentStatus::Unpaid, 0.0, vec![]);
+    assert_eq!(code_of(&e.rets.create_vendor_return(vr(Some(unpaid), None, &[(Some(a_lot), 1.0)]))), "VENDOR_LOT_NOT_ELIGIBLE");
+    // Unpaid: credited to the bill.
+    let r = e.rets.create_vendor_return(vr(Some(unpaid), None, &[(Some(lot1), 3.0)])).unwrap();
+    assert_eq!((r.credited_amount, r.cash_refunded), (300.0, 0.0));
+    assert_eq!(e.purchase(unpaid).balance_due, 700.0);
+    assert_eq!(e.rets.get_return_details(r.return_id).unwrap().return_tx.party_id, None);
+    // Paid: all cash back.
+    let r = e.rets.create_vendor_return(vr(Some(paid), None, &[(Some(lot2), 2.0)])).unwrap();
+    assert_eq!((r.credited_amount, r.cash_refunded), (0.0, 200.0));
+    assert_eq!(kinds(&e.ledger(paid), PaymentKind::RefundIn), vec![200.0]);
+    e.invariants();
 }

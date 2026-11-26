@@ -283,12 +283,12 @@ impl PurchaseRepository for SqlitePurchaseRepository {
     fn list_vendor_return_lots(
         &self,
         item_id: i64,
-        party_id: i64,
+        party_id: Option<i64>,
         purchase_id: Option<i64>,
     ) -> Result<Vec<VendorReturnLot>, AppError> {
         // Twin of `vendor_return_ineligibility` (DD-86); keep the two in step.
         let mut stmt = self.conn.prepare(
-            "SELECT p.id, t.id, t.transaction_code, t.transaction_date, p.unit_cost, p.remaining_quantity,                     i.base_unit, t.items_subtotal, t.discounts_total              FROM purchase_items p              JOIN purchase_transactions t ON t.id = p.purchase_transaction_id              JOIN items i ON i.id = p.item_id              WHERE t.source = 'PURCHASE' AND t.is_opening_balance = 0 AND t.party_id = ?2                AND (?3 IS NULL OR t.id = ?3) AND p.item_id = ?1 AND p.remaining_quantity > 1e-9              ORDER BY p.id",
+            "SELECT p.id, t.id, t.transaction_code, t.transaction_date, p.unit_cost, p.remaining_quantity,                     i.base_unit, t.items_subtotal, t.discounts_total              FROM purchase_items p              JOIN purchase_transactions t ON t.id = p.purchase_transaction_id              JOIN items i ON i.id = p.item_id              WHERE t.source = 'PURCHASE' AND t.is_opening_balance = 0 AND t.party_id IS ?2                AND (?3 IS NULL OR t.id = ?3) AND p.item_id = ?1 AND p.remaining_quantity > 1e-9              ORDER BY p.id",
         )?;
         let rows = stmt
             .query_map(params![item_id, party_id, purchase_id], |r| {
