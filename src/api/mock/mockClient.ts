@@ -917,7 +917,7 @@ export class MockApiClient implements ApiClient {
       notes: p.notes,
       createdAt: nowIso(),
     });
-    return { returnId: id, returnCode: code, creditedAmount: 0, cashRefunded: p.total, totalAmount: p.total, issuedValue: 0 };
+    return { returnId: id, returnCode: code, creditedAmount: 0, cashRefunded: p.total, totalAmount: p.total, issuedValue: 0, discountReversed: 0 };
   }
   // --- Previews (DD-56): canned shapes only. The Rust backend computes every figure. ---
   private emptyBillPreview() {
@@ -952,10 +952,25 @@ export class MockApiClient implements ApiClient {
     return [];
   }
   async previewCustomerReturn(_payload: Parameters<ApiClient['previewCustomerReturn']>[0]) {
-    return { returnId: 0, returnCode: '', creditedAmount: 0, cashRefunded: 0, totalAmount: 0, issuedValue: 0 };
+    return { returnId: 0, returnCode: '', creditedAmount: 0, cashRefunded: 0, totalAmount: 0, issuedValue: 0, discountReversed: 0 };
   }
   async previewVendorReturn(_payload: Parameters<ApiClient['previewVendorReturn']>[0]) {
-    return { returnId: 0, returnCode: '', creditedAmount: 0, cashRefunded: 0, totalAmount: 0, issuedValue: 0 };
+    return { returnId: 0, returnCode: '', creditedAmount: 0, cashRefunded: 0, totalAmount: 0, issuedValue: 0, discountReversed: 0 };
+  }
+  async listVendorReturnLots(itemId: number, _partyId: number | null, purchaseId?: number | null) {
+    // DD-27 thin stub: one fixed lot (no eligibility rule lives here).
+    return [
+      {
+        purchaseItemId: 1,
+        purchaseId: purchaseId ?? 1,
+        purchaseCode: 'PUR-1000',
+        transactionDate: '2026-11-01',
+        unitCost: 5,
+        netUnitCost: 5,
+        remainingQuantity: this.items.find((i) => i.id === itemId)?.currentStock ?? 0,
+        baseUnit: 'PCS',
+      },
+    ];
   }
   async previewStockAdjustment(_payload: Parameters<ApiClient['previewStockAdjustment']>[0]) {
     return { previousStock: 0, newStock: 0, unitCost: null, lossValue: 0, valueChange: 0 };

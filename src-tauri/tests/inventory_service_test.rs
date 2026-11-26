@@ -173,13 +173,13 @@ fn test_tc_inv_007_positive_adjustment_without_prior_lot_needs_cost() {
 fn test_tc_inv_009_vendor_return_named_lot() {
     let (db, inv) = setup(&[(9, 9, 10.0, 3.0)]);
     let mut tx = db.begin_transaction().unwrap();
-    let value = inv.remove_stock_for_vendor_return(&mut *tx, 55, 9, Some(9), 4.0).unwrap();
-    assert_eq!(value, 12.0);
+    let value = inv.remove_stock_for_vendor_return(&mut *tx, 55, 9, 9, 4.0).unwrap();
+    assert_eq!((value.gross_cost, value.net_value), (12.0, 12.0));
     assert_eq!(lot_remaining(&mut *tx, 9), 6.0);
     let rows = tx.outflow_allocations().find_by_source(OutflowSourceType::VendorReturn, 55).unwrap();
     assert_eq!((rows.len(), rows[0].purchase_item_id, rows[0].quantity_depleted), (1, 9, 4.0));
     assert!(matches!(
-        inv.remove_stock_for_vendor_return(&mut *tx, 56, 9, Some(9), 7.0),
+        inv.remove_stock_for_vendor_return(&mut *tx, 56, 9, 9, 7.0),
         Err(AppError::ValidationError { .. })
     ));
     assert_eq!(lot_remaining(&mut *tx, 9), 6.0);
@@ -362,21 +362,21 @@ fn adjustments_on_service_items_are_rejected() {
 }
 
 #[test]
-fn vendor_return_rejects_wrong_item_and_non_purchase_lots_and_falls_back_to_fifo() {
+fn vendor_return_rejects_wrong_item_and_non_purchase_lots() {
     let (db, inv) = setup(&[(1, 1, 10.0, 3.0), (2, 2, 10.0, 8.0)]);
     inv.create_adjustment(adj(1, 5.0, AdjustmentReason::CountCorrection, None)).unwrap();
     let adj_lot = inv.get_item_lots(1).unwrap()[1].purchase_item_id;
     let mut tx = db.begin_transaction().unwrap();
     // lot 2 belongs to item 2
-    assert!(matches!(inv.remove_stock_for_vendor_return(&mut *tx, 1, 1, Some(2), 1.0), Err(AppError::ValidationError { .. })));
+    assert!(matches!(inv.remove_stock_for_vendor_return(&mut *tx, 1, 1, 2, 1.0), Err(AppError::ValidationError { .. })));
     // an ADJUSTMENT-source lot is not returnable to a vendor
-    assert!(matches!(inv.remove_stock_for_vendor_return(&mut *tx, 1, 1, Some(adj_lot), 1.0), Err(AppError::ValidationError { .. })));
-    assert!(matches!(inv.remove_stock_for_vendor_return(&mut *tx, 1, 1, Some(999), 1.0), Err(AppError::NotFound { .. })));
-    // None -> FIFO outflow tagged VENDOR_RETURN across lots (10 @3 then 5 @3)
-    let value = inv.remove_stock_for_vendor_return(&mut *tx, 2, 1, None, 12.0).unwrap();
-    assert_eq!(value, 36.0);
+    assert!(matches!(inv.remove_stock_for_vendor_return(&mut *tx, 1, 1, adj_lot, 1.0), Err(AppError::ValidationError { .. })));
+    assert!(matches!(inv.remove_stock_for_vendor_return(&mut *tx, 1, 1, 999, 1.0), Err(AppError::NotFound { .. })));
+    // DD-86: no FIFO fall-back; the named purchase lot is the only one drawn (one outflow row).
+    let value = inv.remove_stock_for_vendor_return(&mut *tx, 2, 1, 1, 10.0).unwrap();
+    assert_eq!(value.gross_cost, 30.0);
     let rows = tx.outflow_allocations().find_by_source(OutflowSourceType::VendorReturn, 2).unwrap();
-    assert_eq!(rows.len(), 2);
+    assert_eq!((rows.len(), rows[0].purchase_item_id), (1, 1));
     assert_stock_invariant(&mut *tx);
 }
 
@@ -394,12 +394,11 @@ fn test_tc_inv_008_stock_cache_invariant_after_mixed_operations() {
     inv.reverse_sale_line(&mut *tx, 21, 1, 7.0, true).unwrap();
     inv.reverse_sale_line(&mut *tx, 21, 1, 2.0, false).unwrap();
     assert_stock_invariant(&mut *tx);
-    // replacement issue, opening lot, vendor return (named + FIFO)
+    // replacement issue, opening lot, vendor return (named lot, DD-86)
     inv.issue_stock_outflow(&mut *tx, OutflowSourceType::Replacement, 900, 2, 2.0).unwrap();
     inv.create_source_lot(&mut *tx, LotSource::Opening, "2026-11-21", 2, 6.0, Some(2.5), None).unwrap();
     inv.create_source_lot(&mut *tx, LotSource::Return, "2026-11-21", 1, 1.5, None, None).unwrap();
-    inv.remove_stock_for_vendor_return(&mut *tx, 901, 1, Some(2), 2.0).unwrap();
-    inv.remove_stock_for_vendor_return(&mut *tx, 902, 1, None, 3.0).unwrap();
+    inv.remove_stock_for_vendor_return(&mut *tx, 901, 1, 2, 2.0).unwrap();
     assert_stock_invariant(&mut *tx);
     tx.commit().unwrap();
     // adjustments in their own transactions

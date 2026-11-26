@@ -44,3 +44,14 @@ pub async fn preview_vendor_return(state: State<'_, AppState>, payload: VendorRe
     let svc = state.return_service.clone();
     super::run_blocking(move || svc.preview_vendor_return(payload)).await
 }
+/// DD-86: the lots a vendor return may take (picker rows and per-lot maximum).
+#[tauri::command]
+pub async fn list_vendor_return_lots(
+    state: State<'_, AppState>,
+    item_id: i64,
+    party_id: Option<i64>,
+    purchase_id: Option<i64>,
+) -> Result<Vec<VendorReturnLot>, AppError> {
+    let svc = state.return_service.clone();
+    super::run_blocking(move || svc.list_vendor_return_lots(item_id, party_id, purchase_id)).await
+}

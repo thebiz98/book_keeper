@@ -615,7 +615,7 @@ fn cost_change_on_a_vendor_returned_lot_is_rejected() {
             settlement_type: SettlementType::Refund,
             reason: None,
             notes: None,
-            items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: None, quantity: 2.0 }],
+            items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: Some(lot), quantity: 2.0 }],
         })
         .unwrap();
     let g = e.purchases.get_purchase_edit_guard(p).unwrap();
@@ -684,7 +684,7 @@ fn purchase_vendor_change_repoints_settlements_and_credits_lock_it() {
             settlement_type: SettlementType::Refund,
             reason: None,
             notes: None,
-            items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: None, quantity: 2.0 }],
+            items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: Some(lot), quantity: 2.0 }],
         })
         .unwrap();
     assert_eq!(code(e.purchases.update_purchase(p, e.pp(Some(1), Unpaid, 0.0, &[(Some(lot), 1, 10.0, 10.0)]))), "PARTY_CHANGE_WITH_CREDITS");

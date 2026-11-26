@@ -1,9 +1,10 @@
 //! SQLite implementation of `PurchaseRepository`.
 use rusqlite::{params, types::Value, OptionalExtension, Row};
 
-use crate::core::dtos::{ItemBillRef, ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow};
+use crate::core::dtos::{ItemBillRef, ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow, VendorReturnLot};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
+use crate::core::money::net_unit_price;
 use crate::core::value_objects::{LotSource, PaymentStatus};
 use crate::data::contracts::purchase_repository::PurchaseRepository;
 use crate::data::sqlite::code_gen::{next_code, seq_for_source, OPENING_BALANCE_CODE};
@@ -277,6 +278,35 @@ impl PurchaseRepository for SqlitePurchaseRepository {
                 |r| r.get::<_, f64>(0),
             )
             .optional()?)
+    }
+
+    fn list_vendor_return_lots(
+        &self,
+        item_id: i64,
+        party_id: Option<i64>,
+        purchase_id: Option<i64>,
+    ) -> Result<Vec<VendorReturnLot>, AppError> {
+        // Twin of `vendor_return_ineligibility` (DD-86); keep the two in step.
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, t.id, t.transaction_code, t.transaction_date, p.unit_cost, p.remaining_quantity,                     i.base_unit, t.items_subtotal, t.discounts_total              FROM purchase_items p              JOIN purchase_transactions t ON t.id = p.purchase_transaction_id              JOIN items i ON i.id = p.item_id              WHERE t.source = 'PURCHASE' AND t.is_opening_balance = 0 AND t.party_id IS ?2                AND (?3 IS NULL OR t.id = ?3) AND p.item_id = ?1 AND p.remaining_quantity > 1e-9              ORDER BY p.id",
+        )?;
+        let rows = stmt
+            .query_map(params![item_id, party_id, purchase_id], |r| {
+                let unit_cost: f64 = r.get(4)?;
+                let (subtotal, discounts): (f64, f64) = (r.get(7)?, r.get(8)?);
+                Ok(VendorReturnLot {
+                    purchase_item_id: r.get(0)?,
+                    purchase_id: r.get(1)?,
+                    purchase_code: r.get(2)?,
+                    transaction_date: r.get(3)?,
+                    unit_cost,
+                    net_unit_cost: net_unit_price(unit_cost, subtotal, discounts),
+                    remaining_quantity: r.get(5)?,
+                    base_unit: r.get(6)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     fn list_lots_for_item(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {

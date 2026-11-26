@@ -187,14 +187,8 @@ pub fn delete_bill_charges(
     tx.bill_charges().delete_by_transaction(side, transaction_id)
 }
 
-/// Sold rate net of the bill discount share: `unit_price * clamp(1 - discounts / items_subtotal, 0, 1)`.
-/// A bill without a positive subtotal keeps the unit price.
-pub fn net_unit_price(unit_price: f64, items_subtotal: f64, discounts_total: f64) -> f64 {
-    if items_subtotal <= MONEY_EPS {
-        return unit_price;
-    }
-    unit_price * (1.0 - discounts_total / items_subtotal).clamp(0.0, 1.0)
-}
+/// Rate net of the bill discount share (lives in `core::money` so repositories share it, DD-87).
+pub use crate::core::money::net_unit_price;
 
 /// Sale payment cross-check (DD-02): returns `(upfront, change)`.
 pub fn sale_payment_split(status: PaymentStatus, total_amount: f64, paid: f64) -> Result<(f64, f64), AppError> {

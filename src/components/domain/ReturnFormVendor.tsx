@@ -1,15 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePreview } from '@/hooks/usePreview';
 import { Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import { todayLocal } from '@/lib/dates';
 import type {
-  ItemLot,
   ItemSearchResult,
   Party,
   PurchaseDetailView,
   ReturnResult,
   VendorReturnItemPayload,
+  VendorReturnLot,
   VendorReturnPayload,
 } from '@/types';
 import { Button } from '../ui/Button';
@@ -28,8 +28,6 @@ import {
 } from './ReturnFormShared';
 import { refreshAppMetrics } from './navParams';
 
-const FIFO = 'FIFO';
-
 interface BillLine {
   purchaseItemId: number;
   itemId: number;
@@ -44,22 +42,18 @@ interface VendorLine {
   itemId: number;
   name: string;
   baseUnit: string;
-  lots: ItemLot[];
-  /** 'FIFO' or String(purchaseItemId). */
+  /** DD-86: the backend's eligible lots for this vendor, in the order received; null = loading. */
+  lots: VendorReturnLot[] | null;
+  /** String(purchaseItemId), or '' while none is chosen. */
   lot: string;
   qty: number;
 }
 
-/** Supplier lots (PURCHASE source) that still have stock, oldest first. */
-export function purchaseLots(lots: ItemLot[]): ItemLot[] {
-  return lots
-    .filter((l) => l.source === 'PURCHASE' && l.remainingQuantity > 0)
-    .sort((a, b) => (a.transactionDate === b.transactionDate ? a.purchaseItemId - b.purchaseItemId : a.transactionDate < b.transactionDate ? -1 : 1));
-}
+const money = (v: number) => `₹${v.toFixed(2)}`;
 
-function lineRemaining(l: VendorLine): number {
-  if (l.lot === FIFO) return l.lots.reduce((s, x) => s + x.remainingQuantity, 0);
-  return l.lots.find((x) => String(x.purchaseItemId) === l.lot)?.remainingQuantity ?? 0;
+export function lotLabel(l: VendorReturnLot): string {
+  const net = Math.abs(l.netUnitCost - l.unitCost) > 0.0001 ? ` (net ${money(l.netUnitCost)})` : '';
+  return `${l.purchaseCode} · ${l.transactionDate} · ${money(l.unitCost)}${net} · ${l.remainingQuantity} ${l.baseUnit} left`;
 }
 
 
@@ -115,24 +109,47 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
   const patchLine = (key: number, p: Partial<VendorLine>) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
 
-  const addItem = (it: ItemSearchResult) => {
-    const key = Date.now() + Math.random();
-    setLines((ls) => [...ls, { key, itemId: it.itemId, name: it.name, baseUnit: it.baseUnit, lots: [], lot: FIFO, qty: 1 }]);
+  // DD-86: the lot list comes from the backend; a late answer for another vendor is dropped.
+  const vendorRef = useRef<number | null>(null);
+  const loadLots = useCallback((key: number, itemId: number, name: string, partyId: number) => {
     api
-      .getItemLots(it.itemId)
-      .then((lots) => patchLine(key, { lots: purchaseLots(lots) }))
-      .catch((e) => setLoadError(`Could not load lots for ${it.name}: ${errorMessage(e)}`));
+      .listVendorReturnLots(itemId, partyId, null)
+      .then((lots) => {
+        if (vendorRef.current !== partyId) return;
+        setLines((ls) =>
+          ls.map((l) =>
+            l.key === key ? { ...l, lots, lot: lots.length === 1 ? String(lots[0].purchaseItemId) : '' } : l
+          )
+        );
+      })
+      .catch((e) => setLoadError(`Could not load lots for ${name}: ${errorMessage(e)}`));
+  }, []);
+
+  const pickVendor = (p: Party | null) => {
+    setVendor(p);
+    vendorRef.current = p?.id ?? null;
+    setLines((ls) => ls.map((l) => ({ ...l, lots: p ? null : [], lot: '' })));
+    if (p) lines.forEach((l) => loadLots(l.key, l.itemId, l.name, p.id));
   };
 
-  // DD-56: the value (lot cost removed, FIFO or named lot), the credited/cash split and every
-  // refusal (more than remaining ...) come from `preview_vendor_return`.
+  const addItem = (it: ItemSearchResult) => {
+    const key = Date.now() + Math.random();
+    setLines((ls) => [
+      ...ls,
+      { key, itemId: it.itemId, name: it.name, baseUnit: it.baseUnit, lots: vendor ? null : [], lot: '', qty: 1 },
+    ]);
+    if (vendor) loadLots(key, it.itemId, it.name, vendor.id);
+  };
+
+  // DD-56: the value (lot cost net of the bill discount), the credited/cash split and every
+  // refusal (no lot, lot not eligible, more than remaining ...) come from `preview_vendor_return`.
   const payload = useMemo<VendorReturnPayload | null>(() => {
     const items: VendorReturnItemPayload[] =
       mode === 'BILL'
         ? billLines
             .filter((l) => l.qty > 0)
             .map((l) => ({ itemId: l.itemId, purchaseItemId: l.purchaseItemId, quantity: l.qty }))
-        : lines.map((l) => ({ itemId: l.itemId, purchaseItemId: l.lot === FIFO ? null : Number(l.lot), quantity: l.qty }));
+        : lines.map((l) => ({ itemId: l.itemId, purchaseItemId: l.lot ? Number(l.lot) : null, quantity: l.qty }));
     if (items.length === 0 || (mode === 'BILL' && !detail) || (mode === 'VENDOR' && !vendor)) return null;
     return {
       originalPurchaseId: mode === 'BILL' ? detail?.purchase.id ?? null : null,
@@ -249,29 +266,39 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
         <div className="flex flex-col gap-3">
           <div className="max-w-sm">
             <FieldLabel>Vendor *</FieldLabel>
-            <PartySelector partyType="VENDOR" selectedPartyId={vendor?.id ?? null} onSelectParty={setVendor} allowWalkIn={false} />
+            <PartySelector partyType="VENDOR" selectedPartyId={vendor?.id ?? null} onSelectParty={pickVendor} allowWalkIn={false} />
           </div>
           <div>
             <FieldLabel>Add item to return</FieldLabel>
             <ItemSearchTypeahead physicalOnly onSelectItem={addItem} placeholder="Search item to return..." />
           </div>
-          {lines.map((l) => (
+          {lines.map((l) => {
+            const chosen = l.lots?.find((x) => String(x.purchaseItemId) === l.lot) ?? null;
+            return (
             <div key={l.key} className="grid grid-cols-[1fr_2fr_7rem_auto] gap-2 items-end text-xs">
               <span className="font-medium pb-2">{l.name}</span>
-              <Select
-                label="Lot"
-                value={l.lot}
-                onChange={(v) => patchLine(l.key, { lot: String(v) })}
-                options={[
-                  { value: FIFO, label: 'FIFO (oldest first)' },
-                  ...l.lots.map((lot) => ({
-                    value: String(lot.purchaseItemId),
-                    label: `${lot.transactionCode} · ${lot.transactionDate} · ${lot.remainingQuantity} left @ ₹${lot.unitCost}`,
-                  })),
-                ]}
-              />
+              {!vendor ? (
+                <span className="pb-2 text-slate-500">Choose the vendor to see its lots</span>
+              ) : l.lots === null ? (
+                <span className="pb-2 text-slate-500">Loading lots...</span>
+              ) : l.lots.length === 0 ? (
+                <span data-testid="no-vendor-lots" className="pb-2 text-slate-500">
+                  No stock of this item from {vendor.name} to return
+                </span>
+              ) : (
+                <Select
+                  label="Lot"
+                  aria-label={`Lot for ${l.name}`}
+                  value={l.lot}
+                  onChange={(v) => patchLine(l.key, { lot: String(v) })}
+                  options={[
+                    ...(l.lots.length > 1 ? [{ value: '', label: 'Choose a lot...' }] : []),
+                    ...l.lots.map((lot) => ({ value: String(lot.purchaseItemId), label: lotLabel(lot) })),
+                  ]}
+                />
+              )}
               <NumericInput
-                label={`Qty (max ${lineRemaining(l)})`}
+                label={chosen ? `Qty (max ${chosen.remainingQuantity})` : 'Qty'}
                 aria-label={`Return quantity for ${l.name}`}
                 value={l.qty}
                 onChange={(v) => patchLine(l.key, { qty: v })}
@@ -287,7 +314,8 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

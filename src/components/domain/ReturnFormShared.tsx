@@ -25,6 +25,11 @@ export const RefundPreview: React.FC<{
         <span className="text-slate-500"> (total value </span>
         <CurrencyDisplay amount={result.totalAmount} size="sm" />
         <span className="text-slate-500">)</span>
+        {(result.discountReversed ?? 0) > 0 && (
+          <span data-testid="discount-reversed" className="text-slate-500">
+            {' '}· Purchase discount reversed <CurrencyDisplay amount={result.discountReversed} size="sm" />
+          </span>
+        )}
       </>
     ) : (
       <span className="text-slate-500">—</span>

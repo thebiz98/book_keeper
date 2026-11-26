@@ -1,6 +1,6 @@
 use crate::core::dtos::{
     BillEditGuard, CustomerReturnPayload, DeleteReturnResult, Paginated, ReturnDetailView, ReturnResult,
-    ReturnsFilter, VendorReturnPayload,
+    ReturnsFilter, VendorReturnLot, VendorReturnPayload,
 };
 use crate::core::entities::ReturnTransaction;
 use crate::core::error::AppError;
@@ -23,6 +23,16 @@ pub trait ReturnService: Send + Sync {
 
     /// FR-20 pre-check for the UI (same evaluation as the command).
     fn get_return_delete_guard(&self, return_id: i64) -> Result<BillEditGuard, AppError>;
+
+    /// DD-86: the lots a vendor return of `item_id` to `party_id` may take (only `purchase_id`'s
+    /// when given; `party_id = None` only with `purchase_id`, a walk-in bill), id order, with stock
+    /// left and the net cost. Feeds the picker and its maximum.
+    fn list_vendor_return_lots(
+        &self,
+        item_id: i64,
+        party_id: Option<i64>,
+        purchase_id: Option<i64>,
+    ) -> Result<Vec<VendorReturnLot>, AppError>;
 }
 
 impl<T: ReturnService + ?Sized> ReturnService for std::sync::Arc<T> {
@@ -60,5 +70,14 @@ impl<T: ReturnService + ?Sized> ReturnService for std::sync::Arc<T> {
 
     fn get_return_delete_guard(&self, return_id: i64) -> Result<BillEditGuard, AppError> {
         (**self).get_return_delete_guard(return_id)
+    }
+
+    fn list_vendor_return_lots(
+        &self,
+        item_id: i64,
+        party_id: Option<i64>,
+        purchase_id: Option<i64>,
+    ) -> Result<Vec<VendorReturnLot>, AppError> {
+        (**self).list_vendor_return_lots(item_id, party_id, purchase_id)
     }
 }

@@ -671,7 +671,7 @@ fn vendor_case(e: &Env, p: VendorReturnPayload) -> ReturnResult {
 }
 
 #[test]
-fn vendor_return_preview_equals_command_linked_and_fifo() {
+fn vendor_return_preview_equals_command_linked_and_unlinked() {
     let e = env();
     let bill = e.buy(Some(VENDOR), Partial, 40.0, &[(1, 10.0, 10.0)]);
     let lot = e.lots_of(bill)[0].id;
@@ -681,19 +681,26 @@ fn vendor_return_preview_equals_command_linked_and_fifo() {
         vendor_return(Some(bill), None, vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: Some(lot), quantity: 8.0 }]),
     );
     assert_eq!((r.total_amount, r.credited_amount, r.cash_refunded), (80.0, 60.0, 20.0));
-    // FIFO, no bill, no party: the oldest lot's cost, all cash.
+    // DD-86: no bill, the vendor's lot of a paid bill; nothing is open, so all cash.
+    let paid = e.buy(Some(VENDOR), Paid, 100.0, &[(1, 10.0, 10.0)]);
+    let paid_lot = e.lots_of(paid)[0].id;
     let r = vendor_case(
         &e,
-        vendor_return(None, None, vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: None, quantity: 2.0 }]),
+        vendor_return(None, Some(VENDOR), vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: Some(paid_lot), quantity: 2.0 }]),
     );
-    assert_eq!((r.total_amount, r.credited_amount, r.cash_refunded), (120.0, 0.0, 120.0));
+    assert_eq!((r.total_amount, r.credited_amount, r.cash_refunded), (20.0, 0.0, 20.0));
 }
 
 #[test]
 fn vendor_return_preview_reports_the_commands_errors() {
     let e = env();
     let line = |qty| vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: None, quantity: qty }];
-    for p in [vendor_return(None, None, line(500.0)), vendor_return(None, None, vec![]), vendor_return(Some(9999), None, line(1.0))] {
+    for p in [
+        vendor_return(None, None, line(500.0)),
+        vendor_return(None, Some(VENDOR), line(1.0)), // VENDOR_LOT_REQUIRED
+        vendor_return(None, None, vec![]),
+        vendor_return(Some(9999), None, line(1.0)),
+    ] {
         let pv = e.quiet(|| e.rets.preview_vendor_return(p.clone()).unwrap_err());
         assert_eq!(pv, e.rets.create_vendor_return(p).unwrap_err());
     }

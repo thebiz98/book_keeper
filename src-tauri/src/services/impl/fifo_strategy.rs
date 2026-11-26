@@ -190,6 +190,8 @@ impl InventoryAllocationStrategy for FifoStrategy {
         item_id: i64,
         quantity: f64,
     ) -> Result<OutflowDepletionResult, AppError> {
+        // DD-86: a vendor return always names its lot; FIFO is for ADJUSTMENT and REPLACEMENT.
+        debug_assert!(source_type != OutflowSourceType::VendorReturn, "vendor returns never draw FIFO");
         let plan = Self::plan_depletion(uow, item_id, quantity)?;
         let mut total_cost = 0.0;
         let mut allocations = Vec::new();

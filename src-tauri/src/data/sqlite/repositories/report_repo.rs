@@ -49,8 +49,12 @@ const PNL_SQL: &str = "SELECT
        AND ri.condition = 'DAMAGED_SCRAP' AND r.return_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(items_subtotal), 0.0) FROM purchase_transactions
      WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
-  (SELECT COALESCE(SUM(total_amount), 0.0) FROM return_transactions
-     WHERE return_type = 'VENDOR' AND return_date BETWEEN ?1 AND ?2),
+  (SELECT COALESCE(SUM(o.quantity_depleted * o.unit_cost), 0.0)
+     FROM stock_outflow_allocations o
+     JOIN return_transactions r ON r.id = o.source_id
+     JOIN purchase_items p ON p.id = o.purchase_item_id
+     JOIN purchase_transactions t ON t.id = p.purchase_transaction_id
+     WHERE o.source_type = 'VENDOR_RETURN' AND t.source = 'PURCHASE' AND r.return_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(amount), 0.0) FROM expenses WHERE expense_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(discounts_total), 0.0) FROM sale_transactions
      WHERE is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
@@ -59,7 +63,14 @@ const PNL_SQL: &str = "SELECT
   (SELECT COALESCE(SUM(discounts_total), 0.0) FROM purchase_transactions
      WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(charges_total), 0.0) FROM purchase_transactions
-     WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2)";
+     WHERE source = 'PURCHASE' AND is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
+  (SELECT COALESCE(SUM(ri.cost_amount - ri.total_amount), 0.0)
+     FROM return_items ri
+     JOIN return_transactions r ON r.id = ri.return_transaction_id
+     JOIN purchase_items p ON p.id = ri.purchase_item_id
+     JOIN purchase_transactions t ON t.id = p.purchase_transaction_id
+     WHERE r.return_type = 'VENDOR' AND ri.line_type = 'RETURNED' AND t.source = 'PURCHASE'
+       AND r.return_date BETWEEN ?1 AND ?2)";
 
 impl ReportRepository for SqliteReportRepository {
     fn pnl(&self, from: &str, to: &str) -> Result<PnLReport, AppError> {
@@ -70,14 +81,14 @@ impl ReportRepository for SqliteReportRepository {
              WHERE s.is_opening_balance = 0 AND s.transaction_date BETWEEN ?1 AND ?2)",
             misc_cost_sql("si")
         );
-        let v: [f64; 14] = self.conn.query_row(&sql, params![from, to], |r| {
-            let mut a = [0.0; 14];
+        let v: [f64; 15] = self.conn.query_row(&sql, params![from, to], |r| {
+            let mut a = [0.0; 15];
             for (i, slot) in a.iter_mut().enumerate() {
                 *slot = r.get(i)?;
             }
             Ok(a)
         })?;
-        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses, sale_disc, sale_chg, pur_disc, pur_chg, misc] =
+        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses, sale_disc, sale_chg, pur_disc, pur_chg, disc_rev, misc] =
             v;
         let gross_sales = round2(gross);
         let sales_returns = round2(returns);
@@ -90,7 +101,9 @@ impl ReportRepository for SqliteReportRepository {
         let sale_charges_income = round2(sale_chg);
         let purchase_discounts_income = round2(pur_disc);
         let purchase_charges_expense = round2(pur_chg);
-        let other_income = round2(sale_charges_income + purchase_discounts_income);
+        // DD-87: a vendor return gives back its share of the bill discount on the return date.
+        let purchase_discount_reversed = round2(disc_rev);
+        let other_income = round2(sale_charges_income + purchase_discounts_income - purchase_discount_reversed);
         let operating_expenses = round2(expenses + purchase_charges_expense);
         Ok(PnLReport {
             gross_sales,
@@ -107,6 +120,7 @@ impl ReportRepository for SqliteReportRepository {
             operating_expenses,
             sale_charges_income,
             purchase_discounts_income,
+            purchase_discount_reversed,
             purchase_charges_expense,
             expenses_by_type: Vec::new(),
         })

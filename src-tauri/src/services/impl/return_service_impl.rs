@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{validate_date_range, BillEditGuard, DeleteReturnResult,
     CustomerReturnPayload, PageRequest, Paginated, RecordRefundPayload, ReturnDetailView, ReturnItemDetail,
-    ReturnResult, ReturnsFilter, VendorReturnPayload,
+    ReturnResult, ReturnsFilter, VendorReturnLot, VendorReturnPayload,
 };
 use crate::core::entities::{Item, ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
@@ -13,6 +13,7 @@ use crate::core::value_objects::{
     LotSource, OutflowSourceType, PartyType, ReturnLineType, ReturnType, SettlementType, StockCondition,
     TransactionType,
 };
+use crate::data::contracts::purchase_repository::vendor_return_ineligibility;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::inventory_service::InventoryService;
@@ -95,6 +96,10 @@ fn validation(field: &str, message: impl Into<String>) -> AppError {
     AppError::ValidationError { field: field.to_string(), message: message.into() }
 }
 
+fn locked(code: &str, message: impl Into<String>) -> AppError {
+    AppError::BillLocked { code: code.to_string(), message: message.into() }
+}
+
 fn check_qty(field: &str, q: f64) -> Result<(), AppError> {
     if !q.is_finite() || q <= 0.0 {
         return Err(validation(field, format!("Quantity must be a positive finite number, got {q}")));
@@ -150,6 +155,19 @@ fn active_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Item, Ap
         .ok_or_else(|| AppError::not_found("Item", item_id.to_string()))?;
     if !item.is_active {
         return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", item.name)));
+    }
+    reject_service_return(&item)?;
+    Ok(item)
+}
+
+/// Vendor-return item check: a deleted item is `DeletedReference(ITEM)` (DD-90), a service is refused.
+fn active_vendor_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Item, AppError> {
+    let item = tx
+        .items()
+        .find_by_id(item_id)?
+        .ok_or_else(|| AppError::not_found("Item", item_id.to_string()))?;
+    if !item.is_active {
+        return Err(AppError::deleted_reference("ITEM", item.id, &item.name));
     }
     reject_service_return(&item)?;
     Ok(item)
@@ -407,7 +425,15 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                 }
             }
         }
-        Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash, total_amount, issued_value: round2(issued_value) })
+        Ok(ReturnResult {
+            return_id,
+            return_code,
+            credited_amount: credited,
+            cash_refunded: cash,
+            total_amount,
+            issued_value: round2(issued_value),
+            discount_reversed: 0.0,
+        })
     }
 
     fn create_vendor_return_in_tx(&self, tx: &mut dyn TransactionContext, payload: &VendorReturnPayload) -> Result<ReturnResult, AppError> {
@@ -445,63 +471,57 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             purchase.is_some(),
             PartyType::Vendor,
         )?;
-
-        let mut per_lot: HashMap<i64, f64> = HashMap::new();
-        let mut fifo_reqs: Vec<(i64, f64)> = Vec::new();
-        let mut item_names: Vec<String> = Vec::new();
-        for it in &payload.items {
-            let vendor_item = tx
-                .items()
-                .find_by_id(it.item_id)?
-                .ok_or_else(|| AppError::not_found("Item", it.item_id.to_string()))?;
-            reject_service_return(&vendor_item)?;
-            if !vendor_item.is_active {
-                return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", vendor_item.name)));
-            }
-            item_names.push(vendor_item.name);
-            match it.purchase_item_id {
-                Some(lid) => {
-                    let lot = tx
-                        .purchases()
-                        .find_purchase_item_by_id(lid)?
-                        .ok_or_else(|| AppError::not_found("PurchaseItem", lid.to_string()))?;
-                    let header = tx
-                        .purchases()
-                        .find_transaction_by_id(lot.purchase_transaction_id)?
-                        .ok_or_else(|| AppError::not_found("PurchaseTransaction", lot.purchase_transaction_id.to_string()))?;
-                    if header.source != LotSource::Purchase {
-                        return Err(validation("purchase_item_id", "Only PURCHASE-source lots can be returned to a vendor"));
-                    }
-                    if lot.item_id != it.item_id {
-                        return Err(validation("item_id", format!("Item does not match lot {lid}")));
-                    }
-                    if let Some(pid) = payload.original_purchase_id {
-                        if lot.purchase_transaction_id != pid {
-                            return Err(validation("purchase_item_id", format!("Lot {lid} does not belong to the original purchase")));
-                        }
-                    }
-                    *per_lot.entry(lid).or_insert(0.0) += it.quantity;
-                }
-                None => match fifo_reqs.iter_mut().find(|(i, _)| *i == it.item_id) {
-                    Some(e) => e.1 += it.quantity,
-                    None => fifo_reqs.push((it.item_id, it.quantity)),
-                },
-            }
+        // A walk-in bill (no vendor) is returned linked to that bill only; else a vendor is needed.
+        if party_id.is_none() && purchase.is_none() {
+            return Err(validation("party_id", "Choose the vendor the goods go back to"));
         }
-        for (lid, qty) in &per_lot {
-            let lot = tx.purchases().find_purchase_item_by_id(*lid)?.ok_or_else(|| AppError::not_found("PurchaseItem", lid.to_string()))?;
-            if *qty > lot.remaining_quantity + EPS {
+
+        // ---- Per line: the exact lot (DD-86), eligibility, simulated draw (R10), value (DD-87) --
+        struct Line {
+            name: String,
+            lot_id: i64,
+            unit_price: f64,
+            total: f64,
+        }
+        let mut drawn: HashMap<i64, f64> = HashMap::new();
+        let mut lines: Vec<Line> = Vec::with_capacity(payload.items.len());
+        for (i, it) in payload.items.iter().enumerate() {
+            // Deleted items and services first: their message beats "choose a lot" (DD-67).
+            let item = active_vendor_item(tx, it.item_id)?;
+            let Some(lot_id) = it.purchase_item_id else {
+                return Err(locked("VENDOR_LOT_REQUIRED", format!("Choose the lot of '{}' to return to the vendor", item.name)));
+            };
+            let lot = tx
+                .purchases()
+                .find_purchase_item_by_id(lot_id)?
+                .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+            let header = tx
+                .purchases()
+                .find_transaction_by_id(lot.purchase_transaction_id)?
+                .ok_or_else(|| AppError::not_found("PurchaseTransaction", lot.purchase_transaction_id.to_string()))?;
+            if let Some(why) = vendor_return_ineligibility(&header, party_id, party_name.as_deref(), purchase.as_ref()) {
+                return Err(locked("VENDOR_LOT_NOT_ELIGIBLE", format!("{why} ('{}', lot {})", lot.item_name, header.transaction_code)));
+            }
+            if lot.item_id != it.item_id {
+                return Err(validation(&format!("items[{i}].item_id"), format!("'{}' is not on lot {}", item.name, header.transaction_code)));
+            }
+            let total_drawn = drawn.entry(lot_id).or_insert(0.0);
+            *total_drawn += it.quantity;
+            if *total_drawn > lot.remaining_quantity + EPS {
                 return Err(validation(
-                    "quantity",
-                    format!("Cannot return {qty} from lot {lid}: only {} remaining", lot.remaining_quantity),
+                    &format!("items[{i}].quantity"),
+                    format!(
+                        "Cannot return {} of '{}' from lot {}: only {} left",
+                        total_drawn, item.name, header.transaction_code, lot.remaining_quantity
+                    ),
                 ));
             }
-        }
-        if !fifo_reqs.is_empty() {
-            self.inventory_service.validate_stock_availability(tx, &fifo_reqs)?;
+            let unit_price = lot.unit_cost * net_unit_price(1.0, header.items_subtotal, header.discounts_total);
+            lines.push(Line { name: item.name, lot_id, unit_price, total: round2(it.quantity * unit_price) });
         }
 
         // ---- Writes -----------------------------------------------------------------------
+        let total = round2(lines.iter().map(|l| l.total).sum());
         let return_code = tx.returns().get_next_return_code()?;
         let return_id = tx.returns().create_return_transaction(&ReturnTransaction {
             id: 0,
@@ -512,39 +532,32 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             party_name,
             original_transaction_id: payload.original_purchase_id,
             settlement_type: SettlementType::Refund,
-            total_amount: 0.0,
+            total_amount: total,
             reason: payload.reason.clone(),
             notes: payload.notes.clone(),
             created_at: chrono::Utc::now().to_rfc3339(),
         })?;
-        let mut total = 0.0;
-        for (idx, it) in payload.items.iter().enumerate() {
-            // DD-11: the lot cost removed (named lot or FIFO) is the line's value and cost.
-            let value = self.inventory_service.remove_stock_for_vendor_return(
-                tx,
-                return_id,
-                it.item_id,
-                it.purchase_item_id,
-                it.quantity,
-            )?;
-            total += value;
+        let mut cost_total = 0.0;
+        for (it, line) in payload.items.iter().zip(&lines) {
+            // DD-87: the stock leaves at gross lot cost; the line's value is net of the bill discount.
+            let removed = self.inventory_service.remove_stock_for_vendor_return(tx, return_id, it.item_id, line.lot_id, it.quantity)?;
+            let cost = round2(removed.gross_cost);
+            cost_total += cost;
             tx.returns().create_return_item(&ReturnItem {
                 id: 0,
                 return_transaction_id: return_id,
                 line_type: ReturnLineType::Returned,
                 item_id: it.item_id,
-                item_name: item_names[idx].clone(),
+                item_name: line.name.clone(),
                 sale_item_id: None,
-                purchase_item_id: it.purchase_item_id,
+                purchase_item_id: Some(line.lot_id),
                 quantity: it.quantity,
-                unit_price: value / it.quantity,
-                total_amount: round2(value),
-                cost_amount: round2(value),
+                unit_price: line.unit_price,
+                total_amount: line.total,
+                cost_amount: cost,
                 condition: None, // condition applies to customer lines only
             })?;
         }
-        let total = round2(total);
-        tx.returns().update_return_total(return_id, total)?;
         let (credited, cash) = self.settle(
             tx,
             TransactionType::Purchase,
@@ -556,7 +569,42 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             0.0,
             "Vendor return refund",
         )?;
-        Ok(ReturnResult { return_id, return_code, credited_amount: credited, cash_refunded: cash, total_amount: total, issued_value: 0.0 })
+        Ok(ReturnResult {
+            return_id,
+            return_code,
+            credited_amount: credited,
+            cash_refunded: cash,
+            total_amount: total,
+            issued_value: 0.0,
+            discount_reversed: round2((cost_total - total).max(0.0)),
+        })
+    }
+
+    fn list_vendor_return_lots_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        item_id: i64,
+        party_id: Option<i64>,
+        purchase_id: Option<i64>,
+    ) -> Result<Vec<VendorReturnLot>, AppError> {
+        active_vendor_item(tx, item_id)?;
+        match (party_id, purchase_id) {
+            (Some(pid), _) => {
+                resolve_party(tx, Some(pid), None, false, PartyType::Vendor)?;
+            }
+            // Walk-in bill: only that bill's lots, and only when the bill has no vendor.
+            (None, Some(bid)) => {
+                let bill = tx
+                    .purchases()
+                    .find_transaction_by_id(bid)?
+                    .ok_or_else(|| AppError::not_found("PurchaseTransaction", bid.to_string()))?;
+                if bill.party_id.is_some() {
+                    return Ok(Vec::new());
+                }
+            }
+            (None, None) => return Err(validation("party_id", "Choose the vendor the goods go back to")),
+        }
+        tx.purchases().list_vendor_return_lots(item_id, party_id, purchase_id)
     }
 }
 
@@ -623,6 +671,16 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
     fn get_return_delete_guard(&self, return_id: i64) -> Result<BillEditGuard, AppError> {
         let mut tx = self.uow.begin_read()?;
         evaluate_return_guard(&mut *tx, return_id, &self.inventory_service)
+    }
+
+    fn list_vendor_return_lots(
+        &self,
+        item_id: i64,
+        party_id: Option<i64>,
+        purchase_id: Option<i64>,
+    ) -> Result<Vec<VendorReturnLot>, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        self.list_vendor_return_lots_in_tx(&mut *tx, item_id, party_id, purchase_id)
     }
 
     fn get_return_details(&self, return_id: i64) -> Result<ReturnDetailView, AppError> {

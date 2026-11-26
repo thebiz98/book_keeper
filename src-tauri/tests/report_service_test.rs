@@ -177,6 +177,11 @@ fn test_tc_rep_004_full_pnl_statement() {
     adj_src.source = LotSource::Adjustment;
     tx.purchases().create_transaction(&adj_src).unwrap();
     tx.returns().create_return_transaction(&return_tx(4, ReturnType::Vendor, SettlementType::Refund, 200.0, TODAY)).unwrap();
+    // DD-87: the vendor-return line is the gross cost that left a PURCHASE lot (outflow rows).
+    tx.outflow_allocations().create_allocation(&StockOutflowAllocation {
+        id: 3, source_type: OutflowSourceType::VendorReturn, source_id: 4, purchase_item_id: 1,
+        quantity_depleted: 20.0, unit_cost: 10.0,
+    }).unwrap();
     // Out-of-range activity must not leak in.
     tx.sales().create_transaction(&create_test_sale_tx(2, "SAL-1002", None, 5000.0, 5000.0, "2026-12-01")).unwrap();
     tx.commit().unwrap();
