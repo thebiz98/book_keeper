@@ -27,6 +27,10 @@ export interface ItemSearchTypeaheadProps {
   inputRef?: React.MutableRefObject<HTMLInputElement | null>;
   /** Clear the query after a selection (default true). */
   clearOnSelect?: boolean;
+  /** FR-48: keep the picked item's name in the box (see LiveSearchTypeahead). */
+  selectedLabel?: string | null;
+  onQueryChange?: (query: string) => void;
+  onLabelEnter?: () => void;
   disabled?: boolean;
   /** Enables the "+ Create" row and Enter-on-no-match; receives the trimmed query. */
   onCreate?: (query: string) => void;
@@ -67,6 +71,9 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
   className,
   inputRef,
   clearOnSelect = true,
+  selectedLabel,
+  onQueryChange,
+  onLabelEnter,
   disabled = false,
   onCreate,
   createLabel,
@@ -94,6 +101,9 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
     className={className}
     inputRef={inputRef}
     clearOnSelect={clearOnSelect}
+    selectedLabel={selectedLabel}
+    onQueryChange={onQueryChange}
+    onLabelEnter={onLabelEnter}
     disabled={disabled}
     onSelect={(item) => {
       onSelect?.(item, { matchedBundleId: item.matchedBundleId ?? null });

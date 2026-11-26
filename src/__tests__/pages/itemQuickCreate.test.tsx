@@ -87,7 +87,8 @@ describe('ItemQuickCreateModal on the sale screen (FR-24)', () => {
       })
     );
     // line is filled and Qty is focused
-    expect(container.querySelector('[data-testid="stock-indicator"]')?.textContent).toContain('Zed Marker');
+    expect((container.querySelector('[data-testid="item-search-input"]') as HTMLInputElement).value).toBe('Zed Marker');
+    expect(container.querySelector('[data-testid="stock-indicator"]')).not.toBeNull();
     await flush(10);
     expect(document.activeElement).toBe(container.querySelector('[data-testid="quantity-input"]'));
     expect(doc().querySelector('[role="dialog"]')).toBeNull();
@@ -142,7 +143,7 @@ describe('ItemQuickCreateModal on the purchase screen', () => {
     expect(api.createItem).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'Zed Marker', initialStock: null, initialCost: null, category: null, barcode: null })
     );
-    expect(container.querySelector('[data-testid="selected-item"]')?.textContent).toContain('Zed Marker');
+    expect((container.querySelector('[data-testid="item-search-input"]') as HTMLInputElement).value).toBe('Zed Marker');
   });
 
   it('Alt+N opens the modal', async () => {

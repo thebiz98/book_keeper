@@ -41,6 +41,8 @@ export interface UseLiveSearchResult<T> {
   refresh: () => Promise<T>;
   /** Clear query/results and invalidate anything in flight. */
   reset: () => void;
+  /** Like `reset`, but the input then shows `text` (no search runs for it, e.g. a picked item's name). */
+  showText: (text: string) => void;
 }
 
 function sameDeps(a: ReadonlyArray<unknown>, b: ReadonlyArray<unknown>): boolean {
@@ -208,6 +210,14 @@ export function useLiveSearch<T>(opts: UseLiveSearchOptions<T>): UseLiveSearchRe
     settleWaiters(initialRef.current);
   }, []);
 
+  const showText = useCallback(
+    (text: string) => {
+      reset();
+      setQueryState(text);
+    },
+    [reset]
+  );
+
   useEffect(() => {
     if (!isLoading) {
       setShowSpinner(false);
@@ -239,5 +249,6 @@ export function useLiveSearch<T>(opts: UseLiveSearchOptions<T>): UseLiveSearchRe
     flush,
     refresh,
     reset,
+    showText,
   };
 }
