@@ -20,7 +20,28 @@ export type AppError =
   | { type: 'OperationNotAllowed'; details: string }
   | { type: 'BillLocked'; details: { code: string; message: string } }
   /** FR-45 / FR-46: the name belongs to a deleted record; `existing_id` can be restored. */
-  | { type: 'DeletedNameClash'; details: { field: string; code: string; existing_id: number; message: string } };
+  | { type: 'DeletedNameClash'; details: { field: string; code: string; existing_id: number; message: string } }
+  /** DD-90: a write would use a deleted item or party; the UI offers Restore for `id`. */
+  | { type: 'DeletedReference'; details: { entity: DeletedEntity; id: number; name: string; message: string } };
+
+export type DeletedEntity = 'ITEM' | 'PARTY';
+
+/** The deleted item or party behind an error (DD-90): a thrown `DeletedReference` or a preview error. */
+export interface DeletedRefInfo {
+  entity: DeletedEntity;
+  id: number;
+  name: string;
+  message: string;
+}
+
+/** The `DeletedReference` behind a thrown error, else null. */
+export function deletedReference(e: unknown): DeletedRefInfo | null {
+  if (typeof e === 'object' && e !== null && (e as { type?: unknown }).type === 'DeletedReference') {
+    const d = (e as { details: DeletedRefInfo }).details;
+    return { entity: d.entity, id: d.id, name: d.name, message: d.message };
+  }
+  return null;
+}
 
 /** The deleted record behind a `DeletedNameClash` (e.g. `ITEM_NAME_DELETED`), else null. */
 export function deletedNameClash(e: unknown): { code: string; existingId: number; message: string } | null {
@@ -43,6 +64,7 @@ export const APP_ERROR_TYPES = [
   'OperationNotAllowed',
   'BillLocked',
   'DeletedNameClash',
+  'DeletedReference',
 ] as const;
 
 export function isAppError(x: unknown): x is AppError {

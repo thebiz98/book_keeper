@@ -47,6 +47,7 @@ fn seed(app: &AppState) -> i64 {
         .unwrap();
     app.purchase_service
         .create_purchase(CreatePurchasePayload {
+            confirm_move_settlements: false,
             charges: vec![],
             transaction_date: "2026-11-20".into(), party_id: None, payment_mode: Some("CASH".into()),
             supplier_invoice_ref: None, payment_status: PaymentStatus::Paid, paid_amount: 35.0, notes: None,
@@ -55,6 +56,7 @@ fn seed(app: &AppState) -> i64 {
         .unwrap();
     app.sale_service
         .create_sale(CreateSalePayload {
+            confirm_move_settlements: false,
             charges: vec![],
             transaction_date: "2026-11-21".into(), party_id: Some(party), payment_mode: Some("CASH".into()),
             payment_status: PaymentStatus::Partial, paid_amount: 50.0, notes: None,
@@ -127,6 +129,7 @@ fn transactions_scope_restores_opening_stock_and_keeps_masters() {
 fn seed_sale_again(app: &AppState, item: i64) {
     app.sale_service
         .create_sale(CreateSalePayload {
+            confirm_move_settlements: false,
             charges: vec![],
             transaction_date: "2026-11-22".into(), party_id: None, payment_mode: Some("CASH".into()),
             payment_status: PaymentStatus::Paid, paid_amount: 20.0, notes: None,
@@ -208,6 +211,7 @@ fn bill_charges_cleared_by_transactions_and_types_by_all() {
     e.app
         .sale_service
         .create_sale(CreateSalePayload {
+            confirm_move_settlements: false,
             charges: vec![BillChargeInput { charge_type_id: t.id, amount: 5.0 }],
             transaction_date: "2026-11-22".into(), party_id: None, payment_mode: None,
             payment_status: PaymentStatus::Paid, paid_amount: 15.0, notes: None,

@@ -81,6 +81,7 @@ fn purchase_on(date: &str) -> CreatePurchasePayload {
 
 fn preview_of(p: &CreateSalePayload) -> PreviewSalePayload {
     PreviewSalePayload {
+        confirm_move_settlements: false,
         transaction_date: p.transaction_date.clone(),
         party_id: p.party_id,
         payment_status: Some(p.payment_status),
@@ -114,7 +115,7 @@ fn sale_today_passes_tomorrow_is_rejected_and_preview_agrees() {
         let pv = e.sales.preview_sale(None, preview_of(&bad)).unwrap();
         assert_eq!(
             pv.errors,
-            vec![PreviewError { field: "transaction_date".into(), message: MSG.into() }]
+            vec![PreviewError::new("transaction_date", MSG)]
         );
     });
 }
@@ -146,6 +147,7 @@ fn purchase_today_passes_tomorrow_is_rejected_edit_and_preview_too() {
             .preview_purchase(
                 None,
                 PreviewPurchasePayload {
+                    confirm_move_settlements: false,
                     transaction_date: pp.transaction_date.clone(),
                     party_id: pp.party_id,
                     supplier_invoice_ref: None,

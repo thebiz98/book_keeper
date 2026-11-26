@@ -1042,6 +1042,7 @@ export class MockApiClient implements ApiClient {
       removedCashAmount: paid,
       removedCreditAmount: 0,
       lotLimits: [],
+      settlementsToMove: { count: 0, amount: 0 },
     };
   }
   async getReturnDetails(returnId: number): Promise<ReturnDetailView> {

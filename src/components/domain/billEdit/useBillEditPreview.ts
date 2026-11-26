@@ -12,6 +12,8 @@ export interface UseBillEditPreviewOptions<P> {
   paidInput: number;
   /** `previewPurchase` / `previewSale` bound to the bill being edited. */
   fetcher: (payload: WithPayment<P>) => Promise<BillPreview>;
+  /** Bumped to re-run both previews for the same draft (after a Restore, DD-90). */
+  refreshKey?: number;
 }
 
 /**
@@ -19,8 +21,14 @@ export interface UseBillEditPreviewOptions<P> {
  * `totals` previews the bill without a payment (line totals, charges, total, open); `pay` adds the
  * chosen payment (balance, errors). PAID pays what the backend says is open.
  */
-export function useBillEditPreview<P extends object>({ bill, paymentStatus, paidInput, fetcher }: UseBillEditPreviewOptions<P>) {
-  const totalsPreview = usePreview<WithPayment<P>, BillPreview>({ input: bill, fetcher });
+export function useBillEditPreview<P extends object>({
+  bill,
+  paymentStatus,
+  paidInput,
+  fetcher,
+  refreshKey = 0,
+}: UseBillEditPreviewOptions<P>) {
+  const totalsPreview = usePreview<WithPayment<P>, BillPreview>({ input: bill, fetcher, refreshKey });
   const totals = totalsPreview.data;
   const paidToSend = paymentStatus === 'PAID' ? totals?.openAmount : paymentStatus === 'UNPAID' ? 0 : paidInput;
   const payInput = useMemo<WithPayment<P> | null>(
@@ -28,7 +36,7 @@ export function useBillEditPreview<P extends object>({ bill, paymentStatus, paid
       bill && paidToSend != null && !totalsPreview.isLoading ? { ...bill, paymentStatus, paidAmount: paidToSend } : null,
     [bill, paymentStatus, paidToSend, totalsPreview.isLoading]
   );
-  const payPreview = usePreview<WithPayment<P>, BillPreview>({ input: payInput, fetcher });
+  const payPreview = usePreview<WithPayment<P>, BillPreview>({ input: payInput, fetcher, refreshKey });
 
   const pending = bill !== null && (totalsPreview.isLoading || payPreview.isLoading || payPreview.data === null);
   const errors = useMemo(() => {

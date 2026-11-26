@@ -161,6 +161,7 @@ impl Env {
 
 fn as_preview_sale(p: &CreateSalePayload, with_payment: bool) -> PreviewSalePayload {
     PreviewSalePayload {
+        confirm_move_settlements: false,
         transaction_date: p.transaction_date.clone(),
         party_id: p.party_id,
         payment_status: with_payment.then_some(p.payment_status),
@@ -174,6 +175,7 @@ fn as_preview_sale(p: &CreateSalePayload, with_payment: bool) -> PreviewSalePayl
 
 fn as_preview_purchase(p: &CreatePurchasePayload, with_payment: bool) -> PreviewPurchasePayload {
     PreviewPurchasePayload {
+        confirm_move_settlements: false,
         transaction_date: p.transaction_date.clone(),
         party_id: p.party_id,
         supplier_invoice_ref: p.supplier_invoice_ref.clone(),

@@ -8,6 +8,7 @@ import type {
   ItemSearchResult,
   PaymentStatus,
   PreviewPurchasePayload,
+  SettlementsToMove,
 } from '@/types';
 import type { PurchaseLine } from '../purchaseMath';
 
@@ -60,6 +61,8 @@ export function usePurchaseEditDraft(billId: number) {
   const [draft, setDraft] = useState<PurchaseDraft | null>(null);
   const [baseline, setBaseline] = useState('');
   const [applied, setApplied] = useState(0);
+  // DD-88: the bill's later payments a party change would move (confirm dialog text).
+  const [settlementsToMove, setSettlementsToMove] = useState<SettlementsToMove>({ count: 0, amount: 0 });
   const seq = useRef(1);
 
   useEffect(() => {
@@ -121,6 +124,7 @@ export function usePurchaseEditDraft(billId: number) {
         setDraft(next);
         setBaseline(snapshot(next));
         setApplied(g.appliedAmount);
+        setSettlementsToMove(g.settlementsToMove ?? { count: 0, amount: 0 });
         setLoad({ status: 'ready' });
       } catch (e) {
         if (live) setLoad({ status: 'error', message: errorMessage(e) });
@@ -275,6 +279,7 @@ export function usePurchaseEditDraft(billId: number) {
     incomplete,
     /** Settlements and return credits that stay on the bill ("Already settled" hint). */
     applied,
+    settlementsToMove,
     bill,
     toPayload,
     setHeader,

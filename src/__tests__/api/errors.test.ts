@@ -4,7 +4,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 import { invoke } from '@tauri-apps/api/core';
 import { invokeCmd } from '@/api/ipc';
-import { errorMessage, isAppError } from '@/api/errors';
+import { deletedReference, errorMessage, isAppError } from '@/api/errors';
 
 const mocked = vi.mocked(invoke);
 
@@ -92,5 +92,17 @@ describe('BillLocked (FR-20)', () => {
     expect(mocked).toHaveBeenCalledWith('get_bill_edit_guard', { target: 'SALE', id: 1 });
     expect(g.canEdit).toBe(true);
     expect(g.lotLimits).toEqual([]);
+  });
+
+  it('DeletedReference (DD-90) is typed and carries what Restore needs', async () => {
+    mocked.mockReset();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const msg = "'Ravi' is deleted. Restore it first.";
+    mocked.mockRejectedValue({ type: 'DeletedReference', details: { entity: 'PARTY', id: 4, name: 'Ravi', message: msg } });
+    const err = await invokeCmd<any>('update_sale').catch((x): any => x);
+    expect(isAppError(err)).toBe(true);
+    expect(errorMessage(err)).toBe(msg);
+    expect(deletedReference(err)).toEqual({ entity: 'PARTY', id: 4, name: 'Ravi', message: msg });
+    expect(deletedReference(new Error('x'))).toBeNull();
   });
 });

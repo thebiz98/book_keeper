@@ -49,6 +49,16 @@ pub struct BillEditGuard {
     /// Return credit that is taken back on a return delete (0 for bills).
     pub removed_credit_amount: f64,
     pub lot_limits: Vec<LotEditLimit>,
+    /// DD-88: SETTLEMENT rows a party change would move (the confirm dialog's count and amount).
+    #[serde(default)]
+    pub settlements_to_move: SettlementsToMove,
+}
+
+/// Count and sum of a bill's SETTLEMENT rows (DD-88).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct SettlementsToMove {
+    pub count: i64,
+    pub amount: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

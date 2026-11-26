@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { Users, Plus, Search, Pencil, User, Truck, BookOpen, Upload, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
+import { isAppError } from '@/api/errors';
 import type { DeletedPartyRow, PartyDeletePreview, PartyListRow, PartyType } from '@/types';
 import type { CreatePartyPayload } from '@/types/api';
 import { todayLocal } from '@/lib/dates';
@@ -56,11 +57,14 @@ export const PartiesPage: React.FC = () => {
   const [form, setForm] = useState<PartyForm | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // L1: the backend's refusal of a type change (bills or payments pin the type) shows on Type.
+  const [typeError, setTypeError] = useState<string | null>(null);
   const savingRef = useRef(false);
   const formOpen = form !== null;
 
   useEffect(() => {
     setFormError(null);
+    setTypeError(null);
   }, [formOpen, form?.id]);
 
   const live = useLiveSearch<PartyListRow[]>({
@@ -84,6 +88,7 @@ export const PartiesPage: React.FC = () => {
     savingRef.current = true;
     setIsSaving(true);
     setFormError(null);
+    setTypeError(null);
     const payload: CreatePartyPayload = {
       name: form.name.trim(),
       phone: form.phone.trim() || null,
@@ -113,7 +118,11 @@ export const PartiesPage: React.FC = () => {
       setForm(null);
       load();
     } catch (err) {
-      setFormError(errorMessage(err));
+      if (isAppError(err) && err.type === 'ValidationError' && err.details.field === 'party_type') {
+        setTypeError(err.details.message);
+      } else {
+        setFormError(errorMessage(err));
+      }
     } finally {
       savingRef.current = false;
       setIsSaving(false);
@@ -316,8 +325,12 @@ export const PartiesPage: React.FC = () => {
             <Select
               label="Type"
               value={form.partyType}
-              onChange={(v) => setForm({ ...form, partyType: v })}
+              onChange={(v) => {
+                setTypeError(null);
+                setForm({ ...form, partyType: v });
+              }}
               disabled={form.hadOpening}
+              error={typeError ?? undefined}
               options={[
                 { value: 'CUSTOMER', label: 'Customer' },
                 { value: 'VENDOR', label: 'Vendor' },

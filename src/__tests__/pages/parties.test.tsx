@@ -70,4 +70,20 @@ describe('PartiesPage add/edit dialog', () => {
     await settle();
     expect(document.querySelector('[role="dialog"] [role="alert"]')?.textContent).toContain('Name already exists');
   });
+
+  it('a refused type change shows on the Type field (L1)', async () => {
+    const msg = "'Ramesh' has bills or payments, so its type can't change.";
+    setup(
+      vi.fn(async () => {
+        throw { type: 'ValidationError', details: { field: 'party_type', message: msg } };
+      }),
+    );
+    await openAddDialog();
+    press(nameInput(), 'Enter');
+    await settle();
+    await settle();
+    const typeError = document.querySelector('[role="dialog"] [id$="-error"]');
+    expect(typeError?.textContent).toBe(msg);
+    expect(document.querySelector('[aria-invalid="true"]')).not.toBeNull();
+  });
 });

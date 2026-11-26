@@ -6,3 +6,4 @@ export * from './HotkeyBadge';
 export * from './DateRangePicker';
 export * from './ConfirmDialog';
 export * from './LiveSearchTypeahead';
+export * from './DeletedReferenceAlert';

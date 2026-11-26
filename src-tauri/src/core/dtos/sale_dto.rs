@@ -17,6 +17,10 @@ pub struct CreateSalePayload {
     /// Bill-level charge/discount lines (FR-19).
     #[serde(default)]
     pub charges: Vec<BillChargeInput>,
+    /// DD-88 edit only: the user confirmed moving the bill's later payments to the new party.
+    /// Ignored on create.
+    #[serde(default)]
+    pub confirm_move_settlements: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

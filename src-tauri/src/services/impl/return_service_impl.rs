@@ -10,7 +10,7 @@ use crate::core::entities::{Item, ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
 use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
 use crate::core::value_objects::{
-    LotSource, OutflowSourceType, ReturnLineType, ReturnType, SettlementType, StockCondition,
+    LotSource, OutflowSourceType, PartyType, ReturnLineType, ReturnType, SettlementType, StockCondition,
     TransactionType,
 };
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
@@ -20,6 +20,7 @@ use crate::services::contracts::payment_service::PaymentService;
 use crate::services::contracts::return_service::ReturnService;
 use crate::services::r#impl::bill_guard::{check_return_deletable, evaluate_return_guard};
 use crate::services::r#impl::bill_math::net_unit_price;
+use crate::services::r#impl::party_guard::ensure_active_party;
 
 
 #[derive(Clone)]
@@ -101,12 +102,15 @@ fn check_qty(field: &str, q: f64) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Resolves the effective party: defaults to the bill's party and must match it when given.
+/// Resolves the effective party: defaults to the bill's party and must match it when given. A
+/// return with no bill takes only a party of the `expected` type (R7); a deleted party is a
+/// `DeletedReference` (DD-90).
 fn resolve_party(
     tx: &mut dyn TransactionContext,
     payload_party: Option<i64>,
     bill_party: Option<i64>,
     has_bill: bool,
+    expected: PartyType,
 ) -> Result<(Option<i64>, Option<String>), AppError> {
     let party_id = if has_bill {
         if let Some(p) = payload_party {
@@ -124,9 +128,14 @@ fn resolve_party(
                 .parties()
                 .find_by_id(pid)?
                 .ok_or_else(|| AppError::not_found("Party", pid.to_string()))?;
-            if !party.is_active {
-                return Err(validation("party_id", format!("'{}' is deleted. Restore the party first.", party.name)));
+            if party.party_type != expected {
+                let (is, want) = match party.party_type {
+                    PartyType::Vendor => ("a vendor", "a customer"),
+                    PartyType::Customer => ("a customer", "a vendor"),
+                };
+                return Err(validation("party_id", format!("'{}' is {is}. Pick {want}.", party.name)));
             }
+            ensure_active_party(&party)?;
             Some(party.name)
         }
         None => None,
@@ -220,6 +229,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             payload.party_id,
             sale.as_ref().and_then(|s| s.party_id),
             sale.is_some(),
+            PartyType::Customer,
         )?;
 
         let mut per_line_qty: HashMap<i64, f64> = HashMap::new();
@@ -433,6 +443,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             payload.party_id,
             purchase.as_ref().and_then(|p| p.party_id),
             purchase.is_some(),
+            PartyType::Vendor,
         )?;
 
         let mut per_lot: HashMap<i64, f64> = HashMap::new();

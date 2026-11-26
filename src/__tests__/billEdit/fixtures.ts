@@ -27,6 +27,7 @@ export const purchaseGuard = (over: Partial<BillEditGuard> = {}): BillEditGuard 
     { purchaseItemId: 21, consumedQuantity: 4, referenced: true, vendorReturned: true },
     { purchaseItemId: 22, consumedQuantity: 0, referenced: false, vendorReturned: false },
   ],
+  settlementsToMove: { count: 0, amount: 0 },
   ...over,
 });
 
@@ -61,5 +62,5 @@ export const saleDetail = (): SaleDetailView =>
 
 export const saleGuard = (over: Partial<BillEditGuard> = {}): BillEditGuard => ({
   target: 'SALE', id: 5, code: 'SAL-1005', canEdit: true, canDelete: true, canChangeParty: true, reasons: [],
-  upfrontAmount: 130, appliedAmount: 0, removedCashAmount: 130, removedCreditAmount: 0, lotLimits: [], ...over,
+  upfrontAmount: 130, appliedAmount: 0, removedCashAmount: 130, removedCreditAmount: 0, lotLimits: [], settlementsToMove: { count: 0, amount: 0 }, ...over,
 });

@@ -55,6 +55,11 @@ pub enum AppError {
     /// `existing_id` instead of a raw constraint error. `code` is e.g. `ITEM_NAME_DELETED`.
     #[error("{message}")]
     DeletedNameClash { field: String, code: String, existing_id: i64, message: String },
+
+    /// DD-90 (v1.7 FR-54 / FR-55): a write would use a soft-deleted item or party.
+    /// `entity` is `ITEM` or `PARTY`; the UI offers Restore for `id` and re-runs the preview.
+    #[error("{message}")]
+    DeletedReference { entity: String, id: i64, name: String, message: String },
 }
 
 pub type DomainResult<T> = Result<T, AppError>;
@@ -64,6 +69,16 @@ impl AppError {
         Self::NotFound {
             entity: entity.into(),
             id: id.into(),
+        }
+    }
+
+    /// DD-90: `'<name>' is deleted. Restore it first.` for a deleted `ITEM` / `PARTY`.
+    pub fn deleted_reference(entity: &str, id: i64, name: &str) -> Self {
+        Self::DeletedReference {
+            entity: entity.to_string(),
+            id,
+            name: name.to_string(),
+            message: format!("'{name}' is deleted. Restore it first."),
         }
     }
 }
@@ -126,6 +141,8 @@ mod tests {
              json!({"type":"BillLocked","details":{"code":"LINKED_RETURNS","message":"m"}})),
             (AppError::DeletedNameClash { field: "name".into(), code: "ITEM_NAME_DELETED".into(), existing_id: 7, message: "m".into() },
              json!({"type":"DeletedNameClash","details":{"field":"name","code":"ITEM_NAME_DELETED","existing_id":7,"message":"m"}})),
+            (AppError::deleted_reference("PARTY", 4, "Ravi"),
+             json!({"type":"DeletedReference","details":{"entity":"PARTY","id":4,"name":"Ravi","message":"'Ravi' is deleted. Restore it first."}})),
         ];
         for (err, expected) in cases {
             assert_eq!(serde_json::to_value(&err).unwrap(), expected);

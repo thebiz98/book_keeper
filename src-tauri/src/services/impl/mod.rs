@@ -12,6 +12,7 @@ pub mod import_core;
 pub mod import_template_writer;
 pub mod item_import_service_impl;
 pub mod item_service_impl;
+pub mod party_guard;
 pub mod party_service_impl;
 pub mod payment_service_impl;
 pub mod purchase_service_impl;

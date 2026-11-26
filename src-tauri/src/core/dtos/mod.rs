@@ -20,6 +20,7 @@ pub use adjustment_dto::{
 pub use charge_dto::{BillChargeInput, CreateChargeTypePayload};
 pub use correction_dto::{
     BillEditGuard, CorrectionTarget, DeleteBillResult, DeleteReturnResult, GuardReason, LotEditLimit,
+    SettlementsToMove,
 };
 pub use dues_dto::{
     DeleteSettlementResult, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
@@ -45,7 +46,7 @@ pub use pagination::{
 pub use party_dto::{DeletePartyResult, DeletedPartyRow, PartyDeletePreview};
 pub use payment_dto::{LedgerCashSummary, LedgerTotals, RecordPaymentPayload, RecordRefundPayload};
 pub use preview_dto::{
-    BillPaymentPreview, BillPreview, PreviewError, PreviewPurchasePayload, PreviewSaleLinePayload, PreviewSalePayload,
+    BillPaymentPreview, BillPreview, DeletedRef, PreviewError, PreviewPurchasePayload, PreviewSaleLinePayload, PreviewSalePayload,
     SaleLinePreview, StockAdjustmentPreview,
 };
 pub use purchase_dto::{

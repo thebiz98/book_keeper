@@ -138,7 +138,7 @@ const detail = (balanceDue: number, partyId: number | null): SaleDetailView =>
 
 const guard = {
   target: 'SALE', id: 5, code: 'SAL-1005', canEdit: true, canDelete: true, canChangeParty: true, reasons: [],
-  upfrontAmount: 100, appliedAmount: 150, removedCashAmount: 100, removedCreditAmount: 0, lotLimits: [],
+  upfrontAmount: 100, appliedAmount: 150, removedCashAmount: 100, removedCreditAmount: 0, lotLimits: [], settlementsToMove: { count: 0, amount: 0 },
 };
 
 describe('BillDetailDrawer settlement actions and Settle (D8, D11)', () => {
