@@ -8,9 +8,18 @@ import React, {
 import { Plus } from 'lucide-react';
 import { NEW_BUNDLE, NEW_BUNDLE_LABEL } from '@/lib/bundleSentinel';
 import { cn } from '@/lib/utils';
-import type { LotDraw, ItemBundleSearchResult, PriorLine, SavedBundle, ItemSearchResult } from '@/types';
+import type {
+  LotDraw,
+  ItemBundleSearchResult,
+  PriorLine,
+  PreviewSaleLinePayload,
+  SaleLinePreview,
+  SavedBundle,
+  ItemSearchResult,
+} from '@/types';
 import type { BundleInput } from '@/types/store';
 import { api } from '@/api';
+import { errorMessage } from '@/api/errors';
 import { usePreview } from '@/hooks/usePreview';
 import { useEscapeLayer, useHotkeyAction } from '@/hooks/useHotkeys';
 import { Button } from '../ui/Button';
@@ -80,12 +89,15 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
     const [qty, setQty] = useState('1');
     const [unit, setUnit] = useState<string>(BASE);
     const [rate, setRate] = useState('');
+    /** FR-47: Total box text; `null` = not typed in, so it shows the backend's qty × rate. */
+    const [typedTotal, setTypedTotal] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     const searchRef = useRef<HTMLInputElement | null>(null);
     const qtyRef = useRef<HTMLInputElement>(null);
     const unitRef = useRef<HTMLSelectElement>(null);
     const rateRef = useRef<HTMLInputElement>(null);
+    const totalRef = useRef<HTMLInputElement>(null);
     const handledBundleSeq = useRef<number | null>(null);
 
     useImperativeHandle(ref, () => ({ focusSearch: () => searchRef.current?.focus() }));
@@ -129,6 +141,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
       setQty('1');
       setUnit(BASE);
       setRate('');
+      setTypedTotal(null);
       setError(null);
       if (focusSearch) searchRef.current?.focus();
     };
@@ -178,6 +191,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
       setUnit(next);
       const b = next === BASE ? null : list.find((x) => String(x.bundleId) === next) ?? null;
       setRate(String(defaultRate(item, b)));
+      setTypedTotal(null);
       setError(null);
     };
 
@@ -190,12 +204,34 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
       const matched = matchedBundleId != null ? it.bundles.find((b) => b.bundleId === matchedBundleId) : null;
       setUnit(matched ? String(matched.bundleId) : BASE);
       setRate(String(defaultRate(it, matched ?? null)));
+      setTypedTotal(null);
     };
 
     const parsedQty = parseFloat(qty);
     const parsedRate = parseFloat(rate);
+    const parsedTotal = typedTotal === null ? null : parseFloat(typedTotal);
 
-    const commit = () => {
+    // FR-47 / DD-56 / DD-82: the line total, and the rate a typed total implies, come from the backend.
+    const lineInput: PreviewSaleLinePayload | null =
+      item && Number.isFinite(parsedQty) && parsedQty > 0 && Number.isFinite(parsedRate) && parsedRate >= 0
+        ? {
+            bundleQuantity: parsedQty,
+            unitPrice: parsedRate,
+            enteredTotal: parsedTotal !== null && Number.isFinite(parsedTotal) ? parsedTotal : null,
+          }
+        : null;
+    const linePreview = usePreview<PreviewSaleLinePayload, SaleLinePreview>({
+      input: lineInput,
+      fetcher: async (p) => api.previewSaleLine(p),
+    });
+    const lineData = lineInput ? linePreview.data : null;
+    const totalShown = typedTotal ?? (lineData ? lineData.lineTotal.toFixed(2) : '');
+    /** The rate the line will be added at, when the typed total changes it. */
+    const newRate =
+      typedTotal !== null && lineData && Math.abs(lineData.unitPrice - parsedRate) > 1e-9 ? lineData.unitPrice : null;
+    const committing = useRef(false);
+
+    const commit = async () => {
       if (!item) {
         searchRef.current?.focus();
         return;
@@ -210,11 +246,33 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
         rateRef.current?.focus();
         return;
       }
+      let lineRate = parsedRate;
+      if (parsedTotal !== null) {
+        if (!Number.isFinite(parsedTotal) || parsedTotal < 0) {
+          setError('Enter a valid total');
+          totalRef.current?.focus();
+          return;
+        }
+        // DD-82: ask the backend for the rate of exactly this total (the live preview may lag a keystroke).
+        if (committing.current) return;
+        committing.current = true;
+        try {
+          lineRate = (
+            await api.previewSaleLine({ bundleQuantity: parsedQty, unitPrice: parsedRate, enteredTotal: parsedTotal })
+          ).unitPrice;
+        } catch (e) {
+          setError(errorMessage(e));
+          totalRef.current?.focus();
+          return;
+        } finally {
+          committing.current = false;
+        }
+      }
       const ok = onAddLine?.({
         item,
         quantity: parsedQty,
         bundle: selectedBundle ? toBundleInput(selectedBundle, bundleMrp[selectedBundle.bundleId] ?? null) : null,
-        rate: parsedRate,
+        rate: lineRate,
       });
       if (ok === false) {
         setError(`Cannot add "${item.name}": invalid quantity or rate`);
@@ -250,11 +308,21 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
       }
     };
 
+    // FR-47: Enter in Rate moves to Total; Enter in Total adds the line.
     const onRateKeyDown = (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         if (e.repeat) return;
-        commit();
+        totalRef.current?.focus();
+        totalRef.current?.select();
+      }
+    };
+
+    const onTotalKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        if (e.repeat) return;
+        void commit();
       }
     };
 
@@ -299,6 +367,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
               onChange={(e) => {
                 if (NUMBER_RE.test(e.target.value)) {
                   setQty(e.target.value);
+                  setTypedTotal(null);
                   setError(null);
                 }
               }}
@@ -341,6 +410,7 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
               onChange={(e) => {
                 if (NUMBER_RE.test(e.target.value)) {
                   setRate(e.target.value);
+                  setTypedTotal(null);
                   setError(null);
                 }
               }}
@@ -350,13 +420,36 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
             />
           </div>
 
+          <div className="w-32">
+            <input
+              ref={totalRef}
+              data-testid="total-input"
+              aria-label="Total"
+              type="text"
+              inputMode="decimal"
+              placeholder="Total"
+              title="Item total. Type a different total to change this line's rate."
+              disabled={!item}
+              value={totalShown}
+              onChange={(e) => {
+                if (NUMBER_RE.test(e.target.value)) {
+                  setTypedTotal(e.target.value);
+                  setError(null);
+                }
+              }}
+              onFocus={(e) => e.currentTarget.select()}
+              onKeyDown={onTotalKeyDown}
+              className={cn(inputClass, newRate !== null && 'border-amber-500 dark:border-amber-600')}
+            />
+          </div>
+
           <Button
             type="button"
             data-testid="add-item-btn"
             variant="primary"
             size="md"
             disabled={!item}
-            onClick={commit}
+            onClick={() => void commit()}
             leftIcon={<Plus className="h-4 w-4" />}
             className="shrink-0"
           >
@@ -389,6 +482,14 @@ export const RapidBillingRow = forwardRef<RapidBillingRowHandle, RapidBillingRow
               <span>
                 MRP: {mrpShown != null ? <CurrencyDisplay amount={mrpShown} size="sm" /> : '—'}
               </span>
+              {newRate !== null && (
+                <>
+                  <span>|</span>
+                  <span data-testid="line-new-rate" className="font-sans font-semibold text-amber-700 dark:text-amber-400">
+                    Rate becomes <CurrencyDisplay amount={newRate} size="sm" className="text-inherit" />
+                  </span>
+                </>
+              )}
             </div>
             {/* FR-48: one row per lot, below the stock line. */}
             {draw && <LotDrawLine draw={draw} baseUnit={item.baseUnit} />}

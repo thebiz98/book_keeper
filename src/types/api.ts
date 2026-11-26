@@ -445,6 +445,20 @@ export interface BillPreview {
 }
 
 /** Bill payload for a preview: the payment is optional (totals and stock checks only without it). */
+/** FR-47: one entry-row line for `preview_sale_line`. */
+export interface PreviewSaleLinePayload {
+  bundleQuantity: number;
+  unitPrice: number;
+  /** The total the cashier typed; omitted or null = untouched. */
+  enteredTotal?: number | null;
+}
+
+/** DD-82: `unitPrice` is the rate the line is added at (total ÷ qty when a total was typed). */
+export interface SaleLinePreview {
+  lineTotal: number;
+  unitPrice: number;
+}
+
 export type PreviewSalePayload = Omit<CreateSalePayload, 'paymentStatus' | 'paidAmount'> & {
   paymentStatus?: PaymentStatus | null;
   paidAmount?: number | null;
@@ -622,6 +636,8 @@ export interface ApiClient {
   deleteSale(saleId: number): Promise<DeleteBillResult>;
   /** DD-56: dry run of create/update (`saleId` = edit). Business errors come back in `errors`. */
   previewSale(payload: PreviewSalePayload, saleId?: number | null): Promise<BillPreview>;
+  /** FR-47 / DD-82: entry-row line total and the rate a typed total implies (no database). */
+  previewSaleLine(payload: PreviewSaleLinePayload): Promise<SaleLinePreview>;
 
   // Purchases
   getNextPurchaseCode(): Promise<string>;
