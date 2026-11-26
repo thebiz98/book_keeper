@@ -147,7 +147,7 @@ describe('printBillDocument', () => {
 
 const guard = {
   target: 'SALE', id: 5, code: 'SAL-1005', canEdit: true, canDelete: true, canChangeParty: true, reasons: [],
-  upfrontAmount: 0, appliedAmount: 0, removedCashAmount: 0, removedCreditAmount: 0, lotLimits: [],
+  upfrontAmount: 0, appliedAmount: 0, removedCashAmount: 0, removedCreditAmount: 0, lotLimits: [], settlementsToMove: { count: 0, amount: 0 },
 };
 
 describe('BillDetailDrawer Print', () => {

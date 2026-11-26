@@ -142,6 +142,8 @@ export interface CreateSalePayload {
   items: CreateSaleItemPayload[];
   /** Bill-level charge/discount lines (FR-19). */
   charges: BillChargeInput[];
+  /** DD-88 edit only: the user confirmed moving the bill's later payments to the new party. */
+  confirmMoveSettlements?: boolean;
 }
 
 export interface BillChargeInput {
@@ -186,6 +188,8 @@ export interface CreatePurchasePayload {
   items: CreatePurchaseItemPayload[];
   /** Bill-level charge/discount lines (FR-19). */
   charges: BillChargeInput[];
+  /** DD-88 edit only: the user confirmed moving the bill's later payments to the new party. */
+  confirmMoveSettlements?: boolean;
 }
 
 export interface PurchaseSummaryResponse {
@@ -419,6 +423,8 @@ export interface ReturnResult {
 export interface PreviewError {
   field: string;
   message: string;
+  /** DD-90: the deleted item or party behind the error (the form offers Restore). */
+  deleted?: { entity: 'ITEM' | 'PARTY'; id: number; name: string };
 }
 
 export interface BillPaymentPreview {
@@ -649,6 +655,13 @@ export interface BillEditGuard {
   /** Return credit that is taken back (returns only). */
   removedCreditAmount: number;
   lotLimits: LotEditLimit[];
+  /** DD-88: SETTLEMENT rows a party change would move (the confirm dialog's count and amount). */
+  settlementsToMove: SettlementsToMove;
+}
+
+export interface SettlementsToMove {
+  count: number;
+  amount: number;
 }
 
 export interface DeleteBillResult {
