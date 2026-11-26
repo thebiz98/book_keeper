@@ -606,6 +606,12 @@ gantt
 * **Page edit mode removed (C1, DD-57):** `NewSalePage` / `NewPurchasePage`, `SaleSummaryModal` and the cart store have no edit state (`editing`, `loadForEdit`, "Update bill" mode); `billEditHandoff.ts` is deleted. Edit lives in the bill drawer (below).
 * **ApiClient (§6.1):** `updateSale`, `deleteSale`, `updatePurchase`, `deletePurchase`, `deleteReturn`, `getBillEditGuard(target, id)`; `errors.ts` gains the `BillLocked` variant. Mock client stays thin (DD-27): updates replace date/party/total of the history row, deletes remove it and return `{removedCashAmount: paidAmount}`, the guard returns "everything allowed".
 
+### Bill delete: always say why (v1.6 G8, no backend rule change)
+* `BillDetailDrawer`: a failed guard fetch shows "Could not check whether this bill can be changed: <msg>" with **Retry**; the guard reasons also show for opening (OB-) bills (Edit / Delete stay hidden); Edit / Delete have the title "Checking..." while the guard loads; `actionError` (for example a print error) also shows in the footer. The delete error stays inside the confirm dialog.
+* `ConfirmDialog.onConfirm` may return a Promise: the dialog keeps a pending ref + state, Confirm shows `isLoading`, repeat click / Enter is ignored, Cancel / Esc are off while pending. Async callers pass the function (not `() => void fn()`) so the Promise reaches the dialog.
+* The `NOT_A_PURCHASE` message names the right tool: OPN- lot: change quantity in the item's Lots & Purchase Price; ADJ- lot: undo in Adjustments history.
+* `ItemDetailsDrawer`: after a bill opened from its history changes, the item row (stock), lots and both histories reload.
+
 ### In-drawer edit (v1.2 C1, DD-57)
 * **Why:** the page hand-off (`queueBillEdit` / `takeBillEdit`) was consumed in a mount effect, so React StrictMode's second effect run found nothing and showed a blank new bill. The hand-off is gone.
 * **`BillDetailDrawer`** has `mode: 'view' | 'edit'` (reset to `view` when `billId` changes). `Edit` (enabled by `guard.canEdit`) switches the body to `PurchaseEditForm` / `SaleEditForm` (`src/components/domain/billEdit/`). The drawer widens in edit mode. Closing or Cancel while the draft is dirty asks "Discard changes?".
