@@ -46,6 +46,13 @@ impl ChargeTypeRepository for SqliteChargeTypeRepository {
             .optional()?)
     }
 
+    fn find_by_system_key(&self, key: &str) -> Result<Option<ChargeType>, AppError> {
+        Ok(self
+            .conn
+            .query_row(&format!("SELECT {COLS} FROM charge_types WHERE system_key = ?1"), [key], map)
+            .optional()?)
+    }
+
     fn create(&mut self, ct: &ChargeType) -> Result<i64, AppError> {
         let id = if ct.id > 0 { Some(ct.id) } else { None };
         self.conn.execute(
@@ -64,7 +71,7 @@ impl ChargeTypeRepository for SqliteChargeTypeRepository {
         }
         let marks = vec!["?"; ids.len()].join(",");
         let sql = format!(
-            "SELECT {COLS} FROM charge_types WHERE is_active = 1 AND applies_to IN (?, 'BOTH') AND id IN ({marks})"
+            "SELECT {COLS} FROM charge_types WHERE is_active = 1 AND system_key IS NULL AND applies_to IN (?, 'BOTH') AND id IN ({marks})"
         );
         let mut args: Vec<rusqlite::types::Value> = vec![enum_to_sql(&side)?.into()];
         args.extend(ids.iter().map(|i| rusqlite::types::Value::Integer(*i)));
@@ -76,7 +83,7 @@ impl ChargeTypeRepository for SqliteChargeTypeRepository {
 
     fn list_for_side(&self, side: TransactionType, limit: usize) -> Result<Vec<ChargeType>, AppError> {
         let mut stmt = self.conn.prepare_cached(&format!(
-            "SELECT {COLS} FROM charge_types WHERE is_active = 1 AND applies_to IN (?1, 'BOTH') \
+            "SELECT {COLS} FROM charge_types WHERE is_active = 1 AND system_key IS NULL AND applies_to IN (?1, 'BOTH') \
              ORDER BY name COLLATE NOCASE, id LIMIT ?2"
         ))?;
         let rows = stmt
