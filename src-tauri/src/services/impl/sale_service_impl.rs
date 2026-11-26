@@ -9,9 +9,10 @@ use crate::core::entities::{Item, SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
 use crate::services::r#impl::bill_guard::{
-    evaluate_sale_guard, locked, locked_with, PARTY_CHANGE_WITH_CREDITS, PARTY_REQUIRED_WITH_PAYMENTS,
-    TOTAL_BELOW_APPLIED,
+    evaluate_sale_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
+    PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
 };
+use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party};
 use crate::services::r#impl::bill_math::{
     bill_preview, compute_bill_totals, delete_bill_charges, insert_bill_charges, net_unit_price,
     resolve_bill_charges, sale_payment_split, validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
@@ -112,7 +113,7 @@ fn resolve_sale(
                 return Err(validation("party_id", "Sales need a customer party"));
             }
             if !party.is_active && keep_party != Some(pid) {
-                return Err(validation("party_id", format!("'{}' is deleted. Restore the party first.", party.name)));
+                return Err(deleted_party(&party));
             }
             Some(party.name)
         }
@@ -432,6 +433,9 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
                 "Payments were recorded later for this bill, so it needs a customer",
             ));
         }
+        if party_changed {
+            settlements_move_check(&g, r.party_name.as_deref(), payload.confirm_move_settlements)?;
+        }
         let (charges, totals) = price_sale(tx, payload, &r, g.applied_amount, fig)?;
         self.check_sale_stock(tx, &r)?;
         let total_amount = totals.total_amount;
@@ -475,6 +479,16 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
             entity: "SaleTransaction".to_string(),
             id: sale_id.to_string(),
         })?;
+        // E6 / DD-90: a kept deleted customer may see its due fall, never rise. A preview without
+        // a payment books no upfront, so it compares totals instead.
+        if !party_changed {
+            let (before, after) = if with_payment {
+                (old.balance_due, header.balance_due)
+            } else {
+                (old.total_amount, header.total_amount)
+            };
+            check_due_not_raised(tx, r.party_id, before, after)?;
+        }
         Ok(summary(&header, change))
     }
 }

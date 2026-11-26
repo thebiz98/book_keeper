@@ -273,7 +273,13 @@ fn sale_edit_party_change_repoints_settlements() {
     e.stocked(1, 10.0, 5.0);
     let id = e.sell(Some(1), Unpaid, 0.0, &[(1, 1.0, 100.0)]);
     e.acct.settle_bill_payment(settle_payload(1, TransactionType::Sale, Some(id), 30.0)).unwrap();
-    e.sales.update_sale(id, e.sp(Some(2), Unpaid, 0.0, &[(1, 1.0, 100.0)])).unwrap();
+    // DD-88: without the confirm flag the move is refused and nothing is written.
+    let before = e.snap();
+    assert_eq!(code(e.sales.update_sale(id, e.sp(Some(2), Unpaid, 0.0, &[(1, 1.0, 100.0)]))), "SETTLEMENTS_ON_BILL");
+    assert_eq!(e.snap(), before);
+    let mut p = e.sp(Some(2), Unpaid, 0.0, &[(1, 1.0, 100.0)]);
+    p.confirm_move_settlements = true;
+    e.sales.update_sale(id, p).unwrap();
     let rows = e.ledger(TransactionType::Sale, id);
     assert_eq!((rows.len(), rows[0].party_id), (1, Some(2)));
     let mut tx = e.db.begin_read().unwrap();
@@ -663,7 +669,10 @@ fn purchase_vendor_change_repoints_settlements_and_credits_lock_it() {
     let p = e.buy(Some(1), Unpaid, 0.0, &[(1, 10.0, 10.0)]);
     let lot = e.lots(p)[0].id;
     e.acct.settle_bill_payment(settle_payload(1, TransactionType::Purchase, Some(p), 30.0)).unwrap();
-    e.purchases.update_purchase(p, e.pp(Some(2), Unpaid, 0.0, &[(Some(lot), 1, 10.0, 10.0)])).unwrap();
+    assert_eq!(code(e.purchases.update_purchase(p, e.pp(Some(2), Unpaid, 0.0, &[(Some(lot), 1, 10.0, 10.0)]))), "SETTLEMENTS_ON_BILL");
+    let mut edit = e.pp(Some(2), Unpaid, 0.0, &[(Some(lot), 1, 10.0, 10.0)]);
+    edit.confirm_move_settlements = true;
+    e.purchases.update_purchase(p, edit).unwrap();
     assert_eq!(e.ledger(TransactionType::Purchase, p)[0].party_id, Some(2));
     assert_eq!(e.pur(p).balance_due, 70.0);
     // An unlinked vendor return credits the vendor's open bill and pins the vendor.

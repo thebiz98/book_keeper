@@ -41,6 +41,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
 
     // 2. Morning Inward Receipt: 500 Pencils @ ₹5/pc (Total = ₹2,500; Cash paid = ₹1,500; Credit = ₹1,000)
     let pur_payload = CreatePurchasePayload {
+        confirm_move_settlements: false,
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
@@ -66,6 +67,7 @@ fn test_scenario_s1_morning_inward_to_evening_drawer_audit() {
     // 3. Rapid Day Counter Billing: 10 sales totaling ₹4,000 (400 pcs depleted via FIFO @ ₹10)
     for _ in 1..=10 {
         let sale_payload = CreateSalePayload {
+            confirm_move_settlements: false,
             charges: vec![],
             transaction_date: "2026-11-20".to_string(),
             party_id: None,
@@ -142,6 +144,7 @@ fn test_scenario_s2_customer_credit_and_khata_cycle() {
     }
 
     let sale_payload = CreateSalePayload {
+        confirm_move_settlements: false,
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: Some(1),
@@ -210,6 +213,7 @@ fn test_scenario_s3_restockable_return_and_defective_replacement() {
     }
 
     let sale_payload = CreateSalePayload {
+        confirm_move_settlements: false,
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,
@@ -333,6 +337,7 @@ fn test_scenario_s4_bulk_catalog_import_and_instant_barcode_billing() {
     assert_eq!(matches[0].default_sale_price, 25.0);
 
     let sale_payload = CreateSalePayload {
+        confirm_move_settlements: false,
         charges: vec![],
         transaction_date: "2026-11-20".to_string(),
         party_id: None,

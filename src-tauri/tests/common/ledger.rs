@@ -138,6 +138,7 @@ pub fn sale_payload(
     lines: &[(i64, Option<i64>, f64, f64)],
 ) -> CreateSalePayload {
     CreateSalePayload {
+        confirm_move_settlements: false,
         charges: vec![],
         transaction_date: DAY.to_string(),
         party_id,
@@ -165,6 +166,7 @@ pub fn purchase_payload(
     lines: &[(i64, Option<i64>, f64, f64)],
 ) -> CreatePurchasePayload {
     CreatePurchasePayload {
+        confirm_move_settlements: false,
         charges: vec![],
         transaction_date: DAY.to_string(),
         party_id,

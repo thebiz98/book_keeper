@@ -12,21 +12,38 @@ use crate::core::value_objects::PaymentStatus;
 pub struct PreviewError {
     pub field: String,
     pub message: String,
+    /// DD-90: set when the error is a `DeletedReference`, so the form can offer Restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted: Option<DeletedRef>,
+}
+
+/// The deleted item or party behind a preview error (DD-90).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeletedRef {
+    /// `ITEM` or `PARTY`.
+    pub entity: String,
+    pub id: i64,
+    pub name: String,
 }
 
 impl PreviewError {
+    pub fn new(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self { field: field.into(), message: message.into(), deleted: None }
+    }
+
     /// Maps a command error to data. Business errors become a `PreviewError`; infrastructure
     /// errors (database, IO ...) stay failures (`None`).
     pub fn from_app_error(e: &AppError) -> Option<Self> {
         match e {
-            AppError::ValidationError { field, message } => {
-                Some(Self { field: field.clone(), message: message.clone() })
-            }
-            AppError::BillLocked { code, message } => Some(Self { field: code.clone(), message: message.clone() }),
-            AppError::InsufficientStockError { .. } => {
-                Some(Self { field: "items".to_string(), message: e.to_string() })
-            }
-            AppError::NotFound { .. } => Some(Self { field: "id".to_string(), message: e.to_string() }),
+            AppError::ValidationError { field, message } => Some(Self::new(field, message)),
+            AppError::BillLocked { code, message } => Some(Self::new(code, message)),
+            AppError::InsufficientStockError { .. } => Some(Self::new("items", e.to_string())),
+            AppError::NotFound { .. } => Some(Self::new("id", e.to_string())),
+            AppError::DeletedReference { entity, id, name, message } => Some(Self {
+                field: if entity == "ITEM" { "item_id" } else { "party_id" }.to_string(),
+                message: message.clone(),
+                deleted: Some(DeletedRef { entity: entity.clone(), id: *id, name: name.clone() }),
+            }),
             _ => None,
         }
     }
@@ -89,6 +106,9 @@ pub struct PreviewSalePayload {
     pub items: Vec<CreateSaleItemPayload>,
     #[serde(default)]
     pub charges: Vec<BillChargeInput>,
+    /// DD-88: as on the command payload (a preview without it reports SETTLEMENTS_ON_BILL).
+    #[serde(default)]
+    pub confirm_move_settlements: bool,
 }
 
 impl PreviewSalePayload {
@@ -105,6 +125,7 @@ impl PreviewSalePayload {
                 notes: self.notes,
                 items: self.items,
                 charges: self.charges,
+                confirm_move_settlements: self.confirm_move_settlements,
             },
             with_payment,
         )
@@ -126,6 +147,9 @@ pub struct PreviewPurchasePayload {
     pub items: Vec<CreatePurchaseItemPayload>,
     #[serde(default)]
     pub charges: Vec<BillChargeInput>,
+    /// DD-88: as on the command payload (a preview without it reports SETTLEMENTS_ON_BILL).
+    #[serde(default)]
+    pub confirm_move_settlements: bool,
 }
 
 impl PreviewPurchasePayload {
@@ -142,6 +166,7 @@ impl PreviewPurchasePayload {
                 notes: self.notes,
                 items: self.items,
                 charges: self.charges,
+                confirm_move_settlements: self.confirm_move_settlements,
             },
             with_payment,
         )
