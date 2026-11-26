@@ -151,7 +151,7 @@ pub fn sale_payload(
                 item_id,
                 bundle_id,
                 bundle_quantity,
-                unit_price,
+                unit_price, entered_total: None,
             })
             .collect(),
     }

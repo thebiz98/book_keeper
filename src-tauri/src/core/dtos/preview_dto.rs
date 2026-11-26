@@ -44,6 +44,9 @@ pub struct BillPaymentPreview {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BillPreview {
     pub line_totals: Vec<f64>,
+    /// FR-47: signed extra charge (+) / discount (−) per line from an edited item total; 0 for none.
+    #[serde(default)]
+    pub line_adjustments: Vec<f64>,
     pub items_subtotal: f64,
     pub charges_total: f64,
     pub discounts_total: f64,
@@ -55,6 +58,22 @@ pub struct BillPreview {
     /// `None` when the payload carried no payment status (totals and stock checks only).
     pub payment: Option<BillPaymentPreview>,
     pub errors: Vec<PreviewError>,
+}
+
+/// FR-47: one sale entry-row line, for the Total box before Add (no database).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PreviewSaleLinePayload {
+    pub bundle_quantity: f64,
+    pub unit_price: f64,
+    #[serde(default)]
+    pub entered_total: Option<f64>,
+}
+
+/// `line_total = round2(qty × rate)`; `adjustment` is signed (`> 0` extra charge, `< 0` discount).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaleLinePreview {
+    pub line_total: f64,
+    pub adjustment: f64,
 }
 
 /// `CreateSalePayload` with the payment optional (the cart shows totals before a status is chosen).
