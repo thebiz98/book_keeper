@@ -183,6 +183,10 @@ export class TauriClient implements ApiClient {
     invokeCmd('update_opening_lot_quantity', { payload });
   previewOpeningLotQuantity: ApiClient['previewOpeningLotQuantity'] = (payload) =>
     invokeCmd('preview_opening_lot_quantity', { payload });
+  undoStockAdjustment: ApiClient['undoStockAdjustment'] = (adjustmentId) =>
+    invokeCmd('undo_stock_adjustment', { adjustmentId });
+  getAdjustmentUndoGuard: ApiClient['getAdjustmentUndoGuard'] = (adjustmentId) =>
+    invokeCmd('get_adjustment_undo_guard', { adjustmentId });
   previewLotDraw: ApiClient['previewLotDraw'] = (itemId, quantity, priorLines) =>
     invokeCmd('preview_lot_draw', { itemId, quantity, priorLines });
   previewServiceCost: ApiClient['previewServiceCost'] = (payload) => invokeCmd('preview_service_cost', { payload });

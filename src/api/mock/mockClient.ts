@@ -954,6 +954,21 @@ export class MockApiClient implements ApiClient {
   async updateOpeningLotQuantity(payload: Parameters<ApiClient['updateOpeningLotQuantity']>[0]) {
     return this.previewOpeningLotQuantity(payload);
   }
+  async undoStockAdjustment(adjustmentId: number) {
+    return this.getAdjustmentUndoGuard(adjustmentId);
+  }
+  async getAdjustmentUndoGuard(_adjustmentId: number) {
+    return {
+      canUndo: true,
+      reason: null,
+      quantity: -1,
+      itemId: 1,
+      itemName: 'Mock item',
+      baseUnit: 'PCS',
+      lossRemoved: 5,
+      valueChange: 5,
+    };
+  }
   async previewOpeningLotQuantity(payload: Parameters<ApiClient['previewOpeningLotQuantity']>[0]) {
     return {
       purchaseItemId: payload.purchaseItemId,

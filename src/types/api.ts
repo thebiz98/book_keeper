@@ -518,6 +518,20 @@ export interface UpdateOpeningQuantityPayload {
 }
 
 /** FR-51 / DD-84: no stock adjustment is recorded, so P&L losses never change. */
+/** FR-52 / DD-85: what undoing a stock adjustment does, or why it cannot (backend dry run). */
+export interface AdjustmentUndoGuard {
+  canUndo: boolean;
+  reason: { code: string; message: string } | null;
+  /** Signed adjustment quantity (negative = reduction). */
+  quantity: number;
+  itemId: number;
+  itemName: string;
+  baseUnit: string;
+  /** Reduction: Inventory Losses removed; 0 for an increase. */
+  lossRemoved: number;
+  valueChange: number;
+}
+
 export interface OpeningQuantityResult {
   purchaseItemId: number;
   itemId: number;
@@ -769,6 +783,10 @@ export interface ApiClient {
   updateOpeningLotQuantity(payload: UpdateOpeningQuantityPayload): Promise<OpeningQuantityResult>;
   /** DD-56: dry run of `updateOpeningLotQuantity`; rejects with the error the command would give. */
   previewOpeningLotQuantity(payload: UpdateOpeningQuantityPayload): Promise<OpeningQuantityResult>;
+  /** FR-52: removes a stock adjustment and its effect. Rejects (BillLocked) when it cannot be undone. */
+  undoStockAdjustment(adjustmentId: number): Promise<AdjustmentUndoGuard>;
+  /** DD-56: dry run of `undoStockAdjustment`; a refusal comes back as `canUndo: false` with the reason. */
+  getAdjustmentUndoGuard(adjustmentId: number): Promise<AdjustmentUndoGuard>;
   /** FR-31: open lots in FIFO order and the draw of `quantity` after the earlier cart lines `priorLines` (base units; services expanded by the backend). */
   previewLotDraw(itemId: number, quantity: number, priorLines: PriorLine[]): Promise<LotDraw>;
   /** FR-36: cost of one service unit from the unsaved components and Service cost (backend dry run). */

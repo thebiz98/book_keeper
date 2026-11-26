@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, errorMessage } from '@/api';
-import type { ReturnTransaction, ReturnType, StockAdjustment } from '@/types';
+import type { AdjustmentUndoGuard, ReturnTransaction, ReturnType, StockAdjustment } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { DataTable, type DataTableColumn } from './DataTable';
 import { ADJUSTMENT_REASONS } from './StockAdjustmentForm';
 import { ReturnDetailDrawer } from './ReturnDetailDrawer';
+import { Button } from '../ui/Button';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { refreshAppMetrics } from './navParams';
+import { formatINR } from '@/lib/money';
 
 const PAGE_SIZE = 10;
 
@@ -73,6 +77,7 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [undo, setUndo] = useState<{ row: StockAdjustment; guard: AdjustmentUndoGuard | null; error: string | null } | null>(null);
 
   const load = useCallback(() => {
     let live = true;
@@ -93,6 +98,36 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
   }, [page, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => load(), [load]);
+
+  // Backend dry run (DD-56): the dialog only prints the guard's numbers or its reason.
+  const openUndo = (row: StockAdjustment) => {
+    setUndo({ row, guard: null, error: null });
+    api
+      .getAdjustmentUndoGuard(row.id)
+      .then((guard) => setUndo((u) => (u && u.row.id === row.id ? { ...u, guard } : u)))
+      .catch((e) => setUndo((u) => (u && u.row.id === row.id ? { ...u, error: errorMessage(e) } : u)));
+  };
+
+  const confirmUndo = async () => {
+    if (!undo) return;
+    try {
+      await api.undoStockAdjustment(undo.row.id);
+      setUndo(null);
+      load();
+      refreshAppMetrics();
+    } catch (e) {
+      setUndo((u) => (u ? { ...u, error: errorMessage(e) } : u));
+    }
+  };
+
+  const undoMessage = (g: AdjustmentUndoGuard | null): string => {
+    if (!g) return 'Checking what undoing this adjustment would change...';
+    if (!g.canUndo) return g.reason?.message ?? 'This adjustment cannot be undone.';
+    const qty = `${Math.abs(g.quantity)} ${g.baseUnit} of ${g.itemName}`;
+    return g.quantity < 0
+      ? `Puts ${qty} back into stock and removes ${formatINR(g.lossRemoved)} from Inventory Losses.`
+      : `Removes ${qty} added by this adjustment.`;
+  };
 
   const columns: DataTableColumn<StockAdjustment>[] = [
     { key: 'date', header: 'Date', mono: true, render: (r) => r.adjustmentDate },
@@ -116,9 +151,20 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
       render: (r) => (r.unitCost !== null ? <CurrencyDisplay amount={r.unitCost} /> : '-'),
     },
     { key: 'notes', header: 'Notes', render: (r) => r.notes ?? '' },
+    {
+      key: 'undo',
+      header: '',
+      align: 'right',
+      render: (r) => (
+        <Button variant="outline" size="sm" onClick={() => openUndo(r)} aria-label={`Undo adjustment #${r.id}`}>
+          Undo
+        </Button>
+      ),
+    },
   ];
 
   return (
+    <>
     <DataTable
       columns={columns}
       items={rows}
@@ -132,5 +178,22 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
       limit={PAGE_SIZE}
       onPageChange={setPage}
     />
+    <ConfirmDialog
+      isOpen={undo !== null}
+      title="Undo stock adjustment"
+      message={undoMessage(undo?.guard ?? null)}
+      confirmText="Undo"
+      variant="warning"
+      confirmDisabled={!undo?.guard?.canUndo}
+      onConfirm={confirmUndo}
+      onCancel={() => setUndo(null)}
+    >
+      {undo?.error && (
+        <p role="alert" className="mt-2 text-xs text-rose-600">
+          {undo.error}
+        </p>
+      )}
+    </ConfirmDialog>
+    </>
   );
 };

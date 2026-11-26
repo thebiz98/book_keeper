@@ -60,6 +60,16 @@ pub async fn update_opening_lot_quantity(state: State<'_, AppState>, payload: Up
     super::run_blocking(move || svc.update_opening_lot_quantity(payload)).await
 }
 #[tauri::command]
+pub async fn undo_stock_adjustment(state: State<'_, AppState>, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError> {
+    let svc = state.inventory_service.clone();
+    super::run_blocking(move || svc.undo_stock_adjustment(adjustment_id)).await
+}
+#[tauri::command]
+pub async fn get_adjustment_undo_guard(state: State<'_, AppState>, adjustment_id: i64) -> Result<AdjustmentUndoGuard, AppError> {
+    let svc = state.inventory_service.clone();
+    super::run_blocking(move || svc.get_adjustment_undo_guard(adjustment_id)).await
+}
+#[tauri::command]
 pub async fn preview_opening_lot_quantity(state: State<'_, AppState>, payload: UpdateOpeningQuantityPayload) -> Result<OpeningQuantityResult, AppError> {
     let svc = state.inventory_service.clone();
     super::run_blocking(move || svc.preview_opening_lot_quantity(payload)).await

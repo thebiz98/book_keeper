@@ -19,6 +19,8 @@ export interface ConfirmDialogProps {
    * trimmed text typed by the user equals this exactly.
    */
   requireText?: string;
+  /** Keeps Confirm (and Enter) off, e.g. when the backend says the action is not allowed. */
+  confirmDisabled?: boolean;
   /** Extra body content under the message (e.g. an inline error). */
   children?: React.ReactNode;
 }
@@ -33,6 +35,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onConfirm,
   onCancel,
   requireText,
+  confirmDisabled = false,
   children,
 }) => {
   const [typed, setTyped] = useState('');
@@ -40,7 +43,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     if (isOpen) setTyped('');
   }, [isOpen, requireText]);
 
-  const canConfirm = requireText === undefined || typed.trim() === requireText;
+  const canConfirm = !confirmDisabled && (requireText === undefined || typed.trim() === requireText);
   const pendingRef = useRef(false);
   const [pending, setPending] = useState(false);
   const mounted = useRef(true);

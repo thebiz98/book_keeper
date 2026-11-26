@@ -700,3 +700,92 @@ fn g6_edit_up_and_to_zero_when_unused() {
     assert!(r.purchases().find_purchase_item_by_id(lot).unwrap().is_none());
     assert_stock_invariant(&mut *r);
 }
+
+// ---- G7: undo a stock adjustment (FR-52, DD-85) ----
+
+fn set_stock(inv: &Inv, id: i64, counted: f64) -> i64 {
+    inv.set_item_stock(SetItemStockPayload {
+        item_id: id, counted_quantity: counted, unit_cost: None, adjustment_date: "2026-11-26".into(), notes: None,
+    })
+    .unwrap()
+    .adjustment_id
+    .unwrap()
+}
+
+#[test]
+fn g7_undo_count_correction_restores_stock_and_drops_the_loss() {
+    let (db, inv, id, lot) = opening_env();
+    let rep = common::ReportServiceImpl::with_fixed_today(db.clone(), "2026-11-26");
+    let aid = set_stock(&inv, id, 1.0);
+    assert_eq!(stock(&db, id).0, 1.0);
+    assert_eq!(rep.get_pnl_report("2026-11-26", "2026-11-26").unwrap().inventory_losses, 50.0);
+
+    let g = inv.get_adjustment_undo_guard(aid).unwrap();
+    assert!(g.can_undo && g.reason.is_none());
+    assert_eq!((g.quantity, g.loss_removed, g.value_change, g.base_unit.as_str()), (-5.0, 50.0, 50.0, "PCS"));
+    assert_eq!(stock(&db, id).0, 1.0, "guard writes nothing");
+    assert_eq!(adjustment_rows(&inv, id).len(), 1);
+
+    inv.undo_stock_adjustment(aid).unwrap();
+    assert_eq!(stock(&db, id).0, 6.0);
+    assert_eq!(adjustment_rows(&inv, id).len(), 0);
+    assert_eq!(rep.get_pnl_report("2026-11-26", "2026-11-26").unwrap().inventory_losses, 0.0);
+    let mut r = db.begin_read().unwrap();
+    assert_eq!(lot_remaining(&mut *r, lot), 6.0);
+    assert_stock_invariant(&mut *r);
+    assert!(matches!(inv.undo_stock_adjustment(aid), Err(AppError::NotFound { .. })));
+}
+
+#[test]
+fn g7_undo_unrecorded_stock_removes_the_lot_unless_sold_from() {
+    let (db, inv, id, _lot) = opening_env();
+    let aid = set_stock(&inv, id, 8.0);
+    assert_eq!((stock(&db, id).0, lot_count(&db, id)), (8.0, 2));
+    let g = inv.get_adjustment_undo_guard(aid).unwrap();
+    assert!(g.can_undo);
+    assert_eq!((g.quantity, g.loss_removed, g.value_change), (2.0, 0.0, -20.0));
+    assert_eq!(lot_count(&db, id), 2, "guard writes nothing");
+    inv.undo_stock_adjustment(aid).unwrap();
+    assert_eq!((stock(&db, id).0, lot_count(&db, id)), (6.0, 1));
+    assert_eq!(adjustment_rows(&inv, id).len(), 0);
+    {
+        let mut r = db.begin_read().unwrap();
+        assert_stock_invariant(&mut *r);
+    }
+
+    // Stock added, then sold from: blocked, with the reason in the guard and an error on undo.
+    let aid = set_stock(&inv, id, 8.0);
+    let sales = common::SaleServiceImpl::new(inv.clone(), common::PaymentServiceImpl, db.clone());
+    sales.create_sale(sale_payload(None, PaymentStatus::Paid, 105.0, &[(id, None, 7.0, 15.0)])).unwrap();
+    let g = inv.get_adjustment_undo_guard(aid).unwrap();
+    assert!(!g.can_undo);
+    let reason = g.reason.unwrap();
+    assert_eq!(reason.code, "ADJUSTMENT_STOCK_USED");
+    assert!(reason.message.contains("Delete those sales first"));
+    match inv.undo_stock_adjustment(aid) {
+        Err(AppError::BillLocked { code, .. }) => assert_eq!(code, "ADJUSTMENT_STOCK_USED"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(adjustment_rows(&inv, id).len(), 1);
+    let mut r = db.begin_read().unwrap();
+    assert_stock_invariant(&mut *r);
+}
+
+#[test]
+fn g7_undo_on_a_deleted_item_is_refused() {
+    let (db, inv, id, _lot) = opening_env();
+    let items = ItemServiceImpl::new(db.clone(), Arc::new(db.indexer()), inv.clone());
+    let aid = set_stock(&inv, id, 0.0);
+    items.delete_item(id).unwrap();
+    let g = inv.get_adjustment_undo_guard(aid).unwrap();
+    assert!(!g.can_undo);
+    assert_eq!(g.reason.unwrap().code, "ITEM_DELETED");
+    match inv.undo_stock_adjustment(aid) {
+        Err(AppError::BillLocked { code, message }) => {
+            assert_eq!(code, "ITEM_DELETED");
+            assert!(message.contains("Restore the item first"));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(inv.get_adjustment_undo_guard(9999), Err(AppError::NotFound { .. })));
+}

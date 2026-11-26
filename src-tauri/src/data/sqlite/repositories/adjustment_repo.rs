@@ -1,5 +1,5 @@
 //! SQLite implementation of `AdjustmentRepository`.
-use rusqlite::{params, Row};
+use rusqlite::{params, OptionalExtension, Row};
 
 use crate::core::entities::StockAdjustment;
 use crate::core::error::AppError;
@@ -45,6 +45,18 @@ impl AdjustmentRepository for SqliteAdjustmentRepository {
 
     fn update_unit_cost(&mut self, id: i64, unit_cost: f64) -> Result<(), AppError> {
         self.conn.execute("UPDATE stock_adjustments SET unit_cost = ?1 WHERE id = ?2", params![unit_cost, id])?;
+        Ok(())
+    }
+
+    fn find_by_id(&self, id: i64) -> Result<Option<StockAdjustment>, AppError> {
+        Ok(self
+            .conn
+            .query_row(&format!("SELECT {COLS} FROM stock_adjustments WHERE id = ?1"), params![id], map)
+            .optional()?)
+    }
+
+    fn delete_adjustment(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn.execute("DELETE FROM stock_adjustments WHERE id = ?1", params![id])?;
         Ok(())
     }
 
