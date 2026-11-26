@@ -58,6 +58,24 @@ pub struct BillPreview {
 }
 
 /// `CreateSalePayload` with the payment optional (the cart shows totals before a status is chosen).
+/// FR-47: one sale entry-row line, for the Total box before Add (no database).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PreviewSaleLinePayload {
+    pub bundle_quantity: f64,
+    pub unit_price: f64,
+    /// The total the cashier typed; `None` = untouched.
+    #[serde(default)]
+    pub entered_total: Option<f64>,
+}
+
+/// DD-82: `unit_price` is the rate the line is added at (`entered_total ÷ qty`, not rounded, when a
+/// total was typed; otherwise the given rate). `line_total = round2(qty × unit_price)`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaleLinePreview {
+    pub line_total: f64,
+    pub unit_price: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreviewSalePayload {
     pub transaction_date: String,
