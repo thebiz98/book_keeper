@@ -210,3 +210,18 @@ describe('Inventory keyboard map (D1)', () => {
     expect(active(container)).toBe(0);
   });
 });
+
+describe('Low Stock Level edit availability (FR-50)', () => {
+  it('a physical item has an Edit button; a service and a deleted item are read-only', () => {
+    installApi({});
+    const view = (item: ReturnType<typeof makeItem>) => {
+      const r = render(<ItemDetailsDrawer item={item} onClose={() => {}} onEdit={() => {}} />);
+      const has = document.querySelector(`button[aria-label="Edit low stock level for ${item.name}"]`) !== null;
+      r.unmount();
+      return has;
+    };
+    expect(view(rows[0])).toBe(true);
+    expect(view(rows[2])).toBe(false);
+    expect(view(makeItem({ itemId: 4, name: 'Old Pen', isActive: false }))).toBe(false);
+  });
+});
