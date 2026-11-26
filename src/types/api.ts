@@ -131,6 +131,8 @@ export interface CreateSaleItemPayload {
   bundleId: number | null;
   bundleQuantity: number;
   unitPrice: number;
+  /** DD-89 edit only: the stored line this line keeps; null/absent = a new line. Create rejects non-null. */
+  saleItemId?: number | null;
 }
 
 export interface CreateSalePayload {
