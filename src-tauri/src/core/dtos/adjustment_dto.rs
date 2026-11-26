@@ -52,3 +52,28 @@ pub struct SetItemStockResult {
     /// `+delta x unit_cost` for unrecorded stock, `-FIFO loss` for a count correction.
     pub value_change: f64,
 }
+
+/// `update_opening_lot_quantity` input (FR-51, DD-84): the corrected opening quantity of one opening lot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UpdateOpeningQuantityPayload {
+    pub purchase_item_id: i64,
+    pub quantity: f64,
+}
+
+/// Result of `update_opening_lot_quantity`. No adjustment is recorded, so P&L losses never change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpeningQuantityResult {
+    pub purchase_item_id: i64,
+    pub item_id: i64,
+    pub old_quantity: f64,
+    pub new_quantity: f64,
+    /// Units of this lot already sold, adjusted or returned: the floor for `new_quantity`.
+    pub consumed: f64,
+    pub unit_cost: f64,
+    pub old_stock: f64,
+    pub new_stock: f64,
+    /// `(new - old) x unit_cost`.
+    pub value_change: f64,
+    /// True when quantity 0 removed the (unused) opening lot.
+    pub lot_removed: bool,
+}

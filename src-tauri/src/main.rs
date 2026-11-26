@@ -60,6 +60,8 @@ fn main() {
             dues_controller::preview_settlement_allocation,
             adjustment_controller::preview_stock_adjustment,
             adjustment_controller::preview_set_item_stock,
+            adjustment_controller::preview_opening_lot_quantity,
+            adjustment_controller::update_opening_lot_quantity,
             adjustment_controller::create_stock_adjustment,
             adjustment_controller::set_item_stock,
             adjustment_controller::get_item_lots,
