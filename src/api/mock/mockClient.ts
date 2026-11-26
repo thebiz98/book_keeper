@@ -951,6 +951,23 @@ export class MockApiClient implements ApiClient {
       valueChange: 0,
     };
   }
+  async updateOpeningLotQuantity(payload: Parameters<ApiClient['updateOpeningLotQuantity']>[0]) {
+    return this.previewOpeningLotQuantity(payload);
+  }
+  async previewOpeningLotQuantity(payload: Parameters<ApiClient['previewOpeningLotQuantity']>[0]) {
+    return {
+      purchaseItemId: payload.purchaseItemId,
+      itemId: 1,
+      oldQuantity: 5,
+      newQuantity: payload.quantity,
+      consumed: 0,
+      unitCost: 5,
+      oldStock: 5,
+      newStock: payload.quantity,
+      valueChange: (payload.quantity - 5) * 5,
+      lotRemoved: payload.quantity === 0,
+    };
+  }
   async createCustomerReturn(payload: Parameters<ApiClient['createCustomerReturn']>[0]) {
     const total = payload.items.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
     return this.addReturn('CUSTOMER', { ...payload, originalId: payload.originalSaleId, total });

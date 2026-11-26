@@ -258,3 +258,7 @@ Delivered: the Item List has no Low Stock Level column (`LowStockLevelCell` remo
 ## Branch fix/bill-delete-messages (frontend + one guard message, v1.6 G8)
 Delivered: bill delete always says why. Guard fetch error with Retry, OB- reason visible, "Checking..." title, footer action errors, `ConfirmDialog` pending guard (no double delete), source-specific NOT_A_PURCHASE text (OPN- / ADJ-), Item details reloads after a bill change. No schema or rule change.
 - **Manual check:** open a purchase whose stock was sold: Delete disabled, reason shown. Open an OB- bill: reason visible, no buttons. Delete a plain sale from an item's Sales tab: the item's stock and Sales list refresh. Press Enter twice fast on a delete confirm: one delete.
+
+## Branch feat/opening-qty-edit (FR-51, DD-84; no schema, v1.6 G6)
+Delivered: `update_opening_lot_quantity` / `preview_opening_lot_quantity` (same body, dry run), `OpeningQtyEditModal`, Edit quantity action on Opening rows of the Lots table, Set stock hint. No adjustment row, so Inventory Losses never change. Deviation from the plan text: OPN headers are not bills (total 0, DD-07), so their totals are not rewritten.
+- **Manual check:** create an item with opening 6 @ 10, sell 1. Edit item, Lots, Opening row, Edit quantity: shows used 1, minimum 1; type 1: stock 5 to 0, value -50; Save. Stock 0, Profit & Loss Inventory Losses unchanged. Type 0 while used: refused with the reason. Delete the sale: stock 1. Set stock lower on an item with an Opening lot: the hint shows.

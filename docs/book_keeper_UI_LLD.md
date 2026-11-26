@@ -784,3 +784,9 @@ UI only; no backend, schema or IPC change.
 * **Parties list** shows active parties only. Toolbar **Deleted parties** opens E2's `DeletedRecordsDialog`: Name, Type, Phone, Deleted on, Restore (customers and vendors together, name/phone search, backend paging). This is the only Restore action for parties.
 * **Badges only.** Credit & Dues rows and the party ledger header show a small "Deleted" badge for an inactive party (`PartyDueSummary.is_active`, `Party.is_active`); no Restore button.
 * **Tests (Vitest).** delete confirm HARD / SOFT / blocked; Deleted parties dialog lists both types, search, restore; dues row badge without a Restore action.
+
+## Edit Opening Quantity (FR-51, DD-84, `feat/opening-qty-edit`, v1.6 G6)
+* **Lots table (`LotInspector`, editable mode).** An OPENING row gets a second action, **Edit quantity** (`Edit quantity of OPN-0001`), next to the price pencil. It opens `OpeningQtyEditModal` (pattern of `LotPriceEditModal`, `usePreview`).
+* **Modal.** Shows opening quantity, already used and minimum allowed (both from the backend preview's `consumed`), a quantity input, the preview block (stock on hand old to new, stock value change) and "Not recorded as a loss or adjustment." Backend refusals (`LOT_BELOW_CONSUMED`, ...) show as alerts and block Save; Save is disabled while unchanged. After save the lots reload, `onChanged` fires and `refreshAppMetrics()` runs. The UI only checks the input is a number >= 0.
+* **Set stock dialog.** When the count is below the stock and the item has an Opening lot (a read of `get_item_lots`), a hint: "Opening stock was entered wrong? Edit the Opening lot in Lots & Purchase Price instead. That isn't a loss."
+* **Tests (Vitest, `openingQty.test.tsx`).** used / minimum / preview / save; backend refusal blocks Save; save error shown.

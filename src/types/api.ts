@@ -511,6 +511,27 @@ export interface SetItemStockResult {
   valueChange: number;
 }
 
+/** FR-51: corrected quantity of one OPENING lot. */
+export interface UpdateOpeningQuantityPayload {
+  purchaseItemId: number;
+  quantity: number;
+}
+
+/** FR-51 / DD-84: no stock adjustment is recorded, so P&L losses never change. */
+export interface OpeningQuantityResult {
+  purchaseItemId: number;
+  itemId: number;
+  oldQuantity: number;
+  newQuantity: number;
+  /** Already sold, adjusted or returned from this lot: the minimum quantity. */
+  consumed: number;
+  unitCost: number;
+  oldStock: number;
+  newStock: number;
+  valueChange: number;
+  lotRemoved: boolean;
+}
+
 export type ConflictStrategy = 'SKIP' | 'OVERWRITE' | 'ADD_STOCK';
 
 export interface ImportRowError {
@@ -744,6 +765,10 @@ export interface ApiClient {
   /** DD-56: dry runs of the stock commands: the unit cost used, the FIFO loss and the value change. */
   previewStockAdjustment(payload: StockAdjustmentPayload): Promise<StockAdjustmentPreview>;
   previewSetItemStock(payload: SetItemStockPayload): Promise<SetItemStockResult>;
+  /** FR-51 / DD-84: correct an OPENING lot's quantity directly (no adjustment, no loss); floor = already used. */
+  updateOpeningLotQuantity(payload: UpdateOpeningQuantityPayload): Promise<OpeningQuantityResult>;
+  /** DD-56: dry run of `updateOpeningLotQuantity`; rejects with the error the command would give. */
+  previewOpeningLotQuantity(payload: UpdateOpeningQuantityPayload): Promise<OpeningQuantityResult>;
   /** FR-31: open lots in FIFO order and the draw of `quantity` after the earlier cart lines `priorLines` (base units; services expanded by the backend). */
   previewLotDraw(itemId: number, quantity: number, priorLines: PriorLine[]): Promise<LotDraw>;
   /** FR-36: cost of one service unit from the unsaved components and Service cost (backend dry run). */
