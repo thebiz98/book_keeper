@@ -375,6 +375,13 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
         }
         let old_stock = find_item(tx, lot.item_id)?.current_stock;
         let consumed = lot.quantity - lot.remaining_quantity;
+        if p.quantity + EPS < consumed {
+            // Checked here so 0 gets the floor message, not edit_purchase_lot's "must be positive".
+            return Err(locked(
+                "LOT_BELOW_CONSUMED",
+                format!("'{}': at least {consumed} already used, quantity cannot go below that", lot.item_name),
+            ));
+        }
         let mut lot_removed = false;
         if p.quantity <= EPS && consumed <= EPS {
             // Unused lot: remove it, and its header when nothing else hangs off it (OPN headers are not bills).

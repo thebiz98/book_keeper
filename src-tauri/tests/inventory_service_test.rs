@@ -665,7 +665,10 @@ fn g6_below_consumed_non_opening_and_invalid_are_refused() {
         other => panic!("{other:?}"),
     }
     // 0 is refused too while any of it is used.
-    assert!(inv.update_opening_lot_quantity(oq(lot, 0.0)).is_err());
+    match inv.update_opening_lot_quantity(oq(lot, 0.0)) {
+        Err(AppError::BillLocked { code, .. }) => assert_eq!(code, "LOT_BELOW_CONSUMED"),
+        other => panic!("{other:?}"),
+    }
     assert!(inv.update_opening_lot_quantity(oq(lot, -1.0)).is_err());
     assert!(inv.preview_opening_lot_quantity(oq(lot, f64::NAN)).is_err());
     assert_eq!(stock(&db, id).0, 4.0);
