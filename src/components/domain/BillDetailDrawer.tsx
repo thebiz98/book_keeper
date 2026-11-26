@@ -514,7 +514,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
               Paid: <CurrencyDisplay amount={head.paidAmount} size="sm" />
             </div>
             <div className="font-semibold">
-              Balance: <CurrencyDisplay amount={head.balanceDue} size="sm" colored />
+              Balance: <CurrencyDisplay amount={head.balanceDue} size="sm" colored invertColors={kind === 'PURCHASE'} />
             </div>
           </div>
 

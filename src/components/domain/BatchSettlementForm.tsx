@@ -154,7 +154,7 @@ export const BatchSettlementForm: React.FC<BatchSettlementFormProps> = ({
             Total Outstanding - {partyName}
           </span>
           <div className="text-xl font-bold font-mono">
-            <CurrencyDisplay amount={outstanding} size="xl" colored />
+            <CurrencyDisplay amount={outstanding} size="xl" colored invertColors={transactionType === 'PURCHASE'} />
           </div>
         </div>
         <div className="text-right">

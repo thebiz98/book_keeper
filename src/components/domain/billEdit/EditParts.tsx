@@ -60,7 +60,12 @@ export const PaymentStatusControl: React.FC<{
 );
 
 /** Items subtotal, charges, discounts, total and balance; every number is the preview's. */
-export const EditTotals: React.FC<{ totals: BillPreview | null; balanceDue: number }> = ({ totals, balanceDue }) => (
+/** `payable`: a purchase bill, so a positive balance is money the shop owes and shows red (FR-49). */
+export const EditTotals: React.FC<{ totals: BillPreview | null; balanceDue: number; payable?: boolean }> = ({
+  totals,
+  balanceDue,
+  payable = false,
+}) => (
   <div className="flex flex-col items-end gap-0.5 text-xs" data-testid="edit-totals">
     <div>
       Items subtotal: <CurrencyDisplay amount={totals?.itemsSubtotal ?? 0} size="sm" />
@@ -79,7 +84,7 @@ export const EditTotals: React.FC<{ totals: BillPreview | null; balanceDue: numb
       Total: <CurrencyDisplay amount={totals?.totalAmount ?? 0} size="sm" />
     </div>
     <div data-testid="edit-balance">
-      Balance: <CurrencyDisplay amount={balanceDue} size="sm" colored />
+      Balance: <CurrencyDisplay amount={balanceDue} size="sm" colored invertColors={payable} />
     </div>
   </div>
 );
