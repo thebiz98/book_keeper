@@ -27,7 +27,19 @@ vi.mock('@/components/domain/ItemSearchTypeahead', () => ({
   ),
 }));
 vi.mock('@/components/domain/PartySelector', () => ({
-  PartySelector: () => <span>party-selector</span>,
+  PartySelector: (p: { onSelectParty?: (party: { id: number; name: string }) => void }) => (
+    <span>
+      party-selector
+      {[
+        { id: 4, name: 'Vendor A' },
+        { id: 7, name: 'Vendor B' },
+      ].map((v) => (
+        <button key={v.id} type="button" data-testid={`pick-party-${v.id}`} onClick={() => p.onSelectParty?.(v)}>
+          {v.name}
+        </button>
+      ))}
+    </span>
+  ),
 }));
 
 const saleDetail = (netUnitPrice = 50): SaleDetailView =>
@@ -61,7 +73,24 @@ const purchaseDetail = (): PurchaseDetailView =>
     ],
   }) as unknown as PurchaseDetailView;
 
-const result = { returnId: 1, returnCode: 'RET-1', creditedAmount: 100, cashRefunded: 50, totalAmount: 150, issuedValue: 0 };
+const result = { returnId: 1, returnCode: 'RET-1', creditedAmount: 100, cashRefunded: 50, totalAmount: 150, issuedValue: 0, discountReversed: 0 };
+
+const vlot = (id: number, code: string, remaining: number, net = 30) => ({
+  purchaseItemId: id,
+  purchaseId: id * 10,
+  purchaseCode: code,
+  transactionDate: '2026-11-12',
+  unitCost: 30,
+  netUnitCost: net,
+  remainingQuantity: remaining,
+  baseUnit: 'PCS',
+});
+
+const byTestId = (id: string) => document.querySelector(`[data-testid="${id}"]`)!;
+const vendorMode = () => {
+  const radios = document.querySelectorAll('input[name="vreturn-mode"]');
+  click(radios[1]);
+};
 
 /** Lets the debounced preview come back. */
 const settle = async () => {
@@ -240,5 +269,75 @@ describe('ReturnFormVendor', () => {
       items: [{ itemId: 2, purchaseItemId: 21, quantity: 2 }],
     });
     expect(JSON.stringify(p)).not.toContain('unitCost');
+  });
+
+  it('feeds the lot select from listVendorReturnLots and preselects a single lot (no FIFO option)', async () => {
+    const api = installApi({
+      listVendorReturnLots: async () => [vlot(21, 'PUR-0012', 8, 27)],
+      previewVendorReturn: async () => ({ ...result, totalAmount: 27, discountReversed: 3 }),
+      createVendorReturn: async () => result,
+    });
+    render(<ReturnFormVendor />);
+    vendorMode();
+    await flush();
+    click(byTestId('pick-party-4'));
+    click(byTestId('pick-item'));
+    await waitFor(() => bodyText().includes('PUR-0012'));
+    expect(api.listVendorReturnLots).toHaveBeenCalledWith(9, 4, null);
+    expect(bodyText()).toContain('PUR-0012 · 2026-11-12 · ₹30.00 (net ₹27.00) · 8 PCS left');
+    expect(bodyText()).toContain('Qty (max 8)');
+    expect(bodyText()).not.toContain('FIFO');
+    await settle();
+    expect(byTestId('discount-reversed').textContent).toContain('Purchase discount reversed');
+    click(buttonByText('Record Vendor Return'));
+    await flush();
+    expect(api.createVendorReturn.mock.calls[0][0]).toMatchObject({
+      originalPurchaseId: null,
+      partyId: 4,
+      items: [{ itemId: 9, purchaseItemId: 21, quantity: 1 }],
+    });
+  });
+
+  it('asks for a lot when several are eligible and shows the backend refusal', async () => {
+    installApi({
+      listVendorReturnLots: async () => [vlot(21, 'PUR-0012', 8), vlot(22, 'PUR-0013', 2)],
+      previewVendorReturn: async (p: { items: { purchaseItemId: number | null }[] }) => {
+        if (p.items[0].purchaseItemId === null) {
+          throw { type: 'BillLocked', details: { code: 'VENDOR_LOT_REQUIRED', message: "Choose the lot of 'Gel Pen' to return to the vendor" } };
+        }
+        return result;
+      },
+    });
+    render(<ReturnFormVendor />);
+    vendorMode();
+    await flush();
+    click(byTestId('pick-party-4'));
+    click(byTestId('pick-item'));
+    await waitFor(() => bodyText().includes('PUR-0013'));
+    expect(bodyText()).toContain('Choose a lot...');
+    await settle();
+    expect(bodyText()).toContain("Choose the lot of 'Gel Pen'");
+    const select = document.querySelector('select[aria-label="Lot for Gel Pen"]') as HTMLSelectElement;
+    setInput(select, '22');
+    await settle();
+    expect(bodyText()).toContain('Qty (max 2)');
+    expect(bodyText()).not.toContain("Choose the lot of 'Gel Pen'");
+  });
+
+  it('reloads the lots when the vendor changes and says when there is nothing to return', async () => {
+    const api = installApi({
+      listVendorReturnLots: async (_item: number, party: number) => (party === 4 ? [vlot(21, 'PUR-0012', 8)] : []),
+      previewVendorReturn: async () => result,
+    });
+    render(<ReturnFormVendor />);
+    vendorMode();
+    await flush();
+    click(byTestId('pick-party-4'));
+    click(byTestId('pick-item'));
+    await waitFor(() => bodyText().includes('PUR-0012'));
+    click(byTestId('pick-party-7'));
+    await waitFor(() => bodyText().includes('No stock of this item from Vendor B to return'));
+    expect(api.listVendorReturnLots).toHaveBeenLastCalledWith(9, 7, null);
+    expect(bodyText()).not.toContain('PUR-0012');
   });
 });
