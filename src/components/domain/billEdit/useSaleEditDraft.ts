@@ -8,6 +8,7 @@ import type {
   ItemSearchResult,
   PaymentStatus,
   PreviewSalePayload,
+  SettlementsToMove,
 } from '@/types';
 import type { DraftLoad } from './usePurchaseEditDraft';
 
@@ -67,6 +68,8 @@ export function useSaleEditDraft(billId: number) {
   const [draft, setDraft] = useState<SaleDraft | null>(null);
   const [baseline, setBaseline] = useState('');
   const [applied, setApplied] = useState(0);
+  // DD-88: the bill's later payments a party change would move (confirm dialog text).
+  const [settlementsToMove, setSettlementsToMove] = useState<SettlementsToMove>({ count: 0, amount: 0 });
   const seq = useRef(1);
 
   useEffect(() => {
@@ -130,6 +133,7 @@ export function useSaleEditDraft(billId: number) {
         setDraft(next);
         setBaseline(snapshot(next));
         setApplied(g.appliedAmount);
+        setSettlementsToMove(g.settlementsToMove ?? { count: 0, amount: 0 });
         setLoad({ status: 'ready' });
       } catch (e) {
         if (live) setLoad({ status: 'error', message: errorMessage(e) });
@@ -277,6 +281,7 @@ export function useSaleEditDraft(billId: number) {
     dirty,
     incomplete,
     applied,
+    settlementsToMove,
     bill,
     toPayload,
     setHeader,
