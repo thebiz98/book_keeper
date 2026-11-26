@@ -334,6 +334,10 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * In the item edit drawer, **Lots & Purchase Price**, an **Opening** lot has an **Edit quantity** action. The dialog shows the opening quantity, how much is already used (the minimum allowed), the resulting stock and stock value, and "Not recorded as a loss or adjustment".
   * The quantity cannot go below what was already sold, adjusted or returned from that lot (`LOT_BELOW_CONSUMED`). 0 is allowed only when none of it is used, and then the lot is removed. The unit cost is kept. Only Opening lots can be edited here.
   * It writes no stock adjustment, so Inventory Losses on the Profit & Loss report do not change. Set stock (count correction) stays the tool for real shrinkage; its dialog points to this action when the item has an Opening lot.
+* **FR-52: Undo a stock adjustment** *(added 2026-11-26, v1.6, DD-85)*
+  * Each row of Adjustments history has an **Undo** action. Its confirmation shows the effect (for a reduction: units put back into stock and the amount removed from Inventory Losses; for an increase: units removed) or the reason it cannot be undone, with Undo disabled.
+  * Undoing a reduction (count correction, damaged, expired ...) gives the units back to the lots they were taken from and removes the loss from the Profit & Loss report. Undoing an increase (unrecorded stock ...) removes the stock lot it created; this is refused once any of that stock was sold or used ("Delete those sales first"). A deleted item must be restored first.
+  * The adjustment record is removed (no audit trail), like a deleted bill. No money is involved, so cash is unaffected.
 
 ### 2.2. Non-Functional Requirements (NFR)
 
@@ -427,6 +431,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 53. **Vendor dues in red, customer dues in green, everywhere a due is shown (FR-49).**
 54. **Low Stock Level moves from the Item List to the item details panel (FR-50).**
 55. **Edit an item's opening quantity directly, not as a loss (FR-51).**
+56. **Undo a stock adjustment from Adjustments history (FR-52).**
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).
