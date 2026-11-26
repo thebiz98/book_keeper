@@ -37,6 +37,7 @@ function toSaleItems(items: CartLine[]): CreateSalePayload['items'] {
     bundleId: it.bundleId ?? null,
     bundleQuantity: it.bundleId != null ? it.quantity : it.quantity * it.unitsPerBundle,
     unitPrice: it.bundleId != null ? it.rate : it.rate / it.unitsPerBundle,
+    enteredTotal: it.enteredTotal ?? null,
   }));
 }
 
@@ -147,7 +148,8 @@ export const NewSalePage: React.FC = () => {
       },
       entry.quantity,
       entry.bundle,
-      entry.rate
+      entry.rate,
+      entry.enteredTotal
     );
     setError(ok ? null : `Cannot add "${entry.item.name}": invalid quantity or rate`);
     return ok;
@@ -241,6 +243,7 @@ export const NewSalePage: React.FC = () => {
         <CartTable
           items={items}
           lineTotals={totals?.lineTotals}
+          lineAdjustments={totals?.lineAdjustments}
           onUpdateQuantity={handleUpdateQuantity}
           onRemoveItem={removeItem}
           onFocusSearch={() => rowRef.current?.focusSearch()}
@@ -277,7 +280,7 @@ export const NewSalePage: React.FC = () => {
         <div data-testid="sale-footer-actions" className="flex flex-col items-end gap-3 ml-auto">
           <BillFooterTotals
             testIdPrefix="cart"
-            hasCharges={charges.length > 0}
+            hasCharges={charges.length > 0 || (totals?.chargesTotal ?? 0) > 0 || (totals?.discountsTotal ?? 0) > 0}
             itemsSubtotal={totals?.itemsSubtotal ?? 0}
             chargesTotal={totals?.chargesTotal ?? 0}
             discountsTotal={totals?.discountsTotal ?? 0}

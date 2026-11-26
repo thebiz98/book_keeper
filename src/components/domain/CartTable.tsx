@@ -14,6 +14,8 @@ export interface CartTableProps {
   onFocusSearch?: () => void;
   /** Line totals from the backend preview, by line index; "-" while the preview is pending. */
   lineTotals?: ReadonlyArray<number | null | undefined>;
+  /** FR-47: signed extra charge / discount per line from the backend preview (0 or missing = none). */
+  lineAdjustments?: ReadonlyArray<number | null | undefined>;
   readOnly?: boolean;
   className?: string;
 }
@@ -88,6 +90,7 @@ export const CartTable: React.FC<CartTableProps> = ({
   onRemoveItem,
   onFocusSearch,
   lineTotals,
+  lineAdjustments,
   readOnly = false,
   className,
 }) => {
@@ -171,6 +174,7 @@ export const CartTable: React.FC<CartTableProps> = ({
         <TableBody>
           {items.map((item, index) => {
             const lineTotal = lineTotals?.[index];
+            const adj = lineAdjustments?.[index] ?? 0;
             return (
               <TableRow
                 key={item.lineId}
@@ -209,6 +213,19 @@ export const CartTable: React.FC<CartTableProps> = ({
                 </TableCell>
                 <TableCell align="right" mono className="font-semibold text-slate-900 dark:text-slate-100">
                   {lineTotal != null ? <CurrencyDisplay amount={lineTotal} size="sm" /> : "—"}
+                  {adj !== 0 && (
+                    <div
+                      data-testid="line-adjustment-tag"
+                      title={adj > 0 ? 'Item extra charge (in Charges below)' : 'Item discount (in Discounts below)'}
+                      className={cn(
+                        'text-[10px] font-semibold',
+                        adj > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
+                      )}
+                    >
+                      {adj > 0 ? '+' : '−'}
+                      <CurrencyDisplay amount={Math.abs(adj)} size="sm" className="text-inherit text-[10px]" />
+                    </div>
+                  )}
                 </TableCell>
                 {!readOnly && (
                   <TableCell className="text-center">
