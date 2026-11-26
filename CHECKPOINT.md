@@ -244,3 +244,8 @@ Delivered: `LiveSearchTypeahead selectedLabel / onQueryChange / onLabelEnter`; N
 G2's charge / discount design (`feat/sale-line-total`, DD-81, schema v13) was reverted on main and the live DB rolled back to v12 (backup `backups/book_keeper_pre_v13_rollback_*.db`).
 Delivered: `preview_sale_line` returns the line total and the rate a typed total implies; Total box on the New Sale entry row (Enter in Rate → Total → Add), "Rate becomes ₹x" hint, the line is added at that rate.
 - **Manual check (light and dark):** the app opens normally (schema v12). New Sale: 10 × ₹102.30 shows Total 1023.00; type 1000: row says Rate becomes ₹100.00; Enter: cart line ₹100.00 × 10 = ₹1,000.00, no Charges / Discounts rows. 3 × ₹350, Total 1000: line ₹1,000.00, rate ₹333.33. Save and reopen the bill: the line shows the new rate, no extra charge lines. The item's default sale price is unchanged.
+
+
+## Branch fix/dues-colour-everywhere (FR-49 widened; frontend only, v1.6 G4)
+Delivered: vendor dues / payables red and customer dues / receivables green everywhere a due is shown: Dashboard Dues card (Receivables green, Payables red), Credit & Dues tab total, party rows and open bills, Settle (single bill and "Settle bills") dialogs, Sales / Purchase history Balance Due, bill detail Balance, bill edit Balance (`EditTotals payable`).
+- **Manual check (light and dark):** Dashboard: Receivables green, Payables red. Credit & Dues > Customer Receivables: total and rows green; Vendor Payables: total, rows and expanded open bills red; Settle bills on a vendor: Total Outstanding red. Purchase history: Balance Due red; open a purchase with a due: Balance red; Edit it: Balance red. Sales history and a sale's detail / edit: balance green.
