@@ -130,6 +130,24 @@ export interface CreateSaleItemPayload {
   bundleId: number | null;
   bundleQuantity: number;
   unitPrice: number;
+  /**
+   * FR-47: the line total the cashier typed. The line keeps qty × rate; the backend books the
+   * difference as an "Item extra charge" / "Item discount" bill line. Omitted or null = none.
+   */
+  enteredTotal?: number | null;
+}
+
+/** FR-47: one entry-row line for `preview_sale_line`. */
+export interface PreviewSaleLinePayload {
+  bundleQuantity: number;
+  unitPrice: number;
+  enteredTotal?: number | null;
+}
+
+/** `lineTotal = round2(qty × rate)`; `adjustment` is signed (> 0 extra charge, < 0 discount, 0 none). */
+export interface SaleLinePreview {
+  lineTotal: number;
+  adjustment: number;
 }
 
 export interface CreateSalePayload {
@@ -431,6 +449,10 @@ export interface BillPaymentPreview {
 /** DD-56: what a sale/purchase would look like when saved. Every figure comes from the backend. */
 export interface BillPreview {
   lineTotals: number[];
+  /** FR-47: signed extra charge (+) / discount (−) per line from an edited item total; 0 for none. */
+  lineAdjustments?: number[];
+  /** FR-47: the bill lines those adjustments become ("Item extra charge" / "Item discount"). */
+  adjustmentLines?: { name: string; effect: ChargeEffect; amount: number }[];
   itemsSubtotal: number;
   chargesTotal: number;
   discountsTotal: number;
@@ -622,6 +644,8 @@ export interface ApiClient {
   deleteSale(saleId: number): Promise<DeleteBillResult>;
   /** DD-56: dry run of create/update (`saleId` = edit). Business errors come back in `errors`. */
   previewSale(payload: PreviewSalePayload, saleId?: number | null): Promise<BillPreview>;
+  /** FR-47: entry-row line total and the adjustment of a typed total (no database). */
+  previewSaleLine(payload: PreviewSaleLinePayload): Promise<SaleLinePreview>;
 
   // Purchases
   getNextPurchaseCode(): Promise<string>;

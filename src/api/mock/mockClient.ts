@@ -916,6 +916,13 @@ export class MockApiClient implements ApiClient {
   async previewSale(_payload: Parameters<ApiClient['previewSale']>[0], _saleId?: number | null) {
     return this.emptyBillPreview();
   }
+  /** Browser mock only (no backend here); the real figures come from `preview_sale_line`. */
+  async previewSaleLine(payload: Parameters<ApiClient['previewSaleLine']>[0]) {
+    const lineTotal = Math.round(payload.bundleQuantity * payload.unitPrice * 100) / 100;
+    const entered = payload.enteredTotal;
+    const adjustment = entered == null ? 0 : Math.round((entered - lineTotal) * 100) / 100;
+    return { lineTotal, adjustment };
+  }
   async previewPurchase(_payload: Parameters<ApiClient['previewPurchase']>[0], _purchaseId?: number | null) {
     return this.emptyBillPreview();
   }
