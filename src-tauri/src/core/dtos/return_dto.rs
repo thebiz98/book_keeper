@@ -49,8 +49,25 @@ pub struct VendorReturnPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VendorReturnItemPayload {
     pub item_id: i64,
-    pub purchase_item_id: Option<i64>, // Specific lot being returned (or null for FIFO)
-    pub quantity: f64,                 // Returned base units
+    /// The exact lot returned (DD-86). Required: `None` is refused with `VENDOR_LOT_REQUIRED`.
+    pub purchase_item_id: Option<i64>,
+    pub quantity: f64, // Returned base units
+}
+
+/// One lot a vendor return may take (DD-86): PURCHASE source, bought from the vendor, on the
+/// linked bill when one is chosen, with stock left. Feeds the picker and its per-lot maximum.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VendorReturnLot {
+    pub purchase_item_id: i64,
+    pub purchase_id: i64,
+    pub purchase_code: String,
+    pub transaction_date: String,
+    /// Gross lot cost (the stock leaves at this cost).
+    pub unit_cost: f64,
+    /// `unit_cost` net of that bill's discount share: the value credited per unit (DD-87).
+    pub net_unit_cost: f64,
+    pub remaining_quantity: f64,
+    pub base_unit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,10 +76,13 @@ pub struct ReturnResult {
     pub return_code: String,
     pub credited_amount: f64, // applied to dues as RETURN_CREDIT
     pub cash_refunded: f64,   // REFUND_OUT (customer) / REFUND_IN (vendor)
-    /// Value of the returned lines (customer: qty x refund rate; vendor: the lot cost removed).
+    /// Value of the returned lines (customer: qty x refund rate; vendor: qty x lot cost net of the bill discount).
     pub total_amount: f64,
     /// Replacement only: Σ qty x the issued item's default sale price (display of the value gap); else 0.
     pub issued_value: f64,
+    /// Vendor only: Σ gross lot cost - value, the bill discount share reversed in the P&L (DD-87); else 0.
+    #[serde(default)]
+    pub discount_reversed: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

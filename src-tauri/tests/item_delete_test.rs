@@ -303,6 +303,14 @@ fn returns_of_a_deleted_item_are_rejected_but_existing_returns_can_be_deleted() 
     let e = env();
     let pen = e.item("Pen");
     e.lot(pen, 10.0, 2.0);
+    // DD-86: a vendor return names a lot bought from that vendor.
+    seed_party(&e.db, 90, "V", book_keeper::core::value_objects::PartyType::Vendor);
+    let vendor_bill = e
+        .purchases
+        .create_purchase(purchase_payload(Some(90), PaymentStatus::Paid, 20.0, &[(pen, None, 2.0, 10.0)]))
+        .unwrap()
+        .purchase_id;
+    let vendor_lot = e.db.begin_read().unwrap().purchases().list_items_by_transaction_id(vendor_bill).unwrap()[0].id;
     let sale = e.sell(pen, 4.0, 10.0);
     let line = e.sales.get_sale_details(sale).unwrap().items[0].sale_item.clone();
     let ret = |qty: f64| CustomerReturnPayload {
@@ -320,9 +328,9 @@ fn returns_of_a_deleted_item_are_rejected_but_existing_returns_can_be_deleted() 
     let err = e.rets.create_customer_return(ret(1.0)).unwrap_err();
     assert!(err.to_string().contains("'Pen' is deleted. Restore the item first."), "{err}");
     let vr = VendorReturnPayload {
-        original_purchase_id: None, party_id: None, return_date: DAY.into(),
+        original_purchase_id: None, party_id: Some(90), return_date: DAY.into(),
         settlement_type: SettlementType::Refund, reason: None, notes: None,
-        items: vec![VendorReturnItemPayload { item_id: pen, purchase_item_id: None, quantity: 1.0 }],
+        items: vec![VendorReturnItemPayload { item_id: pen, purchase_item_id: Some(vendor_lot), quantity: 1.0 }],
     };
     let err = e.rets.create_vendor_return(vr).unwrap_err();
     assert!(err.to_string().contains("'Pen' is deleted. Restore the item first."), "{err}");

@@ -101,7 +101,8 @@ fn consecutive_returns_get_distinct_ret_codes_for_both_sides() {
 
     let mut tx = db.begin_transaction().unwrap();
     tx.items().create(&create_test_item(7, "Calculator", None, None, 5.0, 500.0)).unwrap();
-    tx.purchases().create_transaction(&create_test_purchase_tx(7, "PUR-1001", None, 1500.0, 1500.0, "2026-11-20")).unwrap();
+    tx.parties().create(&create_test_party(3, "Vendor", PartyType::Vendor, None)).unwrap();
+    tx.purchases().create_transaction(&create_test_purchase_tx(7, "PUR-1001", Some(3), 1500.0, 1500.0, "2026-11-20")).unwrap();
     tx.purchases().create_purchase_item(&create_test_purchase_lot(70, 7, 7, None, 5.0, 5.0, 300.0, 5.0)).unwrap();
     seed_sale_line(&mut *tx, 15, 7);
     // Sold 2 of the line: returns (even scrap, DD-05) reverse real allocations.
@@ -130,12 +131,12 @@ fn consecutive_returns_get_distinct_ret_codes_for_both_sides() {
     assert_eq!(returns.create_customer_return(customer(1.0)).unwrap().return_code, "RET-1002");
     let vendor = VendorReturnPayload {
         original_purchase_id: None,
-        party_id: None,
+        party_id: Some(3),
         return_date: "2026-11-21".to_string(),
         settlement_type: SettlementType::Refund,
         reason: None,
         notes: None,
-        items: vec![VendorReturnItemPayload { item_id: 7, purchase_item_id: None, quantity: 1.0 }],
+        items: vec![VendorReturnItemPayload { item_id: 7, purchase_item_id: Some(70), quantity: 1.0 }],
     };
     assert_eq!(returns.create_vendor_return(vendor).unwrap().return_code, "RET-1003", "one shared RET- sequence");
     assert_eq!(returns.get_next_return_code().unwrap(), "RET-1004");

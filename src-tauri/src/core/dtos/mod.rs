@@ -62,7 +62,7 @@ pub use report_dto::{
 pub use return_dto::{
     CustomerReturnItemPayload, CustomerReturnPayload, ReturnDetailView, ReturnItemDetail,
     ReplacementItemPayload, ReturnItemPayload, ReturnResult, ReturnsFilter, VendorReturnItemPayload,
-    VendorReturnPayload,
+    VendorReturnLot, VendorReturnPayload,
 };
 pub use sale_dto::{
     CreateSaleItemPayload, CreateSalePayload, SaleDetailView, SaleItemDetail, SaleSummaryResponse,

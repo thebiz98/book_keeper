@@ -33,6 +33,14 @@ pub enum ReturnUndoStep {
     RestoreOutflow { source_type: OutflowSourceType, source_id: i64 },
 }
 
+/// What a vendor-return line removes (DD-87): `gross_cost` = qty × lot cost (the stock value
+/// leaving), `net_value` = qty × lot cost × the lot bill's net factor (the value credited).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VendorReturnCost {
+    pub gross_cost: f64,
+    pub net_value: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ReturnUndoPlan {
     pub steps: Vec<ReturnUndoStep>,
@@ -116,17 +124,19 @@ pub trait InventoryService: Send + Sync {
         quantity: f64,
     ) -> Result<f64, AppError>;
 
-    /// Vendor return. A named lot must be PURCHASE-source, of `item_id`, with qty <= remaining;
-    /// `None` falls back to `issue_stock_outflow(VendorReturn, ..)`. Always logs outflow rows and
-    /// decrements the cache. Returns Σ qty × lot unit_cost.
+    /// Vendor return of an exact lot (DD-86; there is no FIFO fall-back). The lot must be
+    /// PURCHASE-source, of `item_id`, with qty <= remaining. Logs one `VENDOR_RETURN` outflow row
+    /// at the gross lot cost and decrements the cache. Party / bill eligibility is the caller's
+    /// (`vendor_return_ineligibility`). Returns the gross cost and the value net of the lot's
+    /// bill discount share (DD-87), both unrounded.
     fn remove_stock_for_vendor_return(
         &self,
         uow: &mut dyn TransactionContext,
         return_id: i64,
         item_id: i64,
-        purchase_item_id: Option<i64>,
+        purchase_item_id: i64,
         quantity: f64,
-    ) -> Result<f64, AppError>;
+    ) -> Result<VendorReturnCost, AppError>;
 
     /// Physical stock adjustment in its own write transaction.
     fn create_adjustment(
@@ -299,9 +309,9 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
         uow: &mut dyn TransactionContext,
         return_id: i64,
         item_id: i64,
-        purchase_item_id: Option<i64>,
+        purchase_item_id: i64,
         quantity: f64,
-    ) -> Result<f64, AppError> {
+    ) -> Result<VendorReturnCost, AppError> {
         (**self).remove_stock_for_vendor_return(uow, return_id, item_id, purchase_item_id, quantity)
     }
 

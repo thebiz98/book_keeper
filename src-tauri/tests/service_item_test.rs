@@ -313,8 +313,9 @@ fn services_are_never_stocked_each_path_is_rejected() {
     assert!(e.inv.issue_stock_outflow(&mut *tx, book_keeper::core::value_objects::OutflowSourceType::Adjustment, 1, s, 1.0).is_err());
     drop(tx);
     // vendor return line
+    seed_party(&e.db, 90, "V", book_keeper::core::value_objects::PartyType::Vendor);
     let vr = VendorReturnPayload {
-        original_purchase_id: None, party_id: None, return_date: DAY.into(),
+        original_purchase_id: None, party_id: Some(90), return_date: DAY.into(),
         settlement_type: book_keeper::core::value_objects::SettlementType::Refund, reason: None, notes: None,
         items: vec![VendorReturnItemPayload { item_id: s, purchase_item_id: None, quantity: 1.0 }],
     };

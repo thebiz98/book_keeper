@@ -221,7 +221,7 @@ fn vendor_return_outflow_lot_blocks() {
             settlement_type: SettlementType::Refund,
             reason: None,
             notes: None,
-            items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: None, quantity: 2.0 }],
+            items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: Some(lot), quantity: 2.0 }],
         })
         .unwrap();
     let before = e.snap();

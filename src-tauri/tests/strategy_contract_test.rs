@@ -126,8 +126,7 @@ fn exercise(db: &TestDb, inv: &dyn InventoryService) {
     inv.reverse_sale_line(&mut *tx, 50, 1, 1.0, false).unwrap();
     inv.issue_stock_outflow(&mut *tx, OutflowSourceType::Replacement, 7, 1, 2.0).unwrap();
     seed_purchase_lot(inv, &mut *tx, 3, 1, 5.0, 4.0); // fresh lot: named return works under any order
-    inv.remove_stock_for_vendor_return(&mut *tx, 8, 1, Some(3), 1.0).unwrap();
-    inv.remove_stock_for_vendor_return(&mut *tx, 9, 1, None, 1.0).unwrap();
+    inv.remove_stock_for_vendor_return(&mut *tx, 8, 1, 3, 1.0).unwrap();
     assert_stock_invariant(&mut *tx);
     tx.commit().unwrap();
     inv.create_adjustment(adj(1, -2.0)).unwrap();

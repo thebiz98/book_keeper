@@ -277,14 +277,14 @@ fn replacement_return_delete_puts_issued_units_back() {
 }
 
 #[test]
-fn vendor_return_delete_restores_named_lot_and_fifo_returns() {
+fn vendor_return_delete_restores_linked_and_unlinked_named_lot_returns() {
     let e = env();
     seed_party(&e.db, 1, "V", PartyType::Vendor);
     seed_stocked_item(&e.db, &e.inv, 1, 0.0, 0.0, 100.0);
     let p = e.purchases.create_purchase(purchase_payload(Some(1), Unpaid, 0.0, &[(1, None, 10.0, 5.0)])).unwrap().purchase_id;
     let lot = e.lots(p)[0].id;
     let named = e.rets.create_vendor_return(vret(Some(p), None, Some(lot), 3.0)).unwrap();
-    let fifo = e.rets.create_vendor_return(vret(None, Some(1), None, 2.0)).unwrap();
+    let fifo = e.rets.create_vendor_return(vret(None, Some(1), Some(lot), 2.0)).unwrap();
     assert_eq!((e.lot(lot).remaining_quantity, e.stock()), (5.0, 5.0));
     e.rets.delete_return(named.return_id).unwrap();
     assert_eq!((e.lot(lot).remaining_quantity, e.stock()), (8.0, 8.0));

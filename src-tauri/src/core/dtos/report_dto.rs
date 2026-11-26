@@ -71,7 +71,7 @@ pub struct PnLReport {
     pub total_purchases: f64,
     /// Σ sale `discounts_total` (FR-19).
     pub sales_discounts: f64,
-    /// `sale_charges_income + purchase_discounts_income` (FR-19).
+    /// `sale_charges_income + purchase_discounts_income - purchase_discount_reversed` (FR-19, DD-87).
     pub other_income: f64,
     /// Σ expenses by `expense_date` in range + `purchase_charges_expense`.
     pub operating_expenses: f64,
@@ -79,6 +79,10 @@ pub struct PnLReport {
     pub sale_charges_income: f64,
     /// Σ PURCHASE-source `discounts_total` in range.
     pub purchase_discounts_income: f64,
+    /// DD-87: Σ (gross cost − net value) of vendor-return lines on PURCHASE lots by return date;
+    /// subtracted inside `other_income`.
+    #[serde(default)]
+    pub purchase_discount_reversed: f64,
     /// Σ PURCHASE-source `charges_total` in range (already inside `operating_expenses`).
     pub purchase_charges_expense: f64,
     /// Per expense type, `amount DESC, name`; filled by the service from the expense repository.

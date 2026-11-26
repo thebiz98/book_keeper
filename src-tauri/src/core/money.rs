@@ -10,6 +10,15 @@ pub fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
+/// Rate net of the bill discount share: `unit_price * clamp(1 - discounts / items_subtotal, 0, 1)`.
+/// A bill without a positive subtotal keeps the unit price. Charges never enter it (FR-19, DD-87).
+pub fn net_unit_price(unit_price: f64, items_subtotal: f64, discounts_total: f64) -> f64 {
+    if items_subtotal <= MONEY_EPS {
+        return unit_price;
+    }
+    unit_price * (1.0 - discounts_total / items_subtotal).clamp(0.0, 1.0)
+}
+
 /// Which way a ledger row moves physical cash (DD-01 cash direction table).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CashDirection {

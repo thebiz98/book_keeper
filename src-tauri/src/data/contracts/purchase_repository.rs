@@ -1,4 +1,4 @@
-use crate::core::dtos::{ItemBillRef, ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow};
+use crate::core::dtos::{ItemBillRef, ItemLot, PurchaseHistoryFilter, PurchaseHistoryRow, VendorReturnLot};
 use crate::core::entities::{PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, PaymentStatus};
@@ -87,4 +87,34 @@ pub trait PurchaseRepository {
     fn find_adjustment_headers(&self, adjustment_id: i64) -> Result<Vec<PurchaseTransaction>, AppError>;
     /// `RETURN`-source lots of item `item_id` whose header notes equal `note`, lowest id first.
     fn find_return_lots_by_note(&self, note: &str, item_id: i64) -> Result<Vec<PurchaseItem>, AppError>;
+    /// DD-86: the lots of `item_id` a vendor return to `party_id` may take (PURCHASE source, not an
+    /// opening bill, bought from the party, of `purchase_id` when given, stock left), `ORDER BY id`.
+    /// Same rule as [`vendor_return_ineligibility`]; `net_unit_cost` from the header's discount share.
+    fn list_vendor_return_lots(
+        &self,
+        item_id: i64,
+        party_id: i64,
+        purchase_id: Option<i64>,
+    ) -> Result<Vec<VendorReturnLot>, AppError>;
+}
+
+/// DD-86 eligibility of a lot for a vendor return, given the lot's header (the Rust twin of the
+/// `list_vendor_return_lots` filter; stock left is checked by the caller's simulated draw).
+/// `None` = eligible, else the refusal message.
+pub fn vendor_return_ineligibility(
+    header: &PurchaseTransaction,
+    party_id: i64,
+    party_name: &str,
+    linked_bill: Option<&PurchaseTransaction>,
+) -> Option<String> {
+    if header.source != LotSource::Purchase || header.is_opening_balance {
+        return Some("Only purchase lots can be returned to a vendor".to_string());
+    }
+    if header.party_id != Some(party_id) {
+        return Some(format!("This lot was not bought from '{party_name}'"));
+    }
+    match linked_bill {
+        Some(bill) if bill.id != header.id => Some(format!("This lot is not on bill {}", bill.transaction_code)),
+        _ => None,
+    }
 }

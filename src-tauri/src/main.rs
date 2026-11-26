@@ -72,6 +72,7 @@ fn main() {
             adjustment_controller::get_item_sales,
             adjustment_controller::get_item_purchases,
             return_controller::create_vendor_return,
+            return_controller::list_vendor_return_lots,
             item_controller::get_bundle_suggestions,
             item_controller::get_service_components,
             report_controller::get_cash_flow_report,

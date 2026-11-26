@@ -328,17 +328,22 @@ fn tc_ret_009_vendor_return_credit_then_refund_in() {
 #[test]
 fn tc_ret_010_vendor_named_lot_must_be_purchase_source() {
     let e = env();
+    seed_party(&e.db, 5, "V", PartyType::Vendor);
     seed_stocked_item(&e.db, &e.inv, 1, 5.0, 10.0, 20.0);
+    e.db.pool.get().unwrap().execute("UPDATE purchase_transactions SET party_id = 5 WHERE id = 1", []).unwrap();
     e.inv.create_adjustment(StockAdjustmentPayload {
         adjustment_date: DAY.to_string(), item_id: 1, quantity: 3.0, reason: AdjustmentReason::CountCorrection, unit_cost: Some(10.0), notes: None,
     }).unwrap();
     let adj_lot = e.inv.get_item_lots(1).unwrap().into_iter().find(|l| l.source == LotSource::Adjustment).unwrap().purchase_item_id;
     let vr = |lot: Option<i64>, item: i64| VendorReturnPayload {
-        original_purchase_id: None, party_id: None, return_date: DAY.to_string(), settlement_type: SettlementType::Refund, reason: None, notes: None,
+        original_purchase_id: None, party_id: Some(5), return_date: DAY.to_string(), settlement_type: SettlementType::Refund, reason: None, notes: None,
         items: vec![VendorReturnItemPayload { item_id: item, purchase_item_id: lot, quantity: 1.0 }],
     };
     let stock = e.stock(1);
-    assert!(is_validation(&e.rets.create_vendor_return(vr(Some(adj_lot), 1))));
+    assert!(matches!(
+        e.rets.create_vendor_return(vr(Some(adj_lot), 1)),
+        Err(AppError::BillLocked { code, .. }) if code == "VENDOR_LOT_NOT_ELIGIBLE"
+    ));
     assert_eq!((e.stock(1), e.return_count()), (stock, 0));
     // an ADJ bill is not a returnable purchase
     let adj_bill = e.inv.get_item_lots(1).unwrap().into_iter().find(|l| l.source == LotSource::Adjustment).unwrap().purchase_transaction_id;
@@ -349,8 +354,14 @@ fn tc_ret_010_vendor_named_lot_must_be_purchase_source() {
     let mut p = vr(None, 1);
     p.settlement_type = SettlementType::Replacement;
     assert!(is_validation(&e.rets.create_vendor_return(p)));
-    // FIFO (no lot named) works and walk-in vendor is all cash
-    let res = e.rets.create_vendor_return(vr(None, 1)).unwrap();
+    // DD-86: no lot named is refused, never a FIFO draw.
+    assert!(matches!(
+        e.rets.create_vendor_return(vr(None, 1)),
+        Err(AppError::BillLocked { code, .. }) if code == "VENDOR_LOT_REQUIRED"
+    ));
+    assert_eq!((e.stock(1), e.return_count()), (stock, 0));
+    // The vendor's purchase lot is returned; nothing is open, so all cash.
+    let res = e.rets.create_vendor_return(vr(Some(1), 1)).unwrap();
     assert_eq!((res.credited_amount, res.cash_refunded), (0.0, 10.0));
     e.assert_stock();
 }
@@ -413,15 +424,17 @@ fn tc_ret_012_linked_return_never_touches_other_bills() {
 #[test]
 fn list_returns_is_paginated_newest_first_and_filtered() {
     let e = env();
+    seed_party(&e.db, 5, "V", PartyType::Vendor);
     seed_stocked_item(&e.db, &e.inv, 1, 20.0, 5.0, 10.0);
+    e.db.pool.get().unwrap().execute("UPDATE purchase_transactions SET party_id = 5 WHERE id = 1", []).unwrap();
     for (i, date) in ["2026-11-01", "2026-11-05", "2026-11-03"].iter().enumerate() {
         let mut p = cust(None, None, SettlementType::Refund, vec![line(1, None, 1.0 + i as f64, 10.0, R)]);
         p.return_date = date.to_string();
         e.rets.create_customer_return(p).unwrap();
     }
     e.rets.create_vendor_return(VendorReturnPayload {
-        original_purchase_id: None, party_id: None, return_date: "2026-11-04".to_string(), settlement_type: SettlementType::Refund, reason: None, notes: None,
-        items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: None, quantity: 1.0 }],
+        original_purchase_id: None, party_id: Some(5), return_date: "2026-11-04".to_string(), settlement_type: SettlementType::Refund, reason: None, notes: None,
+        items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: Some(1), quantity: 1.0 }],
     }).unwrap();
     let all = e.rets.list_returns(ReturnsFilter { page: Some(1), limit: Some(3), ..Default::default() }).unwrap();
     assert_eq!((all.total, all.items.len(), all.limit), (4, 3, 3));

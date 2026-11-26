@@ -5,7 +5,7 @@ use crate::core::dtos::{
     ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult,
 };
-use crate::core::money::{check_entry_date_now, round2};
+use crate::core::money::{check_entry_date_now, net_unit_price, round2};
 use crate::core::entities::{
     Item, PurchaseItem, PurchaseTransaction, ReturnTransaction, StockAdjustment, StockOutflowAllocation,
 };
@@ -19,7 +19,7 @@ use crate::services::contracts::inventory_allocation_strategy::{
     DepletionResult, InventoryAllocationStrategy,
 };
 use crate::services::contracts::inventory_service::{
-    InventoryService, LotEdit, ReturnUndoPlan, ReturnUndoStep,
+    InventoryService, LotEdit, ReturnUndoPlan, ReturnUndoStep, VendorReturnCost,
 };
 
 /// Sole writer of the stock cache and lot/allocation state. The strategy is injected (DD-08);
@@ -672,16 +672,12 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         uow: &mut dyn TransactionContext,
         return_id: i64,
         item_id: i64,
-        purchase_item_id: Option<i64>,
+        lot_id: i64,
         quantity: f64,
-    ) -> Result<f64, AppError> {
+    ) -> Result<VendorReturnCost, AppError> {
         require_positive("quantity", quantity)?;
         reject_service(&find_item(uow, item_id)?)?;
-        let Some(lot_id) = purchase_item_id else {
-            return self.issue_stock_outflow(uow, OutflowSourceType::VendorReturn, return_id, item_id, quantity);
-        };
-
-        // A named lot is the user's choice, not a strategy concern (LLD 6.2 boundary note).
+        // DD-86: always the named lot; the FIFO fall-back is gone (LLD 6.2 boundary note).
         let lot = uow
             .purchases()
             .find_purchase_item_by_id(lot_id)?
@@ -693,13 +689,13 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             .purchases()
             .find_transaction_by_id(lot.purchase_transaction_id)?
             .ok_or_else(|| AppError::not_found("PurchaseTransaction", lot.purchase_transaction_id.to_string()))?;
-        if header.source != LotSource::Purchase {
+        if header.source != LotSource::Purchase || header.is_opening_balance {
             return Err(validation("purchase_item_id", format!("Lot #{lot_id} is not a purchase lot and cannot be returned to a vendor")));
         }
         if quantity > lot.remaining_quantity + EPS {
             return Err(validation(
                 "quantity",
-                format!("Return quantity {quantity} exceeds the {} remaining in lot #{lot_id}", lot.remaining_quantity),
+                format!("Return quantity {quantity} exceeds the {} remaining in lot {}", lot.remaining_quantity, header.transaction_code),
             ));
         }
         let take = quantity.min(lot.remaining_quantity);
@@ -714,7 +710,11 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             unit_cost: lot.unit_cost,
         })?;
         uow.items().apply_stock_delta(item_id, -take)?;
-        Ok(take * lot.unit_cost)
+        let gross_cost = take * lot.unit_cost;
+        Ok(VendorReturnCost {
+            gross_cost,
+            net_value: gross_cost * net_unit_price(1.0, header.items_subtotal, header.discounts_total),
+        })
     }
 
     fn create_adjustment(
