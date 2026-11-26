@@ -246,7 +246,11 @@ fn test_sale_validation_party_item_bundle_and_numbers() {
     let ok = [(1, None, 1.0, 10.0)];
     // Vendor / inactive / unknown party.
     assert_eq!(field_of(sales.create_sale(sale_payload(Some(1), PaymentStatus::Paid, 10.0, &ok)).unwrap_err()), "party_id");
-    assert_eq!(field_of(sales.create_sale(sale_payload(Some(3), PaymentStatus::Paid, 10.0, &ok)).unwrap_err()), "party_id");
+    // DD-90: a deleted party is a DeletedReference (Restore it first), not a plain validation error.
+    assert!(matches!(
+        sales.create_sale(sale_payload(Some(3), PaymentStatus::Paid, 10.0, &ok)),
+        Err(AppError::DeletedReference { ref entity, id: 3, .. }) if entity == "PARTY"
+    ));
     assert!(matches!(
         sales.create_sale(sale_payload(Some(77), PaymentStatus::Paid, 10.0, &ok)),
         Err(AppError::NotFound { .. })
