@@ -57,9 +57,11 @@ describe('Delete item (FR-45)', () => {
     expect(text).toContain('12 PCS');
     expect(text).toContain('₹840.00');
     expect(document.body.textContent).toContain('moved to Deleted items');
+    // No stock to write off (writeOff null): no choice is offered.
+    expect(document.body.querySelector('[data-testid="delete-writeoff-choice"]')).toBeNull();
     click(document.body.querySelector('[data-testid="delete-confirm-submit"]') as HTMLElement);
     await flush();
-    expect(api.deleteItem).toHaveBeenCalledWith(1);
+    expect(api.deleteItem).toHaveBeenCalledWith(1, false);
     expect(document.body.querySelector('[data-testid="inventory-notice"]')?.textContent).toContain(
       "Deleted 'Gel Pen'. Restore it from Deleted items."
     );
@@ -96,8 +98,45 @@ describe('Delete item (FR-45)', () => {
     expect(submit.textContent).toContain('Delete permanently');
     click(submit);
     await flush();
-    expect(api.deleteItem).toHaveBeenCalledWith(1);
+    expect(api.deleteItem).toHaveBeenCalledWith(1, false);
     expect(document.body.querySelector('[data-testid="inventory-notice"]')?.textContent).toContain('permanently');
+  });
+});
+
+describe('Delete item with stock: Just delete or Book as loss (FR-58)', () => {
+  const withStock: ItemDeletePreview = { ...soft, writeOff: { quantity: 12, baseUnit: 'PCS', loss: 790 } };
+
+  async function openDelete() {
+    const r = mount({ previewItemDelete: vi.fn().mockResolvedValue(withStock) });
+    await openEdit(r.container);
+    click(r.container.querySelector('[data-testid="item-delete-button"]') as HTMLElement);
+    await flush();
+    return r;
+  }
+
+  it('pre-selects Just delete, explains it and sends writeOff=false', async () => {
+    const { api } = await openDelete();
+    const just = document.body.querySelector('[data-testid="delete-just-delete"]') as HTMLInputElement;
+    const loss = document.body.querySelector('[data-testid="delete-book-loss"]') as HTMLInputElement;
+    expect(just.checked).toBe(true);
+    expect(loss.checked).toBe(false);
+    const choice = document.body.querySelector('[data-testid="delete-writeoff-choice"]')?.textContent ?? '';
+    expect(choice).toContain('the item was a mistake and you will re-add it');
+    // The loss figure is the backend's dry-run value, not stock x price.
+    expect(choice).toContain('Book as loss (₹790.00)');
+    click(document.body.querySelector('[data-testid="delete-confirm-submit"]') as HTMLElement);
+    await flush();
+    expect(api.deleteItem).toHaveBeenCalledWith(1, false);
+  });
+
+  it('Book as loss sends writeOff=true', async () => {
+    const { api } = await openDelete();
+    click(document.body.querySelector('[data-testid="delete-book-loss"]') as HTMLElement);
+    await flush();
+    expect((document.body.querySelector('[data-testid="delete-book-loss"]') as HTMLInputElement).checked).toBe(true);
+    click(document.body.querySelector('[data-testid="delete-confirm-submit"]') as HTMLElement);
+    await flush();
+    expect(api.deleteItem).toHaveBeenCalledWith(1, true);
   });
 });
 

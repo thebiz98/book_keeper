@@ -9,6 +9,7 @@
  */
 import type {
   DeleteMode,
+  DeleteItemResult,
   DeletedItemRow,
   DeletedPartyRow,
   PartyDeletePreview,
@@ -615,14 +616,33 @@ export class MockApiClient implements ApiClient {
       reason: item.isActive ? null : `'${item.name}' is already deleted.`,
       mode: 'SOFT',
       reasonsUsed: [],
+      writeOff:
+        item.isActive && item.currentStock > 0
+          ? { quantity: item.currentStock, baseUnit: item.baseUnit, loss: item.currentStock * item.costPrice }
+          : null,
     };
   }
-  async deleteItem(itemId: number): Promise<{ mode: DeleteMode }> {
+  async deleteItem(itemId: number, writeOff = false): Promise<DeleteItemResult> {
     const item = this.items.find((i) => i.id === itemId);
     if (!item) throw notFound('Item', itemId);
+    let adjustmentId: number | null = null;
+    if (writeOff && item.currentStock > 0) {
+      // Thin stub (DD-27): one THEFT_LOST row; the real loss is the backend's FIFO cost.
+      adjustmentId = (
+        await this.createStockAdjustment({
+          adjustmentDate: nowIso().slice(0, 10),
+          itemId,
+          quantity: -item.currentStock,
+          reason: 'THEFT_LOST',
+          unitCost: null,
+          notes: 'Written off on item delete',
+        })
+      ).adjustmentId;
+      item.currentStock = 0;
+    }
     item.isActive = false;
     item.updatedAt = nowIso();
-    return { mode: 'SOFT' };
+    return { mode: 'SOFT', adjustmentId };
   }
   async restoreItem(itemId: number) {
     const item = this.items.find((i) => i.id === itemId);

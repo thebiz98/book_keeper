@@ -75,7 +75,7 @@ export class TauriClient implements ApiClient {
     invokeCmd('search_items_fts', { query, limit: limit ?? null });
   getItem: ApiClient['getItem'] = (itemId) => invokeCmd('get_item', { itemId });
   previewItemDelete: ApiClient['previewItemDelete'] = (itemId) => invokeCmd('preview_item_delete', { itemId });
-  deleteItem: ApiClient['deleteItem'] = (itemId) => invokeCmd('delete_item', { itemId });
+  deleteItem: ApiClient['deleteItem'] = (itemId, writeOff = false) => invokeCmd('delete_item', { itemId, writeOff });
   restoreItem: ApiClient['restoreItem'] = (itemId) => invokeCmd('restore_item', { itemId });
   listDeletedItems: ApiClient['listDeletedItems'] = (search, page, pageSize) =>
     invokeCmd('list_deleted_items', { search: search || null, page: page ?? null, pageSize: pageSize ?? null });

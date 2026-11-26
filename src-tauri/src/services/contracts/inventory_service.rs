@@ -134,6 +134,14 @@ pub trait InventoryService: Send + Sync {
         payload: StockAdjustmentPayload,
     ) -> Result<StockAdjustmentResult, AppError>;
 
+    /// Body of [`Self::create_adjustment`] inside the caller's transaction (same checks, same FIFO
+    /// outflow for a reduction). Used by the item delete write-off (FR-58, DD-93).
+    fn create_adjustment_in_tx(
+        &self,
+        uow: &mut dyn TransactionContext,
+        payload: &StockAdjustmentPayload,
+    ) -> Result<StockAdjustmentResult, AppError>;
+
     /// Set stock on hand: own BEGIN IMMEDIATE; delta = counted - current_stock. delta>0 records an
     /// UNRECORDED_STOCK lot, delta<0 a COUNT_CORRECTION FIFO write-off, 0 is a no-op.
     fn set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError>;
@@ -310,6 +318,14 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
         payload: StockAdjustmentPayload,
     ) -> Result<StockAdjustmentResult, AppError> {
         (**self).create_adjustment(payload)
+    }
+
+    fn create_adjustment_in_tx(
+        &self,
+        uow: &mut dyn TransactionContext,
+        payload: &StockAdjustmentPayload,
+    ) -> Result<StockAdjustmentResult, AppError> {
+        (**self).create_adjustment_in_tx(uow, payload)
     }
 
     fn set_item_stock(&self, payload: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {

@@ -27,6 +27,7 @@ import type {
   ServiceCostPreview,
   ItemSearchResult,
   ItemDeletePreview,
+  DeleteItemResult,
   DeletedItemRow,
   DeletedPartyRow,
   PartyDeletePreview,
@@ -697,7 +698,8 @@ export interface ApiClient {
   /** FR-45 (DD-56): dry run of a delete; writes nothing. */
   previewItemDelete(itemId: number): Promise<ItemDeletePreview>;
   /** FR-45: HARD for a never-used item (removed permanently), otherwise SOFT (Deleted items). */
-  deleteItem(itemId: number): Promise<{ mode: DeleteMode }>;
+  /** FR-58: `writeOff` = "Book as loss" (default false = "Just delete"). */
+  deleteItem(itemId: number, writeOff?: boolean): Promise<DeleteItemResult>;
   restoreItem(itemId: number): Promise<void>;
   listDeletedItems(search?: string | null, page?: number, pageSize?: number): Promise<Paginated<DeletedItemRow>>;
   createItem(payload: CreateItemPayload): Promise<number>;
