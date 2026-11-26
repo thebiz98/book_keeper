@@ -249,3 +249,8 @@ Delivered: `preview_sale_line` returns the line total and the rate a typed total
 ## Branch fix/dues-colour-everywhere (FR-49 widened; frontend only, v1.6 G4)
 Delivered: vendor dues / payables red and customer dues / receivables green everywhere a due is shown: Dashboard Dues card (Receivables green, Payables red), Credit & Dues tab total, party rows and open bills, Settle (single bill and "Settle bills") dialogs, Sales / Purchase history Balance Due, bill detail Balance, bill edit Balance (`EditTotals payable`).
 - **Manual check (light and dark):** Dashboard: Receivables green, Payables red. Credit & Dues > Customer Receivables: total and rows green; Vendor Payables: total, rows and expanded open bills red; Settle bills on a vendor: Total Outstanding red. Purchase history: Balance Due red; open a purchase with a due: Balance red; Edit it: Balance red. Sales history and a sale's detail / edit: balance green.
+
+
+## Branch feat/low-stock-in-details (FR-50, DD-83; frontend only, v1.6 G5)
+Delivered: the Item List has no Low Stock Level column (`LowStockLevelCell` removed); the Item details drawer shows the level with an Edit button (`LowStockLevelField`: Save / Cancel, Enter saves, Esc cancels without closing the drawer). Read-only for services and deleted items. The Item edit drawer keeps its field.
+- **Manual check (light and dark):** Inventory: no Low Stock Level column, Status badges unchanged. Click an item row: the drawer shows "Low Stock Level 5 PCS" and a pencil. Pencil, type 2, Enter: the drawer shows 2 and the row's Status badge updates. Pencil, type -1, Enter: "Enter 0 or more", nothing saved. Esc cancels and the drawer stays open. A service item and a deleted item show the level without a pencil.

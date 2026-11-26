@@ -13,6 +13,7 @@ import { StockStatusBadge } from '../common/StockStatusBadge';
 import { LotInspector } from './LotInspector';
 import { BillDetailDrawer } from './BillDetailDrawer';
 import { Pager } from './Pager';
+import { LowStockLevelField } from './LowStockLevelField';
 
 export const ITEM_HISTORY_PAGE_SIZE = 10;
 
@@ -22,6 +23,8 @@ export interface ItemDetailsDrawerProps {
   onClose: () => void;
   /** Opens the Edit drawer for the item (the caller closes this one). */
   onEdit: (item: ItemSearchResult) => void;
+  /** FR-50: the server row after the Low Stock Level is saved here (lets the caller patch its list). */
+  onItemUpdated?: (row: ItemSearchResult) => void;
 }
 
 type TabId = 'lots' | 'sales' | 'purchases';
@@ -113,8 +116,19 @@ const BillsTab: React.FC<{
 };
 
 /** FR-23 Item details: summary, Lots, and the Sales / Purchases tabs (10 per page, loaded when opened). */
-export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({ item, onClose, onEdit }) => {
+export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
+  item: itemProp,
+  onClose,
+  onEdit,
+  onItemUpdated,
+}) => {
   const [tab, setTab] = useState<TabId>('lots');
+  // FR-50: the last saved low stock level, so the drawer is right even when the caller does not patch.
+  const [savedLevel, setSavedLevel] = useState<ItemSearchResult | null>(null);
+  const item =
+    itemProp && savedLevel && savedLevel.itemId === itemProp.itemId
+      ? { ...itemProp, lowStockThreshold: savedLevel.lowStockThreshold, isLowStock: savedLevel.isLowStock }
+      : itemProp;
   const [viewBill, setViewBill] = useState<{ kind: TransactionType; id: number } | null>(null);
   const itemId = item?.itemId ?? null;
   // FR-45: a deleted item opens read-only (from past bills and reports); Restore lives only in Deleted items.
@@ -123,6 +137,7 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({ item, onCl
   useEffect(() => {
     setTab('lots');
     setViewBill(null);
+    setSavedLevel(null);
   }, [itemId]);
 
   return (
@@ -152,7 +167,17 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({ item, onCl
                   />
                 </Stat>
                 <Stat label="Low Stock Level">
-                  <span className="font-mono">{item.lowStockThreshold}</span>
+                  <LowStockLevelField
+                    itemId={item.itemId}
+                    itemName={item.name}
+                    value={item.lowStockThreshold}
+                    baseUnit={item.baseUnit}
+                    editable={!deleted && item.itemType !== 'SERVICE'}
+                    onSaved={(row) => {
+                      setSavedLevel(row);
+                      onItemUpdated?.(row);
+                    }}
+                  />
                 </Stat>
                 <Stat label="MRP">{item.mrp !== null ? <CurrencyDisplay amount={item.mrp} size="sm" /> : '—'}</Stat>
                 <Stat label="Sale Price">

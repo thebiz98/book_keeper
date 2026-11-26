@@ -576,7 +576,7 @@ gantt
 * **Step 8:** Connect Tauri v2 `invoke()` commands and verify production builds.
 
 ### v1.1 live search (feat/live-search-low-stock, v4)
-* New shared pieces: `useLiveSearch` (`src/hooks/useLiveSearch.ts`), `LiveSearchTypeahead` (`src/components/common/LiveSearchTypeahead.tsx`, optional `onCreate`), `LowStockLevelCell` (`src/components/domain/LowStockLevelCell.tsx`). `ItemSearchTypeahead` wraps `LiveSearchTypeahead`. `StockStatusBadge` takes optional `lowStockThreshold` (tooltip/aria); the flag is the server flag.
+* New shared pieces: `useLiveSearch` (`src/hooks/useLiveSearch.ts`), `LiveSearchTypeahead` (`src/components/common/LiveSearchTypeahead.tsx`, optional `onCreate`), `LowStockLevelCell` (removed 2026-11-26, FR-50: replaced by `LowStockLevelField` in `ItemDetailsDrawer`, Edit → Save / Cancel). `ItemSearchTypeahead` wraps `LiveSearchTypeahead`. `StockStatusBadge` takes optional `lowStockThreshold` (tooltip/aria); the flag is the server flag.
 * ApiClient: `updateItemLowStockThreshold(itemId, threshold)`; `lowStockThreshold` on `ItemSearchResult`, `LowStockItem`, create/update payloads.
 * Convention: every search field uses `useLiveSearch`; debounce 50 ms for typeaheads (`TYPEAHEAD_DEBOUNCE_MS`), 150 ms for lists (`LIST_SEARCH_DEBOUNCE_MS`); the hook owns the stale-response guard; pages never hand-roll `setTimeout`; Enter = `flush()`.
 
