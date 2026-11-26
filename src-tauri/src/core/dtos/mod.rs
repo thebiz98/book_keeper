@@ -30,7 +30,7 @@ pub use expense_dto::{
     CreateExpenseTypePayload, ExpenseFilter, ExpenseListResponse, ExpensePayload, ExpenseTypeTotal,
 };
 pub use item_dto::{
-    BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, DeleteItemResult, DeleteMode, DeletedItemRow, ItemBillRef, ItemDeletePreview, ItemBundleSearchResult, ItemLot, LotDraw, LotDrawLot,
+    BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, DeleteItemResult, DeleteMode, DeletedItemRow, WriteOffPreview, ItemBillRef, ItemDeletePreview, ItemBundleSearchResult, ItemLot, LotDraw, LotDrawLot,
     ItemSearchResult, LotDrawComponent, PreviewServiceCostPayload, PriorLine, SavedBundle, ServiceComponentInput,
     ServiceComponentView, ServiceCostPreview, UpdateBundlePayload, UpdateItemPayload,
 };

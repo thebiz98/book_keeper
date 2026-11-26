@@ -776,7 +776,7 @@ fn g7_undo_on_a_deleted_item_is_refused() {
     let (db, inv, id, _lot) = opening_env();
     let items = ItemServiceImpl::new(db.clone(), Arc::new(db.indexer()), inv.clone());
     let aid = set_stock(&inv, id, 0.0);
-    items.delete_item(id).unwrap();
+    items.delete_item(id, false).unwrap();
     let g = inv.get_adjustment_undo_guard(aid).unwrap();
     assert!(!g.can_undo);
     assert_eq!(g.reason.unwrap().code, "ITEM_DELETED");

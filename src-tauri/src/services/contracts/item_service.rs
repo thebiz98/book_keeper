@@ -28,7 +28,9 @@ pub trait ItemService: Send + Sync {
     fn preview_item_delete(&self, item_id: i64) -> Result<ItemDeletePreview, AppError>;
     /// FR-45: soft delete (`is_active = 0`). Blocked while an active service uses it as a component.
     /// A1 (DD-79): a never-used item is removed permanently (`HARD`), any other is soft-deleted.
-    fn delete_item(&self, item_id: i64) -> Result<DeleteItemResult, AppError>;
+    /// FR-58 (DD-93): `write_off` on a SOFT delete with stock first posts one THEFT_LOST reduction of the
+    /// whole stock (FIFO loss, today) in the same transaction; without stock or on HARD it is a no-op.
+    fn delete_item(&self, item_id: i64, write_off: bool) -> Result<DeleteItemResult, AppError>;
     /// FR-45: reverse of `delete_item`; a service needs all its components active.
     fn restore_item(&self, item_id: i64) -> Result<(), AppError>;
     /// FR-45: deleted items (name `LIKE`, newest delete first), default page size 10.
@@ -93,8 +95,8 @@ impl<T: ItemService + ?Sized> ItemService for std::sync::Arc<T> {
         (**self).preview_item_delete(item_id)
     }
 
-    fn delete_item(&self, item_id: i64) -> Result<DeleteItemResult, AppError> {
-        (**self).delete_item(item_id)
+    fn delete_item(&self, item_id: i64, write_off: bool) -> Result<DeleteItemResult, AppError> {
+        (**self).delete_item(item_id, write_off)
     }
 
     fn restore_item(&self, item_id: i64) -> Result<(), AppError> {
