@@ -794,3 +794,53 @@ UI only; no backend, schema or IPC change.
 ## Undo a Stock Adjustment (FR-52, DD-85, `feat/adjustment-undo`, v1.6 G7)
 * **`AdjustmentsHistoryList`.** Every row has an **Undo** button (`Undo adjustment #N`). It opens a `ConfirmDialog` after fetching `get_adjustment_undo_guard`; the text is built only from the guard's numbers ("Puts 5 PCS back into stock and removes ₹X from Inventory Losses" / "Removes 5 PCS added by this adjustment"). When the guard blocks, the reason is shown and Undo is disabled. Confirm passes the async function to `ConfirmDialog` (pending guard). After success the list reloads and `refreshAppMetrics()` runs.
 * **Tests (Vitest).** Undo opens the effect, confirm calls `undoStockAdjustment`; blocked reason disables Undo.
+
+## v1.7 money and stock correctness (FR-53..FR-59, DD-86..DD-97, H1..H7)
+All rules stay in the backend (DD-56): the UI renders preview and guard fields and backend errors, and holds no money or stock math. Backend sections: LLD §31–§37.
+
+### Shared: `DELETED_REFERENCE` with Restore (DD-90, ships in H3, used from H2 on)
+* `errors.ts` gains the `DeletedReference` variant `{ entity: 'ITEM' | 'PARTY', id, name, message }`.
+* `DeletedReferenceAlert` (`components/domain/DeletedReferenceAlert.tsx`): shows the message and a **Restore '<name>'** button (`deleted-ref-restore`). Restore calls `restoreItem(id)` / `restoreParty(id)`, then the caller's `onRestored()`, which re-runs the preview. The form keeps its draft; the user continues where they were. Used by the bill edit forms, the settle dialogs, the return forms and the lot price modal (any `usePreview` caller: `usePreview` exposes the typed error so the form can render the alert in place of the plain error line).
+* **Tests (Vitest).** Restore calls the right API and re-runs the preview; the draft survives.
+
+### Vendor return lot picker (FR-53, DD-86, H1)
+* `ReturnFormVendor`: the "FIFO (any lot)" option and the local lot filter and maximum are removed. After vendor (and optional bill) and item are chosen, the lot select is fed by `listVendorReturnLots(itemId, partyId, purchaseId?)`: rows "PUR-0012 · 12 Nov · ₹40.00 (net ₹36.00) · 8 PCS left", in the order received. Exactly one row → preselected. No rows → "No stock of this item from <vendor> to return". The quantity hint "max N" is the row's `remaining_quantity`; the backend still validates.
+* The preview block shows Value, Credited, Cash refund and, when > 0, "Purchase discount reversed ₹X" from `ReturnResult`.
+* Errors `VENDOR_LOT_REQUIRED` / `VENDOR_LOT_NOT_ELIGIBLE` / per-line stock errors show under the line they name.
+* **Tests (Vitest).** lot list from the mock; single lot preselected; changing the vendor or bill reloads the lots; no FIFO option.
+
+### Party-move confirm dialog (FR-54, DD-88, H2)
+* `SaleEditForm` / `PurchaseEditForm`: when the party changed and `guard.settlementsToMove.count > 0`, Save opens a `ConfirmDialog` "Move 2 earlier payments (₹1,500.00) to '<new party>'?" with **Move and save** / Cancel. Confirm re-sends the payload with `confirmMoveSettlements: true`. Count and amount come from the guard; the preview's `SETTLEMENTS_ON_BILL` error is shown as an info line ("Saving will ask to move 2 payments") instead of blocking the form.
+* Party form: a backend refusal of a type change shows on the Type field.
+* **Tests (Vitest).** dialog text from the guard; Cancel keeps the form; Confirm sends the flag.
+
+### Edit forms: line detail by id and `dirty` gating (FR-55, DD-89, H3)
+* **Load by id (E4).** `useSaleEditDraft` / `usePurchaseEditDraft` no longer call `searchItemsFts(name, 8)`. For each distinct `itemId` they call `getItem(itemId)` (inactive items included, `isActive` flag) and its bundles, and pick the line's pack by `bundleId` from the details (`null` = base units). `saleLineToCart` / `purchaseLineToDraft` keep `saleItemId` / `purchaseItemId`, and `toPayload()` sends `sale_item_id` per kept sale line.
+* **Deleted items (E5).** A line of a deleted item shows a "Deleted" badge; its inputs stay editable, and a change produces the backend's `DeletedReference` through the preview, shown with `DeletedReferenceAlert`. The add-line typeahead never offers deleted items (FTS).
+* **Dirty gating (E3).** The draft keeps the loaded payload snapshot; `dirty = !samePayload(current, loaded)` (structural compare of the payload, no business rule). `canSave = dirty && !loading && errors.length === 0`; Ctrl+S is ignored while not dirty; the Save button shows "No changes" as its title.
+* **Tests (Vitest).** renamed item keeps its pack from `bundleId`; untouched form: Save disabled and Ctrl+S sends nothing; one edit enables Save; payload carries `sale_item_id`.
+
+### Return dating labels (FR-56, DD-91, H4)
+* Reports P&L: new rows "Returned goods cost" (under COGS, as a credit) and "Purchase discount reversed" (under Other Income) from `PnLReport`. Item profit table gains "Returns" and "Returned cost" columns.
+* Dues: the "Total Paid" column becomes **Paid & credited** (`paidAndCredited` from the row). Dashboard Today card: "Sales" → **Item sales**.
+* **Tests (Vitest).** labels and backend values rendered without TS sums.
+
+### Undo hint in Set stock and Adjustment (FR-57, DD-92, H5)
+* `StockAdjustmentForm`: for Increase the reason list is Unrecorded stock and Count correction (found) only (display list; the backend enforces it). A typed cost of 0 is sent as `0`, never as `null` (S4); an empty field sends `null` (backend default).
+* `SetStockDialog` and `StockAdjustmentForm` (Increase): when the preview's `undoableWriteoffs` is non-empty, an info box: "This item has a write-off of 5 PCS on 12 Nov (₹200). Undo it instead?" with **Undo** opening the G7 undo confirm for that `adjustmentId`; after undo the preview reloads.
+* **Tests (Vitest).** cost 0 reaches the API as 0; hint from the mocked preview; Undo opens the G7 confirm.
+
+### Lot Inspector order and label (FR-57, S7, H5)
+* `LotInspector` renders lots in the order `get_item_lots` returns (id order); no client sort. The header reads "Lots · FIFO order (entry order)"; open lots show `#fifoRank`.
+
+### Reprice modal note (FR-57, S11, H5)
+* `LotPriceEditModal`: when the preview's `recostsHistory` is true, a note under the effect block: "Past COGS and losses that used this lot will change." The per-pack price shown is the backend's `perPackPrice` (H7).
+
+### Item delete choice dialog (FR-58, DD-93, H6)
+* `ItemDeleteDialog` (the item use of `DeleteConfirmDialog`): when `preview.writeOff` is non-null and the mode is SOFT, a radio group: **Just delete** (pre-selected) "12 PCS worth ₹840 leave Inventory value. No loss is booked; restore brings them back." and **Book as loss** "₹840 booked as Inventory Losses today, then the item is deleted." Confirm calls `deleteItem(itemId, writeOff)`. No choice when `writeOff` is null.
+* **Tests (Vitest).** Just delete pre-selected and sends `false`; Book as loss sends `true`; no radios without stock.
+
+### Date order and UI rule moves (FR-59, DD-94, DD-97, H7)
+* `DATE_ORDER` errors land on the date field of the return, settle, bill edit and party forms (the backend `field`).
+* Rules moved to the backend: `itemForm` and `BundleCreationModal` show the backend's validation errors (no stricter local checks); `openBills.ts` no longer sorts (backend order); dues totals render backend sums; `NewPurchasePage` shows `costPerBaseUnit` from `preview_purchase`; `money.ts` `round2` matches Rust (shared vectors test).
+* **Tests (Vitest).** `DATE_ORDER` on the date field; `money.test.ts` vectors.

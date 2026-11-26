@@ -2291,6 +2291,8 @@ Linked return unit price <= `net_unit_price` of the sale line; charges are never
 
 ## 14. Bill Correction (FR-20, schema v8, `feat/bill-edit-delete`)
 
+> **v1.7 (DD-89, DD-88, DD-95, DD-96): partly superseded.** The `update_sale` reverse-then-repost algorithm in §14.5 is **superseded by §33** (change-only line diff; UPFRONT updated in place; charges kept). The silent party re-point is superseded by §32 (`confirm_move_settlements`, `SETTLEMENTS_ON_BILL`). The `edit_purchase_lot` floor `consumed = quantity − remaining` is superseded by §37 (restocked return units count), and the vendor-return FIFO branch of `plan (VENDOR)` no longer occurs for new returns (§31). Guards, reason codes, delete algorithms and `recost_lot` stand.
+
 ### 14.1 Entities and DTOs
 `SaleTransaction` and `PurchaseTransaction` gain `updated_at: Option<String>` (last field; `None` on create, set by every edit). `RETURN_ITEM.purchase_item_id` is also written for the `RETURN` lot of an unlinked restockable customer line. DTOs (`core/dtos/correction_dto.rs`): `CorrectionTarget { Sale, Purchase, Return }` (SCREAMING_SNAKE), `GuardReason { code, message, blocks_edit, blocks_delete }`, `LotEditLimit { purchase_item_id, consumed_quantity, referenced, vendor_returned }`, `BillEditGuard { target, id, code, can_edit, can_delete, can_change_party, reasons, upfront_amount, applied_amount, removed_cash_amount, removed_credit_amount, lot_limits }`, `DeleteBillResult { removed_cash_amount }`, `DeleteReturnResult { removed_cash_amount, removed_credit_amount }`. `CreatePurchaseItemPayload` gains `#[serde(default)] purchase_item_id: Option<i64>`; `create_purchase` rejects `Some`. There is **no** `CodeSequence` entity change: `code_sequences` exists since v6 and `next_code` upserts the high-water mark on issue, so deleting a record never frees its code; `retire_code` is not needed.
 
@@ -2641,3 +2643,255 @@ Equivalence (preview equals the command, field by field), no side effects (row c
 * **Service (`inventory_service_impl.rs`).** `undo_adjustment_in_tx` is the one body; `undo_stock_adjustment` commits it, `get_adjustment_undo_guard` rolls back (DD-56) and returns `AdjustmentUndoGuard { can_undo, reason: Option<{code,message}>, quantity, item_id, item_name, base_unit, loss_removed, value_change }`. Unknown id -> NotFound; item inactive -> refused `ITEM_DELETED` ("Restore the item first"). Reduction: `outflow_allocations().delete_by_source(Adjustment, id)`, each `quantity_depleted` added to the lot's remaining (`> quantity` -> error `LOT_OVERFLOW`, never clamped) and summed into `apply_stock_delta`. Increase: the ADJ header is found by `purchase_service_impl::adjustment_id_from_notes` (shared with `update_lot_price_in_tx`) through `purchases().find_adjustment_lots(id)`; each lot goes through `remove_purchase_lot` (`CONSUMED_LINE_REMOVED` mapped to `ADJUSTMENT_STOCK_USED`: "Stock added by this adjustment has already been sold or used. Delete those sales first."), then the header and the adjustment (`adjustments().delete_adjustment`) are deleted.
 * **IPC.** `undo_stock_adjustment { adjustment_id }`, `get_adjustment_undo_guard { adjustment_id }`.
 * **Tests (`tests/inventory_service_test.rs`).** count correction undone: stock, lot remaining, `inventory_losses` 0, stock invariant; UNRECORDED_STOCK undone when unused (lot gone) and blocked after a sale; deleted item refused; unknown id NotFound; guard writes nothing.
+
+---
+
+**v1.7 (2026-11-26): money and stock correctness.** §31–§37 are one section per H-branch of HLD §16 (FR-53..FR-59, DD-86..DD-97). No schema migration in any of them (v13 stays unused). Finding ids (R, E, S, L) key the test rows. Rules that hold for every section: every command and its preview share one `*_in_tx` body (DD-56); the preview is that body rolled back; guards run before the first write; after every mutating test step assert `assert_stock_invariant` (cache = Σ lot remaining), `assert_lot_flow_invariant` (every allocation fits its lot) and `assert_ledger_invariant` (balance = total − ledger) from `tests/common`. Each finding gets its failing test before the fix.
+
+**Shared error additions (`core/error.rs`).**
+* `AppError::DeletedReference { entity: RefEntity, id: i64, name: String, message: String }`, `RefEntity = ITEM | PARTY` (SCREAMING_SNAKE). Wire `{ type: "DeletedReference", details: { entity, id, name, message } }`; message "'<name>' is deleted. Restore it first." Built by `deleted_ref(entity, id, name)`. Introduced in H2 (party) and reused by H3 / H7. A variant, not a `BillLocked` code, because the UI needs `entity` and `id` for the Restore button (same reasoning as `DeletedNameClash`, §27).
+* New `BillLocked` codes: `VENDOR_LOT_REQUIRED`, `VENDOR_LOT_NOT_ELIGIBLE` (H1), `SETTLEMENTS_ON_BILL` (H2), `STOCK_INVARIANT` (H7). New `ValidationError` code `DATE_ORDER` (H7; the field is the date field, so the form marks it).
+
+## 31. Vendor Returns Take Exact Lots, Net of the Bill Discount (FR-53, DD-86, DD-87, no schema, `fix/vendor-return-lots`, v1.7 H1)
+* **Eligibility predicate (one place).** `purchase_repo::vendor_return_lot_filter` (SQL fragment + Rust check `is_vendor_return_eligible(lot, header, party_id, purchase_id)`): `t.source = 'PURCHASE' AND t.is_opening_balance = 0 AND t.party_id = :party AND (:purchase IS NULL OR t.id = :purchase) AND p.item_id = :item AND p.remaining_quantity > EPS`.
+* **Repo.** `PurchaseRepository::list_vendor_return_lots(item_id, party_id, purchase_id: Option<i64>) -> Vec<VendorReturnLot>` (one statement joining `purchase_items p` to `purchase_transactions t`, `ORDER BY p.id`). `VendorReturnLot { purchase_item_id, purchase_id, purchase_code, transaction_date, unit_cost, net_unit_cost, remaining_quantity, base_unit }`; `net_unit_cost = net_unit_price(unit_cost, t.items_subtotal, t.discounts_total)` computed in Rust after the read.
+* **Service / IPC.** `ReturnService::list_vendor_return_lots(item_id, party_id, purchase_id)` (read tx); command `list_vendor_return_lots { item_id, party_id, purchase_id? }` in `return_controller.rs`. A deleted item or party returns `DeletedReference` (the picker shows Restore).
+* **Strategy.** `InventoryAllocationStrategy` gains `deplete_named_lot_for_outflow(uow, source_type, source_id, lot_id, quantity) -> OutflowDepletionResult` (default body: one outflow row on that lot, `quantity ≤ remaining + EPS` else `InsufficientStock` naming the lot code). `FifoStrategy::deplete_lots_for_outflow` is unchanged for ADJUSTMENT and REPLACEMENT and is **never called with `VENDOR_RETURN`** (debug assert).
+* **Changed signature.** `InventoryService::remove_stock_for_vendor_return(uow, return_id, item_id, purchase_item_id: i64, quantity) -> Result<VendorReturnCost, AppError>`, `VendorReturnCost { gross_cost, net_value }`. `Option` is gone, so the FIFO fall-back cannot be reached.
+* **Algorithm (`create_vendor_return_in_tx`).**
+```
+check_entry_date_now(return_date); shape checks (unchanged)
+purchase = original_purchase_id -> header (PURCHASE, not OB) | None
+(party_id, party_name) = resolve_party(...)          // party required for a vendor return (H2 adds the type check)
+for (i, line) in items:
+  line.purchase_item_id is None -> BillLocked VENDOR_LOT_REQUIRED (field items[i].purchase_item_id)
+  lot, header = find; !is_vendor_return_eligible(lot, header, party_id, original_purchase_id) -> VENDOR_LOT_NOT_ELIGIBLE
+    ("This lot was not bought from '<vendor>'" | "This lot is not on bill <code>" | "Only purchase lots can be returned to a vendor")
+  item active (DeletedReference), not a service, lot.item_id == line.item_id
+  drawn[lot] += qty; drawn[lot] > lot.remaining + EPS -> InsufficientStock on items[i]   // simulated draw, R10: the overdrawing line
+  factor = net_unit_price(1.0, header.items_subtotal, header.discounts_total)
+  line.unit_price = lot.unit_cost * factor; line.total = round2(qty * unit_price); line.cost = round2(qty * lot.unit_cost)
+header total = Σ line.total (rounded lines); insert header + lines
+for line: inventory.remove_stock_for_vendor_return(rid, item, lot, qty)   // outflow VENDOR_RETURN on that lot, cache −qty
+payment.apply_return_value(VENDOR, rid, party, purchase, total)           // RETURN_CREDIT to the bill, then oldest open bills, rest REFUND_IN
+result: credited, cash, value = total, cost = Σ cost, discount_reversed = round2(Σ cost − total)
+```
+* **P&L (`report_repo.rs`).** Vendor returns line = Σ `ri.cost_amount` over `return_type = 'VENDOR'` lines whose lot header is `source = 'PURCHASE'` by `return_date` (gross; subtracted from Purchases). New `purchase_discount_reversed` = Σ (`ri.cost_amount − ri.total_amount`) over the same rows, subtracted from Other Income. `PnLReport` gains `purchase_discount_reversed`.
+* **Delete return.** Unchanged (`restore_outflow(VENDOR_RETURN)`); the P&L lines vanish with the rows.
+* **Old data.** Existing FIFO vendor returns stay as stored (their outflow rows name real lots); the P&L filter drops lines on non-PURCHASE lots, which is the R1 correction for history.
+* **Sequence: vendor return.**
+```mermaid
+sequenceDiagram
+  participant UI as ReturnFormVendor
+  participant RS as ReturnService
+  participant PR as PurchaseRepo
+  participant IS as InventoryService
+  participant PS as PaymentService
+  UI->>RS: list_vendor_return_lots(item, party, bill?)
+  RS->>PR: eligible lots (PURCHASE, party, bill, remaining > 0)
+  RS-->>UI: lots + remaining + net cost (max per line)
+  UI->>RS: preview_vendor_return / create_vendor_return(lines with purchase_item_id)
+  RS->>PR: lot + header per line; eligibility; simulated draw per lot
+  RS->>IS: remove_stock_for_vendor_return(rid, item, lot, qty)
+  IS-->>RS: gross_cost, net_value
+  RS->>PS: apply_return_value(total = Σ net lines)
+  PS-->>RS: credited, refund_in
+  RS-->>UI: ReturnResult { value, credited, cash, discount_reversed }
+```
+* **Tests (`tests/return_service_test.rs`, `report_service_test.rs`).**
+
+| Id | Scenario | Expect |
+|---|---|---|
+| R1 | vendor has OPENING + ADJ + another vendor's lot of the item; return without a lot | `VENDOR_LOT_REQUIRED`; nothing written |
+| R1 | old FIFO-style data: vendor-return outflow on an OPENING lot | P&L vendor returns ignore it |
+| R2 | named lot of vendor B on a return to vendor A | `VENDOR_LOT_NOT_ELIGIBLE`; lot of another bill when a bill is linked, same |
+| R3 | ₹1000 bill, ₹100 discount, unpaid; return all 10 | credit ₹900, no `REFUND_IN`, balance ₹0, `discount_reversed` 100, P&L Other Income −100 on return date, stock −10 at gross |
+| R3 | same bill paid in full | `REFUND_IN` ₹900 (not ₹1000) |
+| R3 | bill with ₹50 freight charge, no discount | value = gross; freight stays in Operating Expenses |
+| R10 | two lines on one lot, second overdraws | error on `items[1]` |
+| — | `list_vendor_return_lots` | only eligible lots, id order, `net_unit_cost`; deleted item → `DeletedReference` |
+| — | preview writes nothing; delete the return restores the lot and both P&L lines vanish | invariants hold |
+
+## 32. Party Integrity (FR-54, DD-88, DD-90 party half, no schema, `fix/party-integrity`, v1.7 H2)
+* **Type lock (L1).** `party_service_impl::update_party`: `payload.party_type != existing.party_type && party_repo::reference_count(id) > 0` → `ValidationError("party_type", "'<name>' has bills or payments, so its type can't change.")`. `reference_count` exists (§28).
+* **Return party type (R7).** `return_service_impl::resolve_party(tx, payload_party, bill_party, linked, expected: PartyType)`: an explicit party of the other type → `ValidationError("party_id", "'<name>' is a vendor. Pick a customer.")` (and the reverse); a deleted party → `DeletedReference(PARTY)`.
+* **Deleted party writes (E6, party half).** `require_active_party(tx, party_id)` helper in `services/impl/party_guard.rs`, used by: sale / purchase update when the bill's party is inactive **and** the new balance due exceeds the old one (a raised due); `resolve_sale` / `resolve_purchase` for a changed party (as today, now `DeletedReference`); party opening-balance edit. Settlement, return and reprice checks follow in H7 (§37).
+* **Settlement move (E7, D6).** `bill_guard::ledger_part` also returns `settlements_to_move = { count, amount }` = `SETTLEMENT` rows of the bill (`kind = SETTLEMENT`, this `transaction_id`); `BillEditGuard` gains it (serde default zeros). `CreateSalePayload` / `CreatePurchasePayload` gain `#[serde(default)] confirm_move_settlements: bool` (ignored on create).
+```
+update_*_in_tx:
+  ... resolve; party_changed = r.party_id != old.party_id
+  party_changed && !g.can_change_party                  -> PARTY_CHANGE_WITH_CREDITS (unchanged)
+  party_changed && g.settlements_to_move.count > 0 && !payload.confirm_move_settlements
+                                                        -> BillLocked SETTLEMENTS_ON_BILL
+     message "This bill has N later payments (₹X). Confirm moving them to '<new party>'."
+  ... post; if party_changed: payment.repoint_bill_party(type, id, new_party)   // SETTLEMENT rows + the bill's share of a lump sum
+```
+  The preview runs the same body, so a preview without the flag returns the `SETTLEMENTS_ON_BILL` error; the UI turns it into the dialog (UI LLD).
+* **Tests (`tests/party_integrity_test.rs`, `bill_correction_test.rs`).**
+
+| Id | Scenario | Expect |
+|---|---|---|
+| L1 | customer with one sale, change type to vendor | refused; unreferenced party: allowed |
+| R7 | unlinked customer return with a vendor `party_id` | refused; vendor return with a customer, refused |
+| E6 | deleted customer; old unpaid bill edited to a higher total | `DeletedReference(PARTY)`; same edit lowering the total passes |
+| E7 | bill with 2 settlements; party change without flag | `SETTLEMENTS_ON_BILL {2, amount}`; nothing written |
+| E7 | same with `confirm_move_settlements` | settlements on the new party; both party ledgers and dues summaries move; ledger invariant |
+| E7 | bill with unlinked-return credit | still `PARTY_CHANGE_WITH_CREDITS` |
+| — | guard reports `settlements_to_move`; preview writes nothing | |
+
+## 33. Change-Only Bill Edit (FR-55, DD-89, DD-90 item half, no schema, `feat/change-only-edit`, v1.7 H3)
+Supersedes the `update_sale` algorithm of §14.5 (reverse-then-repost). §14 guards, reason codes and the purchase lot rules stay.
+* **DTOs.** `CreateSaleItemPayload` gains `#[serde(default)] sale_item_id: Option<i64>`; `create_sale` rejects `Some` ("New bills can't reference existing lines"). Each `sale_item_id` must belong to this sale and appear once (ValidationError). `SaleDetailLine` / `PurchaseDetailLine` gain `bundle_id: Option<i64>` (resolved from `pack_label` + `units_per_bundle` against the item's bundles at read time; `None` when base units or the bundle no longer exists).
+* **Repo (`sale_repo.rs`).** `update_sale_item_price(id, unit_price, total_amount)`, `update_sale_item_quantity(id, quantity, pack_quantity, unit_price, total_amount, service_cost_total)`, `update_sale_item_identity(id, item_id, item_name, pack_label, pack_quantity)` (item or pack change only), `delete_sale_item(id)` (after its allocations are gone), `insert_sale_item` (existing). `AllocationRepository`: `list_by_sale_item(id)` (id order), `shrink(alloc_id, by)` / `delete(alloc_id)`. `SettlementRepository::update_upfront(type, id, amount, date, party)`.
+* **Inventory (new).**
+  * `release_sale_line(uow, sale_item_id, quantity) -> ReleaseResult { cost_released }`: built on the newest-first walk of `reverse_sale_allocations` (`InventoryAllocationStrategy::release_sale_allocations`, sharing its private walker) with `restock = true`, but it **shrinks `quantity_depleted`** (deleting a row at 0) instead of incrementing `returned_quantity`; lots `+take`, cache `+take` per lot item. A take above `quantity_depleted − returned_quantity` is refused (`LINKED_RETURNS` already blocks edits with returns, so `returned_quantity` is 0 here; asserted).
+  * `deplete_extra_for_line(uow, sale_item_id, item_id, quantity) -> DepletionResult`: the normal FIFO draw (`deplete_lots_for_sale`) for `quantity` only, appending allocations to the existing line.
+  * Service lines: `release_service_line(uow, sale_item_id, fraction)` and `deplete_service_extra(uow, sale_item_id, extra_qty)` scale each component by the line's **stored** ratio (`Σ allocation quantity of component c ÷ line quantity`), never by the live `service_components`.
+* **Line-diff engine (`sale_service_impl::diff_sale_lines`).**
+```
+old = lines of the sale by id; new = payload lines
+for n in new with sale_item_id = Some(id): o = old[id]  (else ValidationError)
+  same_identity = n.item_id == o.item_id && same pack (bundle units and label)
+  if !same_identity:                         // item or pack changed
+     release_sale_line(o, o.quantity); identity, quantity, price written; deplete fresh (service: components fresh)
+  elif n.quantity == o.quantity (|Δ| ≤ 1e-9):
+     if n.unit_price == o.unit_price: no write                        // unchanged
+     else: update_sale_item_price                                       // rate only
+  elif n.quantity < o.quantity:
+     release_sale_line(o, o.quantity − n.quantity)                     // newest allocations first
+     update_sale_item_quantity (service_cost_total = o.service_cost_total × n.q / o.q)
+  else:
+     deplete_extra_for_line(o, n.quantity − o.quantity)                // FIFO, extra only
+     update_sale_item_quantity (service_cost_total scaled the same way)
+for n in new with sale_item_id = None: insert line (live snapshot, live service cost / components) and deplete
+for o in old not matched: release_sale_line(o, o.quantity); delete_sale_item
+```
+  The stock check runs before any write on the **net extra demand** per item (Σ extra + Σ fresh − Σ released per item, components for services), against current stock, so the error names the line that needs more. Deleted references (E5): a line whose item (or a component of its service) is inactive may only be **unchanged**; any other branch, or a new line of it → `DeletedReference(ITEM)`. `keep_items` of §27 is replaced by this rule.
+* **Header, charges, UPFRONT.** `update_header_for_edit` as today (date change also updates `sale_items.transaction_date`, §15). Charges: payload rows matched to stored `bill_charges` by `charge_type_id` + position; an unchanged amount keeps the stored row (name, effect) untouched; a changed or new row resolves the type live; a missing row is deleted (E9). UPFRONT: `update_upfront` when the row exists and the new upfront > 0 (amount, `settlement_date` = bill date, party); delete when the new upfront is 0; insert when none existed. `recompute_bill` last.
+* **Purchase edit (E2).** `edit_purchase_lot` keeps `item_name` and `pack_label` when the item did not change (`LotEdit` gains `item_changed`; snapshots are rewritten only then). Charges as for sales.
+* **Sequence: sale edit diff.**
+```mermaid
+sequenceDiagram
+  participant UI as SaleEditForm
+  participant SS as SaleService
+  participant G as bill_guard
+  participant IS as InventoryService
+  participant PS as PaymentService
+  UI->>SS: preview_sale / update_sale(sale_id, payload with sale_item_id)
+  SS->>G: evaluate_sale_guard (linked returns, credits, settlements_to_move)
+  SS->>SS: diff_sale_lines(old, new) -> plan (unchanged / rate / down / up / replace / new / removed)
+  SS->>SS: deleted-reference and net-extra stock checks (before any write)
+  SS->>IS: release_sale_line (down, replace, removed) newest first
+  SS->>IS: deplete_extra_for_line (up) / deplete fresh (replace, new)
+  SS->>SS: update changed lines in place; header; changed charge rows
+  SS->>PS: update_upfront in place; repoint (if confirmed); recompute_bill
+  SS-->>UI: summary (or preview figures)
+```
+* **Tests (`tests/bill_correction_test.rs`, `inventory_service_test.rs`).**
+
+| Id | Scenario | Expect |
+|---|---|---|
+| E1 | notes-only save of a 3-line bill with a service line | allocations, `service_cost_total`, `item_name`, `pack_label`, UPFRONT row (id, amount, date) and COGS byte-identical |
+| E1 | rate-only change | only `unit_price` / `total_amount`; allocations identical |
+| E1 | qty 5 → 6 with a newer purchase entered after the sale | old 5 allocations kept; 1 drawn from the oldest open lot |
+| E1 | qty 6 → 4 | newest allocations shrink by 2; lots +2; no `returned_quantity` change |
+| E1 | notes-only edit when an unreferenced newer purchase exists | that purchase stays unreferenced (deletable) |
+| E1 | service line qty 2 → 3 after the live service cost and components changed | stored ratio and cost per unit used |
+| E2 | purchase notes edit after the item was renamed | lot `item_name` / `pack_label` unchanged |
+| E4 | line of a renamed item sold in a Box | detail returns `bundle_id`; save keeps the pack |
+| E5 | deleted item line: unchanged save passes; qty change, rate change, new line, deleted component of a kept service | `DeletedReference(ITEM)` |
+| E9 | charge type renamed / effect flipped, bill notes edited | stored charge rows unchanged |
+| — | item change on a line; removed line; new line; stock short on the extra | fresh draw / release / insert; error on the line, nothing written |
+| — | `sale_item_id` of another sale or twice | ValidationError |
+
+## 34. Returns Post in the Return Period (FR-56, DD-91, no schema, `fix/return-pnl-dating`, v1.7 H4)
+* **P&L (`report_repo.rs`).** `cogs` = Σ `a.quantity_depleted * a.unit_cost` by sale `transaction_date` (gross) + REPLACEMENT outflow cost by return date. New `returned_goods_cost` = Σ `ri.cost_amount` over customer `RETURNED` lines by `return_date` where `ri.sale_item_id IS NOT NULL` or `ri.condition = 'RESTOCKABLE'`. Inventory Losses keep the scrap term. Gross Profit = Net Sales − (cogs − returned_goods_cost) − misc. costs. `PnLReport` gains `returned_goods_cost`. Service misc. cost uses gross allocations (services are not returnable, so the value is unchanged).
+* **Unlinked restockable cost (R4).** `return_service_impl` sets `cost_amount = round2(qty × RETURN lot unit_cost)` for unlinked restockable lines (was 0). Existing rows are not rewritten; a read-time `COALESCE(NULLIF(ri.cost_amount, 0), qty × lot cost)` through `ri.purchase_item_id` covers history.
+* **Item analytics (`item_analytics_sql.rs`).** Two arms `UNION ALL` grouped by item: sales by bill date (net revenue, gross cost, misc.) and customer `RETURNED` lines by return date, by `ri.item_id` (linked and unlinked): `returns_value = Σ ri.total_amount`, `returned_cost = Σ` as in the P&L, scrap as a loss. Rows gain `returns_value`, `returned_cost`; `reconciliation` asserts Σ rows = P&L gross profit for the range.
+* **Bill profit (`sale_repo.rs` profit parts).** Subtract Σ linked `RETURNED` line totals (not `rt.total_amount`), credit their restockable `cost_amount`, add scrap and replacement cost (R6). The same per-line function feeds item-level profit in the drawer.
+* **Return header and cap (`return_service_impl.rs`).** Header `total_amount = Σ round2(line totals)` (R6). Refund cap per linked line on the total (R8): `already = Σ ri.total_amount of earlier RETURNED rows on the sale line`; `already + round2(qty × unit_price) ≤ round2(line.total_amount × net factor) + MONEY_EPS`, else `ValidationError("Refund for '<item>' can be at most ₹X")`. The per-unit tolerance is dropped.
+* **Labels (L3).** Dues "Total Paid" → "Paid & credited" from `Σ(UPFRONT + SETTLEMENT + RETURN_CREDIT)` served by the backend dues row (`paid_and_credited`); dashboard "Sales" → "Item sales". No figure is computed in TS.
+* **Tests (`tests/report_service_test.rs`, `return_service_test.rs`).**
+
+| Id | Scenario | Expect |
+|---|---|---|
+| R5 | March sale (cost 60), April restockable return | March P&L byte-identical before and after; April `returned_goods_cost` 60, refund under Returns |
+| R5 | linked scrap return in April | April: credit 60 and loss 60; total cost over both months 60 |
+| R4 | unlinked restockable return | `cost_amount` = qty × RETURN lot cost; P&L credits it; item profit includes it |
+| R6 | 3 lines with half-paisa totals | header = Σ rounded lines; bill profit uses lines; Σ item profit = bill profit for a one-bill range |
+| R8 | 1000 units at a rate with a half-paisa net; returned in two parts | Σ refunds ≤ net line total; the overpay case refused |
+| — | P&L gross profit = Σ item profit over random ranges | holds |
+| L3 | dues row with a return credit | `paid_and_credited` = paid + credit; total − it = balance |
+
+## 35. Found Stock Rules (FR-57, DD-92, no schema, `feat/found-stock-rules`, v1.7 H5)
+* **Reasons (S3).** `AdjustmentReason::allows_increase()` = `UnrecordedStock | CountCorrection`; `create_adjustment_in_tx` rejects `quantity > 0` with another reason: `ValidationError("reason", "Damaged, Expired and Theft can only reduce stock.")`. `set_item_stock` up keeps `UNRECORDED_STOCK`.
+* **Cost (S4, S8).** `unit_cost: Some(0.0)` is valid (≥ 0, finite). Default when `None`: `purchase_repo::latest_lot_cost_preferring(item_id)` = latest `PURCHASE` or `OPENING` lot by id, else latest lot of any source, else `ValidationError("unit_cost", "Enter the cost: this item has no lots yet")`.
+* **Undo hint.** `StockAdjustmentPreview` and `SetItemStockResult` gain `undoable_writeoffs: Vec<UndoableWriteoff { adjustment_id, adjustment_date, quantity, reason, loss }>`, filled only for increases: the item's reductions (newest first, max 5) whose G7 `undo_adjustment_in_tx` dry run (savepoint, rolled back) says `can_undo`. Empty for decreases.
+* **Lot Inspector (S7).** `get_item_lots` already orders by id; `ItemLot` gains `fifo_rank` (1-based among open lots) so the UI labels without sorting.
+* **Reprice note (S11).** `LotPriceUpdateResult` gains `recosts_history: bool` (lot has sale or outflow allocations); the modal shows the note only then.
+* **Tests (`tests/inventory_service_test.rs`).**
+
+| Id | Scenario | Expect |
+|---|---|---|
+| S3 | +5 with DAMAGED / EXPIRED / THEFT_LOST | refused; COUNT_CORRECTION +5 passes; no P&L gain line |
+| S4 | +5 at cost 0 | lot cost 0, value change 0 |
+| S8 | ADJ lot at mistyped cost newer than the purchase lot | default cost = purchase lot cost |
+| — | earlier −3 count correction; preview +3 | `undoable_writeoffs` lists it; after undo (G7) the list is empty |
+| S7 | back-dated purchase entered last | `fifo_rank` follows id, not date |
+| S11 | reprice of an unused lot / a sold lot | `recosts_history` false / true |
+
+## 36. Item Delete With Stock: Just Delete or Book as Loss (FR-58, DD-93, no schema, `feat/item-delete-writeoff`, v1.7 H6)
+* **DTOs.** `ItemDeletePreview` gains `write_off: Option<WriteOffPreview { quantity, base_unit, loss }>` (`None` when stock ≤ EPS or the mode is HARD); `loss` = FIFO cost of the whole stock from the dry run. `DeleteItemPayload { item_id, #[serde(default)] write_off: bool }`; `DeleteItemResult` gains `adjustment_id: Option<i64>`.
+* **Algorithm (`item_service_impl::delete_item_in_tx`, shared with the preview).**
+```
+guards of §27 (NotFound, already deleted, ITEM_IS_COMPONENT); mode = HARD | SOFT (DD-79)
+if write_off && mode == SOFT && current_stock > EPS:
+   inventory.create_adjustment_in_tx({ item_id, quantity: −current_stock, reason: THEFT_LOST,
+                                       adjustment_date: today_local(), notes: "Written off on item delete" })
+   // FIFO outflow rows (ADJUSTMENT), cache → 0, loss on today
+items.set_active(id, false, now); FTS remove after commit
+```
+  `write_off` with no stock is a no-op; with HARD it is ignored (a HARD item has untouched opening stock only, which is removed with the item).
+* **Reason.** `THEFT_LOST`: the `stock_adjustments.reason` CHECK (schema v5, `migrations.rs`) lists `DAMAGED, EXPIRED, THEFT_LOST, COUNT_CORRECTION, UNRECORDED_STOCK`, so a `WRITE_OFF` value needs a table rebuild, which v1.7 does not do. The note marks the origin in Adjustments history.
+* **Tests (`tests/item_delete_test.rs`).**
+
+| Id | Scenario | Expect |
+|---|---|---|
+| S5 | item with 12 PCS, delete without write-off | soft delete, lots untouched, P&L unchanged, restore brings value back |
+| S5 | same with write-off | one THEFT_LOST adjustment of −12 dated today, loss = FIFO cost, stock 0, item inactive; invariants |
+| — | preview `write_off` figures equal the committed loss; preview writes nothing | |
+| — | write-off then restore then G7 undo | stock and loss restored |
+
+## 37. Date Order and Integrity Hardening (FR-59, DD-94..DD-97, no schema, `fix/date-order-and-guards`, v1.7 H7)
+* **Date order (E10, DD-94).** Helper `core/money.rs::check_date_order(field, date, limit, rule: After | NotAfter, what: &str)` → `ValidationError { field, code: "DATE_ORDER", message }`. Called in:
+  * customer / vendor return `*_in_tx`: `return_date ≥ bill.transaction_date` ("Return date can't be before the bill date (<d>)");
+  * `settle_bills_batch` (and the single and edit paths through it): each `settlement_date ≥ bill.transaction_date` ("Payment date can't be before the bill date (<d>)");
+  * sale / purchase update: new date `≤ min(earliest SETTLEMENT date, earliest linked return date)` ("This bill has a payment on <d>, so its date can't be later");
+  * party opening-balance edit: As of `≤` earliest settlement of the `OB-` bill.
+* **Remaining deleted-reference checks (D10).** `require_active_party` / `require_active_item` in settlement create / edit / delete, in return create (bill party and items; replaces the "Restore the item first" message with `DeletedReference`), and in `update_lot_price_in_tx` when the bill's party is inactive and the balance would change.
+* **Lot floor (S1, DD-95).** `edit_purchase_lot`: `floor = allocations().sum_depleted_for_lot(lot) + outflows().sum_for_lot(lot)`; `e.quantity + EPS < floor` → `LOT_BELOW_CONSUMED`; `new_remaining = e.quantity − (quantity − remaining)` as before, so the restocked units stay in remaining and stay available to the later return delete. Example: lot 10, sold 6, 2 returned restockable → remaining 6, old floor 4, new floor 6. G6's opening-quantity edit uses the same floor.
+* **Clamp → error (S2).** `reverse_sale_bill_stock`, `release_sale_line` and `restore_outflow`: `lot.remaining + take > lot.quantity + EPS` → `BillLocked STOCK_INVARIANT` ("Stock records don't match for lot <code>. Nothing was changed."); the cache delta is the exact amount added to lots.
+* **Reprice payment (E8, DD-96).** `bill_math::lot_price_upfront(new_total, applied, upfront_old, old_balance_due)`: `old_balance_due ≤ EPS` → `round2(new_total − applied)` (fully paid stays paid, however it was paid); otherwise `round2(min(upfront_old, open))`. `TOTAL_BELOW_APPLIED` unchanged.
+* **Return guard (R9).** `evaluate_return_guard`: any `Err` from the `plan_return_undo` dry run becomes a blocking reason (`code` of a `BillLocked`, else `RETURN_UNDO_FAILED` with the message), so Delete is disabled.
+* **Dates (S6, L2).** `item_service_impl` opening lot: `today_local()` + `check_entry_date` (was the UTC date). `record_import_service_impl` parties import: blank As of on UPDATE keeps the existing `OB-` date.
+* **Rounding and caps (L4, L7, S9).** `round2` = Rust reference (`(x * 100.0).round() / 100.0` with the existing `MONEY_EPS` nudge), `money.ts` changed to the same; a shared test vector file (`tests/fixtures/round2_vectors.json`) is asserted by both cargo and Vitest. `create_source_lots` stores `round2(total)`. `check_finite_amount(field, x)`: finite and `|x| ≤ 1e12`, for quantities, rates and totals of every payload. Set stock: `|delta| < 1e-6` → no-op and a residual `current_stock` below 1e-6 is stored as 0; `is_low_stock = current_stock < threshold − EPS`.
+* **Reindex (L5).** `reindex_after_commit(key)`: on error log, retry once, then mark the index dirty (`ensure_search_index` rebuilds at next start); the command returns `Ok`.
+* **Base unit (L6).** `update_item`: `base_unit` change when `current_stock > EPS` or any `sale_items` / `purchase_items` / `return_items` row exists → `ValidationError("base_unit", "Base unit can't change once the item has stock or bills.")`.
+* **UI rule moves (DD-97).** Backend fields replace TS math: `LotPriceUpdateResult.per_pack_price`; `preview_item_form` validation errors (item form and bundle modal take the backend's `errors[]`); `ReturnFormVendor` uses §31's lots and maximum; open bills arrive oldest first from `get_party_open_bills`; dues rows carry rounded sums; `preview_purchase` lines gain `cost_per_base_unit`.
+* **Tests (`tests/no_future_dates_test.rs`, `bill_correction_test.rs`, `lot_price_test.rs`, `return_delete_test.rs`, `inventory_service_test.rs`, Vitest `money.test.ts`).**
+
+| Id | Scenario | Expect |
+|---|---|---|
+| E10 | return dated before its bill; settlement before its bill; bill moved after its payment / return; OB As of after its settlement | `DATE_ORDER` on that field; previews show the same |
+| E8 | bill paid upfront 600 + settlement 400 (total 1000), lot reprice +100 | stays PAID, UPFRONT 700; part-paid bill takes +100 in balance |
+| S1 | lot 10, sold 6, 2 returned restockable; edit lot to 5 | `LOT_BELOW_CONSUMED`; 6 passes (remaining 2) and the return stays deletable |
+| S2 | corrupt allocation larger than the lot room, delete the sale | `STOCK_INVARIANT`, nothing written |
+| S6 | item created at 00:30 local, UTC still the day before | opening lot dated local today |
+| S9 | set stock to 2.0000001 with threshold 0 | stock 2, not low; residue snapped |
+| R9 | return whose undo plan errors with a non-BillLocked error | guard `can_delete = false` with the reason |
+| L2 | parties re-import, blank As of, UPDATE | OB date unchanged |
+| L4 | round2 vectors at x.xx5 | Rust and TS agree |
+| L5 | reindex fails after commit | command Ok, error logged, index rebuilt on next start |
+| L6 | base unit change with stock / with a bill / fresh item | refused / refused / allowed |
+| L7 | qty 1e200 × rate | ValidationError, nothing written |
+| D10 | settle, edit settlement, return, reprice on a deleted party / item | `DeletedReference` |

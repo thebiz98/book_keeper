@@ -53,7 +53,7 @@ This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagre
   - `DAMAGED_SCRAP` makes no stock change and books no loss.
 - **Vendor return line:**
   - with `purchase_item_id` set: `qty ≤` that lot's `remaining_quantity`;
-  - without it: FIFO across the item's lots, limited to available stock.
+  - without it: FIFO across the item's lots, limited to available stock. *(Superseded in v1.7 by DD-86: the lot is required.)*
   - In both cases, outflow allocations are logged.
 - `SALE_STOCK_ALLOCATION.returned_quantity` tracks returned units for each allocation. Reversal walks allocations in reverse id order and uses `depleted − returned` as each one's capacity, so repeated partial returns can never over-restore.
   - `RESTOCKABLE` lines also add the quantity back to `PURCHASE_ITEM.remaining_quantity`.
@@ -282,7 +282,7 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - **Linked-return lookups filter `return_type`.** `original_transaction_id` is polymorphic with no FK, so a sale id and a purchase id can collide.
 - **Newest-first return delete.** The customer-return reversal walk (latest allocation first, capacity `depleted - returned`) is deterministic, so it is *replayed* from the sale line's `RETURNED` items in id order instead of storing a per-return table. The replay is valid only while allocations are immutable and returns on the bill are deleted newest first; both are guarded (`LINKED_RETURNS`, `NEWER_RETURN`). Used to undo a return and to recompute `RETURN_ITEM.cost_amount` after a re-cost. `REPLACEMENT_ISSUED.cost_amount` is recomputed from its outflow allocations in id order.
 - **`RETURN` lot link.** An unlinked restockable customer line records its `RETURN` lot in `return_items.purchase_item_id` (v1.1). Older rows fall back to the `RTL-` header notes `Return RET-xxxx`, claimed in line order by lowest lot id.
-- **In-place purchase lot edits.** Allocations point at lot ids, so a purchase edit compares old and new lots: kept lines update the lot (id kept), removed lines are deleted if unreferenced, new lines create lots. Header, charges and UPFRONT ledger are reversed and reposted. A sale edit is a full reverse-then-repost because an unlocked sale line has no references.
+- **In-place purchase lot edits.** Allocations point at lot ids, so a purchase edit compares old and new lots: kept lines update the lot (id kept), removed lines are deleted if unreferenced, new lines create lots. Header, charges and UPFRONT ledger are reversed and reposted. A sale edit is a full reverse-then-repost because an unlocked sale line has no references. *(Superseded in v1.7 by DD-89: change-only sale edit.)*
 - **Edit payment semantics.** Status and paid describe the new upfront payment against `open = new_total - applied` (HLD FR-20). `applied` is `Σ SETTLEMENT + Σ RETURN_CREDIT`.
 - **Codes.** v6 `code_sequences` already retires codes on issue, so v8 adds no sequence table and no `retire_code`.
 - **`BillLocked { code, message }`.** New `AppError` variant. Reason codes: `LINKED_RETURNS`, `RETURN_CREDITS`, `NOT_A_PURCHASE`, `CONSUMED_LOTS`, `TOTAL_BELOW_APPLIED`, `PARTY_CHANGE_WITH_CREDITS`, `PARTY_REQUIRED_WITH_PAYMENTS`, `LOT_BELOW_CONSUMED`, `CONSUMED_LINE_CHANGED`, `CONSUMED_LINE_REMOVED`, `VENDOR_RETURNED_COST_CHANGE`, `NEWER_RETURN`, `RESTOCKED_CONSUMED`, `RETURN_LOT_USED`.
@@ -298,7 +298,7 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - **PURCHASE lots:** bill guards → `edit_purchase_lot` (re-costs allocations, vendor-return lock) → header totals from the *stored* line totals + existing charges (no rebuild from rates, so no rounding drift) → UPFRONT replaced → `recompute_bill`.
 - **Payment rule:** `applied = Σ SETTLEMENT + Σ RETURN_CREDIT`, `open = new_total − applied`.
   - `open < 0` → `TOTAL_BELOW_APPLIED`.
-  - A bill paid entirely upfront (balance 0 and applied 0) stays PAID with `upfront = new_total`.
+  - A bill paid entirely upfront (balance 0 and applied 0) stays PAID with `upfront = new_total`. *(Superseded in v1.7 by DD-96: any fully paid bill stays paid.)*
   - Otherwise `upfront = min(old_upfront, open)`, with the status derived from it.
   - No upfront is ever invented.
 - **OPENING / ADJUSTMENT lots:** re-cost only. For ADJUSTMENT, the matching `stock_adjustments.unit_cost` is updated (found via the `Stock adjustment #id` header note).
@@ -474,3 +474,84 @@ Full requirements are in the HLD (FR-05 rev., FR-08 rev., FR-14 rev., FR-18 – 
 - A wrong Set stock (for example a count correction made instead of fixing the opening quantity) leaves a false loss. A reversing +adjustment would keep the loss and add a second record, so the adjustment is deleted instead; past P&L, stock valuation and the dashboard recompute. Accepted: the audit trail of the undone row is lost, as with bill deletes.
 - Reduction: each `stock_outflow_allocations` row (`ADJUSTMENT`, adjustment id) gives its `quantity_depleted` back to its lot (never above the lot quantity; an overflow is an error, not clamped) and to the item cache; the rows and the adjustment are deleted. Increase: the `ADJ-` lot found by the `Stock adjustment #id:` note is removed with `remove_purchase_lot` (refused when referenced) and the adjustment is deleted. Deleted item: refused (restore first).
 - `get_adjustment_undo_guard` and `undo_stock_adjustment` share one body; the guard is a dropped transaction (DD-56). The dialog holds no rule.
+
+## v1.7 decisions (2026-11-26)
+
+Money and stock correctness after the owner's full review (HLD FR-53..FR-59, §16; owner decisions D1..D11 of 2026-11-26). Finding ids (R, E, S, L) are those of the v1.7 review. No schema migration; v13 stays unused.
+
+**DD-86 — A vendor return takes exact lots only (2026-11-26, v1.7 FR-53, owner D9; findings R1, R2, R10). Supersedes the FIFO bullet of DD-05 and HLD Assumption 11 for vendor returns.**
+- Every vendor-return line needs `purchase_item_id`; a line without it is refused with `VENDOR_LOT_REQUIRED`. The FIFO path of `remove_stock_for_vendor_return` is removed, so a vendor return can no longer draw OPENING, ADJUSTMENT or RETURN lots, other vendors' lots or other bills' lots (R1).
+- Eligible lot: header `source = PURCHASE`, header `party_id` = the return's party (R2), and, when the return is linked to a bill, a lot of that bill; `remaining_quantity > 0`. Anything else is `VENDOR_LOT_NOT_ELIGIBLE`.
+- The backend query `list_vendor_return_lots(item_id, party_id, purchase_id?)` applies the same filter (one shared predicate) and feeds the picker and the per-lot maximum, so the UI holds no rule (DD-56). With exactly one eligible lot the UI preselects it.
+- Quantity checks are made per lot over all lines of the return (a simulated draw), so an overdraw is reported on the line that causes it (R10).
+
+**DD-87 — Vendor-return value is net of that bill's discount (2026-11-26, v1.7 FR-53, owner D11; finding R3). Amends DD-48 "Vendor-return cost lock" (the value is no longer the plain lot cost).**
+- Value of a line = qty × gross lot cost × that bill's own **net factor** = `net_unit_price(1, items_subtotal, discounts_total)` = `(items_subtotal − discounts_total) ÷ items_subtotal`, from the stored header of the lot's bill. Discounts only: charges (`bill_charges` rows with effect `CHARGE`) are excluded and stay a purchase expense (HLD Assumption 18). This is the rule customer returns already use (FR-19).
+- The stock leaves at gross cost (`cost_amount` = round2(qty × lot cost)); `RETURN_ITEM.total_amount` = round2(qty × lot cost × factor). The difference is a **"Purchase discount reversed"** P&L line on the return date, subtracted from Other Income, so the discount is counted once (R3 counted it twice: once as income, once inside a phantom `REFUND_IN`).
+- Example: ₹1000 bill with a ₹100 discount, all 10 units returned → credit ₹900, no cash, ₹100 discount income reversed.
+- The vendor-return cost lock of DD-48 stays (`VENDOR_RETURNED_COST_CHANGE`): the value was settled at the old cost.
+
+**DD-88 — Party change on a bill edit needs an explicit settlement move (2026-11-26, v1.7 FR-54, owner D6; findings L1, R7, E7). Amends DD-48 / HLD FR-20 "re-pointed" settlements.**
+- Return credit (unlinked-return `RETURN_CREDIT` rows) still blocks a party change (`PARTY_CHANGE_WITH_CREDITS`).
+- `SETTLEMENT` rows move with the bill only when the payload carries `confirm_move_settlements = true`, set by the UI after its confirm dialog. Without it the backend refuses with `BillLocked SETTLEMENTS_ON_BILL` naming the count and amount. `BillEditGuard.settlements_to_move { count, amount }` tells the UI what the dialog says. Both parties' ledgers move in the same transaction.
+- A party's `party_type` is locked once any bill, return or settlement references it (L1). A return with no linked bill takes only a party of the matching type (R7).
+
+**DD-89 — Change-only sale edit (2026-11-26, v1.7 FR-55, owner D3; findings E1, E2, E3, E4, E5, E9). Supersedes the "full reverse-then-repost" sale bullet of DD-48, the reverse-then-repost wording of DD-41, HLD Assumption 19 (old form) and DD-09's consequence that "re-posted sale lines take the oldest lots available at edit time".**
+- Lines match by `sale_item_id` (new optional payload field; `create_sale` rejects it):
+  - Unchanged: no write.
+  - Rate only: update the price fields (`unit_price`, `total_amount`).
+  - Quantity down: release from the newest allocation first via `reverse_sale_allocations` (restock = true, `returned_quantity` untouched; the allocation shrinks or goes).
+  - Quantity up: FIFO-draw only the extra.
+  - Item or pack changed, or a new line: release in full, draw fresh.
+  - Removed: release in full.
+- Service lines scale their stored `service_cost_total` per unit and their stored component ratios (allocations per component ÷ line quantity), never the live service definition.
+- The UPFRONT row is updated in place (amount, date), never deleted and re-created; it is deleted only when the new upfront is 0, and created only when there was none.
+- Charges keep their stored rows (name, effect) unless the user changed that row (E9).
+- The purchase edit keeps `item_name` and `pack_label` on kept lots whose item didn't change (E2).
+- The edit form sends `sale_item_id`, loads each line's item and bundle by id (`get_item`, `bundle_id`), and gates Save on `dirty` (E3, E4). So a notes-only save leaves allocations, costs, names and the UPFRONT row byte-identical.
+- DD-09 itself (FIFO = entry order) stands; only the extra quantity of an edited line takes the oldest lots at edit time.
+
+**DD-90 — Deleted references are frozen (2026-11-26, v1.7 FR-54 / FR-55, owner D10; findings E5, E6). Amends DD-76 ("Bill edits may keep existing lines of a deleted item": only unchanged) and DD-77 ("Settlements on such a party are allowed": no longer).**
+- History is kept untouched: an unchanged line or bill that references a deleted item or party stays as it is.
+- Any write that uses one fails with the new `AppError::DeletedReference { entity: ITEM | PARTY, id, name, message }` ("'X' is deleted. Restore it first."): a changed or added line of a deleted item (including a deleted service's components, consumed through a kept service line), a raised due on a deleted party, a settlement (create, edit, delete), a return, or a lot reprice that changes its bill.
+- The UI shows the message with a **Restore** button (`restore_item` / `restore_party`) and then re-runs the preview; the user continues in the same form. The party half ships in H2, the item half and the shared UI in H3, the settlement / return / reprice checks in H7.
+
+**DD-91 — Returns post in the return period (2026-11-26, v1.7 FR-56, owner D2; findings R4, R5, R6, R8). Amends DD-13 / HLD §7 Period COGS (net of returns by sale date) and DD-68 item profit dating.**
+- COGS by sale date is gross (`quantity_depleted × unit_cost`). The returned cost (`RETURN_ITEM.cost_amount`) is credited on the return date: linked lines (restockable or scrap; a scrap line's cost then moves to Inventory Losses on the same date, so it is counted once) and unlinked restockable lines (R4: cost = qty × the new `RETURN` lot's cost). Closed months never change.
+- Item analytics use the same rule: sales by bill date, returns (linked and unlinked, by `ri.item_id`) by return date, so Σ item profit = P&L gross profit for a range.
+- Bill profit subtracts its linked return **line** values, not the return header, and counts linked lines only, the same as item profit (R6).
+- The return header total = Σ rounded lines (R6). The refund cap is per sale line on the total: Σ refunded over all returns of that line ≤ its net total (`round2(line total × net factor)`) + `MONEY_EPS`, not a per-unit tolerance (R8).
+
+**DD-92 — Found stock is never a gain (2026-11-26, v1.7 FR-57, owner D5; findings S3, S4, S7, S8, S11). Amends DD-08 and DD-40.**
+- A positive adjustment allows only `UNRECORDED_STOCK` and `COUNT_CORRECTION` (found); `DAMAGED`, `EXPIRED` and `THEFT_LOST` are reduction-only (S3). No P&L gain is ever booked; the stock is realised when it sells.
+- `preview_stock_adjustment` / `preview_set_item_stock` return `undoable_writeoffs` (earlier reductions of the item whose G7 `get_adjustment_undo_guard` says `can_undo`), so the "Undo it instead" hint comes from the backend.
+- A typed cost of 0 is honoured (S4: the UI no longer turns 0 into null). The default cost is the latest `PURCHASE` or `OPENING` lot, then the latest lot of any source (S8), so one mistyped adjustment cost does not carry forward.
+- The Lot Inspector orders lots by id and labels it "FIFO order (entry order)" (S7). The reprice modal states that past COGS and losses using the lot will change (S11).
+
+**DD-93 — Deleting an item with stock: Just delete or Book as loss (2026-11-26, v1.7 FR-58, owner D4; finding S5). Amends DD-76 "Delete with stock is allowed".**
+- `delete_item { item_id, write_off }`. `write_off = false` (the UI default, "Just delete") is today's soft delete: lots untouched, no P&L entry, restore brings the stock back.
+- `write_off = true` posts, in the same transaction and before `set_active(false)`, one reduction adjustment for the whole remaining stock through the normal negative-adjustment path (FIFO outflow allocations, Inventory Losses on today's local date), notes "Written off on item delete". Reason: `THEFT_LOST`. A new `WRITE_OFF` reason was considered, but `stock_adjustments.reason` has a `CHECK (reason IN (...))` since schema v5, so adding one needs a table rebuild, and v1.7 has no migration.
+- `preview_item_delete` returns `write_off { quantity, base_unit, loss }` (null without stock). A hard delete (DD-79) never has stock, so it is unaffected. Undoing the write-off (G7) requires restoring the item first.
+
+**DD-94 — Date order (2026-11-26, v1.7 FR-59, owner D7; finding E10). Extends DD-58.**
+- Checks run inside the `*_in_tx` bodies, so previews show them; error `ValidationError` with code `DATE_ORDER` naming the limiting date.
+- Return date ≥ linked bill date. Settlement date ≥ bill date (single, batch, edit). Bill edit date ≤ earliest `SETTLEMENT` and earliest linked return (UPFRONT moves with the bill). Opening-balance As of date ≤ earliest settlement of the `OB-` bill.
+- Not covered: stock adjustments (S10, DD-97).
+
+**DD-95 — The lot floor counts restocked customer-return units as consumed (2026-11-26, v1.7 FR-59; findings S1, S2). Amends DD-48 "The quantity floor is `consumed = quantity − remaining_quantity`".**
+- Floor = Σ sale allocations `quantity_depleted` on the lot (returned units included) + Σ outflow allocations. A restocked unit is back in `remaining` but still tied to its allocation, so shrinking below it would break the later return delete.
+- `reverse_sale_bill_stock` and `RestoreOutflow` no longer clamp: a reversal that would take a lot above its quantity (or below 0) fails with `STOCK_INVARIANT`, and the stock cache is credited with exactly what the lot received.
+
+**DD-96 — Lot reprice payment rule is independent of how the bill was paid (2026-11-26, v1.7 FR-59, owner D8; finding E8). Supersedes the DD-51 payment rule "A bill paid entirely upfront (balance 0 and applied 0) stays PAID".**
+- A bill with `balance_due = 0` before the reprice stays fully paid: `upfront = new_total − applied`. This holds for upfront-only and upfront-plus-settlements bills alike. `open < 0` is still `TOTAL_BELOW_APPLIED`.
+- A part-paid or unpaid bill keeps its upfront (capped at the new open) and takes the change in its balance due. `lot_price_upfront` in `bill_math.rs` is the one place.
+
+**DD-97 — Rounding and cleanup (2026-11-26, v1.7 FR-59; findings S6, S9, R9, L2, L4, L5, L6, L7). Amends DD-15.**
+- One `round2` semantics: Rust is the reference and `money.ts` is aligned to it, so the two never differ at half a paisa. Stored money is rounded (`create_source_lots` total, vendor-return `total_amount`).
+- The per-line refund cap is on the total (DD-91). Totals and quantities must be finite and below a cap, so a line total can't overflow to infinity.
+- A search reindex after commit logs and retries, and never fails the save (the data is committed).
+- The base unit is locked once the item has stock or any bill line.
+- A party import with a blank As of date keeps the existing date. The opening lot of a new item uses `today_local()` and `check_entry_date`.
+- Set stock snaps a residue below 1e-6 to 0, and low stock uses `current_stock < threshold − EPS` (S9). `evaluate_return_guard` treats any error of the dry run as blocking delete (R9).
+- UI rule moves (DD-56): typed cost 0, the per-pack price of `LotPriceEditModal`, `itemForm` / `BundleCreationModal` validation, the `ReturnFormVendor` lot filter and maximum, the `openBills.ts` FIFO sort, dues sums and the `NewPurchasePage` cost per base unit all come from the backend.
+- **Left as they are:** S10, a back-dated negative adjustment is valued at today's lots (the preview shows the cost; date order does not cover adjustments). Previews take the write lock (`BEGIN IMMEDIATE` then rollback): a performance note only, no wrong data.
