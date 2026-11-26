@@ -11,6 +11,7 @@ use crate::core::value_objects::{LotSource, PartyType, PaymentKind, TransactionT
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::accounting_service::AccountingService;
 use crate::services::contracts::payment_service::PaymentService;
+use crate::services::r#impl::party_guard::{ensure_active_party, require_active_party};
 
 const MAX_BATCH_ALLOCATIONS: usize = 200;
 
@@ -204,6 +205,8 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
                 format!("{:?} settlements need a {:?} party", tx_type, expected_party_type(tx_type)),
             ));
         }
+        // DD-90: no new payment against a deleted party.
+        ensure_active_party(&party)?;
         let outstanding: f64 = Self::open_bills(tx, tx_type, party_id)?.iter().map(|(_, b)| b).sum();
         if amount > round2(outstanding) + MONEY_EPS {
             return Err(validation("amount_paid", "Settlement amount exceeds total outstanding dues"));
@@ -280,6 +283,8 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
                 format!("{:?} settlements need a {:?} party", tx_type, expected_party_type(tx_type)),
             ));
         }
+        // DD-90: no new payment against a deleted party.
+        ensure_active_party(&party)?;
 
         let mut seen: Vec<i64> = Vec::with_capacity(allocations.len());
         let mut amounts: Vec<f64> = Vec::with_capacity(allocations.len());
@@ -455,6 +460,9 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
         check_entry_date_now("settlement_date", &payload.settlement_date)?;
         let mut tx = self.uow.begin_transaction()?;
         let old = Self::load_settlement(&mut *tx, settlement_id, "edit")?;
+        if let Some(pid) = old.party_id {
+            require_active_party(&mut *tx, pid)?;
+        }
         let bill_id = old.transaction_id.ok_or_else(|| validation("transaction_id", "Settlement has no bill"))?;
         let balance = match old.transaction_type {
             TransactionType::Sale => tx.sales().find_transaction_by_id(bill_id)?.map(|b| b.balance_due),
@@ -480,6 +488,9 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
     fn delete_settlement(&self, settlement_id: i64) -> Result<DeleteSettlementResult, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let old = Self::load_settlement(&mut *tx, settlement_id, "delete")?;
+        if let Some(pid) = old.party_id {
+            require_active_party(&mut *tx, pid)?;
+        }
         let bill_id = old.transaction_id.ok_or_else(|| validation("transaction_id", "Settlement has no bill"))?;
         tx.settlements().delete_settlement(settlement_id)?;
         self.payment_service.recompute(&mut *tx, old.transaction_type, bill_id)?;

@@ -12,6 +12,8 @@ export interface UsePreviewOptions<TIn, TOut> {
   fetcher: (input: TIn) => Promise<TOut>;
   debounceMs?: number; // default PREVIEW_DEBOUNCE_MS
   enabled?: boolean; // default true
+  /** Changing it re-runs the preview for the same input (e.g. after a Restore, DD-90). */
+  refreshKey?: number;
 }
 
 export interface UsePreviewResult<TOut> {
@@ -40,12 +42,12 @@ function dataErrors(d: unknown): PreviewError[] {
  * only cancels that run, so a remount never waits on an invalidated request.
  */
 export function usePreview<TIn, TOut>(opts: UsePreviewOptions<TIn, TOut>): UsePreviewResult<TOut> {
-  const { input, enabled = true, debounceMs = PREVIEW_DEBOUNCE_MS } = opts;
+  const { input, enabled = true, debounceMs = PREVIEW_DEBOUNCE_MS, refreshKey = 0 } = opts;
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
   const active = enabled && input !== null;
-  const key = useMemo(() => (active ? JSON.stringify(input) : null), [active, input]);
+  const key = useMemo(() => (active ? `${refreshKey}#${JSON.stringify(input)}` : null), [active, input, refreshKey]);
 
   const [settled, setSettled] = useState<{ key: string | null; data: TOut | null; errors: PreviewError[] }>({
     key: null,

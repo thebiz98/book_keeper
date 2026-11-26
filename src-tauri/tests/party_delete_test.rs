@@ -117,6 +117,17 @@ fn validation_msg<T: std::fmt::Debug>(r: Result<T, AppError>) -> String {
     }
 }
 
+/// DD-90: the `DeletedReference(PARTY)` message, checking the entity and id.
+fn deleted_msg<T: std::fmt::Debug>(r: Result<T, AppError>, party: i64) -> String {
+    match r {
+        Err(AppError::DeletedReference { entity, id, message, .. }) => {
+            assert_eq!((entity.as_str(), id), ("PARTY", party));
+            message
+        }
+        other => panic!("expected DeletedReference, got {other:?}"),
+    }
+}
+
 #[test]
 fn unreferenced_party_is_removed_permanently_with_its_search_rows() {
     let e = env();
@@ -278,9 +289,9 @@ fn every_write_to_a_deleted_party_is_refused() {
     let c = e.party("Gone", PartyType::Customer, None, None);
     e.sale(Some(c), 20.0);
     e.parties.delete_party(c).unwrap();
-    let msg = validation_msg(e.update(c, "Gone 2", PartyType::Customer, None));
+    let msg = deleted_msg(e.update(c, "Gone 2", PartyType::Customer, None), c);
     assert_eq!(msg, "'Gone' is deleted. Restore it first.");
-    assert!(validation_msg(e.update(c, "Gone", PartyType::Customer, ob(100.0))).contains("is deleted"));
+    assert!(deleted_msg(e.update(c, "Gone", PartyType::Customer, ob(100.0)), c).contains("is deleted"));
     assert_eq!(e.count("SELECT COUNT(*) FROM sale_transactions WHERE is_opening_balance = 1"), 0);
     e.parties.restore_party(c).unwrap();
     e.update(c, "Gone 2", PartyType::Customer, None).unwrap();
@@ -296,23 +307,25 @@ fn new_bills_and_returns_reject_a_deleted_party() {
     e.parties.delete_party(c).unwrap();
     e.parties.delete_party(v).unwrap();
 
-    let m = validation_msg(e.sales.create_sale(sale_payload(Some(c), PaymentStatus::Paid, 10.0, &[(1, None, 1.0, 10.0)])));
-    assert_eq!(m, "'Cust' is deleted. Restore the party first.");
-    let m = validation_msg(
+    let m = deleted_msg(e.sales.create_sale(sale_payload(Some(c), PaymentStatus::Paid, 10.0, &[(1, None, 1.0, 10.0)])), c);
+    assert_eq!(m, "'Cust' is deleted. Restore it first.");
+    let m = deleted_msg(
         e.purchases.create_purchase(purchase_payload(Some(v), PaymentStatus::Paid, 5.0, &[(1, None, 1.0, 5.0)])),
+        v,
     );
-    assert_eq!(m, "'Vend' is deleted. Restore the party first.");
+    assert_eq!(m, "'Vend' is deleted. Restore it first.");
 
     // moving an existing bill of another party onto the deleted one
     let other = e.party("Other", PartyType::Customer, None, None);
     let other_bill = e.sale(Some(other), 20.0);
-    let m = validation_msg(
+    let m = deleted_msg(
         e.sales.update_sale(other_bill, sale_payload(Some(c), PaymentStatus::Paid, 20.0, &[(1, None, 2.0, 10.0)])),
+        c,
     );
-    assert!(m.contains("is deleted. Restore the party first."), "{m}");
+    assert!(m.contains("is deleted. Restore it first."), "{m}");
 
     // returns against a bill of a deleted party
-    let m = validation_msg(e.rets.create_customer_return(CustomerReturnPayload {
+    let m = deleted_msg(e.rets.create_customer_return(CustomerReturnPayload {
         original_sale_id: Some(sale),
         party_id: None,
         return_date: TODAY.into(),
@@ -328,9 +341,9 @@ fn new_bills_and_returns_reject_a_deleted_party() {
             unit_cost_override: None,
         }],
         replacement_items: vec![],
-    }));
-    assert_eq!(m, "'Cust' is deleted. Restore the party first.");
-    let m = validation_msg(e.rets.create_vendor_return(VendorReturnPayload {
+    }), c);
+    assert_eq!(m, "'Cust' is deleted. Restore it first.");
+    let m = deleted_msg(e.rets.create_vendor_return(VendorReturnPayload {
         original_purchase_id: Some(purchase),
         party_id: None,
         return_date: TODAY.into(),
@@ -338,8 +351,8 @@ fn new_bills_and_returns_reject_a_deleted_party() {
         reason: None,
         notes: None,
         items: vec![VendorReturnItemPayload { item_id: 1, purchase_item_id: None, quantity: 1.0 }],
-    }));
-    assert_eq!(m, "'Vend' is deleted. Restore the party first.");
+    }), v);
+    assert_eq!(m, "'Vend' is deleted. Restore it first.");
     assert_eq!(e.count("SELECT COUNT(*) FROM return_transactions"), 0);
 
     // restoring lifts it
@@ -348,43 +361,42 @@ fn new_bills_and_returns_reject_a_deleted_party() {
 }
 
 #[test]
-fn old_bill_edit_keeps_its_deleted_party_and_a_left_due_shows_in_dues_and_settles() {
+fn old_bill_edit_keeps_its_deleted_party_but_cannot_raise_its_due() {
     let e = env();
     let c = e.party("Old Cust", PartyType::Customer, None, None);
     let bill = e.sale(Some(c), 20.0);
     e.parties.delete_party(c).unwrap();
     assert!(e.acct.get_party_dues_summary(PartyType::Customer).unwrap().is_empty());
 
-    // edit the old bill so that a due is left
-    e.sales
-        .update_sale(bill, sale_payload(Some(c), PaymentStatus::Partial, 5.0, &[(1, None, 2.0, 10.0)]))
-        .expect("an edit keeps the bill's own deleted party");
-    let dues = e.acct.get_party_dues_summary(PartyType::Customer).unwrap();
-    assert_eq!(dues.len(), 1, "dues summaries do not filter on is_active");
-    assert!(!dues[0].is_active);
-    assert_eq!((dues[0].party_id, dues[0].balance_due), (c, 15.0));
-
-    // settling a deleted party is allowed; the badge disappears with the due
-    e.acct.settle_bill_payment(settle_payload(c, TransactionType::Sale, None, 15.0)).unwrap();
+    // DD-90: leaving a due on the deleted customer is refused, nothing written
+    let m = deleted_msg(
+        e.sales.update_sale(bill, sale_payload(Some(c), PaymentStatus::Partial, 5.0, &[(1, None, 2.0, 10.0)])),
+        c,
+    );
+    assert_eq!(m, "'Old Cust' is deleted. Restore it first.");
     assert!(e.acct.get_party_dues_summary(PartyType::Customer).unwrap().is_empty());
+    // an edit that keeps it paid still keeps the deleted customer
+    e.sales
+        .update_sale(bill, sale_payload(Some(c), PaymentStatus::Paid, 10.0, &[(1, None, 1.0, 10.0)]))
+        .expect("an edit keeps the bill's own deleted party");
+    // no new payment against a deleted party
+    deleted_msg(e.acct.settle_bill_payment(settle_payload(c, TransactionType::Sale, None, 15.0)), c);
     // the ledger still reads the party
     let ledger = e.acct.get_party_ledger(c).unwrap();
     assert!(!ledger.party.is_active);
 }
 
 #[test]
-fn vendor_dues_summary_lists_a_deleted_vendor_with_a_due() {
+fn deleted_vendor_bill_edit_cannot_raise_its_due() {
     let e = env();
     let v = e.party("Old Vendor", PartyType::Vendor, None, None);
     let bill = e.purchase(Some(v), 10.0);
     e.parties.delete_party(v).unwrap();
-    e.purchases
-        .update_purchase(bill, purchase_payload(Some(v), PaymentStatus::Partial, 4.0, &[(1, None, 2.0, 5.0)]))
-        .expect("edit keeps the deleted vendor");
-    let dues = e.acct.get_party_dues_summary(PartyType::Vendor).unwrap();
-    assert_eq!(dues.len(), 1);
-    assert!(!dues[0].is_active);
-    assert_eq!(dues[0].balance_due, 6.0);
+    deleted_msg(
+        e.purchases.update_purchase(bill, purchase_payload(Some(v), PaymentStatus::Partial, 4.0, &[(1, None, 2.0, 5.0)])),
+        v,
+    );
+    assert!(e.acct.get_party_dues_summary(PartyType::Vendor).unwrap().is_empty());
 }
 
 #[test]

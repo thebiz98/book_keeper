@@ -337,7 +337,7 @@ fn list_vendor_return_lots_returns_only_eligible_lots_in_id_order() {
         tx.items().update(&it).unwrap();
         tx.commit().unwrap();
     }
-    assert!(e.rets.list_vendor_return_lots(ITEM, Some(A), None).is_err());
+    assert!(matches!(e.rets.list_vendor_return_lots(ITEM, Some(A), None), Err(AppError::DeletedReference { .. })));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import { api, errorMessage } from '@/api';
+import { api } from '@/api';
 import type { PreviewPurchasePayload } from '@/types';
 import { todayLocal } from '@/lib/dates';
 import { Button } from '../../ui/Button';
@@ -8,6 +8,8 @@ import { Select } from '../../ui/Select';
 import { TextInput } from '../../ui/TextInput';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/Table';
 import { CurrencyDisplay } from '../../common/CurrencyDisplay';
+import { ConfirmDialog } from '../../common/ConfirmDialog';
+import { DeletedReferenceAlert } from '../../common/DeletedReferenceAlert';
 import { PartySelector } from '../PartySelector';
 import { ItemSearchTypeahead } from '../ItemSearchTypeahead';
 import { BillChargesPanel } from '../BillChargesPanel';
@@ -16,6 +18,7 @@ import { NEW_BUNDLE, NEW_BUNDLE_LABEL } from '@/lib/bundleSentinel';
 import { savedBundleToSearchResult } from '@/lib/billEditDraft';
 import { usePurchaseEditDraft } from './usePurchaseEditDraft';
 import { useBillEditPreview } from './useBillEditPreview';
+import { useBillEditSave } from './useBillEditSave';
 import { EditErrors, EditTotals, PaymentStatusControl, inputCls } from './EditParts';
 
 export interface PurchaseEditFormProps {
@@ -33,9 +36,10 @@ const BASE = 0; // unit select value for the base unit
 export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCancel, onSaved, onDirtyChange }) => {
   const dr = usePurchaseEditDraft(billId);
   const { draft } = dr;
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  // Name of the party picked in this form, for the move-payments dialog (DD-88).
+  const [pickedPartyName, setPickedPartyName] = useState<string | null>(null);
+  // Bumped after a Restore so the previews re-run for the same draft (DD-90).
+  const [refreshKey, setRefreshKey] = useState(0);
   const tableRef = useRef<HTMLDivElement>(null);
   // One bundle modal for the whole form; the target says which line asked for it (FR-29).
   const [bundleTarget, setBundleTarget] = useState<{ lineKey: number; itemId: number; baseUnit: string } | null>(null);
@@ -49,33 +53,34 @@ export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCa
     paymentStatus: draft?.paymentStatus ?? 'PAID',
     paidInput: draft?.paidInput ?? 0,
     fetcher: (p) => api.previewPurchase(p, billId),
+    refreshKey,
   });
 
-  // Header fields the backend can name get their message inline; every other message goes above Save.
-  const dateError = preview.errors.find((e) => e.field === 'transaction_date')?.message;
-  const partyError = preview.errors.find((e) => e.field === 'party_id' || e.field === 'PARTY_REQUIRED_WITH_PAYMENTS')?.message;
-  const listed = preview.errors.filter((e) => e.message !== dateError && e.message !== partyError).map((e) => e.message);
-  const messages = saveError ? [...listed, saveError] : listed;
-  const canSave =
-    dr.load.status === 'ready' && !dr.incomplete && !preview.pending && preview.errors.length === 0 && !saving;
-
-  const save = async () => {
-    if (savingRef.current || !canSave) return;
-    const payload = dr.toPayload(preview.paidToSend ?? 0);
-    if (!payload) return;
-    savingRef.current = true;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await api.updatePurchase(billId, payload);
-      onSaved();
-    } catch (e) {
-      setSaveError(errorMessage(e));
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
+  const flow = useBillEditSave({
+    errors: preview.errors,
+    settlementsToMove: dr.settlementsToMove,
+    newPartyName: pickedPartyName,
+    ready: dr.load.status === 'ready' && !dr.incomplete && !preview.pending,
+    buildPayload: () => dr.toPayload(preview.paidToSend ?? 0),
+    send: (payload) => api.updatePurchase(billId, payload),
+    onSaved,
+  });
+  const { saving, canSave, save } = flow;
+  const onRestored = () => {
+    flow.clearDeleted();
+    setRefreshKey((k) => k + 1);
   };
+
+  // Header fields the backend can name get their message inline; every other message goes above Save.
+  const dateError = flow.blocking.find((e) => e.field === 'transaction_date')?.message;
+  const partyError = flow.blocking.find(
+    (e) => !e.deleted && (e.field === 'party_id' || e.field === 'PARTY_REQUIRED_WITH_PAYMENTS')
+  )?.message;
+  const listed = flow.blocking
+    .filter((e) => !e.deleted && e.message !== dateError && e.message !== partyError)
+    .map((e) => e.message);
+  const messages = flow.saveError ? [...listed, flow.saveError] : listed;
+
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => {
@@ -131,7 +136,10 @@ export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCa
           <PartySelector
             partyType="VENDOR"
             selectedPartyId={draft.partyId}
-            onSelectParty={(party) => dr.setHeader({ partyId: party ? party.id : null })}
+            onSelectParty={(party) => {
+              setPickedPartyName(party ? party.name : null);
+              dr.setHeader({ partyId: party ? party.id : null });
+            }}
             allowWalkIn
           />
           {partyError && (
@@ -300,6 +308,14 @@ export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCa
       </div>
 
       <div className="sticky bottom-0 -mx-5 -mb-5 px-5 py-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-2">
+        {flow.deleted && (
+          <DeletedReferenceAlert deleted={flow.deleted.deleted} message={flow.deleted.message} onRestored={onRestored} />
+        )}
+        {flow.moveInfo && (
+          <p data-testid="edit-move-info" className="text-xs text-slate-500 dark:text-slate-400">
+            {flow.moveInfo}
+          </p>
+        )}
         <EditErrors messages={messages} />
         <div className="flex justify-end gap-2">
           <Button variant="outline" size="sm" data-testid="edit-cancel" onClick={onCancel} disabled={saving}>
@@ -318,6 +334,15 @@ export const PurchaseEditForm: React.FC<PurchaseEditFormProps> = ({ billId, onCa
           </Button>
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={flow.confirm.isOpen}
+        title="Move earlier payments?"
+        message={flow.confirm.message}
+        confirmText="Move and save"
+        variant="warning"
+        onConfirm={flow.confirm.onConfirm}
+        onCancel={flow.confirm.onCancel}
+      />
     </div>
   );
 };

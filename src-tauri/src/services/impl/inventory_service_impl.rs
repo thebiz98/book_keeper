@@ -727,6 +727,14 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         Ok(result)
     }
 
+    fn create_adjustment_in_tx(
+        &self,
+        uow: &mut dyn TransactionContext,
+        payload: &StockAdjustmentPayload,
+    ) -> Result<StockAdjustmentResult, AppError> {
+        self.adjustment_in_tx(uow, payload).map(|(result, _)| result)
+    }
+
     fn preview_adjustment(&self, payload: StockAdjustmentPayload) -> Result<StockAdjustmentPreview, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let result = self.adjustment_in_tx(&mut *tx, &payload).map(|(_, preview)| preview);

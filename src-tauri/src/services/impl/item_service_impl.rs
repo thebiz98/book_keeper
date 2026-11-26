@@ -3,15 +3,17 @@ use crate::core::dtos::{
     BundleSuggestion, CatalogFilter, CreateBundlePayload, CreateItemPayload, DeletedItemRow, ItemBundleSearchResult,
     ItemDeletePreview, DeleteItemResult, DeleteMode,
     ItemSearchResult, PageRequest, Paginated, SavedBundle, ServiceComponentInput, ServiceComponentView,
-    UpdateBundlePayload, UpdateItemPayload,
+    StockAdjustmentPayload, UpdateBundlePayload, UpdateItemPayload, WriteOffPreview,
 };
+use crate::core::clock::today_local;
+use crate::core::constants::EPS;
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
 use crate::core::money::round2;
 use crate::core::stock_rules::{
     is_low_stock, validate_low_stock_threshold, DEFAULT_LOW_STOCK_THRESHOLD,
 };
-use crate::core::value_objects::{clean_name, clean_optional, ItemType, LotSource};
+use crate::core::value_objects::{clean_name, clean_optional, AdjustmentReason, ItemType, LotSource};
 use crate::data::contracts::search_indexer::ItemSearchIndexer;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::InventoryService;
@@ -32,7 +34,58 @@ impl<U: UnitOfWork, I: InventoryService> ItemServiceImpl<U, I> {
     pub fn new(uow: U, search_indexer: Arc<dyn ItemSearchIndexer>, inventory_service: I) -> Self {
         Self { uow, search_indexer, inventory_service }
     }
+
+    /// Body of `delete_item` inside the caller's transaction; the preview runs it with `write_off`
+    /// and rolls back (DD-56). Returns `(mode, write-off adjustment, written-off quantity, loss)`.
+    fn delete_item_in_tx(
+        &self,
+        tx: &mut dyn TransactionContext,
+        item: &Item,
+        write_off: bool,
+    ) -> Result<(DeleteMode, Option<i64>, f64, f64), AppError> {
+        let used = !tx.items().usage_reasons(item.id)?.is_empty();
+        if !item.is_active && used {
+            return Err(invalid("item_id", format!("'{}' is already deleted", item.name)));
+        }
+        if item.is_active {
+            let services = tx.items().services_using_active(item.id)?;
+            if !services.is_empty() {
+                return Err(AppError::BillLocked {
+                    code: "ITEM_IS_COMPONENT".to_string(),
+                    message: component_block_message(&item.name, &services),
+                });
+            }
+        }
+        if !used {
+            // DD-79: a HARD item only has untouched opening stock, removed with it; no write-off.
+            tx.items().hard_delete(item.id)?;
+            return Ok((DeleteMode::Hard, None, 0.0, 0.0));
+        }
+        let (mut adjustment_id, mut quantity, mut loss) = (None, 0.0, 0.0);
+        if write_off && item.is_active && item.current_stock > EPS {
+            // FR-58 / DD-93: the whole stock leaves through the normal FIFO reduction, before the flag.
+            let r = self.inventory_service.create_adjustment_in_tx(
+                tx,
+                &StockAdjustmentPayload {
+                    adjustment_date: today_local(),
+                    item_id: item.id,
+                    quantity: -item.current_stock,
+                    reason: AdjustmentReason::TheftLost,
+                    unit_cost: None,
+                    notes: Some(WRITE_OFF_NOTE.to_string()),
+                },
+            )?;
+            adjustment_id = Some(r.adjustment_id);
+            quantity = item.current_stock;
+            loss = round2(r.loss_value);
+        }
+        tx.items().set_active(item.id, false, &chrono::Utc::now().to_rfc3339())?;
+        Ok((DeleteMode::Soft, adjustment_id, quantity, loss))
+    }
 }
+
+/// FR-58: notes of the adjustment a write-off delete posts (shown in Adjustments history).
+pub const WRITE_OFF_NOTE: &str = "Written off on item delete";
 
 fn invalid(field: &str, message: impl Into<String>) -> AppError {
     AppError::ValidationError { field: field.to_string(), message: message.into() }
@@ -619,6 +672,17 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         } else {
             None
         };
+        // FR-58 / DD-93: the write-off figures come from the delete itself, run and rolled back (DD-56).
+        let write_off = if reason.is_none() && item.is_active && mode == DeleteMode::Soft && item.current_stock > EPS {
+            drop(tx);
+            let mut dry = self.uow.begin_transaction()?;
+            let run = self.delete_item_in_tx(&mut *dry, &item, true);
+            dry.rollback()?; // never committed
+            let (_, _, quantity, loss) = run?;
+            Some(WriteOffPreview { quantity, base_unit: item.base_unit.clone(), loss })
+        } else {
+            None
+        };
         Ok(ItemDeletePreview {
             item_id,
             name: item.name,
@@ -631,36 +695,18 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
             reason,
             mode,
             reasons_used,
+            write_off,
         })
     }
 
-    fn delete_item(&self, item_id: i64) -> Result<DeleteItemResult, AppError> {
+    fn delete_item(&self, item_id: i64, write_off: bool) -> Result<DeleteItemResult, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let item = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
-        let used = !tx.items().usage_reasons(item_id)?.is_empty();
-        if !item.is_active && used {
-            return Err(invalid("item_id", format!("'{}' is already deleted", item.name)));
-        }
-        if item.is_active {
-            let services = tx.items().services_using_active(item_id)?;
-            if !services.is_empty() {
-                return Err(AppError::BillLocked {
-                    code: "ITEM_IS_COMPONENT".to_string(),
-                    message: component_block_message(&item.name, &services),
-                });
-            }
-        }
-        let mode = if used {
-            tx.items().set_active(item_id, false, &chrono::Utc::now().to_rfc3339())?;
-            DeleteMode::Soft
-        } else {
-            tx.items().hard_delete(item_id)?;
-            DeleteMode::Hard
-        };
+        let (mode, adjustment_id, _, _) = self.delete_item_in_tx(&mut *tx, &item, write_off)?;
         tx.commit()?;
         // DD-75: the name row and every bundle barcode row leave the index.
         self.search_indexer.remove_item(item_id)?;
-        Ok(DeleteItemResult { mode })
+        Ok(DeleteItemResult { mode, adjustment_id })
     }
 
     fn restore_item(&self, item_id: i64) -> Result<(), AppError> {

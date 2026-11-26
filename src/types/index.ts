@@ -91,6 +91,21 @@ export interface ItemDeletePreview {
   reason: string | null;
   mode: DeleteMode;
   reasonsUsed: string[];
+  /** FR-58 (DD-93): what "Book as loss" would write off; null without stock, for HARD or when blocked. */
+  writeOff?: WriteOffPreview | null;
+}
+
+/** FR-58: the whole stock at its FIFO cost, from the backend dry run. */
+export interface WriteOffPreview {
+  quantity: number;
+  baseUnit: string;
+  loss: number;
+}
+
+/** `delete_item` result. `adjustmentId` is the write-off adjustment (FR-58), null for "Just delete". */
+export interface DeleteItemResult {
+  mode: DeleteMode;
+  adjustmentId?: number | null;
 }
 
 /** One row of the Deleted items list (FR-45). */

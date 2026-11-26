@@ -1,6 +1,6 @@
 //! FR-20 edit / delete guards (LLD 14.4), evaluated inside the caller's transaction so a command and
 //! the UI pre-check (`get_bill_edit_guard`) can never disagree.
-use crate::core::dtos::{BillEditGuard, CorrectionTarget, GuardReason, LotEditLimit};
+use crate::core::dtos::{BillEditGuard, CorrectionTarget, GuardReason, LotEditLimit, SettlementsToMove};
 use crate::core::entities::{PaymentSettlement, ReturnTransaction};
 use crate::core::error::AppError;
 use crate::core::money::round2;
@@ -17,6 +17,7 @@ pub const PARTY_CHANGE_WITH_CREDITS: &str = "PARTY_CHANGE_WITH_CREDITS";
 pub const PARTY_REQUIRED_WITH_PAYMENTS: &str = "PARTY_REQUIRED_WITH_PAYMENTS";
 pub const NEWER_RETURN: &str = "NEWER_RETURN";
 pub const OPENING_BALANCE: &str = "OPENING_BALANCE";
+pub const SETTLEMENTS_ON_BILL: &str = "SETTLEMENTS_ON_BILL";
 
 /// Says which tool changes this stock record instead (G8: always point to the right place).
 fn not_a_purchase_message(code: &str, source: LotSource) -> String {
@@ -80,6 +81,7 @@ fn blank_guard(target: CorrectionTarget, id: i64, code: String) -> BillEditGuard
         removed_cash_amount: 0.0,
         removed_credit_amount: 0.0,
         lot_limits: Vec::new(),
+        settlements_to_move: SettlementsToMove::default(),
     }
 }
 
@@ -97,6 +99,12 @@ fn ledger_part(
     g.upfront_amount = round2(totals.upfront);
     g.applied_amount = round2(totals.settlement + totals.return_credit);
     g.removed_cash_amount = round2(totals.upfront + totals.settlement);
+    let settlements = tx.settlements().list_by_transaction(tx_type, id)?;
+    let moving: Vec<&PaymentSettlement> = settlements.iter().filter(|s| s.kind == PaymentKind::Settlement).collect();
+    g.settlements_to_move = SettlementsToMove {
+        count: moving.len() as i64,
+        amount: round2(moving.iter().map(|s| s.amount_paid).sum::<f64>()),
+    };
     if !linked.is_empty() {
         g.reasons.push(reason(
             LINKED_RETURNS,
@@ -184,6 +192,20 @@ pub fn evaluate_purchase_guard(tx: &mut dyn TransactionContext, purchase_id: i64
         ));
     }
     Ok(finish(g))
+}
+
+/// DD-88 / E7: a party change moves the bill's SETTLEMENT rows only after the user confirmed it.
+pub fn settlements_move_check(g: &BillEditGuard, new_party: Option<&str>, confirmed: bool) -> Result<(), AppError> {
+    let m = &g.settlements_to_move;
+    if m.count == 0 || confirmed {
+        return Ok(());
+    }
+    let what = if m.count == 1 { "1 later payment".to_string() } else { format!("{} later payments", m.count) };
+    let target = new_party.map(|n| format!("'{n}'")).unwrap_or_else(|| "the new party".to_string());
+    Err(locked_with(
+        SETTLEMENTS_ON_BILL,
+        format!("This bill has {what} (\u{20b9}{:.2}). Confirm moving them to {target}.", m.amount),
+    ))
 }
 
 /// Delete checks for a return, shared by the guard and `delete_return`: newest first, then the

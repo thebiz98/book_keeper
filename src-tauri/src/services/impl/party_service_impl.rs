@@ -11,6 +11,7 @@ use crate::data::contracts::search_indexer::FtsIndex;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::data::sqlite::fts::sync_after_commit;
 use crate::services::contracts::party_service::PartyService;
+use crate::services::r#impl::party_guard::ensure_active_party;
 use crate::services::r#impl::payment_service_impl::recompute_bill;
 
 fn validation(field: &str, message: impl Into<String>) -> AppError {
@@ -179,15 +180,6 @@ fn check_not_below_applied(
     Ok(())
 }
 
-/// FR-46 / Y3: every write to a deleted party is refused except restore.
-fn ensure_party_active(party: &Party) -> Result<(), AppError> {
-    if party.is_active {
-        Ok(())
-    } else {
-        Err(validation("party_id", format!("'{}' is deleted. Restore it first.", party.name)))
-    }
-}
-
 fn plural(n: i64, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
@@ -277,12 +269,22 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
                 id: id.to_string(),
             })?;
 
-        ensure_party_active(&party)?;
-        if party.opening_balance.is_some() && payload.party_type != party.party_type {
-            return Err(validation(
-                "party_type",
-                "This party has an opening balance. Remove it before changing the party type",
-            ));
+        // FR-46 / Y3 / DD-90: every write to a deleted party is refused except restore.
+        ensure_active_party(&party)?;
+        if payload.party_type != party.party_type {
+            if party.opening_balance.is_some() {
+                return Err(validation(
+                    "party_type",
+                    "This party has an opening balance. Remove it before changing the party type",
+                ));
+            }
+            // L1 / DD-88: bills, returns or payments pin the type (their dues would be orphaned).
+            if tx.parties().reference_count(id)? > 0 {
+                return Err(validation(
+                    "party_type",
+                    format!("'{}' has bills or payments, so its type can't change.", party.name),
+                ));
+            }
         }
         party.name = payload.name.trim().to_string();
         party.phone = payload.phone.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());

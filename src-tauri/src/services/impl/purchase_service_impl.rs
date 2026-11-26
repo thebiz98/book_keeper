@@ -9,9 +9,10 @@ use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
 use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
 use crate::services::r#impl::bill_guard::{
-    evaluate_purchase_guard, locked, locked_with, PARTY_CHANGE_WITH_CREDITS, PARTY_REQUIRED_WITH_PAYMENTS,
-    TOTAL_BELOW_APPLIED,
+    evaluate_purchase_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
+    PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
 };
+use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party};
 use crate::services::r#impl::bill_math::{
     bill_preview, compute_bill_totals, delete_bill_charges, lot_price_upfront, insert_bill_charges, purchase_upfront, resolve_bill_charges,
     validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
@@ -122,7 +123,7 @@ fn resolve_purchase(
                 return Err(validation("party_id", "Purchases need a vendor party"));
             }
             if !party.is_active && keep_party != Some(pid) {
-                return Err(validation("party_id", format!("'{}' is deleted. Restore the party first.", party.name)));
+                return Err(deleted_party(&party));
             }
             Some(party.name)
         }
@@ -351,6 +352,9 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
                 "Payments were recorded later for this bill, so it needs a vendor",
             ));
         }
+        if party_changed {
+            settlements_move_check(&g, r.party_name.as_deref(), payload.confirm_move_settlements)?;
+        }
         let (charges, totals) = price_purchase(tx, payload, &r, g.applied_amount, fig)?;
         let total_amount = totals.total_amount;
         if total_amount + MONEY_EPS < g.applied_amount {
@@ -429,6 +433,16 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             .purchases()
             .find_transaction_by_id(purchase_id)?
             .ok_or_else(|| AppError::not_found("PurchaseTransaction", purchase_id.to_string()))?;
+        // E6 / DD-90: a kept deleted vendor may see its due fall, never rise (preview without a
+        // payment: compare totals).
+        if !party_changed {
+            let (before, due) = if with_payment {
+                (old.balance_due, after.balance_due)
+            } else {
+                (old.total_amount, after.total_amount)
+            };
+            check_due_not_raised(tx, r.party_id, before, due)?;
+        }
         Ok((PurchaseSummaryResponse { purchase_id, transaction_code: old.transaction_code }, after))
     }
 
@@ -550,6 +564,8 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
             .purchases()
             .find_transaction_by_id(header.id)?
             .ok_or_else(|| AppError::not_found("PurchaseTransaction", header.id.to_string()))?;
+        // E6 / DD-90: a reprice must not raise a deleted vendor's due.
+        check_due_not_raised(tx, header.party_id, header.balance_due, after.balance_due)?;
         Ok(LotPriceUpdateResult {
             purchase_item_id: lot.id,
             old_unit_cost: lot.unit_cost,

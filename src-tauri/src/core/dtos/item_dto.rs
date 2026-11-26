@@ -167,6 +167,18 @@ pub struct ItemDeletePreview {
     pub mode: DeleteMode,
     /// Why the item is SOFT (where it is used); empty for HARD.
     pub reasons_used: Vec<String>,
+    /// FR-58 / DD-93: what "Book as loss" would write off (dry run of the delete with `write_off`).
+    /// `None` without stock, for HARD, or when the delete is blocked.
+    #[serde(default)]
+    pub write_off: Option<WriteOffPreview>,
+}
+
+/// FR-58: the reduction a write-off delete would post: the whole stock at its FIFO cost.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WriteOffPreview {
+    pub quantity: f64,
+    pub base_unit: String,
+    pub loss: f64,
 }
 
 /// FR-45 A1: how a delete is carried out.
@@ -183,6 +195,9 @@ pub enum DeleteMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeleteItemResult {
     pub mode: DeleteMode,
+    /// FR-58: the THEFT_LOST adjustment posted by a write-off delete.
+    #[serde(default)]
+    pub adjustment_id: Option<i64>,
 }
 
 /// One row of the Deleted items list (FR-45).

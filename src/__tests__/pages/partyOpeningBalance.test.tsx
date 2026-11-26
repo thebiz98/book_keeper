@@ -119,7 +119,7 @@ const openingSale = (): SaleDetailView =>
 const lockedGuard = (): BillEditGuard => ({
   target: 'SALE', id: 9, code: 'OB-0001', canEdit: false, canDelete: false, canChangeParty: false,
   reasons: [{ code: 'OPENING_BALANCE', message: 'OB-0001 is the party opening balance.', blocksEdit: true, blocksDelete: true }],
-  upfrontAmount: 0, appliedAmount: 0, removedCashAmount: 0, removedCreditAmount: 0, lotLimits: [],
+  upfrontAmount: 0, appliedAmount: 0, removedCashAmount: 0, removedCreditAmount: 0, lotLimits: [], settlementsToMove: { count: 0, amount: 0 },
 });
 
 describe('Opening-balance bill drawer (FR-35)', () => {

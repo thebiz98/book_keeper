@@ -9,7 +9,7 @@ import { installApi, flush, waitFor, click, setInput, bodyText, fakeBillPreview 
 
 const guard = (over: Partial<BillEditGuard> = {}): BillEditGuard => ({
   target: 'SALE', id: 5, code: 'SAL-1005', canEdit: true, canDelete: true, canChangeParty: true, reasons: [],
-  upfrontAmount: 100, appliedAmount: 0, removedCashAmount: 100, removedCreditAmount: 0, lotLimits: [], ...over,
+  upfrontAmount: 100, appliedAmount: 0, removedCashAmount: 100, removedCreditAmount: 0, lotLimits: [], settlementsToMove: { count: 0, amount: 0 }, ...over,
 });
 
 const saleDetail = (): SaleDetailView =>

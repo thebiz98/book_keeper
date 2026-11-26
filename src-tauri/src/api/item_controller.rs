@@ -68,9 +68,10 @@ pub async fn preview_item_delete(state: State<'_, AppState>, item_id: i64) -> Re
     super::run_blocking(move || svc.preview_item_delete(item_id)).await
 }
 #[tauri::command]
-pub async fn delete_item(state: State<'_, AppState>, item_id: i64) -> Result<DeleteItemResult, AppError> {
+pub async fn delete_item(state: State<'_, AppState>, item_id: i64, write_off: Option<bool>) -> Result<DeleteItemResult, AppError> {
     let svc = state.item_service.clone();
-    super::run_blocking(move || svc.delete_item(item_id)).await
+    // FR-58: absent = false ("Just delete").
+    super::run_blocking(move || svc.delete_item(item_id, write_off.unwrap_or(false))).await
 }
 #[tauri::command]
 pub async fn restore_item(state: State<'_, AppState>, item_id: i64) -> Result<(), AppError> {
