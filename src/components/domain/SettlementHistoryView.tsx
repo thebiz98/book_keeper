@@ -323,7 +323,7 @@ export const SettlementHistoryView: React.FC<SettlementHistoryViewProps> = ({ on
             : ''
         }
         confirmText="Delete"
-        onConfirm={() => void confirmDelete()}
+        onConfirm={confirmDelete}
         onCancel={() => setDeleting(null)}
       >
         {deleteError && (

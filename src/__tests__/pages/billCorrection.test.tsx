@@ -105,6 +105,80 @@ describe('BillDetailDrawer actions (FR-20)', () => {
   });
 });
 
+describe('BillDetailDrawer: always says why (G8)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('shows the guard error with Retry, and Retry reloads the guard', async () => {
+    const getBillEditGuard = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(guard());
+    installApi({ getSaleDetails: saleDetail(), getBillEditGuard });
+    render(<BillDetailDrawer kind="SALE" billId={5} onClose={() => {}} />);
+    await waitFor(() => !!document.querySelector('[data-testid="guard-error"]'));
+    expect(bodyText()).toContain('Could not check whether this bill can be changed');
+    expect((document.querySelector('[data-testid="bill-delete"]') as HTMLButtonElement).disabled).toBe(true);
+    click(document.querySelector('[data-testid="guard-retry"]')!);
+    await waitFor(() => !!document.querySelector('[data-testid="bill-delete"]:not([disabled])'));
+    expect(document.querySelector('[data-testid="guard-error"]')).toBeNull();
+  });
+
+  it('shows the OPENING_BALANCE reason for an OB- bill and keeps Edit/Delete hidden', async () => {
+    const d = saleDetail();
+    (d.sale as unknown as Record<string, unknown>).isOpeningBalance = true;
+    (d.sale as unknown as Record<string, unknown>).transactionCode = 'OB-1';
+    installApi({
+      getSaleDetails: d,
+      getBillEditGuard: guard({
+        canEdit: false, canDelete: false,
+        reasons: [{ code: 'OPENING_BALANCE', message: 'OB-1 is an opening balance. Change it from the party record.', blocksEdit: true, blocksDelete: true }],
+      }),
+    });
+    render(<BillDetailDrawer kind="SALE" billId={5} onClose={() => {}} />);
+    await waitFor(() => !!document.querySelector('[data-testid="guard-reasons"]'));
+    expect(bodyText()).toContain('Change it from the party record');
+    expect(document.querySelector('[data-testid="bill-delete"]')).toBeNull();
+    expect(document.querySelector('[data-testid="bill-edit"]')).toBeNull();
+  });
+
+  it('a CONSUMED_LOTS purchase shows its reason with Delete disabled', async () => {
+    const detail = {
+      purchase: { ...saleDetail().sale, id: 7, transactionCode: 'PUR-1007', supplierInvoiceRef: null },
+      party: null, settlements: [], charges: [], items: [],
+    };
+    installApi({
+      getPurchaseDetails: detail,
+      getBillEditGuard: guard({
+        target: 'PURCHASE', id: 7, code: 'PUR-1007', canEdit: false, canDelete: false,
+        reasons: [{ code: 'CONSUMED_LOTS', message: 'Stock from this purchase was already sold.', blocksEdit: false, blocksDelete: true }],
+      }),
+    });
+    render(<BillDetailDrawer kind="PURCHASE" billId={7} onClose={() => {}} />);
+    await waitFor(() => bodyText().includes('already sold'));
+    expect((document.querySelector('[data-testid="bill-delete"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a double confirm (click then Enter) deletes once', async () => {
+    let release: () => void = () => {};
+    const api = installApi({
+      getSaleDetails: saleDetail(),
+      getBillEditGuard: guard(),
+      deleteSale: vi.fn(() => new Promise((res) => (release = () => res({ removedCashAmount: 100 })))),
+    });
+    render(<BillDetailDrawer kind="SALE" billId={5} onClose={() => {}} />);
+    await waitFor(() => !!document.querySelector('[data-testid="bill-delete"]:not([disabled])'));
+    click(document.querySelector('[data-testid="bill-delete"]')!);
+    setInput(document.querySelector('[data-testid="confirm-require-text"]')!, 'SAL-1005');
+    const confirm = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('Delete') && b.textContent?.includes('Enter'))!;
+    click(confirm);
+    click(confirm);
+    document.querySelector('[data-testid="confirm-require-text"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flush();
+    expect(api.deleteSale).toHaveBeenCalledTimes(1);
+    release();
+    await flush();
+  });
+});
+
 describe('ReturnDetailDrawer (FR-20)', () => {
   beforeEach(() => {
     document.body.innerHTML = '';

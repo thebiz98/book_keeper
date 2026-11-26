@@ -125,10 +125,14 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
   const [tab, setTab] = useState<TabId>('lots');
   // FR-50: the last saved low stock level, so the drawer is right even when the caller does not patch.
   const [savedLevel, setSavedLevel] = useState<ItemSearchResult | null>(null);
+  // After a bill opened from here changes, the refreshed row (stock included) replaces the prop's values.
+  const [fresh, setFresh] = useState<ItemSearchResult | null>(null);
+  const [historyKey, setHistoryKey] = useState(0);
+  const base = itemProp && fresh && fresh.itemId === itemProp.itemId ? { ...itemProp, currentStock: fresh.currentStock } : itemProp;
   const item =
-    itemProp && savedLevel && savedLevel.itemId === itemProp.itemId
-      ? { ...itemProp, lowStockThreshold: savedLevel.lowStockThreshold, isLowStock: savedLevel.isLowStock }
-      : itemProp;
+    base && savedLevel && savedLevel.itemId === base.itemId
+      ? { ...base, lowStockThreshold: savedLevel.lowStockThreshold, isLowStock: savedLevel.isLowStock }
+      : base;
   const [viewBill, setViewBill] = useState<{ kind: TransactionType; id: number } | null>(null);
   const itemId = item?.itemId ?? null;
   // FR-45: a deleted item opens read-only (from past bills and reports); Restore lives only in Deleted items.
@@ -138,7 +142,23 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
     setTab('lots');
     setViewBill(null);
     setSavedLevel(null);
+    setFresh(null);
   }, [itemId]);
+
+  /** A bill opened from the history was deleted or changed: reload stock, lots and both histories. */
+  const reloadAfterBillChange = () => {
+    setViewBill(null);
+    setHistoryKey((k) => k + 1);
+    if (itemId === null) return;
+    api
+      .getItem(itemId)
+      .then((row) => {
+        setFresh(row);
+        setSavedLevel(row);
+        onItemUpdated?.(row);
+      })
+      .catch(() => {}); // the lists above still reload; stock refreshes on the next open
+  };
 
   return (
     <>
@@ -219,10 +239,10 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
               <LotInspector key={item.currentStock} itemId={item.itemId} baseUnit={item.baseUnit} editable={!deleted} />
             )}
             {tab === 'sales' && (
-              <BillsTab itemId={item.itemId} kind="SALE" onView={(id) => setViewBill({ kind: 'SALE', id })} />
+              <BillsTab key={historyKey} itemId={item.itemId} kind="SALE" onView={(id) => setViewBill({ kind: 'SALE', id })} />
             )}
             {tab === 'purchases' && (
-              <BillsTab itemId={item.itemId} kind="PURCHASE" onView={(id) => setViewBill({ kind: 'PURCHASE', id })} />
+              <BillsTab key={historyKey} itemId={item.itemId} kind="PURCHASE" onView={(id) => setViewBill({ kind: 'PURCHASE', id })} />
             )}
           </div>
         )}
@@ -231,7 +251,7 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
         kind={viewBill?.kind ?? 'SALE'}
         billId={viewBill?.id ?? null}
         onClose={() => setViewBill(null)}
-        onChanged={() => setViewBill(null)}
+        onChanged={reloadAfterBillChange}
       />
     </>
   );
