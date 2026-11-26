@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use crate::core::dtos::{DeleteMode, DeletePartyResult, DeletedPartyRow, PageRequest, Paginated, PartyDeletePreview};
 use crate::core::entities::{
     CreatePartyPayload, OpeningBalanceInput, Party, PartyListRow, PurchaseTransaction, SaleTransaction,
     UpdatePartyPayload,
@@ -178,6 +179,43 @@ fn check_not_below_applied(
     Ok(())
 }
 
+/// FR-46 / Y3: every write to a deleted party is refused except restore.
+fn ensure_party_active(party: &Party) -> Result<(), AppError> {
+    if party.is_active {
+        Ok(())
+    } else {
+        Err(validation("party_id", format!("'{}' is deleted. Restore it first.", party.name)))
+    }
+}
+
+fn plural(n: i64, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// Why a party is SOFT: what references it ("3 bills", "1 payment"). Empty = HARD.
+fn usage_reasons(tx: &mut dyn TransactionContext, id: i64) -> Result<Vec<String>, AppError> {
+    let (sales, purchases, returns, payments) = tx.parties().reference_breakdown(id)?;
+    let mut out = Vec::new();
+    if sales + purchases > 0 {
+        out.push(plural(sales + purchases, "bill", "bills"));
+    }
+    if returns > 0 {
+        out.push(plural(returns, "return", "returns"));
+    }
+    if payments > 0 {
+        out.push(plural(payments, "payment", "payments"));
+    }
+    Ok(out)
+}
+
+fn dues_block_message(total: f64, count: i64) -> String {
+    format!("₹{} due on {}. Settle them first.", rupees(total), plural(count, "bill", "bills"))
+}
+
+fn party_not_found(id: i64) -> AppError {
+    AppError::NotFound { entity: "Party".to_string(), id: id.to_string() }
+}
+
 #[derive(Clone)]
 pub struct PartyServiceImpl<U: UnitOfWork = Arc<dyn UnitOfWork>> {
     pub uow: U,
@@ -239,6 +277,7 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
                 id: id.to_string(),
             })?;
 
+        ensure_party_active(&party)?;
         if party.opening_balance.is_some() && payload.party_type != party.party_type {
             return Err(validation(
                 "party_type",
@@ -286,5 +325,82 @@ impl<U: UnitOfWork> PartyService for PartyServiceImpl<U> {
     ) -> Result<Vec<PartyListRow>, AppError> {
         let mut tx = self.uow.begin_read()?;
         tx.parties().list_rows(party_type, true, Some(query))
+    }
+
+    fn preview_party_delete(&self, party_id: i64) -> Result<PartyDeletePreview, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        let party = tx.parties().find_by_id(party_id)?.ok_or_else(|| party_not_found(party_id))?;
+        let (open_bills_count, balance_due_total) = tx.parties().open_dues(party_id, party.party_type)?;
+        let reasons_used = usage_reasons(&mut *tx, party_id)?;
+        let mode = if reasons_used.is_empty() { DeleteMode::Hard } else { DeleteMode::Soft };
+        let reason = if !party.is_active && mode == DeleteMode::Soft {
+            Some(format!("'{}' is already deleted.", party.name))
+        } else if open_bills_count > 0 {
+            Some(dues_block_message(balance_due_total, open_bills_count))
+        } else {
+            None
+        };
+        Ok(PartyDeletePreview {
+            party_id,
+            name: party.name,
+            party_type: party.party_type,
+            mode,
+            open_bills_count,
+            balance_due_total,
+            can_delete: reason.is_none(),
+            reason,
+            reasons_used,
+        })
+    }
+
+    fn delete_party(&self, party_id: i64) -> Result<DeletePartyResult, AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let party = tx.parties().find_by_id(party_id)?.ok_or_else(|| party_not_found(party_id))?;
+        let used = !usage_reasons(&mut *tx, party_id)?.is_empty();
+        if !party.is_active && used {
+            return Err(validation("party_id", format!("'{}' is already deleted", party.name)));
+        }
+        let (count, total) = tx.parties().open_dues(party_id, party.party_type)?;
+        if count > 0 {
+            return Err(AppError::BillLocked {
+                code: "PARTY_HAS_DUES".to_string(),
+                message: dues_block_message(total, count),
+            });
+        }
+        let mode = if used {
+            tx.parties().set_active(party_id, false, &chrono::Utc::now().to_rfc3339())?;
+            DeleteMode::Soft
+        } else {
+            tx.parties().hard_delete(party_id)?;
+            DeleteMode::Hard
+        };
+        tx.commit()?;
+        // DD-75: a deleted party leaves the search index (after commit, DD-24).
+        self.search_index.remove(party_id)?;
+        Ok(DeletePartyResult { mode })
+    }
+
+    fn restore_party(&self, party_id: i64) -> Result<(), AppError> {
+        let mut tx = self.uow.begin_transaction()?;
+        let party = tx.parties().find_by_id(party_id)?.ok_or_else(|| party_not_found(party_id))?;
+        if party.is_active {
+            return Err(validation("party_id", format!("'{}' is not deleted", party.name)));
+        }
+        tx.parties().set_active(party_id, true, &chrono::Utc::now().to_rfc3339())?;
+        tx.commit()?;
+        sync_after_commit(&*self.search_index, party_id, "party");
+        Ok(())
+    }
+
+    fn list_deleted_parties(
+        &self,
+        search: Option<String>,
+        page: Option<usize>,
+        page_size: Option<usize>,
+    ) -> Result<Paginated<DeletedPartyRow>, AppError> {
+        let req = PageRequest::new(page, page_size.or(Some(10)))?;
+        let mut tx = self.uow.begin_read()?;
+        let (rows, total) = tx.parties().list_inactive(search.as_deref().unwrap_or(""), req.offset(), req.limit)?;
+        Ok(Paginated::new(rows, total, req.page, req.limit))
     }
 }

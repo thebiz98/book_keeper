@@ -772,3 +772,9 @@ UI only; no backend, schema or IPC change.
 * **Pickers.** Returns line pickers disable deleted items; New Sale / Purchase search never returns them (FTS).
 * **Tests (Vitest).** delete confirm from a mocked preview (allowed / blocked); Deleted items dialog search and restore; ITEM_NAME_DELETED restore action; deleted item details read-only.
 
+
+## Delete and Restore Parties (FR-46, DD-77, DD-80, `feat/party-delete`, v1.5 E3)
+* **Party edit form.** Edit mode shows a danger **Delete party** button left of `FormActions` (`party-delete-button`) opening E2's `DeleteConfirmDialog` with `previewPartyDelete`; the body renders only backend preview data (DD-56). HARD: "'<name>' has no bills or payments. It will be removed permanently." SOFT: "Kept for its past bills and payments; hidden from pickers and the Parties list." Blocked (`can_delete = false`): the backend `reason` ("₹X due on N bills. Settle them first."). After delete: drawer closes, list reloads, toast.
+* **Parties list** shows active parties only. Toolbar **Deleted parties** opens E2's `DeletedRecordsDialog`: Name, Type, Phone, Deleted on, Restore (customers and vendors together, name/phone search, backend paging). This is the only Restore action for parties.
+* **Badges only.** Credit & Dues rows and the party ledger header show a small "Deleted" badge for an inactive party (`PartyDueSummary.is_active`, `Party.is_active`); no Restore button.
+* **Tests (Vitest).** delete confirm HARD / SOFT / blocked; Deleted parties dialog lists both types, search, restore; dues row badge without a Restore action.

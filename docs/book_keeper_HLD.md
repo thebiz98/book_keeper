@@ -307,13 +307,13 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Names stay unique, including deleted items.** Creating or importing an item whose name matches a deleted item is rejected with "'<name>' is in Deleted items. Restore it instead." The create form offers a **Restore** action from that error; the import report shows it as a row error.
   * A deleted item can't be edited (fields, bundles, low-stock level, set stock, adjustments); restore it first. Its details drawer opens read-only from past bills and reports, with a "Deleted" badge and Restore.
   * **Never-used items are removed permanently** *(amendment A1, DD-79)*. Delete stays one action and the backend chooses the mode. An item that appears in no sale, return, adjustment or non-opening purchase line, whose opening stock was never consumed, and that is not a component of any service, is removed for good (its opening lot, bundles and own component rows go with it; the name can be reused). Any other item is soft-deleted as above. The confirm says which: "'<name>' was never used. It will be removed permanently" or "Used in past records, so it is moved to Deleted items."
-* **FR-46: Delete and Restore Parties (soft delete)** *(added 2026-11-25, v1.5, DD-74, DD-75, DD-77; FR-17 rev.)*
-  * **Delete** (Party edit screen, danger action with confirm): sets `parties.is_active = 0`. Past bills, returns, settlements and the party ledger keep showing the party by name.
+* **FR-46: Delete and Restore Parties (soft delete; hard delete only when unreferenced)** *(added 2026-11-25, v1.5, DD-74, DD-75, DD-77, DD-80; FR-17 rev.; owner amendments 2026-11-25 / 2026-11-26)*
+  * **Delete** (Party edit screen, one danger action with confirm): the backend picks the mode (DD-56). A party with any history (a sale, purchase of any source, return or settlement row carrying its `party_id`) is **soft-deleted**: `parties.is_active = 0`; past bills, returns, settlements and the party ledger keep showing it. A party that **nothing references** (typically a bad import row) is **removed permanently** together with its search rows (DD-80). An imported opening balance counts as a reference through its `OB-` bill; setting the opening balance to 0 removes the unsettled `OB-` bill (FR-35), after which the party is unreferenced.
   * **Blocked while the party has dues:** any of its bills (including an `OB-` opening bill) with `balance_due > 0`. The error and the confirm preview show the amount and the number of open bills, so the user settles them first.
   * **A deleted party is hidden from:** party live search and every party picker (new sale, new purchase, returns, quick-create), and the Parties list.
-  * **Old bills:** editing an existing bill keeps its deleted party (as today). A deleted party can't be chosen on a new bill or moved onto another bill. A new return against a bill of a deleted party is rejected with "'<name>' is deleted. Restore the party first."
+  * **Old bills:** editing an existing bill keeps its deleted party (as today). A deleted party can't be chosen on a new bill or moved onto another bill. A new return against a bill of a deleted party is rejected with "'<name>' is deleted. Restore the party first." Every other write to a deleted party (edit, opening balance) is rejected with "'<name>' is deleted. Restore it first."
   * **Safety net for dues:** if a later bill edit leaves a due on a deleted party, Credit & Dues still lists that party, with a "Deleted" badge, and settling it works as normal. Dues lists never filter on `is_active`.
-  * **Deleted parties** button on the Parties page: Name, Type, Phone, Deleted on, **Restore** (name/phone search, paged in the backend).
+  * **Restore lives in one place:** the **Deleted parties** button on the Parties page opens one list with customers and vendors together: Name, Type, Phone, Deleted on, **Restore** (name/phone search, paged in the backend). No other screen has a Restore action; screens that show a deleted party (bill drawer, ledger, dues rows) show at most a small "Deleted" badge.
   * Party names are not unique, so creating a party with a deleted party's name is allowed. The parties import matches only active parties for *skip* / *update*.
 
 ### 2.2. Non-Functional Requirements (NFR)
@@ -440,7 +440,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 10. **Linked Return Reversal**: When a customer returns units from a sale line, the system walks that line's `SALE_STOCK_ALLOCATION` rows in reverse depletion order, using `quantity_depleted − returned_quantity` as each row's capacity, increments `returned_quantity`, and records the reversed FIFO cost on `RETURN_ITEM.cost_amount`. For `RESTOCKABLE` units it also restores `remaining_quantity` on the original `PURCHASE_ITEM` lots, bringing the item back at its exact historical cost. This makes repeated partial returns safe and keeps COGS net of returns.
 11. **Stock Outflow FIFO Depletion**: Negative adjustments, replacement issues, and vendor returns consume the oldest available lots via the allocation engine and log each lot consumed in `STOCK_OUTFLOW_ALLOCATION` (with `source_type` and `source_id`). This prevents phantom inventory lots and records inventory loss accurately.
 12. **Optional MRP Tracking**: `mrp` is stored as an optional reference attribute on `ITEM` and `ITEM_BUNDLE`, representing printed pack pricing distinct from the shop's actual selling price.
-13. **Soft-Delete** *(v1.5, FR-45 / FR-46)*: `ITEM` and `PARTY` are never physically deleted. Delete sets `is_active = 0`, restore sets it back to `1`. Search indexes hold active rows only (DD-75). Every reference from history is by id and stays valid.
+13. **Soft-Delete** *(v1.5, FR-45 / FR-46)*: `ITEM` and `PARTY` rows with history are never physically deleted (a never-used item or an unreferenced party is removed permanently, DD-79 / DD-80). Delete sets `is_active = 0`, restore sets it back to `1`. Search indexes hold active rows only (DD-75). Every reference from history is by id and stays valid.
 14. **Lot Sources**: Every stock lot is a `PURCHASE_ITEM` under a `PURCHASE_TRANSACTION` whose `source` is `PURCHASE` (real supplier bill), `ADJUSTMENT` (found stock), `OPENING` (import opening stock) or `RETURN` (unlinked restockable customer return). Non-`PURCHASE` headers carry `total_amount = 0`, no party, status `PAID`, and their own code prefix (`ADJ-`, `OPN-`, `RTL-`). All purchase lists, counts, totals, payables and vendor-return pickers include only `source = PURCHASE`.
 15. **FIFO Order**: Lots are consumed in entry order (ascending `PURCHASE_ITEM.id`).
 16. **Expenses are standalone cash-out events** *(2026-11-22)*: An `EXPENSE` row is itself the money event (always cash, paid on `expense_date`); it does not create `PAYMENT_SETTLEMENT` rows, because it has no bill, no party and no due. Assumption 8 still holds for every bill. Cash out for any period = ledger cash out + Σ `EXPENSE.amount` by `expense_date`.
@@ -1707,10 +1707,11 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // ItemSearchResult (get_item) gains is_active
 
 // --- Party delete / restore (FR-46) — party_api
-// preview_party_delete { party_id } -> { open_bills_count, balance_due_total, can_delete }  // read-only
-// delete_party { party_id } -> ()   // BillLocked PARTY_HAS_DUES when balance_due_total > 0
+// preview_party_delete { party_id } -> { party_id, name, party_type, mode: 'HARD'|'SOFT', open_bills_count, balance_due_total,
+//                                        can_delete, reason?, reasons_used: [string] }  // read-only
+// delete_party { party_id } -> { mode }   // BillLocked PARTY_HAS_DUES when open dues; HARD only when nothing references the party (DD-80)
 // restore_party { party_id } -> ()
-// list_deleted_parties { search?, party_type?, page, page_size } -> Paginated<{ party_id, name, party_type, phone, deleted_at }>
+// list_deleted_parties { search?, page, page_size } -> Paginated<{ party_id, name, party_type, phone, deleted_at }>  // both types, Type is a column
 // PartyDueSummary gains is_active (dues lists include deleted parties with dues)
 ```
 

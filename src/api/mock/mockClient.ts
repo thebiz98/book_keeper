@@ -10,6 +10,8 @@
 import type {
   DeleteMode,
   DeletedItemRow,
+  DeletedPartyRow,
+  PartyDeletePreview,
   ItemDeletePreview,
   ItemBillRef,
   ApiClient,
@@ -732,6 +734,7 @@ export class MockApiClient implements ApiClient {
         totalInvoiced: p.balanceDue,
         totalPaid: 0,
         balanceDue: p.balanceDue,
+        isActive: p.isActive,
       }));
   }
   async settleBillPayment(payload: Parameters<ApiClient['settleBillPayment']>[0]) {
@@ -827,6 +830,39 @@ export class MockApiClient implements ApiClient {
     return (await this.listParties(partyType)).filter(
       (p) => p.name.toLowerCase().includes(q) || (p.phone ?? '').includes(q)
     );
+  }
+
+  async previewPartyDelete(partyId: number): Promise<PartyDeletePreview> {
+    const p = this.findParty(partyId);
+    return {
+      partyId,
+      name: p.name,
+      partyType: p.partyType,
+      mode: 'SOFT',
+      openBillsCount: p.unpaidBillsCount,
+      balanceDueTotal: p.balanceDue,
+      canDelete: p.isActive && p.balanceDue <= 0,
+      reason: !p.isActive ? `'${p.name}' is already deleted.` : p.balanceDue > 0 ? `Due on ${p.unpaidBillsCount} bills. Settle them first.` : null,
+      reasonsUsed: [],
+    };
+  }
+  async deleteParty(partyId: number): Promise<{ mode: DeleteMode }> {
+    const p = this.findParty(partyId);
+    p.isActive = false;
+    p.updatedAt = nowIso();
+    return { mode: 'SOFT' };
+  }
+  async restoreParty(partyId: number) {
+    const p = this.findParty(partyId);
+    p.isActive = true;
+    p.updatedAt = nowIso();
+  }
+  async listDeletedParties(search?: string | null, page?: number, pageSize?: number) {
+    const q = (search ?? '').trim().toLowerCase();
+    const rows: DeletedPartyRow[] = this.parties
+      .filter((p) => !p.isActive && (p.name.toLowerCase().includes(q) || (p.phone ?? '').includes(q)))
+      .map((p) => ({ partyId: p.id, name: p.name, partyType: p.partyType, phone: p.phone, deletedAt: p.updatedAt }));
+    return paginate(rows, page, pageSize);
   }
 
   // --- Returns & Adjustments ---

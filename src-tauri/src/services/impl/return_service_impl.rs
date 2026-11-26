@@ -119,12 +119,16 @@ fn resolve_party(
         payload_party
     };
     let party_name = match party_id {
-        Some(pid) => Some(
-            tx.parties()
+        Some(pid) => {
+            let party = tx
+                .parties()
                 .find_by_id(pid)?
-                .ok_or_else(|| AppError::not_found("Party", pid.to_string()))?
-                .name,
-        ),
+                .ok_or_else(|| AppError::not_found("Party", pid.to_string()))?;
+            if !party.is_active {
+                return Err(validation("party_id", format!("'{}' is deleted. Restore the party first.", party.name)));
+            }
+            Some(party.name)
+        }
         None => None,
     };
     Ok((party_id, party_name))

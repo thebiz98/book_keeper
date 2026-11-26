@@ -1,6 +1,7 @@
 use crate::app_state::AppState;
 use tauri::State;
 use crate::core::error::AppError;
+use crate::core::dtos::{DeletePartyResult, DeletedPartyRow, Paginated, PartyDeletePreview};
 use crate::core::entities::{CreatePartyPayload, Party, PartyListRow, UpdatePartyPayload};
 use crate::core::value_objects::PartyType;
 
@@ -28,4 +29,29 @@ pub async fn list_parties(state: State<'_, AppState>, party_type: Option<PartyTy
 pub async fn search_parties(state: State<'_, AppState>, query: String, party_type: Option<PartyType>) -> Result<Vec<PartyListRow>, AppError> {
     let svc = state.party_service.clone();
     super::run_blocking(move || svc.search_parties(&query, party_type)).await
+}
+#[tauri::command]
+pub async fn preview_party_delete(state: State<'_, AppState>, party_id: i64) -> Result<PartyDeletePreview, AppError> {
+    let svc = state.party_service.clone();
+    super::run_blocking(move || svc.preview_party_delete(party_id)).await
+}
+#[tauri::command]
+pub async fn delete_party(state: State<'_, AppState>, party_id: i64) -> Result<DeletePartyResult, AppError> {
+    let svc = state.party_service.clone();
+    super::run_blocking(move || svc.delete_party(party_id)).await
+}
+#[tauri::command]
+pub async fn restore_party(state: State<'_, AppState>, party_id: i64) -> Result<(), AppError> {
+    let svc = state.party_service.clone();
+    super::run_blocking(move || svc.restore_party(party_id)).await
+}
+#[tauri::command]
+pub async fn list_deleted_parties(
+    state: State<'_, AppState>,
+    search: Option<String>,
+    page: Option<usize>,
+    page_size: Option<usize>,
+) -> Result<Paginated<DeletedPartyRow>, AppError> {
+    let svc = state.party_service.clone();
+    super::run_blocking(move || svc.list_deleted_parties(search, page, page_size)).await
 }

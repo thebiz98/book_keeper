@@ -6,6 +6,7 @@ pub mod expense_dto;
 pub mod item_dto;
 pub mod import_dto;
 pub mod pagination;
+pub mod party_dto;
 pub mod payment_dto;
 pub mod preview_dto;
 pub mod purchase_dto;
@@ -41,6 +42,7 @@ pub use import_dto::{
 pub use pagination::{
     clean_text, validate_date_range, PageRequest, Paginated, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT,
 };
+pub use party_dto::{DeletePartyResult, DeletedPartyRow, PartyDeletePreview};
 pub use payment_dto::{LedgerCashSummary, LedgerTotals, RecordPaymentPayload, RecordRefundPayload};
 pub use preview_dto::{
     BillPaymentPreview, BillPreview, PreviewError, PreviewPurchasePayload, PreviewSalePayload, StockAdjustmentPreview,

@@ -110,7 +110,7 @@ fn resolve_purchase(
                 return Err(validation("party_id", "Purchases need a vendor party"));
             }
             if !party.is_active && keep_party != Some(pid) {
-                return Err(validation("party_id", "Vendor is inactive"));
+                return Err(validation("party_id", format!("'{}' is deleted. Restore the party first.", party.name)));
             }
             Some(party.name)
         }

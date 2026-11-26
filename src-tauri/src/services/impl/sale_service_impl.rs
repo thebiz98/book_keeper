@@ -112,7 +112,7 @@ fn resolve_sale(
                 return Err(validation("party_id", "Sales need a customer party"));
             }
             if !party.is_active && keep_party != Some(pid) {
-                return Err(validation("party_id", "Customer is inactive"));
+                return Err(validation("party_id", format!("'{}' is deleted. Restore the party first.", party.name)));
             }
             Some(party.name)
         }

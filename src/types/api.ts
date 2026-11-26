@@ -28,6 +28,8 @@ import type {
   ItemSearchResult,
   ItemDeletePreview,
   DeletedItemRow,
+  DeletedPartyRow,
+  PartyDeletePreview,
   DeleteMode,
   ItemType,
   LowStockItem,
@@ -680,6 +682,13 @@ export interface ApiClient {
   getParty(partyId: number): Promise<Party>;
   listParties(partyType?: PartyType, activeOnly?: boolean): Promise<PartyListRow[]>;
   searchParties(query: string, partyType?: PartyType): Promise<PartyListRow[]>;
+  /** FR-46 (DD-56): dry run of a party delete; writes nothing. */
+  previewPartyDelete(partyId: number): Promise<PartyDeletePreview>;
+  /** FR-46: HARD when nothing references the party (removed permanently), otherwise SOFT. */
+  deleteParty(partyId: number): Promise<{ mode: DeleteMode }>;
+  restoreParty(partyId: number): Promise<void>;
+  /** Deleted customers and vendors together; name or phone search and paging run in SQL. */
+  listDeletedParties(search?: string | null, page?: number, pageSize?: number): Promise<Paginated<DeletedPartyRow>>;
 
   // Charge / discount types (FR-19)
   /** Live type search for one bill side; a blank query lists the applicable types by name. */
