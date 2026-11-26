@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
-import { Users, Plus, Search, Pencil, User, Truck, BookOpen, Upload } from 'lucide-react';
+import { Users, Plus, Search, Pencil, User, Truck, BookOpen, Upload, Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
-import type { PartyListRow, PartyType } from '@/types';
+import type { DeletedPartyRow, PartyDeletePreview, PartyListRow, PartyType } from '@/types';
 import type { CreatePartyPayload } from '@/types/api';
 import { todayLocal } from '@/lib/dates';
 import { PartyLedgerDrawer } from '@/components/domain/PartyLedgerDrawer';
 import { ImportDialog } from '@/components/domain/ImportDialog';
+import { DeleteConfirmDialog } from '@/components/domain/DeleteConfirmDialog';
+import { DeletedRecordsDialog } from '@/components/domain/DeletedRecordsDialog';
 import { useAppStore } from '@/store/useAppStore';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -46,6 +48,9 @@ export const PartiesPage: React.FC = () => {
   const [tab, setTab] = useState<PartyType>('CUSTOMER');
   const [ledgerId, setLedgerId] = useState<number | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletedOpen, setDeletedOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const refreshMetrics = useAppStore((s) => s.refreshMetrics);
 
   const [form, setForm] = useState<PartyForm | null>(null);
@@ -139,6 +144,15 @@ export const PartiesPage: React.FC = () => {
           <Button
             variant="outline"
             size="md"
+            data-testid="deleted-parties-button"
+            leftIcon={<Trash2 className="h-4 w-4" />}
+            onClick={() => setDeletedOpen(true)}
+          >
+            Deleted parties
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
             leftIcon={<Upload className="h-4 w-4" />}
             onClick={() => setImportOpen(true)}
           >
@@ -187,6 +201,19 @@ export const PartiesPage: React.FC = () => {
         <p role="alert" className="shrink-0 text-xs text-rose-600 dark:text-rose-400 font-medium px-1">
           {error}
         </p>
+      )}
+
+      {notice && (
+        <div
+          role="status"
+          data-testid="parties-notice"
+          className="shrink-0 flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+        >
+          <span>{notice}</span>
+          <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)} className="cursor-pointer px-1">
+            ×
+          </button>
+        </div>
       )}
 
       <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs flex-1 min-h-[240px] flex flex-col">
@@ -245,12 +272,27 @@ export const PartiesPage: React.FC = () => {
         title={form?.id == null ? 'Add Party' : 'Edit Party'}
         size="md"
         footer={
-          <FormActions
-            onSave={() => void handleSave()}
-            onCancel={() => setForm(null)}
-            isSubmitting={isSaving}
-            canSave={!!form?.name.trim()}
-          />
+          <div className="flex w-full items-center gap-3">
+            {form?.id != null && (
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                data-testid="party-delete-button"
+                disabled={isSaving}
+                onClick={() => setDeleteOpen(true)}
+              >
+                Delete party
+              </Button>
+            )}
+            <FormActions
+              className="ml-auto"
+              onSave={() => void handleSave()}
+              onCancel={() => setForm(null)}
+              isSubmitting={isSaving}
+              canSave={!!form?.name.trim()}
+            />
+          </div>
         }
       >
         {form && (
@@ -317,6 +359,58 @@ export const PartiesPage: React.FC = () => {
           </div>
         )}
       </Modal>
+
+      <DeleteConfirmDialog<PartyDeletePreview>
+        isOpen={deleteOpen}
+        title="Delete party"
+        loadPreview={() => api.previewPartyDelete(form?.id as number)}
+        canDelete={(p) => p.canDelete}
+        blockedReason={(p) => p.reason}
+        confirmLabel={(p) => (p.mode === 'HARD' ? 'Delete permanently' : 'Delete party')}
+        onConfirm={async (p) => {
+          const r = await api.deleteParty(p.partyId);
+          setDeleteOpen(false);
+          setForm(null);
+          setNotice(
+            r.mode === 'HARD'
+              ? `Deleted '${p.name}' permanently.`
+              : `Deleted '${p.name}'. Restore it from Deleted parties.`
+          );
+          load();
+          void refreshMetrics();
+        }}
+        onClose={() => setDeleteOpen(false)}
+        renderBody={(p) =>
+          p.mode === 'HARD' ? (
+            <p data-testid="delete-hard-text">
+              &apos;{p.name}&apos; has no bills or payments. It will be removed permanently.
+            </p>
+          ) : (
+            <p data-testid="delete-soft-text">
+              Kept for its past bills and payments; hidden from pickers and the Parties list.
+            </p>
+          )
+        }
+      />
+
+      <DeletedRecordsDialog<DeletedPartyRow>
+        isOpen={deletedOpen}
+        title="Deleted parties"
+        columns={[
+          { header: 'Name', render: (r) => <span className="font-semibold">{r.name}</span> },
+          { header: 'Type', render: (r) => (r.partyType === 'VENDOR' ? 'Vendor' : 'Customer') },
+          { header: 'Phone', render: (r) => r.phone ?? '—' },
+          { header: 'Deleted on', render: (r) => r.deletedAt.slice(0, 10) },
+        ]}
+        fetchPage={(s, p, size) => api.listDeletedParties(s, p, size)}
+        rowId={(r) => r.partyId}
+        restore={(r) => api.restoreParty(r.partyId)}
+        onRestored={() => {
+          load();
+          void refreshMetrics();
+        }}
+        onClose={() => setDeletedOpen(false)}
+      />
     </div>
   );
 };

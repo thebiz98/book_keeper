@@ -88,6 +88,14 @@ export const PartyLedgerDrawer: React.FC<PartyLedgerDrawerProps> = ({ partyId, o
       )}
       {ledger && (
         <div className="flex flex-col gap-3 text-xs">
+          {!ledger.party.isActive && (
+            <span
+              data-testid="party-deleted-badge"
+              className="self-start rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+            >
+              Deleted
+            </span>
+          )}
           <div className="flex items-center justify-between p-3 rounded-md bg-slate-50 dark:bg-slate-800">
             <span className="text-slate-500">Current balance</span>
             <CurrencyDisplay amount={ledger.currentBalance} size="lg" colored />

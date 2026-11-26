@@ -128,6 +128,11 @@ export class TauriClient implements ApiClient {
     invokeCmd('list_parties', { partyType: partyType ?? null, activeOnly: activeOnly ?? null });
   searchParties: ApiClient['searchParties'] = (query, partyType) =>
     invokeCmd('search_parties', { query, partyType: partyType ?? null });
+  previewPartyDelete: ApiClient['previewPartyDelete'] = (partyId) => invokeCmd('preview_party_delete', { partyId });
+  deleteParty: ApiClient['deleteParty'] = (partyId) => invokeCmd('delete_party', { partyId });
+  restoreParty: ApiClient['restoreParty'] = (partyId) => invokeCmd('restore_party', { partyId });
+  listDeletedParties: ApiClient['listDeletedParties'] = (search, page, pageSize) =>
+    invokeCmd('list_deleted_parties', { search: search || null, page: page ?? null, pageSize: pageSize ?? null });
 
   // --- Charge types ---
   searchChargeTypes: ApiClient['searchChargeTypes'] = (query, appliesTo, limit) =>

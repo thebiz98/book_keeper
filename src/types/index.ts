@@ -107,6 +107,28 @@ export interface DeletedItemRow {
   canPurge?: boolean;
 }
 
+/** FR-46 (DD-80): backend dry run of a party delete. Every figure and sentence comes from the backend. */
+export interface PartyDeletePreview {
+  partyId: number;
+  name: string;
+  partyType: PartyType;
+  mode: DeleteMode;
+  openBillsCount: number;
+  balanceDueTotal: number;
+  canDelete: boolean;
+  reason: string | null;
+  reasonsUsed: string[];
+}
+
+/** One row of the Deleted parties list (customers and vendors together). */
+export interface DeletedPartyRow {
+  partyId: number;
+  name: string;
+  partyType: PartyType;
+  phone: string | null;
+  deletedAt: string;
+}
+
 /** One component of a service (FR-36): base units of a physical item per service unit. */
 export interface ServiceComponentInput {
   componentItemId: number;
@@ -511,6 +533,8 @@ export interface PartyDueSummary {
   totalInvoiced: number;
   totalPaid: number;
   balanceDue: number;
+  /** FR-46: false for a deleted party that still has dues (badge only). Absent = active. */
+  isActive?: boolean;
 }
 
 export interface PartyLedgerEntry {

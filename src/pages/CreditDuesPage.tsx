@@ -161,6 +161,14 @@ export const CreditDuesPage: React.FC = () => {
         >
           {expanded === d.partyId ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           {d.partyName}
+          {d.isActive === false && (
+            <span
+              data-testid="party-deleted-badge"
+              className="ml-1 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+            >
+              Deleted
+            </span>
+          )}
         </button>
       ),
     },
