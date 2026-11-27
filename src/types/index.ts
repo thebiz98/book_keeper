@@ -696,6 +696,8 @@ export interface AppConfigView {
   backupDirectory: string;
   isDefaultDirectory: boolean;
   lastAutoBackupAt: string | null;
+  /** IANA shop time zone from app config (e.g. Asia/Kolkata). */
+  timeZone: string;
 }
 
 export type ResetScope = 'Transactions' | 'All';

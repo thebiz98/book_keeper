@@ -74,7 +74,7 @@ impl BackupServiceImpl {
 
         // Local-time stamp; `_2`, `_3`, ... on collision. `create_new` reserves the name
         // atomically so an existing backup is never overwritten.
-        let stamp = chrono::Local::now().format("%Y%m%d_%H%M");
+        let stamp = crate::core::clock::now_local().format("%Y%m%d_%H%M");
         let mut n = 1u32;
         let final_dest_path: PathBuf = loop {
             let prefix = kind.prefix();
@@ -124,7 +124,7 @@ impl BackupService for BackupServiceImpl {
 
     fn rotate(&self, dir: &str, retention_days: u32) -> Result<Vec<String>, AppError> {
         let names = list_file_names(dir)?;
-        let now = chrono::Local::now().naive_local();
+        let now = crate::core::clock::now_local().naive_local();
         let doomed = select_for_deletion(&names, now, retention_days);
         let mut deleted = Vec::new();
         for name in doomed {

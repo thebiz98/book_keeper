@@ -11,6 +11,7 @@ import { TextInput } from '@/components/ui/TextInput';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { useCartStore } from '@/store/useCartStore';
+import { formatDateTime } from '@/lib/dates';
 
 type Notice = { kind: 'success' | 'error'; text: string } | null;
 
@@ -279,7 +280,7 @@ export const SettingsPage: React.FC = () => {
           </div>
           <p className="text-xs text-slate-500" data-testid="last-auto-backup">
             Last auto backup:{' '}
-            {config?.lastAutoBackupAt ? new Date(config.lastAutoBackupAt).toLocaleString() : 'Never'}
+            {config?.lastAutoBackupAt ? formatDateTime(config.lastAutoBackupAt) : 'Never'}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={handleChoose}>
@@ -295,7 +296,7 @@ export const SettingsPage: React.FC = () => {
           </div>
           <p className="text-xs text-slate-500" data-testid="last-backup">
             {lastBackup
-              ? `Last backup this session: ${lastBackup.at.toLocaleString()} (${lastBackup.path})`
+              ? `Last backup this session: ${formatDateTime(lastBackup.at)} (${lastBackup.path})`
               : 'No backup yet this session.'}
           </p>
           <div className="flex flex-wrap items-center gap-2">

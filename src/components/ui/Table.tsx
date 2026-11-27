@@ -1,5 +1,5 @@
 import React from 'react';
-import { cn } from '@/lib/utils';
+import { cn, HIGHLIGHT_ROW } from '@/lib/utils';
 
 export type TableScroll = 'bounded' | 'fill' | 'page' | 'none';
 
@@ -73,7 +73,7 @@ export const TableRow: React.FC<TableRowProps> = ({ className, selected, ...prop
   <tr
     className={cn(
       'border-b border-slate-100 dark:border-slate-800/80 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors',
-      selected && 'bg-blue-50/60 dark:bg-blue-950/40',
+      selected && HIGHLIGHT_ROW,
       className
     )}
     {...props}

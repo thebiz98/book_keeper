@@ -160,6 +160,7 @@ fn build_sqlite_app_state_full(
     use crate::data::sqlite::sqlite_uow::SqliteUnitOfWork;
     use crate::services::r#impl::*;
 
+    crate::core::clock::init_time_zone(config.tz());
     let pool = create_pool(db_path)?;
     {
         let conn = pool

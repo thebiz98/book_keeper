@@ -17,6 +17,7 @@ import { DataTable, type DataTableColumn } from './DataTable';
 import { SettlementModal } from './SettlementModal';
 import { BillDetailDrawer } from './BillDetailDrawer';
 import { navigateWithParam, refreshAppMetrics } from './navParams';
+import { formatTime } from '@/lib/dates';
 
 type Row = SaleHistoryRow | PurchaseHistoryRow;
 
@@ -146,7 +147,7 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
       render: (r) => (
         <span className="text-xs text-slate-500">
           {r.transactionDate}
-          {isSale && r.createdAt ? ` ${r.createdAt.slice(11, 16)}` : ''}
+          {isSale && r.createdAt ? ` ${formatTime(r.createdAt)}` : ''}
         </span>
       ),
     },

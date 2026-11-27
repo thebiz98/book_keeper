@@ -12,6 +12,7 @@ const view = (over: Partial<AppConfigView> = {}): AppConfigView => ({
   backupDirectory: 'C:/data/backups',
   isDefaultDirectory: true,
   lastAutoBackupAt: null,
+  timeZone: 'Asia/Kolkata',
   ...over,
 });
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { addDays, startOfMonth, startOfWeek, startOfYear, todayLocal, toLocalDateString } from '@/lib/dates';
+import { addDays, parseLocalDate, startOfMonth, startOfWeek, startOfYear, todayLocal, toLocalDateString } from '@/lib/dates';
 
 export type DatePresetId = 'all' | 'today' | '7d' | '30d' | 'week' | 'month' | 'year' | 'custom';
 
@@ -33,7 +33,7 @@ const LABELS: Record<DatePresetId, string> = {
 };
 
 /** Inclusive local-date range for a preset ('all' = both empty). */
-export function presetRange(preset: Exclude<DatePresetId, 'custom'>, now: Date = new Date()): DateRange {
+export function presetRange(preset: Exclude<DatePresetId, 'custom'>, now: Date = parseLocalDate(todayLocal())): DateRange {
   const end = toLocalDateString(now);
   switch (preset) {
     case 'all':

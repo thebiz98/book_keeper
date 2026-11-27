@@ -178,7 +178,7 @@ export const CartTable: React.FC<CartTableProps> = ({
                 tabIndex={readOnly ? undefined : 0}
                 aria-label={`${item.name}, ${packDisplay(item)}`}
                 onKeyDown={(e) => onRowKeyDown(e, item, index)}
-                className="focus:outline-none focus:bg-blue-50 dark:focus:bg-blue-950/40 focus:ring-1 focus:ring-inset focus:ring-blue-500"
+                className="focus:outline-none focus:bg-blue-100 dark:focus:bg-blue-900/50 focus:ring-1 focus:ring-inset focus:ring-blue-500"
               >
                 <TableCell className="text-center text-slate-400 select-none">{index + 1}</TableCell>
                 <TableCell>
