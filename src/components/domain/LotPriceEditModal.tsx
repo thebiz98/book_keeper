@@ -159,6 +159,12 @@ export const LotPriceEditModal: React.FC<LotPriceEditModalProps> = ({ lot, baseU
           <p className="text-[11px] text-slate-500">
             Cost of sold units (COGS) updates; sale bills don&apos;t change.
           </p>
+          {result?.recostsHistory && (
+            <p data-testid="lot-price-recost-note" className="text-[11px] text-amber-700 dark:text-amber-400">
+              Units from this lot were already sold or written off: past COGS and inventory losses in reports will
+              change to the new price.
+            </p>
+          )}
 
           {loadError && (
             <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">

@@ -136,4 +136,22 @@ describe('LotPriceEditModal', () => {
     expect(bodyText()).toContain('Purchase price per Box of 5');
     expect(priceInput().value).toBe('50');
   });
+
+  it('says past COGS and losses change only when the backend reports a recost of history (S11)', async () => {
+    let recosts = false;
+    installApi({
+      previewLotPurchasePrice: async (p: { unitPrice: number }) => ({
+        purchaseItemId: 11, oldUnitCost: 10, newUnitCost: p.unitPrice, bill: null, recostsHistory: recosts,
+      }),
+    });
+    render(<LotPriceEditModal lot={lot({ source: 'OPENING' })} baseUnit="PCS" onClose={() => {}} onSaved={() => {}} />);
+    await flush();
+    setInput(priceInput(), 7);
+    await waitFor(() => !buttonByText('Save').disabled);
+    expect(document.querySelector('[data-testid="lot-price-recost-note"]')).toBeNull();
+    recosts = true;
+    setInput(priceInput(), 8);
+    await waitFor(() => document.querySelector('[data-testid="lot-price-recost-note"]') !== null);
+    expect(bodyText()).toContain('past COGS and inventory losses');
+  });
 });

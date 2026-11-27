@@ -463,6 +463,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
           item={{ itemId: item.itemId, name: item.name, currentStock: item.currentStock, baseUnit: item.baseUnit }}
           onClose={() => setStockOpen(false)}
           onDone={onSaved}
+          onStockChanged={onSaved}
         />
       )}
     </Drawer>

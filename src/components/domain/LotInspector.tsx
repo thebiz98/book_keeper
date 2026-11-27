@@ -23,14 +23,18 @@ const SOURCE_STYLE: Record<LotSource, string> = {
   RETURN: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-800',
 };
 
-/** Active (remaining > 0) lots first in FIFO order, then exhausted lots, newest first. */
+/**
+ * DD-92 (S7): the backend's FIFO order, which is entry order (lot id), never the lot date.
+ * Lots with stock first (by `fifoRank`), then used-up lots, newest entry first.
+ */
 export function sortLots(lots: ItemLot[]): ItemLot[] {
-  const active = (l: ItemLot) => l.remainingQuantity > STOCK_EPS;
+  const rank = (l: ItemLot) => l.fifoRank ?? null;
   return [...lots].sort((a, b) => {
-    if (active(a) !== active(b)) return active(a) ? -1 : 1;
-    const byDate = a.transactionDate.localeCompare(b.transactionDate);
-    if (byDate !== 0) return active(a) ? byDate : -byDate;
-    return active(a) ? a.purchaseItemId - b.purchaseItemId : b.purchaseItemId - a.purchaseItemId;
+    const ra = rank(a);
+    const rb = rank(b);
+    if ((ra === null) !== (rb === null)) return ra !== null ? -1 : 1;
+    if (ra !== null && rb !== null) return ra - rb;
+    return b.purchaseItemId - a.purchaseItemId;
   });
 }
 
@@ -88,9 +92,13 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, ed
 
   return (
     <>
+    <p data-testid="lot-order-label" className="text-[11px] text-slate-500 px-2 pb-1">
+      FIFO order (entry order): sales use the lot marked 1 first, whatever its date.
+    </p>
     <Table dense scroll="none" data-testid="lot-table">
       <TableHeader>
         <TableRow className="text-left text-slate-400">
+          <TableHead className="py-1 px-2 font-medium text-right">FIFO</TableHead>
           <TableHead className="py-1 px-2 font-medium">Lot Date</TableHead>
           <TableHead className="py-1 px-2 font-medium">Code</TableHead>
           <TableHead className="py-1 px-2 font-medium">Source</TableHead>
@@ -110,6 +118,9 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, ed
               l.remainingQuantity > STOCK_EPS ? '' : 'opacity-50'
             }`}
           >
+            <TableCell className="py-1 px-2 text-right font-mono" data-testid="lot-fifo-rank">
+              {l.fifoRank ?? '—'}
+            </TableCell>
             <TableCell className="py-1 px-2 font-mono">{l.transactionDate}</TableCell>
             <TableCell className="py-1 px-2 font-mono">{l.transactionCode}</TableCell>
             <TableCell className="py-1 px-2">

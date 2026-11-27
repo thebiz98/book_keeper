@@ -519,6 +519,7 @@ export const InventoryPage: React.FC = () => {
           }}
           onClose={() => setSetStockItem(null)}
           onDone={refreshAll}
+          onStockChanged={refreshAll}
         />
       )}
 
