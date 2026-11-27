@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, LotDraw, LotDrawComponent, OpeningQuantityResult, UpdateOpeningQuantityPayload, AdjustmentUndoGuard, AdjustmentUndoReason, LotDrawLot, PageRequest, Paginated, PreviewServiceCostPayload, PriorLine,
+    AdjustmentListRow, ItemBillRef, ItemLot, LotDraw, LotDrawComponent, OpeningQuantityResult, UpdateOpeningQuantityPayload, AdjustmentUndoGuard, AdjustmentUndoReason, LotDrawLot, PageRequest, Paginated, PreviewServiceCostPayload, PriorLine,
     ServiceCostPreview, SetItemStockPayload, SetItemStockResult, SetStockMode, SetStockOption, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult, UndoableWriteoff,
 };
@@ -1333,10 +1333,10 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         item_id: Option<i64>,
         page: Option<usize>,
         limit: Option<usize>,
-    ) -> Result<Paginated<StockAdjustment>, AppError> {
+    ) -> Result<Paginated<AdjustmentListRow>, AppError> {
         let req = PageRequest::new(page, limit)?;
         let mut tx = self.uow.begin_read()?;
-        let (items, total) = tx.adjustments().list_adjustments(item_id, req.offset(), req.limit)?;
+        let (items, total) = tx.adjustments().list_adjustment_rows(item_id, req.offset(), req.limit)?;
         Ok(Paginated::new(items, total, req.page, req.limit))
     }
 

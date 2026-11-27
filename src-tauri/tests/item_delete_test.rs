@@ -546,7 +546,7 @@ fn losses(e: &E) -> f64 {
     e.report.get_pnl_report(DAY, DAY).unwrap().inventory_losses
 }
 
-fn adjustments_of(e: &E, item: i64) -> Vec<book_keeper::core::entities::StockAdjustment> {
+fn adjustments_of(e: &E, item: i64) -> Vec<book_keeper::core::dtos::AdjustmentListRow> {
     e.inv.list_adjustments(Some(item), None, None).unwrap().items
 }
 

@@ -1,4 +1,5 @@
 use crate::core::entities::StockAdjustment;
+use crate::core::dtos::AdjustmentListRow;
 use crate::core::error::AppError;
 
 pub trait AdjustmentRepository {
@@ -15,4 +16,12 @@ pub trait AdjustmentRepository {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<StockAdjustment>, usize), AppError>;
+    /// Same paging as `list_adjustments`, with the item name/unit and the value (loss for a
+    /// reduction = FIFO cost from `stock_outflow_allocations`; qty x unit cost for an increase).
+    fn list_adjustment_rows(
+        &self,
+        item_id: Option<i64>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<AdjustmentListRow>, usize), AppError>;
 }

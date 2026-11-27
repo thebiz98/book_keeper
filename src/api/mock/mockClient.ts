@@ -53,6 +53,7 @@ import type {
   ResetScope,
   ResetSummary,
   StockAdjustment,
+  AdjustmentListRow,
   TransactionType,
 } from '@/types';
 import type { AppError } from '../errors';
@@ -1179,7 +1180,18 @@ export class MockApiClient implements ApiClient {
   }
   async listStockAdjustments(itemId?: number, page?: number, limit?: number) {
     const rows = itemId ? this.adjustments.filter((a) => a.itemId === itemId) : this.adjustments;
-    return paginate(rows, page, limit);
+    // The mock tracks no FIFO loss (createStockAdjustment reports lossValue 0), so a reduction's value is 0.
+    const listRows: AdjustmentListRow[] = rows.map((a) => {
+      const item = this.items.find((i) => i.id === a.itemId);
+      return {
+        ...a,
+        itemName: item?.name ?? `Item #${a.itemId}`,
+        baseUnit: item?.baseUnit ?? 'PCS',
+        itemIsActive: item?.isActive ?? true,
+        value: a.quantity < 0 ? 0 : a.quantity * (a.unitCost ?? 0),
+      };
+    });
+    return paginate(listRows, page, limit);
   }
 
   // --- Reports (static fixtures) ---

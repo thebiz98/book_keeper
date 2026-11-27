@@ -8,7 +8,6 @@ use std::sync::Arc;
 use common::stock::*;
 use common::{FifoStrategy, InventoryServiceImpl, ItemServiceImpl, TestDb};
 use book_keeper::core::dtos::*;
-use book_keeper::core::entities::StockAdjustment;
 use book_keeper::core::error::AppError;
 use book_keeper::core::value_objects::*;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
@@ -186,7 +185,7 @@ fn test_tc_inv_009_vendor_return_named_lot() {
     assert_stock_invariant(&mut *tx);
 }
 
-fn adjustment_rows(inv: &Inv, item: i64) -> Vec<StockAdjustment> {
+fn adjustment_rows(inv: &Inv, item: i64) -> Vec<AdjustmentListRow> {
     inv.list_adjustments(Some(item), Some(1), Some(50)).unwrap().items
 }
 
@@ -733,6 +732,27 @@ fn g7_undo_count_correction_restores_stock_and_drops_the_loss() {
     assert_eq!(lot_remaining(&mut *r, lot), 6.0);
     assert_stock_invariant(&mut *r);
     assert!(matches!(inv.undo_stock_adjustment(aid), Err(AppError::NotFound { .. })));
+}
+
+#[test]
+fn list_adjustments_rows_carry_item_name_unit_and_value() {
+    let (db, inv) = setup(&[(8, 8, 20.0, 5.0)]);
+    let rep = common::ReportServiceImpl::with_fixed_today(db.clone(), "2026-11-21");
+    let loss = inv.create_adjustment(adj(8, -3.0, AdjustmentReason::CountCorrection, None)).unwrap();
+    let added = inv.create_adjustment(adj(8, 4.0, AdjustmentReason::UnrecordedStock, Some(2.5))).unwrap();
+    let rows = inv.list_adjustments(Some(8), Some(1), Some(10)).unwrap().items;
+    assert_eq!(rows.len(), 2);
+    let l = rows.iter().find(|r| r.id == loss.adjustment_id).unwrap();
+    assert_eq!((l.item_name.as_str(), l.base_unit.as_str(), l.item_is_active), ("Item 8", "PCS", true));
+    assert_eq!((l.quantity, l.value, l.unit_cost), (-3.0, 15.0, None));
+    let a = rows.iter().find(|r| r.id == added.adjustment_id).unwrap();
+    assert_eq!((a.quantity, a.value, a.unit_cost), (4.0, 10.0, Some(2.5)));
+    assert_eq!(rep.get_pnl_report("2026-11-21", "2026-11-21").unwrap().inventory_losses, 15.0);
+
+    inv.undo_stock_adjustment(loss.adjustment_id).unwrap();
+    let rows = inv.list_adjustments(Some(8), Some(1), Some(10)).unwrap().items;
+    assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![added.adjustment_id]);
+    assert_eq!(rep.get_pnl_report("2026-11-21", "2026-11-21").unwrap().inventory_losses, 0.0);
 }
 
 #[test]

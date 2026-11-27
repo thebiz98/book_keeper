@@ -1,18 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { AdjustmentsHistoryList } from '@/components/domain/ReturnsHistoryList';
-import type { AdjustmentUndoGuard, StockAdjustment } from '@/types';
+import type { AdjustmentUndoGuard, AdjustmentListRow } from '@/types';
 import { installApi, flush, waitFor, click, buttonByText, bodyText } from './helpers';
 
-const adj = (over: Partial<StockAdjustment> = {}): StockAdjustment => ({
-  id: 7, adjustmentDate: '2026-11-26', itemId: 1, quantity: -5, unitCost: null, reason: 'COUNT_CORRECTION',
-  notes: null, createdAt: '2026-11-26T00:00:00Z', ...over,
+const adj = (over: Partial<AdjustmentListRow> = {}): AdjustmentListRow => ({
+  id: 7, adjustmentDate: '2026-11-26', itemId: 1, itemName: 'Pen', baseUnit: 'PCS', itemIsActive: true, quantity: -5, unitCost: null,
+  reason: 'COUNT_CORRECTION', notes: null, createdAt: '2026-11-26T00:00:00Z', value: 50, ...over,
 });
-const page = (items: StockAdjustment[]) => ({ items, total: items.length, page: 1, limit: 10 });
+const page = (items: AdjustmentListRow[]) => ({ items, total: items.length, page: 1, limit: 10 });
 const guard = (over: Partial<AdjustmentUndoGuard> = {}): AdjustmentUndoGuard => ({
   canUndo: true, reason: null, quantity: -5, itemId: 1, itemName: 'Pen', baseUnit: 'PCS', lossRemoved: 50, valueChange: 50, ...over,
 });
-const undoBtn = () => document.querySelector('button[aria-label="Undo adjustment #7"]') as HTMLButtonElement;
+const undoBtn = () => document.querySelector('button[aria-label="Undo adjustment #7 (Pen)"]') as HTMLButtonElement;
 
 describe('AdjustmentsHistoryList undo', () => {
   beforeEach(() => {
@@ -30,6 +30,11 @@ describe('AdjustmentsHistoryList undo', () => {
     click(undoBtn());
     await waitFor(() => bodyText().includes('Puts 5 PCS of Pen back into stock'));
     expect(bodyText()).toContain('Inventory Losses');
+    expect(bodyText()).not.toContain('#1');
+    expect(bodyText()).toContain('Pen');
+    expect(bodyText()).toContain('−5 PCS');
+    expect(bodyText()).toContain('Loss');
+    expect(bodyText()).toContain('50');
     expect(api.getAdjustmentUndoGuard).toHaveBeenCalledWith(7);
     click(buttonByText(/^Undo/, document.querySelector('[role="dialog"]') ?? document.body));
     await flush();
@@ -55,5 +60,19 @@ describe('AdjustmentsHistoryList undo', () => {
     click(confirm);
     await flush();
     expect(api.undoStockAdjustment).not.toHaveBeenCalled();
+  });
+
+  it('shows the item name, deleted marker, unit cost and value of an increase', async () => {
+    installApi({
+      listStockAdjustments: page([adj({ id: 8, itemName: 'Gel Pen', itemIsActive: false, quantity: 35, reason: 'UNRECORDED_STOCK', unitCost: 10, value: 350 })]),
+    });
+    render(<AdjustmentsHistoryList reloadKey={0} />);
+    await waitFor(() => bodyText().includes('Gel Pen'));
+    expect(bodyText()).toContain('(deleted)');
+    expect(bodyText()).toContain('+35 PCS');
+    expect(bodyText()).toContain('Added');
+    expect(bodyText()).toContain('350');
+    expect(bodyText()).toContain('#8');
+    expect(document.querySelector('button[aria-label="Undo adjustment #8 (Gel Pen)"]')).not.toBeNull();
   });
 });

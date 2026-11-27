@@ -1067,7 +1067,7 @@ pub trait InventoryService: Send + Sync {
     /// Lot inspector (all sources).
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;
 
-    /// Lists historical stock adjustments.
+    /// Lists historical stock adjustments with item name and value (loss = FIFO cost of a write-off; added = qty x unit cost).
     fn list_adjustments(
         &self,
         item_id: Option<i64>,

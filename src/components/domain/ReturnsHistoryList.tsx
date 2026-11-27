@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, errorMessage } from '@/api';
-import type { AdjustmentUndoGuard, ReturnTransaction, ReturnType, StockAdjustment } from '@/types';
+import type { AdjustmentUndoGuard, ReturnTransaction, ReturnType, AdjustmentListRow } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { DataTable, type DataTableColumn } from './DataTable';
 import { ADJUSTMENT_REASONS } from './StockAdjustmentForm';
@@ -73,11 +73,11 @@ export const ReturnsHistoryList: React.FC<{ returnType: ReturnType; reloadKey: n
 
 export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reloadKey }) => {
   const [page, setPage] = useState(1);
-  const [rows, setRows] = useState<StockAdjustment[]>([]);
+  const [rows, setRows] = useState<AdjustmentListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [undo, setUndo] = useState<{ row: StockAdjustment; guard: AdjustmentUndoGuard | null; error: string | null } | null>(null);
+  const [undo, setUndo] = useState<{ row: AdjustmentListRow; guard: AdjustmentUndoGuard | null; error: string | null } | null>(null);
 
   const load = useCallback(() => {
     let live = true;
@@ -100,7 +100,7 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
   useEffect(() => load(), [load]);
 
   // Backend dry run (DD-56): the dialog only prints the guard's numbers or its reason.
-  const openUndo = (row: StockAdjustment) => {
+  const openUndo = (row: AdjustmentListRow) => {
     setUndo({ row, guard: null, error: null });
     api
       .getAdjustmentUndoGuard(row.id)
@@ -129,15 +129,30 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
       : `Removes ${qty} added by this adjustment.`;
   };
 
-  const columns: DataTableColumn<StockAdjustment>[] = [
+  const columns: DataTableColumn<AdjustmentListRow>[] = [
+    { key: 'ref', header: 'Ref', mono: true, render: (r) => <span className="text-xs">#{r.id}</span> },
     { key: 'date', header: 'Date', mono: true, render: (r) => r.adjustmentDate },
-    { key: 'item', header: 'Item', mono: true, render: (r) => `#${r.itemId}` },
+    {
+      key: 'item',
+      header: 'Item',
+      render: (r) => (
+        <>
+          {r.itemName}
+          {!r.itemIsActive && <span className="ml-1 text-xs text-slate-500 dark:text-slate-400">(deleted)</span>}
+        </>
+      ),
+    },
     {
       key: 'qty',
-      header: 'Quantity',
+      header: 'Change',
       align: 'right',
       mono: true,
-      render: (r) => (r.quantity > 0 ? `+${r.quantity}` : String(r.quantity)),
+      render: (r) => (
+        <span className={r.quantity < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}>
+          {r.quantity < 0 ? '−' : '+'}
+          {Math.abs(r.quantity)} {r.baseUnit}
+        </span>
+      ),
     },
     {
       key: 'reason',
@@ -145,10 +160,20 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
       render: (r) => ADJUSTMENT_REASONS.find((x) => x.value === r.reason)?.label ?? r.reason,
     },
     {
-      key: 'cost',
-      header: 'Unit Cost',
+      key: 'value',
+      header: 'Value',
       align: 'right',
-      render: (r) => (r.unitCost !== null ? <CurrencyDisplay amount={r.unitCost} /> : '-'),
+      render: (r) => (
+        <div>
+          <span className="mr-1 text-xs text-slate-500 dark:text-slate-400">{r.quantity < 0 ? 'Loss' : 'Added'}</span>
+          <CurrencyDisplay amount={r.value} />
+          {r.unitCost !== null && (
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              @ {formatINR(r.unitCost)} / {r.baseUnit}
+            </div>
+          )}
+        </div>
+      ),
     },
     { key: 'notes', header: 'Notes', render: (r) => r.notes ?? '' },
     {
@@ -156,7 +181,7 @@ export const AdjustmentsHistoryList: React.FC<{ reloadKey: number }> = ({ reload
       header: '',
       align: 'right',
       render: (r) => (
-        <Button variant="outline" size="sm" onClick={() => openUndo(r)} aria-label={`Undo adjustment #${r.id}`}>
+        <Button variant="outline" size="sm" onClick={() => openUndo(r)} aria-label={`Undo adjustment #${r.id} (${r.itemName})`}>
           Undo
         </Button>
       ),
