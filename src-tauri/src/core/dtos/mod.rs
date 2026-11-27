@@ -67,5 +67,5 @@ pub use return_dto::{
 };
 pub use sale_dto::{
     CreateSaleItemPayload, CreateSalePayload, SaleDetailView, SaleItemDetail, SaleSummaryResponse,
-    PaymentStatusFilter, SaleHistoryRow, SalesHistoryFilter, BillProfitParts, ProfitSummary,
+    PaymentStatusFilter, SaleHistoryRow, SalesHistoryFilter, SalesHistoryPage, SalesHistoryTotals, BillProfitParts, ProfitSummary,
 };

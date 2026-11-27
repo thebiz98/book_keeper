@@ -1,7 +1,7 @@
 //! SQLite implementation of `SaleRepository`.
 use rusqlite::{params, types::Value, OptionalExtension, Row};
 
-use crate::core::dtos::{BillProfitParts, ItemBillRef, SaleHistoryRow, SalesHistoryFilter};
+use crate::core::dtos::{BillProfitParts, ItemBillRef, SaleHistoryRow, SalesHistoryFilter, SalesHistoryTotals};
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
@@ -340,13 +340,41 @@ impl SaleRepository for SqliteSaleRepository {
         filter: &SalesHistoryFilter,
         offset: usize,
         limit: usize,
-    ) -> Result<(Vec<SaleHistoryRow>, usize), AppError> {
+    ) -> Result<(Vec<SaleHistoryRow>, usize, Option<SalesHistoryTotals>), AppError> {
         let (w, vals) = history_where(filter, (filter.include_opening_balance != Some(true)).then_some("t.is_opening_balance = 0"), &["t.transaction_code", "t.party_name"])?;
-        let total: i64 = self.conn.query_row(
-            &format!("SELECT COUNT(*) FROM sale_transactions t{w}"),
-            rusqlite::params_from_iter(vals.iter()),
-            |r| r.get(0),
-        )?;
+        let (total, totals): (i64, Option<SalesHistoryTotals>) = if filter.include_totals == Some(true) {
+            let profit_sum = if filter.include_profit == Some(true) {
+                format!("ROUND(COALESCE(SUM({}), 0), 2)", profit_expr())
+            } else {
+                "NULL".to_string()
+            };
+            self.conn.query_row(
+                &format!(
+                    "SELECT COUNT(*), ROUND(COALESCE(SUM(t.total_amount), 0), 2), ROUND(COALESCE(SUM(t.paid_amount), 0), 2),                      ROUND(COALESCE(SUM(t.balance_due), 0), 2), {profit_sum} FROM sale_transactions t{w}"
+                ),
+                rusqlite::params_from_iter(vals.iter()),
+                |r| {
+                    let n: i64 = r.get(0)?;
+                    Ok((
+                        n,
+                        Some(SalesHistoryTotals {
+                            bill_count: n.max(0) as usize,
+                            total_amount: r.get(1)?,
+                            paid_amount: r.get(2)?,
+                            balance_due: r.get(3)?,
+                            profit: r.get(4)?,
+                        }),
+                    ))
+                },
+            )?
+        } else {
+            let n = self.conn.query_row(
+                &format!("SELECT COUNT(*) FROM sale_transactions t{w}"),
+                rusqlite::params_from_iter(vals.iter()),
+                |r| r.get(0),
+            )?;
+            (n, None)
+        };
         let mut page_vals = vals;
         page_vals.push(Value::Integer(lim(limit)));
         page_vals.push(Value::Integer(lim(offset)));
@@ -381,7 +409,7 @@ impl SaleRepository for SqliteSaleRepository {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((rows, total.max(0) as usize))
+        Ok((rows, total.max(0) as usize, totals))
     }
 
     fn get_returned_quantities_for_sale(&self, sale_id: i64) -> Result<Vec<(i64, f64, f64)>, AppError> {

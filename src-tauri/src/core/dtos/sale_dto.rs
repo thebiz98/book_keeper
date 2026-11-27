@@ -94,6 +94,9 @@ pub struct SalesHistoryFilter {
     /// Absent / false: opening bills are excluded (history is trade only).
     #[serde(default)]
     pub include_opening_balance: Option<bool>,
+    /// Sales history only (FR-34): when true the page also carries `totals` over every matching bill.
+    #[serde(default)]
+    pub include_totals: Option<bool>,
 }
 
 impl SalesHistoryFilter {
@@ -102,6 +105,29 @@ impl SalesHistoryFilter {
         validate_date_range(self.start_date.as_deref(), self.end_date.as_deref())?;
         PageRequest::new(self.page, self.limit)
     }
+}
+
+/// Totals over every bill matching the history filter (all pages), computed in SQL (DD-56).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SalesHistoryTotals {
+    pub bill_count: usize,
+    pub total_amount: f64,
+    pub paid_amount: f64,
+    pub balance_due: f64,
+    /// Bill-based profit (FR-34); `None` unless the filter asked for profit.
+    #[serde(default)]
+    pub profit: Option<f64>,
+}
+
+/// A sales history page: `Paginated` fields plus optional `totals` (when `include_totals`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SalesHistoryPage {
+    pub items: Vec<SaleHistoryRow>,
+    pub total: usize,
+    pub page: usize,
+    pub limit: usize,
+    #[serde(default)]
+    pub totals: Option<SalesHistoryTotals>,
 }
 
 /// One row of the sales history (party name is the header snapshot, DD-30).
