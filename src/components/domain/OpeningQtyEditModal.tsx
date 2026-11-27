@@ -47,6 +47,13 @@ export const OpeningQtyEditModal: React.FC<OpeningQtyEditModalProps> = ({ lot, b
     fetcher: (i) => api.previewOpeningLotQuantity(i),
   });
   const result = preview.data;
+  // DD-95: the floor (restocked return units count as used) is the backend's; the last one shown
+  // stays on screen while a refused quantity has no result.
+  const [floor, setFloor] = useState<number | null>(null);
+  useEffect(() => setFloor(null), [lotId]);
+  useEffect(() => {
+    if (result) setFloor(result.consumed);
+  }, [result]);
   const changed = result != null && result.newQuantity !== result.oldQuantity;
   const canSave = !problem && !preview.isLoading && result != null && preview.errors.length === 0 && changed;
 
@@ -86,13 +93,13 @@ export const OpeningQtyEditModal: React.FC<OpeningQtyEditModalProps> = ({ lot, b
             <div>
               <div className="text-[10px] uppercase tracking-wide text-slate-400">Already used</div>
               <div className="font-mono" data-testid="opening-used">
-                {result ? result.consumed : lot.quantity - lot.remainingQuantity} {baseUnit}
+                {floor != null ? `${floor} ${baseUnit}` : '–'}
               </div>
             </div>
             <div>
               <div className="text-[10px] uppercase tracking-wide text-slate-400">Minimum allowed</div>
               <div className="font-mono" data-testid="opening-min">
-                {result ? result.consumed : lot.quantity - lot.remainingQuantity} {baseUnit}
+                {floor != null ? `${floor} ${baseUnit}` : '–'}
               </div>
             </div>
           </div>

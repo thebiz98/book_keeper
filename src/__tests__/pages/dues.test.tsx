@@ -97,6 +97,24 @@ describe('CreditDuesPage', () => {
     expect(payload.settlementDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it('shows the backend DATE_ORDER refusal of a payment dated before its bill (DD-94)', async () => {
+    const msg = "Payment date can't be before the bill date (01 Jan 2026)";
+    const api = setup();
+    api.settleBillPayment.mockImplementation(async () => {
+      throw { type: 'BillLocked', details: { code: 'DATE_ORDER', message: msg } };
+    });
+    render(<CreditDuesPage />);
+    await waitFor(() => bodyText().includes('Sharma Traders'));
+    click(document.querySelector('[aria-label^="Toggle open bills"]')!);
+    await waitFor(() => !!document.querySelector('[data-testid="open-bills"]'));
+    const rows = document.querySelectorAll('[data-testid="open-bills"] tbody tr');
+    click(buttonByText('Settle', rows[0] as HTMLElement));
+    await flush();
+    click(buttonByText('Record Settlement', document.querySelector('[role="dialog"]')!));
+    await waitFor(() => bodyText().includes(msg));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
   it('Settle bills sends one batch payload and previews the FIFO fill', async () => {
     const api = setup();
     render(<CreditDuesPage />);
