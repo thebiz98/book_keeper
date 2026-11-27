@@ -101,3 +101,13 @@ export const EditErrors: React.FC<{ messages: string[] }> = ({ messages }) =>
 
 export const inputCls =
   'bg-transparent border border-slate-300 dark:border-slate-700 rounded px-1 text-right font-mono disabled:opacity-60';
+
+/** FR-45 / DD-90: marks a line whose item is deleted (it may only stay unchanged; the backend decides). */
+export const DeletedBadge: React.FC = () => (
+  <span
+    data-testid="edit-line-deleted"
+    className="ml-1.5 rounded px-1 py-0.5 text-[10px] font-semibold uppercase bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+  >
+    Deleted
+  </span>
+);

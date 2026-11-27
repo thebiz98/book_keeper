@@ -30,6 +30,8 @@ export interface EditSaleLine {
   rate: number | null;
   /** The item's sale price per base unit, to suggest a rate when the unit changes (null = unknown). */
   defaultSalePrice: number | null;
+  /** FR-45 / DD-90: the item is deleted; the line may only stay unchanged (the backend decides). */
+  deleted?: boolean;
   /** The item's bundles, for the unit select. */
   bundles: ItemBundleSearchResult[];
 }
@@ -109,6 +111,7 @@ export function useSaleEditDraft(billId: number) {
             rate: c.rate,
             defaultSalePrice: c.defaultSalePrice ?? null,
             bundles: found[i]?.bundles ?? [],
+            deleted: found[i]?.isActive === false,
           };
         });
         const s = d.sale;

@@ -15,6 +15,8 @@ import type { PurchaseLine } from '../purchaseMath';
 /** A purchase line of the edit form. `unitCost` is null until the user types one (new lines). */
 export interface EditPurchaseLine extends Omit<PurchaseLine, 'unitCost'> {
   unitCost: number | null;
+  /** FR-45 / DD-90: the item is deleted; the line may only stay unchanged (the backend decides). */
+  deleted?: boolean;
   /** The item's bundles, for the unit select. */
   bundles: ItemBundleSearchResult[];
 }
@@ -96,6 +98,7 @@ export function usePurchaseEditDraft(billId: number) {
             locked: lim?.referenced ?? false,
             costLocked: lim?.vendorReturned ?? false,
             bundles: found[i]?.bundles ?? [],
+            deleted: found[i]?.isActive === false,
           };
         });
         const p = d.purchase;

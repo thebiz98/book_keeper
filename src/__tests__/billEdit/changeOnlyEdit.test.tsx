@@ -114,9 +114,13 @@ describe('change-only bill edit (FR-55, DD-89)', () => {
         restoreItem: vi.fn(async () => {
           restored = true;
         }),
+        getItem: async (id: number) => (id === 1 ? { ...PEN, isActive: false } : getItem(id)),
       },
     });
     await openEdit();
+    // The deleted item's line is marked; the unchanged form raises no error.
+    expect(document.querySelectorAll('[data-testid="edit-line-deleted"]')).toHaveLength(1);
+    expect(document.querySelector('[data-testid="deleted-ref-alert"]')).toBeNull();
     setInput(q('input[aria-label="Quantity Pen"]'), '3');
     await settle();
     expect(q('[data-testid="deleted-ref-alert"]').textContent).toContain("'Pen' is deleted. Restore it first.");
