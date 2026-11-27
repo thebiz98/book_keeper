@@ -11,6 +11,8 @@ pub enum BackupKind {
     PreReset,
     /// Written by the migration runner before an upgrade (DD-29). Rotated after `retentionDays`.
     PreMigration,
+    /// Written right before a restore swaps the database file (FR-60). Rotated like `PreReset`.
+    PreRestore,
 }
 
 impl BackupKind {
@@ -20,6 +22,7 @@ impl BackupKind {
             BackupKind::Auto => "book_keeper_auto_",
             BackupKind::PreReset => "book_keeper_prereset_",
             BackupKind::PreMigration => "book_keeper_premigration_",
+            BackupKind::PreRestore => "book_keeper_prerestore_",
         }
     }
 }
@@ -32,7 +35,7 @@ pub trait BackupService: Send + Sync {
     /// Like `backup_database`, but creates `dir` if missing and names the file by `kind`.
     fn backup_to_dir(&self, dir: &str, kind: BackupKind) -> Result<String, AppError>;
 
-    /// Deletes auto, pre-reset and pre-migration backups in `dir` older than `retention_days` (by the stamp in
+    /// Deletes auto, pre-reset, pre-migration and pre-restore backups in `dir` older than `retention_days` (by the stamp in
     /// their name). Always keeps the newest auto backup; never touches manual or unknown files.
     /// Returns the deleted file names.
     fn rotate(&self, dir: &str, retention_days: u32) -> Result<Vec<String>, AppError>;

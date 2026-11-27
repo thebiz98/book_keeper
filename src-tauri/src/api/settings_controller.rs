@@ -4,6 +4,7 @@ use crate::core::error::AppError;
 use crate::core::entities::ShopSetting;
 use serde::Serialize;
 use crate::services::contracts::backup_service::BackupKind;
+use crate::services::r#impl::restore::{self, BackupFileInfo, RestorePreview};
 
 /// Runtime config shown on the Settings page.
 #[derive(Debug, Clone, Serialize)]
@@ -15,7 +16,12 @@ pub struct AppConfigView {
     pub last_auto_backup_at: Option<String>,
     /// IANA shop time zone from app config; the UI formats stamps in it.
     pub time_zone: String,
+    /// Why the last restore failed (FR-60); shown once until dismissed. Filled by the commands.
+    pub restore_failure: Option<String>,
 }
+
+/// The app data folder (where the restore marker and staged file live). Managed by `main.rs`.
+pub struct AppDataDir(pub std::path::PathBuf);
 
 pub fn build_config_view(state: &AppState) -> AppConfigView {
     let dir = state.backup_dir.read().unwrap_or_else(|e| e.into_inner()).clone();
@@ -36,6 +42,7 @@ pub fn build_config_view(state: &AppState) -> AppConfigView {
                     .map(|d| d.with_timezone(&chrono::Utc).to_rfc3339())
             }),
         time_zone: state.config.time_zone.clone(),
+        restore_failure: None,
     }
 }
 
@@ -63,8 +70,40 @@ pub fn apply_backup_directory(state: &AppState, path: Option<String>) -> Result<
 }
 
 #[tauri::command]
-pub async fn get_app_config(state: State<'_, AppState>) -> Result<AppConfigView, AppError> {
-    Ok(build_config_view(&state))
+pub async fn get_app_config(state: State<'_, AppState>, data_dir: State<'_, AppDataDir>) -> Result<AppConfigView, AppError> {
+    let mut view = build_config_view(&state);
+    view.restore_failure = crate::services::r#impl::restore::restore_failure(&data_dir.0);
+    Ok(view)
+}
+#[tauri::command]
+pub async fn dismiss_restore_failure(data_dir: State<'_, AppDataDir>) -> Result<(), AppError> {
+    crate::services::r#impl::restore::dismiss_restore_failure(&data_dir.0);
+    Ok(())
+}
+#[tauri::command]
+pub async fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupFileInfo>, AppError> {
+    let dir = state.backup_dir.read().unwrap_or_else(|e| e.into_inner()).clone();
+    super::run_blocking(move || restore::list_backups(&dir)).await
+}
+#[tauri::command]
+pub async fn preview_restore(path: String) -> Result<RestorePreview, AppError> {
+    super::run_blocking(move || restore::preview_restore(std::path::Path::new(&path))).await
+}
+/// Stages the restore and restarts the app shortly after, so the UI gets this answer first.
+/// The swap happens at the next start-up (DD-99).
+#[tauri::command]
+pub async fn stage_restore(
+    app: tauri::AppHandle,
+    data_dir: State<'_, AppDataDir>,
+    path: String,
+) -> Result<(), AppError> {
+    let dir = data_dir.0.clone();
+    super::run_blocking(move || restore::stage_restore(&dir, std::path::Path::new(&path)).map(|_| ())).await?;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        app.restart();
+    });
+    Ok(())
 }
 #[tauri::command]
 pub async fn set_backup_directory(state: State<'_, AppState>, path: Option<String>) -> Result<AppConfigView, AppError> {

@@ -245,7 +245,7 @@ pub fn parse_stamp(name: &str, kind: BackupKind) -> Option<chrono::NaiveDateTime
     chrono::NaiveDateTime::parse_from_str(stamp, "%Y%m%d_%H%M").ok()
 }
 
-/// Pure rotation rule: auto, pre-reset and pre-migration backups older than `retention_days` before `now`,
+/// Pure rotation rule: auto, pre-reset, pre-migration and pre-restore backups older than `retention_days` before `now`,
 /// except the newest auto backup. Manual and unrecognised files are never selected.
 pub fn select_for_deletion(names: &[String], now: chrono::NaiveDateTime, retention_days: u32) -> Vec<String> {
     let cutoff = now - chrono::Duration::days(i64::from(retention_days));
@@ -258,7 +258,7 @@ pub fn select_for_deletion(names: &[String], now: chrono::NaiveDateTime, retenti
         .iter()
         .filter(|n| Some(*n) != newest_auto.as_ref())
         .filter(|n| {
-            [BackupKind::Auto, BackupKind::PreReset, BackupKind::PreMigration]
+            [BackupKind::Auto, BackupKind::PreReset, BackupKind::PreMigration, BackupKind::PreRestore]
                 .iter()
                 .any(|k| parse_stamp(n, *k).is_some_and(|t| t < cutoff))
         })
