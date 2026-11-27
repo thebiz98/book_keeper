@@ -4,12 +4,12 @@ import { render } from '../testUtils';
 import { installApi, waitFor } from '../pages/helpers';
 import { useSaleEditDraft, type SaleEditDraftApi } from '@/components/domain/billEdit/useSaleEditDraft';
 import { useCartStore } from '@/store/useCartStore';
-import { saleDetail, saleGuard, search, INK, PEN } from './fixtures';
+import { saleDetail, saleGuard, search, INK, PEN, getItem } from './fixtures';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function mount(strict = false) {
-  installApi({ getSaleDetails: saleDetail(), getBillEditGuard: saleGuard(), searchItemsFts: search });
+  installApi({ getSaleDetails: saleDetail(), getBillEditGuard: saleGuard(), searchItemsFts: search, getItem });
   const out: { current: SaleEditDraftApi } = { current: undefined as unknown as SaleEditDraftApi };
   const Probe: React.FC = () => {
     out.current = useSaleEditDraft(5);
@@ -37,8 +37,8 @@ describe('useSaleEditDraft', () => {
     const out = mount();
     await waitFor(() => out.current.load.status === 'ready');
     expect(out.current.toPayload(130)!.items).toEqual([
-      { itemId: 1, bundleId: null, bundleQuantity: 2, unitPrice: 50 },
-      { itemId: 2, bundleId: null, bundleQuantity: 1, unitPrice: 30 },
+      { itemId: 1, bundleId: null, bundleQuantity: 2, unitPrice: 50, saleItemId: 1 },
+      { itemId: 2, bundleId: null, bundleQuantity: 1, unitPrice: 30, saleItemId: 2 },
     ]);
     act(() => { out.current.addLine({ ...INK, defaultSalePrice: 11 }); });
     expect(out.current.draft!.lines[2]).toMatchObject({ itemId: 2, quantity: 1, rate: 11 });

@@ -63,6 +63,11 @@ pub trait SaleRepository {
     /// total and `updated_at`. Never touches the code, `created_at` or the cached money fields
     /// (`PaymentService` recomputes those).
     fn update_header_for_edit(&mut self, h: &SaleTransaction) -> Result<(), AppError>;
+    /// DD-89 (change-only edit): rewrites one line's item, snapshots, quantities and price fields
+    /// in place (id, bill and line date kept). The service decides which fields change.
+    fn update_sale_item(&mut self, line: &SaleItem) -> Result<(), AppError>;
+    /// DD-89: removes one line (its allocations must be gone first).
+    fn delete_sale_item(&mut self, id: i64) -> Result<(), AppError>;
     /// FR-20: removes the bill's lines (allocations must be gone first); returns the count.
     fn delete_sale_items(&mut self, sale_id: i64) -> Result<usize, AppError>;
     /// FR-20: removes the header (lines, charges and ledger must be gone first).

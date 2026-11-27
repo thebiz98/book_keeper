@@ -15,6 +15,8 @@ import type { PurchaseLine } from '../purchaseMath';
 /** A purchase line of the edit form. `unitCost` is null until the user types one (new lines). */
 export interface EditPurchaseLine extends Omit<PurchaseLine, 'unitCost'> {
   unitCost: number | null;
+  /** FR-45 / DD-90: the item is deleted; the line may only stay unchanged (the backend decides). */
+  deleted?: boolean;
   /** The item's bundles, for the unit select. */
   bundles: ItemBundleSearchResult[];
 }
@@ -29,6 +31,8 @@ export interface PurchaseDraft {
   charges: BillChargeLine[];
   paymentStatus: PaymentStatus;
   paidInput: number;
+  /** The stored payment mode, sent back unchanged (the form does not edit it). */
+  paymentMode: string | null;
 }
 
 export type DraftLoad = { status: 'loading' } | { status: 'ready' } | { status: 'error'; message: string };
@@ -80,25 +84,21 @@ export function usePurchaseEditDraft(billId: number) {
           });
           return;
         }
-        const found = await Promise.all(
-          d.items.map((it) =>
-            api
-              .searchItemsFts(it.purchaseItem.itemName, 8)
-              .then((rows) => rows.find((r) => r.itemId === it.purchaseItem.itemId) ?? null)
-              .catch(() => null)
-          )
-        );
+        // E4: each lot's item by id (deleted or renamed items included), its pack by the
+        // backend-resolved bundle id; never a name search.
+        const found = await Promise.all(d.items.map((it) => api.getItem(it.purchaseItem.itemId).catch(() => null)));
         if (!live) return;
         const lines: EditPurchaseLine[] = d.items.map((it, i) => {
           const lot = it.purchaseItem;
           const lim = g.lotLimits.find((l) => l.purchaseItemId === lot.id);
           return {
-            ...purchaseLineToDraft(lot, found[i]),
+            ...purchaseLineToDraft(lot, found[i], it.bundleId),
             key: seq.current++,
             minBaseQty: lim?.consumedQuantity ?? 0,
             locked: lim?.referenced ?? false,
             costLocked: lim?.vendorReturned ?? false,
             bundles: found[i]?.bundles ?? [],
+            deleted: found[i]?.isActive === false,
           };
         });
         const p = d.purchase;
@@ -120,6 +120,7 @@ export function usePurchaseEditDraft(billId: number) {
           // Only seeds the control from what is stored; the backend preview judges the result.
           paymentStatus: p.paymentStatus === 'PAID' ? 'PAID' : up > 0 ? 'PARTIAL' : 'UNPAID',
           paidInput: up,
+          paymentMode: p.paymentMode,
         };
         setDraft(next);
         setBaseline(snapshot(next));
@@ -251,7 +252,7 @@ export function usePurchaseEditDraft(billId: number) {
             transactionDate: draft.date,
             partyId: draft.partyId,
             supplierInvoiceRef: draft.supplierInvoiceRef.trim() || null,
-            paymentMode: 'CASH',
+            paymentMode: draft.paymentMode ?? 'CASH',
             charges: toChargeInputs(draft.charges),
             notes: draft.notes.trim() || null,
             items: draft.lines.map((l) => ({

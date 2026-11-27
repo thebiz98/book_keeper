@@ -52,6 +52,11 @@ impl BillChargeRepository for SqliteBillChargeRepository {
         Ok(rows)
     }
 
+    fn delete_by_id(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn.execute("DELETE FROM bill_charges WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     fn delete_by_transaction(&mut self, t: TransactionType, id: i64) -> Result<usize, AppError> {
         Ok(self.conn.execute(
             "DELETE FROM bill_charges WHERE transaction_type = ?1 AND transaction_id = ?2",

@@ -185,6 +185,26 @@ impl SaleRepository for SqliteSaleRepository {
         Ok(())
     }
 
+    fn update_sale_item(&mut self, l: &SaleItem) -> Result<(), AppError> {
+        let n = self.conn.execute(
+            "UPDATE sale_items SET item_id = ?2, item_name = ?3, pack_label = ?4, pack_quantity = ?5, quantity = ?6, \
+             unit_price = ?7, total_amount = ?8, service_cost_total = ?9 WHERE id = ?1",
+            params![
+                l.id, l.item_id, l.item_name, l.pack_label, l.pack_quantity, l.quantity, l.unit_price,
+                l.total_amount, l.service_cost_total
+            ],
+        )?;
+        if n == 0 {
+            return Err(AppError::not_found("SaleItem", l.id.to_string()));
+        }
+        Ok(())
+    }
+
+    fn delete_sale_item(&mut self, id: i64) -> Result<(), AppError> {
+        self.conn.execute("DELETE FROM sale_items WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     fn delete_sale_items(&mut self, sale_id: i64) -> Result<usize, AppError> {
         Ok(self.conn.execute("DELETE FROM sale_items WHERE sale_transaction_id = ?1", params![sale_id])?)
     }

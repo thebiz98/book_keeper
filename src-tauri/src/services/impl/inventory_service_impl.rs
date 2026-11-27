@@ -558,6 +558,49 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         Ok(result.reversed_cost)
     }
 
+    fn release_sale_line(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        item_id: i64,
+        quantity: f64,
+    ) -> Result<f64, AppError> {
+        let result = self.strategy.release_sale_allocations(uow, sale_item_id, item_id, quantity)?;
+        if result.restocked_quantity > 0.0 {
+            uow.items().apply_stock_delta(item_id, result.restocked_quantity)?;
+        }
+        Ok(result.reversed_cost)
+    }
+
+    fn release_whole_sale_line(&self, uow: &mut dyn TransactionContext, sale_item_id: i64) -> Result<f64, AppError> {
+        // Per lot item: a service line's allocations sit on its components' lots (X4).
+        let mut per_item: Vec<(i64, f64)> = Vec::new();
+        for a in uow.allocations().find_by_sale_item_id(sale_item_id)? {
+            let lot = uow
+                .purchases()
+                .find_purchase_item_by_id(a.purchase_item_id)?
+                .ok_or_else(|| AppError::not_found("PurchaseItem", a.purchase_item_id.to_string()))?;
+            match per_item.iter_mut().find(|(i, _)| *i == lot.item_id) {
+                Some(e) => e.1 += a.quantity_depleted,
+                None => per_item.push((lot.item_id, a.quantity_depleted)),
+            }
+        }
+        let mut cost = 0.0;
+        for (item_id, qty) in per_item {
+            if qty > 0.0 {
+                cost += self.release_sale_line(uow, sale_item_id, item_id, qty)?;
+            }
+        }
+        // Rows within EPS of zero are deleted by the walk; nothing may remain.
+        if !uow.allocations().find_by_sale_item_id(sale_item_id)?.is_empty() {
+            return Err(locked(
+                "STOCK_INVARIANT",
+                format!("Sale line #{sale_item_id} still holds stock after a full release"),
+            ));
+        }
+        Ok(cost)
+    }
+
     fn create_source_lot(
         &self,
         uow: &mut dyn TransactionContext,

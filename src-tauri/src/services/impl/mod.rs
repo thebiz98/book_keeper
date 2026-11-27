@@ -10,6 +10,7 @@ pub mod fifo_strategy;
 pub mod inventory_service_impl;
 pub mod import_core;
 pub mod import_template_writer;
+pub mod item_guard;
 pub mod item_import_service_impl;
 pub mod item_service_impl;
 pub mod party_guard;

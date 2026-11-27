@@ -60,7 +60,7 @@ fn seed(app: &AppState) -> i64 {
             charges: vec![],
             transaction_date: "2026-11-21".into(), party_id: Some(party), payment_mode: Some("CASH".into()),
             payment_status: PaymentStatus::Partial, paid_amount: 50.0, notes: None,
-            items: vec![CreateSaleItemPayload { item_id: item, bundle_id: None, bundle_quantity: 12.0, unit_price: 10.0 }],
+            items: vec![CreateSaleItemPayload { sale_item_id: None, item_id: item, bundle_id: None, bundle_quantity: 12.0, unit_price: 10.0 }],
         })
         .unwrap();
     item
@@ -133,7 +133,7 @@ fn seed_sale_again(app: &AppState, item: i64) {
             charges: vec![],
             transaction_date: "2026-11-22".into(), party_id: None, payment_mode: Some("CASH".into()),
             payment_status: PaymentStatus::Paid, paid_amount: 20.0, notes: None,
-            items: vec![CreateSaleItemPayload { item_id: item, bundle_id: None, bundle_quantity: 2.0, unit_price: 10.0 }],
+            items: vec![CreateSaleItemPayload { sale_item_id: None, item_id: item, bundle_id: None, bundle_quantity: 2.0, unit_price: 10.0 }],
         })
         .unwrap();
 }
@@ -215,7 +215,7 @@ fn bill_charges_cleared_by_transactions_and_types_by_all() {
             charges: vec![BillChargeInput { charge_type_id: t.id, amount: 5.0 }],
             transaction_date: "2026-11-22".into(), party_id: None, payment_mode: None,
             payment_status: PaymentStatus::Paid, paid_amount: 15.0, notes: None,
-            items: vec![CreateSaleItemPayload { item_id: 1, bundle_id: None, bundle_quantity: 1.0, unit_price: 10.0 }],
+            items: vec![CreateSaleItemPayload { sale_item_id: None, item_id: 1, bundle_id: None, bundle_quantity: 1.0, unit_price: 10.0 }],
         })
         .unwrap();
     assert_eq!(count(&e.db, "bill_charges"), 1);

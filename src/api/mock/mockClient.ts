@@ -301,6 +301,7 @@ export class MockApiClient implements ApiClient {
           },
           itemName: item.name,
           bundleName: null,
+          bundleId: null,
           returnedQuantity: 0,
           allocations: [],
           netUnitPrice:
@@ -424,6 +425,7 @@ export class MockApiClient implements ApiClient {
           },
           itemName: item.name,
           bundleName: null,
+          bundleId: null,
         },
       ],
       settlements: [],

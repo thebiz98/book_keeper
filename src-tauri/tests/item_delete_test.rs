@@ -241,6 +241,17 @@ fn name_clash_with_a_deleted_item_on_create_and_import() {
     assert!(!e.row(id).is_active, "an import never touches a deleted item");
 }
 
+/// `DeletedReference(ITEM)` for `id` (DD-90).
+fn deleted_ref<T: std::fmt::Debug>(r: Result<T, AppError>, id: i64) {
+    match r {
+        Err(AppError::DeletedReference { entity, id: got, message, .. }) => {
+            assert_eq!((entity.as_str(), got), ("ITEM", id));
+            assert!(message.ends_with("is deleted. Restore it first."), "{message}");
+        }
+        other => panic!("expected DeletedReference(ITEM {id}), got {other:?}"),
+    }
+}
+
 #[test]
 fn old_bills_keep_a_deleted_item_but_new_lines_cannot_add_it() {
     let e = env();
@@ -249,21 +260,29 @@ fn old_bills_keep_a_deleted_item_but_new_lines_cannot_add_it() {
     e.lot(pen, 10.0, 2.0);
     e.lot(ink, 10.0, 3.0);
     let sale = e.sell(pen, 2.0, 10.0);
+    let line = e.sales.get_sale_details(sale).unwrap().items[0].sale_item.id;
     e.items.delete_item(pen, false).unwrap();
-    // Edit the old sale: qty and payment change; the deleted item stays.
-    e.sales.update_sale(sale, sale_payload(None, PaymentStatus::Paid, 30.0, &[(pen, None, 3.0, 10.0)])).unwrap();
-    assert_eq!(e.row(pen).current_stock, 7.0);
+    let edit = |qty: f64, price: f64, extra: Option<(i64, f64)>| {
+        let mut lines = vec![(pen, None, qty, price)];
+        lines.extend(extra.map(|(i, q)| (i, None, q, 10.0)));
+        let total: f64 = lines.iter().map(|l| l.2 * l.3).sum();
+        let mut p = sale_payload(None, PaymentStatus::Paid, total, &lines);
+        p.items[0].sale_item_id = Some(line);
+        p
+    };
+    // v1.7 DD-90 (supersedes DD-76's "qty may change"): the unchanged line of the deleted item
+    // stays (a notes edit passes); changing its quantity or rate is refused.
+    let mut notes = edit(2.0, 10.0, None);
+    notes.notes = Some("later note".into());
+    e.sales.update_sale(sale, notes).unwrap();
+    deleted_ref(e.sales.update_sale(sale, edit(3.0, 10.0, None)), pen);
+    deleted_ref(e.sales.update_sale(sale, edit(2.0, 11.0, None)), pen);
+    assert_eq!(e.row(pen).current_stock, 8.0);
     // Adding the deleted item to another bill fails.
-    let err = e.sales.create_sale(sale_payload(None, PaymentStatus::Paid, 10.0, &[(pen, None, 1.0, 10.0)])).unwrap_err();
-    assert!(err.to_string().contains("Restore the item first"), "{err}");
-    // Adding it to the old bill as an extra new item is allowed only if it was already there; a
-    // different deleted item is not.
+    deleted_ref(e.sales.create_sale(sale_payload(None, PaymentStatus::Paid, 10.0, &[(pen, None, 1.0, 10.0)])), pen);
+    // Adding another deleted item to the old bill fails.
     e.items.delete_item(ink, false).unwrap();
-    let err = e
-        .sales
-        .update_sale(sale, sale_payload(None, PaymentStatus::Paid, 40.0, &[(pen, None, 3.0, 10.0), (ink, None, 1.0, 10.0)]))
-        .unwrap_err();
-    assert!(err.to_string().contains("'Ink' is deleted"), "{err}");
+    deleted_ref(e.sales.update_sale(sale, edit(2.0, 10.0, Some((ink, 1.0)))), ink);
     // Deleting the old bill restores the deleted item's lots.
     e.sales.delete_sale(sale).unwrap();
     assert_eq!(e.row(pen).current_stock, 10.0);
@@ -281,21 +300,22 @@ fn purchase_edit_keeps_a_deleted_item_only_if_it_was_on_the_bill() {
         .create_purchase(purchase_payload(None, PaymentStatus::Paid, 20.0, &[(pen, None, 10.0, 2.0)]))
         .unwrap()
         .purchase_id;
+    let lot = e.purchases.get_purchase_details(bill).unwrap().items[0].purchase_item.id;
     e.items.delete_item(pen, false).unwrap();
     e.items.delete_item(ink, false).unwrap();
-    e.purchases
-        .update_purchase(bill, purchase_payload(None, PaymentStatus::Paid, 22.0, &[(pen, None, 10.0, 2.2)]))
-        .unwrap();
-    let err = e
-        .purchases
-        .create_purchase(purchase_payload(None, PaymentStatus::Paid, 5.0, &[(pen, None, 1.0, 5.0)]))
-        .unwrap_err();
-    assert!(err.to_string().contains("Restore the item first"), "{err}");
-    let err = e
-        .purchases
-        .update_purchase(bill, purchase_payload(None, PaymentStatus::Paid, 25.0, &[(pen, None, 10.0, 2.2), (ink, None, 1.0, 3.0)]))
-        .unwrap_err();
-    assert!(err.to_string().contains("'Ink' is deleted"), "{err}");
+    let edit = |paid: f64, lines: &[(i64, f64, f64)]| {
+        let l: Vec<_> = lines.iter().map(|&(i, q, c)| (i, None, q, c)).collect();
+        let mut p = purchase_payload(None, PaymentStatus::Paid, paid, &l);
+        p.items[0].purchase_item_id = Some(lot);
+        p
+    };
+    // v1.7 DD-90: the kept, unchanged lot of the deleted item stays; changing it is refused.
+    let mut notes = edit(20.0, &[(pen, 10.0, 2.0)]);
+    notes.notes = Some("later note".into());
+    e.purchases.update_purchase(bill, notes).unwrap();
+    deleted_ref(e.purchases.update_purchase(bill, edit(22.0, &[(pen, 10.0, 2.2)])), pen);
+    deleted_ref(e.purchases.create_purchase(purchase_payload(None, PaymentStatus::Paid, 5.0, &[(pen, None, 1.0, 5.0)])), pen);
+    deleted_ref(e.purchases.update_purchase(bill, edit(23.0, &[(pen, 10.0, 2.0), (ink, 1.0, 3.0)])), ink);
 }
 
 #[test]

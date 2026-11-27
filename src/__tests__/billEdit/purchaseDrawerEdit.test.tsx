@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render } from '../testUtils';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText, fakeBillPreview } from '../pages/helpers';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
-import { purchaseDetail, purchaseGuard, search, INK } from './fixtures';
+import { purchaseDetail, purchaseGuard, search, INK, getItem } from './fixtures';
 import type { BillEditGuard } from '@/types';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,7 +29,7 @@ function mount(opts: { guard?: BillEditGuard; preview?: (p: never) => unknown; s
   const api = installApi({
     getPurchaseDetails: purchaseDetail(),
     getBillEditGuard: opts.guard ?? purchaseGuard(),
-    searchItemsFts: search,
+    searchItemsFts: search, getItem,
     previewPurchase: opts.preview ?? (async (p: Parameters<typeof fakeBillPreview>[0]) => fakeBillPreview(p)),
     updatePurchase: { purchaseId: 8, transactionCode: 'PUR-1008' },
     getDashboardMetrics: { cashInHand: 0 },

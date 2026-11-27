@@ -72,6 +72,9 @@ pub struct PurchaseItemDetail {
     pub purchase_item: PurchaseItem,
     pub item_name: String,
     pub bundle_name: Option<String>,
+    /// E4 / DD-89: the item's bundle of this lot, resolved like `SaleItemDetail::bundle_id`.
+    #[serde(default)]
+    pub bundle_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

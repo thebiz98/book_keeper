@@ -36,6 +36,40 @@ impl SqliteAllocationRepository {
 }
 
 impl AllocationRepository for SqliteAllocationRepository {
+    fn update_quantity_depleted(&mut self, allocation_id: i64, quantity: f64) -> Result<(), AppError> {
+        const EPS: f64 = 1e-9;
+        let returned: f64 = self
+            .conn
+            .query_row(
+                "SELECT returned_quantity FROM sale_stock_allocations WHERE id = ?1",
+                params![allocation_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| AppError::not_found("SaleStockAllocation", allocation_id.to_string()))?;
+        if !quantity.is_finite() || quantity <= 0.0 || quantity + EPS < returned {
+            return Err(AppError::ValidationError {
+                field: "quantity_depleted".to_string(),
+                message: format!(
+                    "Depleted quantity {quantity} is invalid for allocation #{allocation_id} (returned {returned})"
+                ),
+            });
+        }
+        self.conn.execute(
+            "UPDATE sale_stock_allocations SET quantity_depleted = ?1 WHERE id = ?2",
+            params![quantity.max(returned), allocation_id],
+        )?;
+        Ok(())
+    }
+
+    fn delete_allocation(&mut self, allocation_id: i64) -> Result<(), AppError> {
+        let n = self.conn.execute("DELETE FROM sale_stock_allocations WHERE id = ?1", params![allocation_id])?;
+        if n == 0 {
+            return Err(AppError::not_found("SaleStockAllocation", allocation_id.to_string()));
+        }
+        Ok(())
+    }
+
     fn delete_by_sale_item_id(&mut self, sale_item_id: i64) -> Result<usize, AppError> {
         Ok(self.conn.execute("DELETE FROM sale_stock_allocations WHERE sale_item_id = ?1", params![sale_item_id])?)
     }

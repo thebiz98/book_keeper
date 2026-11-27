@@ -40,6 +40,13 @@ export const INK: ItemSearchResult = { ...PEN, itemId: 2, name: 'Ink', bundles: 
 
 export const search = async (q: string) => (q === 'Pen' ? [PEN] : q === 'Ink' ? [INK] : []);
 
+/** E4: the edit drafts load each line's item by id (never a name search). */
+export const getItem = async (id: number): Promise<ItemSearchResult> => {
+  if (id === PEN.itemId) return PEN;
+  if (id === INK.itemId) return INK;
+  throw new Error(`no item ${id}`);
+};
+
 export const saleDetail = (): SaleDetailView =>
   ({
     sale: {

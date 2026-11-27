@@ -29,6 +29,10 @@ pub struct CreateSaleItemPayload {
     pub bundle_id: Option<i64>, // Write-time helper only (multiplier + label); not stored (DD-28)
     pub bundle_quantity: f64,   // Units entered in selected packaging
     pub unit_price: f64,        // Rate charged per selected bundle/unit (₹); required
+    /// DD-89 edit only: the stored line this payload line keeps (`None` = a new line). Lines match
+    /// by it, so only what changed is written. `create_sale` rejects `Some`.
+    #[serde(default)]
+    pub sale_item_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -158,6 +162,11 @@ pub struct SaleItemDetail {
     pub sale_item: SaleItem,
     pub item_name: String,
     pub bundle_name: Option<String>,
+    /// E4 / DD-89: the item's bundle this line was sold in, resolved at read time from the stored
+    /// pack (label and units per pack; units alone for a renamed bundle). `None` for base units or
+    /// a bundle that no longer exists. The edit form loads the line by it.
+    #[serde(default)]
+    pub bundle_id: Option<i64>,
     /// Base units of this line already returned by customer returns.
     pub returned_quantity: f64,
     /// FIFO cost breakdown of the line.

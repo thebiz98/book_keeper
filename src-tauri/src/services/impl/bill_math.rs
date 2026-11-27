@@ -178,6 +178,116 @@ pub fn insert_bill_charges(
     Ok(ids)
 }
 
+/// E9 / DD-89: how a bill edit treats the stored charge rows. `charges` are the bill's charge lines
+/// after the edit, in payload order (for the totals).
+#[derive(Debug, Clone, Default)]
+pub struct ChargeEditPlan {
+    pub charges: Vec<ResolvedCharge>,
+    /// Stored rows the user removed or changed.
+    remove_ids: Vec<i64>,
+    /// Payload rows that match no stored row: resolved against the live charge type.
+    added: Vec<ResolvedCharge>,
+}
+
+/// In-tx, no writes. Each payload row is matched to the first unused stored row of the same
+/// charge type and amount: a match keeps the stored row untouched (its name and effect, even if
+/// the type was renamed, flipped or deactivated since). A row that matches nothing is new (or
+/// changed) and resolves the live type; stored rows left unmatched are removed.
+pub fn plan_bill_charges_edit(
+    tx: &mut dyn TransactionContext,
+    side: TransactionType,
+    transaction_id: i64,
+    inputs: &[BillChargeInput],
+) -> Result<ChargeEditPlan, AppError> {
+    let stored = tx.bill_charges().list_by_transaction(side, transaction_id)?;
+    let mut used = vec![false; stored.len()];
+    let mut plan = ChargeEditPlan::default();
+    let mut unmatched: Vec<BillChargeInput> = Vec::new();
+    let mut slots: Vec<Option<ResolvedCharge>> = Vec::with_capacity(inputs.len());
+    for c in inputs {
+        let amount = round2(c.amount);
+        let hit = stored
+            .iter()
+            .enumerate()
+            .position(|(i, s)| !used[i] && s.charge_type_id == c.charge_type_id && (s.amount - amount).abs() <= 1e-9);
+        match hit {
+            Some(i) => {
+                used[i] = true;
+                let s = &stored[i];
+                slots.push(Some(ResolvedCharge {
+                    charge_type_id: s.charge_type_id,
+                    charge_name: s.charge_name.clone(),
+                    effect: s.effect,
+                    amount: s.amount,
+                }));
+            }
+            None => {
+                unmatched.push(c.clone());
+                slots.push(None);
+            }
+        }
+    }
+    let mut fresh = resolve_bill_charges(tx, side, &unmatched)?.into_iter();
+    for slot in slots {
+        let c = match slot {
+            Some(c) => c,
+            None => {
+                let c = fresh.next().expect("one resolved charge per unmatched input");
+                plan.added.push(c.clone());
+                c
+            }
+        };
+        plan.charges.push(c);
+    }
+    plan.remove_ids = stored.iter().zip(&used).filter(|(_, u)| !**u).map(|(s, _)| s.id).collect();
+    Ok(plan)
+}
+
+/// Writes a [`ChargeEditPlan`]: removes the changed / dropped rows and inserts the new ones. Kept
+/// rows are not written.
+pub fn apply_bill_charges_edit(
+    tx: &mut dyn TransactionContext,
+    side: TransactionType,
+    transaction_id: i64,
+    plan: &ChargeEditPlan,
+) -> Result<(), AppError> {
+    for id in &plan.remove_ids {
+        tx.bill_charges().delete_by_id(*id)?;
+    }
+    insert_bill_charges(tx, side, transaction_id, &plan.added)?;
+    Ok(())
+}
+
+/// Units per pack of a stored line (`quantity / pack_quantity`; 1 without a usable pack quantity).
+pub fn units_per_pack(quantity: f64, pack_quantity: f64) -> f64 {
+    if pack_quantity.is_finite() && pack_quantity > 0.0 { quantity / pack_quantity } else { 1.0 }
+}
+
+/// E4 / DD-89: the item's bundle a stored line was entered in. `None` for a base-unit line
+/// (no pack label) or when no bundle has those units per pack. A bundle with the same label and
+/// units wins; else the only bundle with those units (a renamed bundle).
+pub fn resolve_line_bundle(
+    tx: &mut dyn TransactionContext,
+    item_id: i64,
+    pack_label: Option<&str>,
+    units: f64,
+) -> Result<Option<i64>, AppError> {
+    let Some(label) = pack_label else { return Ok(None) };
+    let same_units: Vec<_> = tx
+        .bundles()
+        .find_by_item_id(item_id)?
+        .into_iter()
+        .filter(|b| (b.units_per_bundle - units).abs() <= 1e-9)
+        .collect();
+    if let Some(b) = same_units.iter().find(|b| b.bundle_name == label) {
+        return Ok(Some(b.id));
+    }
+    Ok(match same_units.as_slice() {
+        [only] => Some(only.id),
+        _ => None,
+    })
+}
+
 /// Removes the charge rows of a bill (FR-20 edit/delete).
 pub fn delete_bill_charges(
     tx: &mut dyn TransactionContext,

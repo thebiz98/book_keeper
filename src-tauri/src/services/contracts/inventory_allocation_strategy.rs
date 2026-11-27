@@ -65,6 +65,82 @@ pub trait InventoryAllocationStrategy: Send + Sync {
         restock: bool,
     ) -> Result<ReversalResult, AppError>;
 
+    /// DD-89 (change-only sale edit): gives back `quantity` units of a sale line that were drawn
+    /// from `item_id`'s lots (a quantity cut or a removed line, never a customer return). Walks the
+    /// line's allocations on that item's lots latest-depleted first (the order of
+    /// `reverse_sale_allocations`), **shrinks `quantity_depleted`** (deleting a row that reaches 0)
+    /// and puts the units back on the lot. `returned_quantity` is never touched: a line with linked
+    /// returns cannot be edited (`LINKED_RETURNS`), so it is 0 here, and a non-zero one is refused
+    /// (`STOCK_INVARIANT`). More than the line drew from the item is a `ValidationError`.
+    fn release_sale_allocations(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        item_id: i64,
+        quantity: f64,
+    ) -> Result<ReversalResult, AppError> {
+        if !quantity.is_finite() || quantity <= 0.0 {
+            return Err(AppError::ValidationError {
+                field: "quantity".to_string(),
+                message: format!("Quantity must be a finite number greater than zero (got {quantity})"),
+            });
+        }
+        let mut allocs: Vec<(SaleStockAllocation, PurchaseItem)> = Vec::new();
+        for a in uow.allocations().find_by_sale_item_id(sale_item_id)? {
+            let lot = uow
+                .purchases()
+                .find_purchase_item_by_id(a.purchase_item_id)?
+                .ok_or_else(|| AppError::not_found("PurchaseItem", a.purchase_item_id.to_string()))?;
+            if lot.item_id != item_id {
+                continue;
+            }
+            if a.returned_quantity > EPS {
+                return Err(AppError::BillLocked {
+                    code: "STOCK_INVARIANT".to_string(),
+                    message: format!("Sale line #{sale_item_id} has returned units, so its stock cannot be released"),
+                });
+            }
+            allocs.push((a, lot));
+        }
+        allocs.sort_by_key(|(a, _)| std::cmp::Reverse(a.id)); // latest depleted first
+        let drawn: f64 = allocs.iter().map(|(a, _)| a.quantity_depleted).sum();
+        if drawn + EPS < quantity {
+            return Err(AppError::ValidationError {
+                field: "quantity".to_string(),
+                message: format!(
+                    "Cannot release {quantity}: sale line #{sale_item_id} drew only {drawn} of item #{item_id}"
+                ),
+            });
+        }
+        let mut left = quantity;
+        let (mut reversed_cost, mut reversed_quantity) = (0.0, 0.0);
+        for (a, lot) in allocs {
+            if left <= EPS {
+                break;
+            }
+            // Within EPS of the whole row: release it all, so no dust row stays behind.
+            let take = if left + EPS >= a.quantity_depleted { a.quantity_depleted } else { left };
+            let keep = a.quantity_depleted - take;
+            if keep <= EPS {
+                uow.allocations().delete_allocation(a.id)?;
+            } else {
+                uow.allocations().update_quantity_depleted(a.id, keep)?;
+            }
+            // Re-read: two rows of the line may sit on one lot. The repo refuses anything above the
+            // lot's own quantity (no clamp).
+            let remaining = uow
+                .purchases()
+                .find_purchase_item_by_id(lot.id)?
+                .ok_or_else(|| AppError::not_found("PurchaseItem", lot.id.to_string()))?
+                .remaining_quantity;
+            uow.purchases().update_remaining_quantity(lot.id, remaining + take)?;
+            reversed_cost += take * a.unit_cost;
+            reversed_quantity += take;
+            left -= take;
+        }
+        Ok(ReversalResult { reversed_cost, reversed_quantity, restocked_quantity: reversed_quantity })
+    }
+
     /// Depletes lots for a non-sale outflow (negative adjustment, replacement issue, vendor
     /// return) and logs `StockOutflowAllocation` rows tagged `(source_type, source_id)`.
     fn deplete_lots_for_outflow(
@@ -141,6 +217,16 @@ impl<T: InventoryAllocationStrategy + ?Sized> InventoryAllocationStrategy for st
         restock: bool,
     ) -> Result<ReversalResult, AppError> {
         (**self).reverse_sale_allocations(uow, sale_item_id, quantity, restock)
+    }
+
+    fn release_sale_allocations(
+        &self,
+        uow: &mut dyn TransactionContext,
+        sale_item_id: i64,
+        item_id: i64,
+        quantity: f64,
+    ) -> Result<ReversalResult, AppError> {
+        (**self).release_sale_allocations(uow, sale_item_id, item_id, quantity)
     }
 
     fn deplete_lots_for_outflow(

@@ -7,6 +7,8 @@ pub trait BillChargeRepository {
     fn create(&mut self, c: &BillCharge) -> Result<i64, AppError>;
     /// Lines of one bill, in entry order (`ORDER BY id`).
     fn list_by_transaction(&self, t: TransactionType, id: i64) -> Result<Vec<BillCharge>, AppError>;
+    /// DD-89 / E9: removes one line by id (a charge row the user changed or removed).
+    fn delete_by_id(&mut self, id: i64) -> Result<(), AppError>;
     /// Removes every line of one bill (used by bill edit/delete); returns the number removed.
     fn delete_by_transaction(&mut self, t: TransactionType, id: i64) -> Result<usize, AppError>;
 }

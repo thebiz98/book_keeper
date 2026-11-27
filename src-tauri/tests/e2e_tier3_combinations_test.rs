@@ -98,7 +98,7 @@ fn test_tc_t3_cmb_001_inward_sale_return_adjustment_valuation() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 4000.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 40.0,
@@ -174,7 +174,7 @@ fn test_tc_t3_cmb_002_credit_sale_dues_drawer_settlement_ledger() {
         payment_mode: None,
         payment_status: PaymentStatus::Unpaid, paid_amount: 0.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 30.0,
@@ -248,7 +248,7 @@ fn test_tc_t3_cmb_003_bundle_inward_loose_sale_bundle_suggestions() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 105.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 7.0,
@@ -322,7 +322,7 @@ fn test_tc_t3_cmb_005_vendor_credit_return_dues_offset_profit() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 1000.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 20.0,
@@ -363,7 +363,7 @@ fn test_tc_t3_cmb_006_split_payment_partial_settlement_cash_flow() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Partial, paid_amount: 200.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
@@ -429,7 +429,7 @@ fn test_tc_t3_cmb_007_barcode_scan_bundle_multiplier_tender() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 90.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: Some(1),
             bundle_quantity: 2.0,
@@ -522,7 +522,7 @@ fn test_tc_t3_cmb_009_shop_settings_profile_and_sale_summary() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 80.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
@@ -562,7 +562,7 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 120.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,
@@ -595,7 +595,7 @@ fn test_tc_t3_cmb_010_master_price_update_historical_immutability() {
         payment_mode: Some("CASH".to_string()),
         payment_status: PaymentStatus::Paid, paid_amount: 150.0,
         notes: None,
-        items: vec![CreateSaleItemPayload {
+        items: vec![CreateSaleItemPayload { sale_item_id: None,
             item_id: 1,
             bundle_id: None,
             bundle_quantity: 2.0,

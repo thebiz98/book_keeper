@@ -563,7 +563,7 @@ fn preview_matches_the_command_and_writes_nothing() {
         .preview_sale(None, PreviewSalePayload {
             confirm_move_settlements: false,
             transaction_date: DAY.into(), party_id: None, payment_status: None, paid_amount: None, payment_mode: None, notes: None,
-            items: vec![CreateSaleItemPayload { item_id: s, bundle_id: None, bundle_quantity: 1.0, unit_price: 12.0 }],
+            items: vec![CreateSaleItemPayload { sale_item_id: None, item_id: s, bundle_id: None, bundle_quantity: 1.0, unit_price: 12.0 }],
             charges: vec![],
         })
         .unwrap();

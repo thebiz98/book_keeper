@@ -19,7 +19,7 @@ import { savedBundleToSearchResult } from '@/lib/billEditDraft';
 import { useSaleEditDraft } from './useSaleEditDraft';
 import { useBillEditPreview } from './useBillEditPreview';
 import { useBillEditSave } from './useBillEditSave';
-import { EditErrors, EditTotals, PaymentStatusControl, inputCls } from './EditParts';
+import { DeletedBadge, EditErrors, EditTotals, PaymentStatusControl, inputCls } from './EditParts';
 
 export interface SaleEditFormProps {
   billId: number;
@@ -63,7 +63,8 @@ export const SaleEditForm: React.FC<SaleEditFormProps> = ({ billId, onCancel, on
     errors: preview.errors,
     settlementsToMove: dr.settlementsToMove,
     newPartyName: pickedPartyName,
-    ready: dr.load.status === 'ready' && !dr.incomplete && !preview.pending,
+    // E3: an untouched form never saves (button and Ctrl+S alike).
+    ready: dr.load.status === 'ready' && dr.dirty && !dr.incomplete && !preview.pending,
     buildPayload: () => dr.toPayload(preview.paidToSend ?? 0),
     send: (payload) => api.updateSale(billId, payload),
     onSaved,
@@ -176,7 +177,10 @@ export const SaleEditForm: React.FC<SaleEditFormProps> = ({ billId, onCancel, on
             )}
             {draft.lines.map((l, idx) => (
               <TableRow key={l.key} data-testid="edit-line" data-line-key={l.key}>
-                <TableCell className="py-1 font-medium">{l.name}</TableCell>
+                <TableCell className="py-1 font-medium">
+                  {l.name}
+                  {l.deleted && <DeletedBadge />}
+                </TableCell>
                 <TableCell className="min-w-28">
                   <Select<string | number>
                     aria-label={`Unit ${l.name}`}
@@ -306,7 +310,7 @@ export const SaleEditForm: React.FC<SaleEditFormProps> = ({ billId, onCancel, on
             disabled={!canSave}
             isLoading={saving}
             onClick={() => void save()}
-            title="Save changes (Ctrl+S)"
+            title={dr.dirty ? 'Save changes (Ctrl+S)' : 'No changes'}
           >
             Save changes
           </Button>

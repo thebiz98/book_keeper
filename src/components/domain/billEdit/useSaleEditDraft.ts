@@ -18,6 +18,8 @@ import type { DraftLoad } from './usePurchaseEditDraft';
  */
 export interface EditSaleLine {
   key: number;
+  /** DD-89: the stored line this row keeps (null for a row added in the form). */
+  saleItemId: number | null;
   itemId: number;
   name: string;
   baseUnit: string;
@@ -28,6 +30,8 @@ export interface EditSaleLine {
   rate: number | null;
   /** The item's sale price per base unit, to suggest a rate when the unit changes (null = unknown). */
   defaultSalePrice: number | null;
+  /** FR-45 / DD-90: the item is deleted; the line may only stay unchanged (the backend decides). */
+  deleted?: boolean;
   /** The item's bundles, for the unit select. */
   bundles: ItemBundleSearchResult[];
 }
@@ -41,6 +45,8 @@ export interface SaleDraft {
   charges: BillChargeLine[];
   paymentStatus: PaymentStatus;
   paidInput: number;
+  /** The stored payment mode, sent back unchanged (the form does not edit it). */
+  paymentMode: string | null;
 }
 
 type HeaderPatch = Partial<Pick<SaleDraft, 'date' | 'partyId' | 'notes' | 'paymentStatus' | 'paidInput'>>;
@@ -50,7 +56,7 @@ function snapshot(d: SaleDraft): string {
     d.date,
     d.partyId,
     d.notes,
-    d.lines.map((l) => [l.itemId, l.bundleId, l.quantity, l.rate]),
+    d.lines.map((l) => [l.saleItemId, l.itemId, l.bundleId, l.quantity, l.rate]),
     d.charges.map((c) => [c.chargeTypeId, c.amount]),
     d.paymentStatus,
     d.paidInput,
@@ -87,19 +93,15 @@ export function useSaleEditDraft(billId: number) {
           });
           return;
         }
-        const found = await Promise.all(
-          d.items.map((it) =>
-            api
-              .searchItemsFts(it.saleItem.itemName, 8)
-              .then((rows) => rows.find((r) => r.itemId === it.saleItem.itemId) ?? null)
-              .catch(() => null)
-          )
-        );
+        // E4: each line's item by id (deleted or renamed items included), its pack by the
+        // backend-resolved bundle id; never a name search.
+        const found = await Promise.all(d.items.map((it) => api.getItem(it.saleItem.itemId).catch(() => null)));
         if (!live) return;
         const lines: EditSaleLine[] = d.items.map((it, i) => {
-          const c = saleLineToCart(it.saleItem, found[i]);
+          const c = saleLineToCart(it.saleItem, found[i], it.bundleId);
           return {
             key: seq.current++,
+            saleItemId: it.saleItem.id,
             itemId: c.itemId,
             name: c.name,
             baseUnit: c.baseUnit,
@@ -109,6 +111,7 @@ export function useSaleEditDraft(billId: number) {
             rate: c.rate,
             defaultSalePrice: c.defaultSalePrice ?? null,
             bundles: found[i]?.bundles ?? [],
+            deleted: found[i]?.isActive === false,
           };
         });
         const s = d.sale;
@@ -129,6 +132,7 @@ export function useSaleEditDraft(billId: number) {
           // Only seeds the control from what is stored; the backend preview judges the result.
           paymentStatus: s.paymentStatus === 'PAID' ? 'PAID' : up > 0 ? 'PARTIAL' : 'UNPAID',
           paidInput: up,
+          paymentMode: s.paymentMode,
         };
         setDraft(next);
         setBaseline(snapshot(next));
@@ -197,6 +201,7 @@ export function useSaleEditDraft(billId: number) {
           ...d.lines,
           {
             key,
+            saleItemId: null,
             itemId: item.itemId,
             name: item.name,
             baseUnit: item.baseUnit,
@@ -256,7 +261,7 @@ export function useSaleEditDraft(billId: number) {
         : {
             transactionDate: draft.date,
             partyId: draft.partyId,
-            paymentMode: 'CASH',
+            paymentMode: draft.paymentMode ?? 'CASH',
             charges: toChargeInputs(draft.charges),
             notes: draft.notes.trim() || null,
             items: draft.lines.map((l) => ({
@@ -264,6 +269,7 @@ export function useSaleEditDraft(billId: number) {
               bundleId: l.bundleId,
               bundleQuantity: l.quantity,
               unitPrice: l.rate as number,
+              saleItemId: l.saleItemId,
             })),
           },
     [draft, incomplete]

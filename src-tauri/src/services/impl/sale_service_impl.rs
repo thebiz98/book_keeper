@@ -13,10 +13,14 @@ use crate::services::r#impl::bill_guard::{
     PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
 };
 use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party};
+use crate::services::r#impl::item_guard::{ensure_active_item, require_active_item};
 use crate::services::r#impl::bill_math::{
-    bill_preview, compute_bill_totals, delete_bill_charges, insert_bill_charges, net_unit_price,
-    resolve_bill_charges, sale_payment_split, validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
+    apply_bill_charges_edit, bill_preview, compute_bill_totals, delete_bill_charges, insert_bill_charges,
+    net_unit_price, plan_bill_charges_edit, resolve_bill_charges, resolve_line_bundle, sale_payment_split,
+    units_per_pack, validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
 };
+use crate::core::constants::EPS;
+use crate::services::contracts::payment_service::BillUpfront;
 use crate::core::value_objects::{ItemType, PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::InventoryService;
@@ -96,12 +100,13 @@ fn validate_sale_shape(payload: &CreateSalePayload) -> Result<(), AppError> {
 }
 
 /// Party must be an active customer (an edit may keep its current, since-deactivated customer);
-/// every line: active item, bundle belongs to the item, snapshots, round2 totals.
+/// every line: bundle belongs to the item, snapshots, round2 totals. A deleted item is
+/// `DeletedReference(ITEM)` unless `edit` (the line diff then decides, DD-90).
 fn resolve_sale(
     tx: &mut dyn TransactionContext,
     payload: &CreateSalePayload,
     keep_party: Option<i64>,
-    keep_items: &HashSet<i64>,
+    edit: bool,
 ) -> Result<ResolvedSale, AppError> {
     let party_name = match payload.party_id {
         Some(pid) => {
@@ -126,8 +131,8 @@ fn resolve_sale(
             entity: "Item".to_string(),
             id: line.item_id.to_string(),
         })?;
-        if !item.is_active && !keep_items.contains(&item.id) {
-            return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", item.name)));
+        if !edit {
+            ensure_active_item(&item)?;
         }
         let is_service = item.item_type == ItemType::Service;
         if is_service && line.bundle_id.is_some() {
@@ -215,6 +220,198 @@ fn check_sale_payment(
     Ok(split)
 }
 
+/// Notes of a sale's UPFRONT ledger row.
+const UPFRONT_NOTE: &str = "Upfront Counter Payment";
+
+/// Quantities equal within this are "unchanged" (DD-89).
+const QTY_EPS: f64 = 1e-9;
+
+/// What a change-only edit does to one payload line (DD-89).
+enum LineOp {
+    /// Unchanged: no write at all.
+    Keep,
+    /// Same item: price, pack or quantity changed. Only the quantity difference moves stock:
+    /// `release` gives back (newest allocations first), `draw` takes the extra FIFO.
+    Update { row: SaleItem, release: Vec<(i64, f64)>, draw: Vec<(i64, f64)> },
+    /// Item changed: everything the line drew goes back, the new item is drawn fresh, the line id stays.
+    Replace { row: SaleItem, draw: Vec<(i64, f64)> },
+    /// A new line: inserted with the live snapshot, drawn fresh.
+    Insert,
+}
+
+/// The line diff of a sale edit, computed before any write.
+struct EditPlan {
+    /// One per payload line, in payload order.
+    ops: Vec<LineOp>,
+    /// Line totals in payload order (a kept line uses its stored total).
+    line_totals: Vec<f64>,
+    /// Stored lines the payload no longer has.
+    removed: Vec<SaleItem>,
+    /// Stored base quantity drawn per lot item, per stored line (a service line: per component).
+    stored: BTreeMap<i64, Vec<(i64, f64)>>,
+}
+
+/// A line's stored draw: Σ `quantity_depleted` per lot item, in first-allocation order.
+fn stored_draws(tx: &mut dyn TransactionContext, sale_item_id: i64) -> Result<Vec<(i64, f64)>, AppError> {
+    let mut out: Vec<(i64, f64)> = Vec::new();
+    for a in tx.allocations().find_by_sale_item_id(sale_item_id)? {
+        let lot = tx
+            .purchases()
+            .find_purchase_item_by_id(a.purchase_item_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseItem", a.purchase_item_id.to_string()))?;
+        match out.iter_mut().find(|(i, _)| *i == lot.item_id) {
+            Some(e) => e.1 += a.quantity_depleted,
+            None => out.push((lot.item_id, a.quantity_depleted)),
+        }
+    }
+    Ok(out)
+}
+
+/// The live draw of a resolved line: its components for a service, else the item itself.
+fn live_draw(l: &ResolvedSaleLine) -> Vec<(i64, f64)> {
+    if l.item.item_type == ItemType::Service {
+        l.components.iter().copied().filter(|&(_, q)| q > 0.0).collect()
+    } else {
+        vec![(l.item.id, l.base_qty)]
+    }
+}
+
+/// DD-89: matches payload lines to stored lines by `sale_item_id` and decides, per line, the
+/// smallest write. A same-item line moves stock only by its quantity difference, scaled for a
+/// service line by its **stored** component ratios (never the live definition); its stored
+/// `service_cost_total` scales the same way. Reads only.
+fn plan_sale_edit(
+    tx: &mut dyn TransactionContext,
+    payload: &CreateSalePayload,
+    r: &ResolvedSale,
+    old_lines: &[SaleItem],
+) -> Result<EditPlan, AppError> {
+    let mut seen: HashSet<i64> = HashSet::new();
+    for line in &payload.items {
+        if let Some(id) = line.sale_item_id {
+            if !old_lines.iter().any(|o| o.id == id) {
+                return Err(validation("sale_item_id", format!("Line {id} does not belong to this sale")));
+            }
+            if !seen.insert(id) {
+                return Err(validation("sale_item_id", format!("Line {id} is used by more than one line")));
+            }
+        }
+    }
+    let mut stored: BTreeMap<i64, Vec<(i64, f64)>> = BTreeMap::new();
+    for o in old_lines {
+        stored.insert(o.id, stored_draws(tx, o.id)?);
+    }
+    let mut ops = Vec::with_capacity(payload.items.len());
+    let mut line_totals = Vec::with_capacity(payload.items.len());
+    for (line, n) in payload.items.iter().zip(&r.lines) {
+        let Some(o) = line.sale_item_id.and_then(|id| old_lines.iter().find(|o| o.id == id)) else {
+            ops.push(LineOp::Insert);
+            line_totals.push(n.line_total);
+            continue;
+        };
+        let unit_price = n.line_total / n.base_qty;
+        if n.item.id != o.item_id {
+            ops.push(LineOp::Replace {
+                row: SaleItem {
+                    item_id: n.item.id,
+                    item_name: n.item.name.clone(),
+                    pack_label: n.pack_label.clone(),
+                    pack_quantity: n.pack_quantity,
+                    quantity: n.base_qty,
+                    unit_price,
+                    total_amount: n.line_total,
+                    service_cost_total: n.service_cost_total,
+                    ..o.clone()
+                },
+                draw: live_draw(n),
+            });
+            line_totals.push(n.line_total);
+            continue;
+        }
+        let delta = n.base_qty - o.quantity;
+        let qty_changed = delta.abs() > QTY_EPS;
+        let total_changed = (n.line_total - o.total_amount).abs() > QTY_EPS;
+        // Same units per pack: the stored label stays (a renamed bundle is not a change).
+        let same_pack = (units_per_pack(n.base_qty, n.pack_quantity) - units_per_pack(o.quantity, o.pack_quantity)).abs()
+            <= QTY_EPS;
+        let pack_changed = !same_pack || (n.pack_quantity - o.pack_quantity).abs() > QTY_EPS;
+        if !qty_changed && !total_changed && !pack_changed {
+            ops.push(LineOp::Keep);
+            line_totals.push(o.total_amount);
+            continue;
+        }
+        let mut row = o.clone();
+        if total_changed || qty_changed {
+            row.unit_price = unit_price;
+            row.total_amount = n.line_total;
+        }
+        if !same_pack {
+            row.pack_label = n.pack_label.clone();
+        }
+        row.pack_quantity = n.pack_quantity;
+        let (mut release, mut draw) = (Vec::new(), Vec::new());
+        if qty_changed {
+            row.quantity = n.base_qty;
+            row.service_cost_total = o.service_cost_total.map(|t| round2(t * n.base_qty / o.quantity));
+            // Per stored draw item (the item itself, or each component of a service line).
+            let per_unit: Vec<(i64, f64)> = if n.item.item_type == ItemType::Service {
+                stored[&o.id].iter().map(|&(c, q)| (c, q / o.quantity)).collect()
+            } else {
+                vec![(o.item_id, 1.0)]
+            };
+            for (item_id, ratio) in per_unit {
+                let qty = ratio * delta.abs();
+                if qty <= QTY_EPS {
+                    continue;
+                }
+                if delta < 0.0 { release.push((item_id, qty)) } else { draw.push((item_id, qty)) }
+            }
+        }
+        ops.push(LineOp::Update { row, release, draw });
+        line_totals.push(n.line_total);
+    }
+    let removed = old_lines.iter().filter(|o| !seen.contains(&o.id)).cloned().collect();
+    Ok(EditPlan { ops, line_totals, removed, stored })
+}
+
+/// DD-90 item half (E5): a line whose item, or a stored component of its service, is deleted may
+/// only stay unchanged. Changing, replacing or removing it, adding a deleted item, or drawing a
+/// deleted component is `DeletedReference(ITEM)`.
+fn check_edit_deleted_items(
+    tx: &mut dyn TransactionContext,
+    plan: &EditPlan,
+    r: &ResolvedSale,
+    old_lines: &[SaleItem],
+) -> Result<(), AppError> {
+    let mut touched_old: Vec<&SaleItem> = plan.removed.iter().collect();
+    for (op, n) in plan.ops.iter().zip(&r.lines) {
+        match op {
+            LineOp::Keep => {}
+            LineOp::Update { row, .. } => touched_old.extend(old_lines.iter().find(|o| o.id == row.id)),
+            LineOp::Replace { row, draw } => {
+                touched_old.extend(old_lines.iter().find(|o| o.id == row.id));
+                ensure_active_item(&n.item)?;
+                for &(c, _) in draw {
+                    require_active_item(tx, c)?;
+                }
+            }
+            LineOp::Insert => {
+                ensure_active_item(&n.item)?;
+                for (c, _) in live_draw(n) {
+                    require_active_item(tx, c)?;
+                }
+            }
+        }
+    }
+    for o in touched_old {
+        require_active_item(tx, o.item_id)?;
+        for &(c, _) in plan.stored.get(&o.id).map(Vec::as_slice).unwrap_or(&[]) {
+            require_active_item(tx, c)?;
+        }
+    }
+    Ok(())
+}
+
 fn summary(header: &SaleTransaction, change: f64) -> SaleSummaryResponse {
     SaleSummaryResponse {
         sale_id: header.id,
@@ -300,6 +497,66 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
         Ok(())
     }
 
+    /// DD-89 stock check of an edit, before any write: only the **net extra demand** per item
+    /// (Σ extra and fresh draws − Σ released units) is checked against current stock. The lines are
+    /// walked in payload order against a running total that starts at minus what the edit gives
+    /// back, so a shortfall names the line that needs more (a service line: the component too).
+    fn check_edit_stock(&self, tx: &mut dyn TransactionContext, plan: &EditPlan, r: &ResolvedSale) -> Result<(), AppError> {
+        let mut running: BTreeMap<i64, f64> = BTreeMap::new();
+        let mut give_back = |item_id: i64, qty: f64| *running.entry(item_id).or_insert(0.0) -= qty;
+        for o in &plan.removed {
+            for &(item_id, qty) in &plan.stored[&o.id] {
+                give_back(item_id, qty);
+            }
+        }
+        for op in &plan.ops {
+            match op {
+                LineOp::Replace { row, .. } => {
+                    for &(item_id, qty) in &plan.stored[&row.id] {
+                        give_back(item_id, qty);
+                    }
+                }
+                LineOp::Update { release, .. } => {
+                    for &(item_id, qty) in release {
+                        give_back(item_id, qty);
+                    }
+                }
+                LineOp::Keep | LineOp::Insert => {}
+            }
+        }
+        for (n, (op, l)) in plan.ops.iter().zip(&r.lines).enumerate() {
+            let draws: Vec<(i64, f64)> = match op {
+                LineOp::Keep => continue,
+                LineOp::Update { draw, .. } | LineOp::Replace { draw, .. } => draw.clone(),
+                LineOp::Insert => live_draw(l),
+            };
+            for (item_id, qty) in draws {
+                let total = running.entry(item_id).or_insert(0.0);
+                *total += qty;
+                let need = *total;
+                if need <= EPS {
+                    continue;
+                }
+                match self.inventory_service.validate_stock_availability(tx, &[(item_id, need)]) {
+                    Err(AppError::InsufficientStockError { item_name, required, available, .. })
+                        if l.item.item_type == ItemType::Service =>
+                    {
+                        return Err(validation(
+                            "items",
+                            format!(
+                                "Not enough '{item_name}' for service '{}' (line {}): need {required}, have {available}",
+                                l.item.name,
+                                n + 1
+                            ),
+                        ));
+                    }
+                    other => other?,
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Upfront cash goes through the one ledger path.
     fn record_upfront(
         &self,
@@ -321,7 +578,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
                     settlement_date: payload.transaction_date.clone(),
                     amount_paid: upfront,
                     payment_mode: payload.payment_mode.clone(),
-                    notes: Some("Upfront Counter Payment".to_string()),
+                    notes: Some(UPFRONT_NOTE.to_string()),
                 },
             )?;
         }
@@ -342,10 +599,13 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
         fig: &mut BillFigures,
     ) -> Result<SaleSummaryResponse, AppError> {
         validate_sale_shape(payload)?;
+        if payload.items.iter().any(|i| i.sale_item_id.is_some()) {
+            return Err(validation("sale_item_id", "New bills can't reference existing lines"));
+        }
 
         // Party and lines; charges and totals (FR-19), then the aggregated stock check across all
         // lines of one item (DD-10) and the payment cross-check (DD-02).
-        let r = resolve_sale(tx, payload, None, &HashSet::new())?;
+        let r = resolve_sale(tx, payload, None, false)?;
         let (charges, totals) = price_sale(tx, payload, &r, 0.0, fig)?;
         self.check_sale_stock(tx, &r)?;
         let total_amount = totals.total_amount;
@@ -407,19 +667,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
             return Err(locked(reason));
         }
 
-        // FR-45: lines of an item deleted since the sale was made may stay on the bill.
-        let keep_items: HashSet<i64> =
-            tx.sales().list_items_by_transaction_id(sale_id)?.into_iter().map(|l| l.item_id).collect();
-
-        // Reverse the old version: stock, lines, charges, upfront cash. Later settlements stay.
-        self.inventory_service.reverse_sale_bill_stock(tx, sale_id)?;
-        tx.sales().delete_sale_items(sale_id)?;
-        delete_bill_charges(tx, TransactionType::Sale, sale_id)?;
-        self.payment_service
-            .delete_bill_ledger(tx, TransactionType::Sale, sale_id, &[PaymentKind::Upfront])?;
-
-        // Repost through the create rules.
-        let r = resolve_sale(tx, payload, old.party_id, &keep_items)?;
+        // DD-89: diff the payload against the stored lines; nothing is written until every check
+        // has passed, and only what changed is written.
+        let r = resolve_sale(tx, payload, old.party_id, true)?;
+        let old_lines = tx.sales().list_items_by_transaction_id(sale_id)?;
         let party_changed = r.party_id != old.party_id;
         if party_changed && !g.can_change_party {
             return Err(locked_with(
@@ -436,8 +687,13 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
         if party_changed {
             settlements_move_check(&g, r.party_name.as_deref(), payload.confirm_move_settlements)?;
         }
-        let (charges, totals) = price_sale(tx, payload, &r, g.applied_amount, fig)?;
-        self.check_sale_stock(tx, &r)?;
+        let plan = plan_sale_edit(tx, payload, &r, &old_lines)?;
+        // E9: stored charge rows stay unless the user changed them.
+        let charge_plan = plan_bill_charges_edit(tx, TransactionType::Sale, sale_id, &payload.charges)?;
+        let totals = compute_bill_totals(&plan.line_totals, &charge_plan.charges)?;
+        fig.set_totals(&plan.line_totals, totals, g.applied_amount);
+        check_edit_deleted_items(tx, &plan, &r, &old_lines)?;
+        self.check_edit_stock(tx, &plan, &r)?;
         let total_amount = totals.total_amount;
         if total_amount + MONEY_EPS < g.applied_amount {
             return Err(locked_with(
@@ -466,14 +722,61 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
             is_opening_balance: false,
             ..old.clone()
         };
+        // Writes. Stock first goes back (removed lines, replaced lines, quantity cuts), so other
+        // lines may draw it; then the header (new lines take its date), changed rows, extra draws.
+        for o in &plan.removed {
+            self.inventory_service.release_whole_sale_line(tx, o.id)?;
+            tx.sales().delete_sale_item(o.id)?;
+        }
+        for op in &plan.ops {
+            match op {
+                LineOp::Replace { row, .. } => {
+                    self.inventory_service.release_whole_sale_line(tx, row.id)?;
+                }
+                LineOp::Update { row, release, .. } => {
+                    for &(item_id, qty) in release {
+                        self.inventory_service.release_sale_line(tx, row.id, item_id, qty)?;
+                    }
+                }
+                LineOp::Keep | LineOp::Insert => {}
+            }
+        }
         tx.sales().update_header_for_edit(&header)?;
-        insert_bill_charges(tx, TransactionType::Sale, sale_id, &charges)?;
-        self.post_sale_lines(tx, sale_id, &r.lines)?;
+        apply_bill_charges_edit(tx, TransactionType::Sale, sale_id, &charge_plan)?;
+        for (op, n) in plan.ops.iter().zip(&r.lines) {
+            match op {
+                LineOp::Keep => {}
+                LineOp::Update { row, draw, .. } | LineOp::Replace { row, draw } => {
+                    tx.sales().update_sale_item(row)?;
+                    for &(item_id, qty) in draw {
+                        self.inventory_service.deplete_stock_for_sale(tx, row.id, item_id, qty)?;
+                    }
+                }
+                LineOp::Insert => self.post_sale_lines(tx, sale_id, std::slice::from_ref(n))?,
+            }
+        }
         if party_changed {
             self.payment_service.repoint_bill_party(tx, TransactionType::Sale, sale_id, r.party_id)?;
         }
-        self.payment_service.recompute(tx, TransactionType::Sale, sale_id)?;
-        self.record_upfront(tx, sale_id, r.party_id, payload, upfront)?;
+        if with_payment {
+            // DD-89: the UPFRONT row is updated in place (created only when none, deleted at 0).
+            self.payment_service.set_bill_upfront(
+                tx,
+                BillUpfront {
+                    tx_type: TransactionType::Sale,
+                    tx_id: sale_id,
+                    party_id: r.party_id,
+                    date: payload.transaction_date.clone(),
+                    amount: upfront,
+                    payment_mode: payload.payment_mode.clone(),
+                    notes: UPFRONT_NOTE.to_string(),
+                },
+            )?;
+        } else {
+            // Preview without a payment (rolled back): the cash is unknown, so it is left out.
+            self.payment_service
+                .delete_bill_ledger(tx, TransactionType::Sale, sale_id, &[PaymentKind::Upfront])?;
+        }
 
         let header = tx.sales().find_transaction_by_id(sale_id)?.ok_or_else(|| AppError::NotFound {
             entity: "SaleTransaction".to_string(),
@@ -632,10 +935,17 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             );
             let share = net_unit_price_factor(sale.items_subtotal, sale.discounts_total);
             let profit = round2(item.total_amount * share - cost_amount);
+            let bundle_id = resolve_line_bundle(
+                &mut *tx,
+                item.item_id,
+                item.pack_label.as_deref(),
+                units_per_pack(item.quantity, item.pack_quantity),
+            )?;
             details.push(SaleItemDetail {
                 sale_item: item,
                 item_name,
                 bundle_name,
+                bundle_id,
                 returned_quantity,
                 allocations,
                 net_unit_price,
