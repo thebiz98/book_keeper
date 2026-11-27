@@ -231,8 +231,8 @@ export class MockApiClient implements ApiClient {
           balanceDue: sum((r) => r.balanceDue),
           profit: filter.includeProfit ? 0 : null,
         }
-      : null;
-    return { ...p, items: p.items.map((r) => ({ ...r, profit: filter?.includeProfit ? 0 : null })), totals };
+      : undefined;
+    return { ...p, items: p.items.map((r) => ({ ...r, profit: filter?.includeProfit ? 0 : null })), ...(totals ? { totals } : {}) };
   }
   // FR-20 (thin stubs, DD-27: no business rules, no stock or ledger effects)
   async updateSale(saleId: number, payload: Parameters<ApiClient['createSale']>[0]) {
