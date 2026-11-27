@@ -23,7 +23,7 @@ pub(crate) fn vfail(field: &str, message: impl Into<String>) -> AppError {
 }
 
 pub(crate) fn today() -> String {
-    chrono::Local::now().format("%Y-%m-%d").to_string()
+    crate::core::clock::today_local()
 }
 
 pub(crate) fn expected_columns_of(specs: &[&ColumnSpec]) -> Vec<ExpectedColumn> {

@@ -65,7 +65,7 @@ pub fn check_and_backup(svc: &dyn BackupService, dir: &Path, cfg: &BackupConfig)
             return;
         }
     };
-    if !is_due(last, chrono::Local::now().naive_local(), cfg.interval_hours) {
+    if !is_due(last, crate::core::clock::now_ist().naive_local(), cfg.interval_hours) {
         return;
     }
     match run_auto_backup(svc, dir, cfg.retention_days) {

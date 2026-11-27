@@ -536,7 +536,7 @@ fn premigration_backup(conn: &rusqlite::Connection, from: i64, to: i64) -> Resul
     let fail = |what: String| AppError::MigrationError(format!("pre-migration backup failed, nothing was changed: {what}"));
     let dir = db_file.parent().map(|p| p.join("backups")).unwrap_or_else(|| std::path::PathBuf::from("backups"));
     std::fs::create_dir_all(&dir).map_err(|e| fail(format!("cannot create '{}': {e}", dir.display())))?;
-    let stamp = chrono::Local::now().format("%Y%m%d_%H%M");
+    let stamp = crate::core::clock::now_ist().format("%Y%m%d_%H%M");
     let prefix = format!("book_keeper_premigration_v{from}_to_v{to}_{stamp}");
     let mut n = 1u32;
     let dest = loop {
