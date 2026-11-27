@@ -250,7 +250,8 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             PartyType::Customer,
         )?;
 
-        let mut per_line_qty: HashMap<i64, f64> = HashMap::new();
+        // Per linked sale line: (returned qty, refund value) of this payload (R8 cap below).
+        let mut per_line_qty: HashMap<i64, (f64, f64)> = HashMap::new();
         let mut item_names: Vec<String> = Vec::with_capacity(payload.items.len());
         for it in &payload.items {
             match it.sale_item_id {
@@ -282,19 +283,37 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                             format!("unit_price {} exceeds the net sold rate {:.4} (after bill discounts)", it.unit_price, cap),
                         ));
                     }
-                    *per_line_qty.entry(sid).or_insert(0.0) += it.quantity;
+                    let e = per_line_qty.entry(sid).or_insert((0.0, 0.0));
+                    e.0 += it.quantity;
+                    e.1 += round2(it.quantity * it.unit_price);
                     item_names.push(line.item_name);
                 }
                 None => item_names.push(active_item_name(tx, it.item_id)?),
             }
         }
-        for (sid, qty) in &per_line_qty {
+        for (sid, (qty, value)) in &per_line_qty {
             let line = tx.sales().find_sale_item_by_id(*sid)?.ok_or_else(|| AppError::not_found("SaleItem", sid.to_string()))?;
             let returned = tx.sales().get_returned_quantity_for_line(*sid)?;
             if *qty > line.quantity - returned + EPS {
                 return Err(validation(
                     "quantity",
                     format!("Cannot return {qty} of sale line {sid}: sold {}, already returned {returned}", line.quantity),
+                ));
+            }
+            // R8 / DD-91: Σ refunded over every return of the line ≤ its net total (rounded lines).
+            let s = sale.as_ref().expect("a linked line implies the original sale");
+            let net_total = round2(line.total_amount * net_unit_price(1.0, s.items_subtotal, s.discounts_total));
+            let already: f64 = tx
+                .returns()
+                .list_customer_returned_items_for_sale_item(*sid)?
+                .iter()
+                .map(|r| r.total_amount)
+                .sum();
+            if already + value > net_total + MONEY_EPS {
+                let left = round2((net_total - already).max(0.0));
+                return Err(validation(
+                    "unit_price",
+                    format!("Refund for '{}' can be at most ₹{left:.2} (net line total ₹{net_total:.2}, already refunded ₹{:.2})", line.item_name, round2(already)),
                 ));
             }
         }
@@ -309,7 +328,8 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         // ---- Writes -----------------------------------------------------------------------
         let line_totals: Vec<f64> =
             payload.items.iter().map(|i| round2(i.quantity * i.unit_price)).collect();
-        let total_amount = round2(payload.items.iter().map(|i| i.quantity * i.unit_price).sum());
+        // R6 / DD-91: the header is the sum of the rounded lines, never a separately rounded sum.
+        let total_amount = round2(line_totals.iter().sum());
         let return_code = tx.returns().get_next_return_code()?;
         let return_id = tx.returns().create_return_transaction(&ReturnTransaction {
             id: 0,

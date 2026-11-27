@@ -63,6 +63,16 @@ describe('CreditDuesPage', () => {
     expect(document.querySelector('[data-table-scroll]')?.getAttribute('data-table-scroll')).toBe('fill');
   });
 
+  it('shows Paid & credited from the backend row (L3: return credits included)', async () => {
+    installApi({ getPartyDuesSummary: [{ ...party, totalPaid: 200, paidAndCredited: 260, balanceDue: 240 }] });
+    render(<CreditDuesPage />);
+    await waitFor(() => bodyText().includes('Sharma Traders'));
+    const heads = Array.from(document.querySelectorAll('th')).map((h) => h.textContent ?? '');
+    expect(heads).toContain('Paid & credited');
+    expect(heads).not.toContain('Total Paid');
+    expect(bodyText()).toContain('₹260.00');
+  });
+
   it('settles a single bill with transactionId', async () => {
     const api = setup();
     render(<CreditDuesPage />);

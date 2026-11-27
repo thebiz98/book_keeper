@@ -132,9 +132,9 @@ pub struct SaleHistoryRow {
 /// Raw components of one bill's profit (same sources as the P&L), computed in SQL.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BillProfitParts {
-    /// FIFO cost of the units sold and not returned.
+    /// Gross FIFO cost of the lines less the `cost_amount` of their linked returned lines (DD-91).
     pub cost_net: f64,
-    /// Customer REFUND returns linked to the bill.
+    /// Σ linked RETURNED line totals of customer REFUND returns (R6: lines, not the header).
     pub refunds: f64,
     /// Cost of scrapped returned units (stays spent).
     pub scrap_cost: f64,

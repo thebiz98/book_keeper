@@ -3,7 +3,7 @@ import { api, errorMessage } from '@/api';
 import { useLiveSearch, LIST_SEARCH_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import type { ItemProfitReport, ItemProfitRow, ReportSort } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
-import { Table, TableBody, TableCell, TableFooter, TableHeader, TableRow } from '../ui/Table';
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { Pager } from './Pager';
 import {
   nextSort,
@@ -16,7 +16,7 @@ import {
 const EMPTY: ItemProfitReport = {
   rows: [],
   totals: { revenue: 0, cost: 0, profit: 0, marginPct: null },
-  reconciliation: { itemsProfit: 0, charges: 0, replacementCost: 0, billsProfit: 0 },
+  reconciliation: { itemsProfit: 0, charges: 0, replacementCost: 0, billsProfit: 0, pnlGrossProfit: 0 },
   totalCount: 0,
   page: 1,
   pageSize: REPORT_PAGE_SIZE,
@@ -82,6 +82,8 @@ export const ItemProfitPanel: React.FC<ItemProfitPanelProps> = ({ fromDate, toDa
                 {head('name', 'Item')}
                 {head('qty', 'Qty', 'right')}
                 {head('revenue', 'Revenue', 'right')}
+                <TableHead align="right">Returns</TableHead>
+                <TableHead align="right">Returned cost</TableHead>
                 {head('cost', 'Cost', 'right')}
                 {head('profit', 'Profit', 'right')}
                 {head('margin', 'Margin', 'right')}
@@ -90,8 +92,8 @@ export const ItemProfitPanel: React.FC<ItemProfitPanelProps> = ({ fromDate, toDa
             <TableBody>
               {data.rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-xs text-slate-400 py-3">
-                    {live.isLoading ? 'Loading...' : 'No sales in this period.'}
+                  <TableCell colSpan={8} className="text-xs text-slate-400 py-3">
+                    {live.isLoading ? 'Loading...' : 'No sales or returns in this period.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -108,6 +110,12 @@ export const ItemProfitPanel: React.FC<ItemProfitPanelProps> = ({ fromDate, toDa
                   </TableCell>
                   <TableCell align="right">
                     <CurrencyDisplay amount={r.revenue} size="sm" />
+                  </TableCell>
+                  <TableCell align="right" data-testid="item-profit-returns">
+                    <CurrencyDisplay amount={r.returnsValue ?? 0} size="sm" />
+                  </TableCell>
+                  <TableCell align="right" data-testid="item-profit-returned-cost">
+                    <CurrencyDisplay amount={r.returnedCost ?? 0} size="sm" />
                   </TableCell>
                   <TableCell align="right">
                     <CurrencyDisplay amount={r.cost} size="sm" />
@@ -128,6 +136,8 @@ export const ItemProfitPanel: React.FC<ItemProfitPanelProps> = ({ fromDate, toDa
                 <TableCell align="right">
                   <CurrencyDisplay amount={data.totals.revenue} size="sm" />
                 </TableCell>
+                <TableCell />
+                <TableCell />
                 <TableCell align="right">
                   <CurrencyDisplay amount={data.totals.cost} size="sm" />
                 </TableCell>
@@ -142,10 +152,11 @@ export const ItemProfitPanel: React.FC<ItemProfitPanelProps> = ({ fromDate, toDa
           </Table>
           <Pager page={page} total={data.totalCount} limit={REPORT_PAGE_SIZE} onPageChange={setPage} />
           <p data-testid="item-profit-reconciliation" className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            Items profit <CurrencyDisplay amount={rec.itemsProfit} size="sm" /> + charges{' '}
-            <CurrencyDisplay amount={rec.charges} size="sm" /> - replacement cost{' '}
-            <CurrencyDisplay amount={rec.replacementCost} size="sm" /> = bills profit{' '}
-            <CurrencyDisplay amount={rec.billsProfit} size="sm" />
+            Items profit <CurrencyDisplay amount={rec.itemsProfit} size="sm" /> = P&amp;L gross profit{' '}
+            <CurrencyDisplay amount={rec.pnlGrossProfit ?? rec.itemsProfit} size="sm" /> (sales by bill date, returns by
+            return date; scrapped returns are Inventory Losses). Bills dated in the period: profit{' '}
+            <CurrencyDisplay amount={rec.billsProfit} size="sm" />, with charges{' '}
+            <CurrencyDisplay amount={rec.charges} size="sm" /> and all their returns.
           </p>
         </>
       )}

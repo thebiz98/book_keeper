@@ -176,7 +176,12 @@ export const CreditDuesPage: React.FC = () => {
     { key: 'count', header: 'Unsettled Bills', align: 'center', render: (d) => d.unsettledBillsCount },
     { key: 'earliest', header: 'Earliest Bill', mono: true, render: (d) => d.earliestBillDate },
     { key: 'inv', header: 'Total Invoiced', align: 'right', render: (d) => <CurrencyDisplay amount={d.totalInvoiced} /> },
-    { key: 'paid', header: 'Total Paid', align: 'right', render: (d) => <CurrencyDisplay amount={d.totalPaid} /> },
+    {
+      key: 'paid',
+      header: 'Paid & credited',
+      align: 'right',
+      render: (d) => <CurrencyDisplay amount={d.paidAndCredited ?? d.totalPaid} />,
+    },
     {
       key: 'bal',
       header: 'Net Due Balance',

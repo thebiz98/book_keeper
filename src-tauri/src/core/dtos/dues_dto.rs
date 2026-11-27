@@ -15,8 +15,12 @@ pub struct PartyDueSummary {
     pub earliest_bill_date: String,
     /// Σ `total_amount` of the open bills.
     pub total_invoiced: f64,
-    /// Σ `paid_amount` of the open bills (upfront + settlements + return credits).
+    /// Σ `paid_amount` of the open bills (upfront + settlements; return credits are not in it).
     pub total_paid: f64,
+    /// L3: Σ (UPFRONT + SETTLEMENT + RETURN_CREDIT) of the open bills = `total_invoiced - balance_due`.
+    /// The Dues "Paid & credited" column.
+    #[serde(default)]
+    pub paid_and_credited: f64,
     /// Σ `balance_due` of the open bills.
     pub balance_due: f64,
     /// FR-46: false for a deleted party that still has dues (UI shows a "Deleted" badge).

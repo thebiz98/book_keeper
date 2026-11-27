@@ -109,7 +109,7 @@ export const DashboardSummaryCards: React.FC<{
       rows: [
         {
           testId: 'kpi-sales',
-          label: 'Sales',
+          label: 'Item sales',
           caption: m ? `${m.todaySalesCount} ${m.todaySalesCount === 1 ? 'bill' : 'bills'}` : undefined,
           value: m?.todaySalesAmount ?? null,
           route: 'sales-history',

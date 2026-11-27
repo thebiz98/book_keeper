@@ -60,18 +60,27 @@ fn lim(n: usize) -> i64 {
 
 // ---- FR-34 bill profit -------------------------------------------------------------------------
 // Bill profit = total_amount (items subtotal + charges - discounts)
-//             - cost_net          FIFO cost of units sold and not returned ((depleted - returned) * unit_cost;
-//                                 restocked units give their cost back, scrapped units are re-added below)
-//             - refunds           linked CUSTOMER REFUND returns (a REPLACEMENT return does not reduce revenue)
+//             - cost_net          gross FIFO cost of the bill's lines less the `cost_amount` of their linked
+//                                 RETURNED lines (restocked and scrapped; scrapped cost is re-added below)
+//             - refunds           Σ linked RETURNED line totals of CUSTOMER REFUND returns (R6: lines, not the
+//                                 header, so an unlinked line on the same return never counts; a REPLACEMENT
+//                                 return does not reduce revenue)
 //             - scrap_cost        cost_amount of linked DAMAGED_SCRAP returned lines (stays spent)
 //             - replacement_cost  FIFO cost of replacement units issued against the bill.
-// These are the P&L sources (`cogs_sales`, `returns`, `loss_scrap`, `cogs_repl` in report_repo.rs PNL_SQL)
-// restricted to one bill. Correlated on the alias `t` (sale_transactions).
-const PROFIT_COST_NET: &str = "COALESCE((SELECT SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost) \
+// These are the P&L sources (`cogs_sales`, `returned_goods_cost`, `returns`, `loss_scrap`, `cogs_repl`
+// in report_repo.rs) restricted to one bill, whatever the return dates (DD-91). Correlated on `t`.
+const PROFIT_COST_NET: &str = "(COALESCE((SELECT SUM(a.quantity_depleted * a.unit_cost) \
      FROM sale_stock_allocations a JOIN sale_items si ON si.id = a.sale_item_id \
-     WHERE si.sale_transaction_id = t.id), 0.0)";
-const PROFIT_REFUNDS: &str = "COALESCE((SELECT SUM(r.total_amount) FROM return_transactions r \
-     WHERE r.return_type = 'CUSTOMER' AND r.settlement_type = 'REFUND' AND r.original_transaction_id = t.id), 0.0)";
+     WHERE si.sale_transaction_id = t.id), 0.0) \
+     - COALESCE((SELECT SUM(ri.cost_amount) FROM sale_items si \
+     JOIN return_items ri ON ri.sale_item_id = si.id \
+     JOIN return_transactions r ON r.id = ri.return_transaction_id \
+     WHERE si.sale_transaction_id = t.id AND r.return_type = 'CUSTOMER' AND ri.line_type = 'RETURNED'), 0.0))";
+const PROFIT_REFUNDS: &str = "COALESCE((SELECT SUM(ri.total_amount) FROM sale_items si \
+     JOIN return_items ri ON ri.sale_item_id = si.id \
+     JOIN return_transactions r ON r.id = ri.return_transaction_id \
+     WHERE si.sale_transaction_id = t.id AND r.return_type = 'CUSTOMER' AND r.settlement_type = 'REFUND' \
+       AND ri.line_type = 'RETURNED'), 0.0)";
 const PROFIT_SCRAP: &str = "COALESCE((SELECT SUM(ri.cost_amount) FROM return_items ri \
      JOIN return_transactions r ON r.id = ri.return_transaction_id \
      JOIN sale_items si ON si.id = ri.sale_item_id \
@@ -375,16 +384,16 @@ impl SaleRepository for SqliteSaleRepository {
         Ok((rows, total.max(0) as usize))
     }
 
-    fn get_returned_quantities_for_sale(&self, sale_id: i64) -> Result<Vec<(i64, f64)>, AppError> {
+    fn get_returned_quantities_for_sale(&self, sale_id: i64) -> Result<Vec<(i64, f64, f64)>, AppError> {
         let mut stmt = self.conn.prepare(
-            "SELECT ri.sale_item_id, SUM(ri.quantity) FROM return_items ri \
+            "SELECT ri.sale_item_id, SUM(ri.quantity), SUM(ri.cost_amount) FROM return_items ri \
              JOIN return_transactions rt ON rt.id = ri.return_transaction_id \
              JOIN sale_items si ON si.id = ri.sale_item_id \
              WHERE si.sale_transaction_id = ?1 AND ri.line_type = 'RETURNED' AND rt.return_type = 'CUSTOMER' \
              GROUP BY ri.sale_item_id",
         )?;
         let rows = stmt
-            .query_map(params![sale_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?)))?
+            .query_map(params![sale_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }

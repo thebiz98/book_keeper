@@ -44,8 +44,9 @@ pub trait SaleRepository {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<SaleHistoryRow>, usize), AppError>;
-    /// `(sale_item_id, returned base qty)` for the bill's lines that have customer returns, one query.
-    fn get_returned_quantities_for_sale(&self, sale_id: i64) -> Result<Vec<(i64, f64)>, AppError>;
+    /// `(sale_item_id, returned base qty, Σ returned cost_amount)` for the bill's lines that have
+    /// customer `RETURNED` lines, one query (DD-91: the cost a line's returns credit back).
+    fn get_returned_quantities_for_sale(&self, sale_id: i64) -> Result<Vec<(i64, f64, f64)>, AppError>;
     fn list_items_by_transaction_id(&self, tx_id: i64) -> Result<Vec<SaleItem>, AppError>;
     /// Σ quantity of customer `RETURNED` return lines referencing this sale line.
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError>;

@@ -161,10 +161,12 @@ impl E {
             .map(|t| c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0)).unwrap())
             .collect()
     }
-    /// Reconciliation identity of FR-38 against the bill profits of the period (FR-34).
+    /// Reconciliation of FR-38: DD-91 items profit = P&L gross profit of the range; `bills_profit`
+    /// is still Σ FR-34 bill profit of the bills dated in range.
     fn assert_reconciles(&self, bills: usize) {
         let r = self.profit(pf(FROM, TO)).reconciliation;
-        close(r.items_profit + r.charges - r.replacement_cost, r.bills_profit);
+        close(r.items_profit, r.pnl_gross_profit);
+        close(r.pnl_gross_profit, self.report.get_pnl_report(FROM, TO).unwrap().gross_profit);
         let _ = bills;
         let mut tx = self.db.begin_read().unwrap();
         let (sum_bills,): (f64,) = {
@@ -233,10 +235,14 @@ fn returns_refund_restock_scrap_and_replacement() {
     let rb = e.row("Beta");
     close(rb.qty_sold, 2.0);
     close(rb.revenue, 20.0);
-    close(rb.cost, 20.0); // 2 kept (10) + 2 scrapped units keep their cost (10)
+    // DD-91: 4 sold (20) less 2 scrapped units credited (10); the scrap is a P&L Inventory Loss.
+    close(rb.cost, 10.0);
+    close(rb.returned_cost, 10.0);
+    close(rb.returns_value, 20.0);
     let rg = e.row("Gamma");
     close(rg.qty_sold, 3.0); // replacement returns still count as returned units
     close(rg.revenue, 40.0); // a replacement does not reduce revenue
+    close(rg.cost, 20.0); // 20 sold - 5 restocked + 5 for the replacement unit issued
     let rep = e.profit(pf(FROM, TO));
     assert!(rep.reconciliation.replacement_cost > 0.0);
     e.assert_reconciles(3);

@@ -368,6 +368,7 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
         for r in &mut rows {
             r.total_invoiced = round2(r.total_invoiced);
             r.total_paid = round2(r.total_paid);
+            r.paid_and_credited = round2(r.paid_and_credited);
             r.balance_due = round2(r.balance_due);
         }
         Ok(rows)

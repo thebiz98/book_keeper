@@ -82,6 +82,8 @@ describe('DashboardPage', () => {
     const inCard = (id: string) => Array.from(card(id).querySelectorAll('[data-testid^="kpi-"]')).map((e) => e.getAttribute('data-testid'));
     expect(document.querySelectorAll('[data-testid^="card-"]')).toHaveLength(3);
     expect(inCard('today')).toEqual(['kpi-sales', 'kpi-purchases']);
+    // L3: the figure is items_subtotal, so it is labelled "Item sales".
+    expect(document.querySelector('[data-testid="kpi-sales"]')!.textContent).toContain('Item sales');
     expect(inCard('dues')).toEqual(['kpi-receivables', 'kpi-payables']);
     expect(inCard('cash')).toEqual(['kpi-cash', 'kpi-expenses', 'kpi-valuation']);
     expect(document.querySelector('[data-testid="kpi-profit"]')).toBeNull();

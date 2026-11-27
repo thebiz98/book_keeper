@@ -11,7 +11,7 @@ use crate::core::error::AppError;
 use crate::core::money::{round2, MONEY_EPS};
 use crate::data::contracts::report_repository::ReportListQuery;
 use crate::data::sqlite::repositories::sale_repo::{profit_expr, PROFIT_REPLACEMENT};
-use crate::data::sqlite::service_sql::{line_net_cost_sql, misc_cost_sql};
+use crate::data::sqlite::service_sql::{line_gross_cost_sql, misc_cost_sql, returned_cost_filter, returned_cost_sql};
 use crate::data::sqlite::SqliteConn;
 
 fn dir(desc: bool) -> &'static str {
@@ -22,30 +22,38 @@ fn margin(profit: f64, revenue: f64) -> Option<f64> {
     (revenue.abs() > MONEY_EPS).then(|| round2(profit / revenue * 100.0))
 }
 
-/// Per sale line of non-opening bills dated `?1..?2`: quantity net of linked returns, revenue (line
-/// total x the FR-19 discount share, less linked refund value) and cost (net allocations + scrapped
-/// returned units + misc. cost).
+/// DD-91, two arms over `?1..?2`, the same dating as the P&L:
+/// * sales of non-opening bills by bill date: quantity, revenue (line total x the FR-19 discount
+///   share), gross FIFO cost + misc. cost;
+/// * customer return lines by return date, by `ri.item_id` (linked or not): returned units and the
+///   REFUND value come off, the returned cost (`returned_cost_sql`) is credited, and replacement
+///   units issued add their cost to the issued item.
+///
+/// Σ `rev - cost` over every row = P&L gross profit of the range. Scrapped units are an Inventory
+/// Loss there, not item cost. `rv` / `rc` carry the returns value and returned cost for the row.
 fn line_cte() -> String {
-    let linked = |extra: &str, col: &str| {
-        format!(
-            "COALESCE((SELECT SUM(ri.{col}) FROM return_items ri \
-             JOIN return_transactions r ON r.id = ri.return_transaction_id \
-             WHERE ri.sale_item_id = si.id AND ri.line_type = 'RETURNED' AND r.return_type = 'CUSTOMER'{extra}), 0.0)"
-        )
-    };
     format!(
-        "line AS (SELECT si.item_id AS item_id, si.item_name AS snap, \
-           si.quantity - {ret_qty} AS qty, \
+        "line AS (SELECT si.item_id AS item_id, si.item_name AS snap, si.quantity AS qty, \
            si.total_amount * (CASE WHEN s.items_subtotal <= {eps} THEN 1.0 \
-              ELSE MAX(0.0, MIN(1.0, 1.0 - s.discounts_total / s.items_subtotal)) END) \
-             - {refund} AS rev, \
-           {net} + {scrap} + {misc} AS cost \
+              ELSE MAX(0.0, MIN(1.0, 1.0 - s.discounts_total / s.items_subtotal)) END) AS rev, \
+           {gross} + {misc} AS cost, 0.0 AS rv, 0.0 AS rc \
          FROM sale_transactions s JOIN sale_items si ON si.sale_transaction_id = s.id \
-         WHERE s.is_opening_balance = 0 AND s.transaction_date BETWEEN ?1 AND ?2)",
-        ret_qty = linked("", "quantity"),
-        refund = linked(" AND r.settlement_type = 'REFUND'", "total_amount"),
-        scrap = linked(" AND ri.condition = 'DAMAGED_SCRAP'", "cost_amount"),
-        net = line_net_cost_sql("si"),
+         WHERE s.is_opening_balance = 0 AND s.transaction_date BETWEEN ?1 AND ?2 \
+         UNION ALL \
+         SELECT ri.item_id, ri.item_name, \
+           CASE WHEN ri.line_type = 'RETURNED' THEN -ri.quantity ELSE 0.0 END, \
+           -({refund}), \
+           CASE WHEN ri.line_type = 'REPLACEMENT_ISSUED' THEN ri.cost_amount ELSE -({credit}) END, \
+           {refund}, {credit} \
+         FROM return_transactions r JOIN return_items ri ON ri.return_transaction_id = r.id \
+         WHERE r.return_type = 'CUSTOMER' AND r.return_date BETWEEN ?1 AND ?2)",
+        refund = "CASE WHEN ri.line_type = 'RETURNED' AND r.settlement_type = 'REFUND' THEN ri.total_amount ELSE 0.0 END",
+        credit = format!(
+            "CASE WHEN ri.line_type = 'RETURNED' AND {} THEN {} ELSE 0.0 END",
+            returned_cost_filter("ri"),
+            returned_cost_sql("ri")
+        ),
+        gross = line_gross_cost_sql("si"),
         misc = misc_cost_sql("si"),
         eps = MONEY_EPS,
     )
@@ -67,7 +75,7 @@ pub fn profit_ctes() -> String {
     format!(
         "WITH {line}, agg AS (SELECT l.item_id AS item_id, COALESCE(i.name, MAX(l.snap)) AS name, \
            COALESCE(i.base_unit, '') AS base_unit, SUM(l.qty) AS qty, SUM(l.rev) AS revenue, \
-           SUM(l.cost) AS cost, SUM(l.rev) - SUM(l.cost) AS profit \
+           SUM(l.cost) AS cost, SUM(l.rev) - SUM(l.cost) AS profit, SUM(l.rv) AS rv, SUM(l.rc) AS rc \
          FROM line l LEFT JOIN items i ON i.id = l.item_id GROUP BY l.item_id), \
          flt AS (SELECT * FROM agg WHERE (?3 IS NULL OR instr(lower(name), lower(?3)) > 0))",
         line = line_cte()
@@ -77,7 +85,7 @@ pub fn profit_ctes() -> String {
 /// The page statement (`?4` = limit, `?5` = offset), exposed so tests can EXPLAIN it.
 pub fn profit_page_sql(order: &str, desc: bool) -> String {
     format!(
-        "{} SELECT item_id, name, base_unit, qty, revenue, cost, profit FROM flt \n         ORDER BY ({ord}) IS NULL, ({ord}) {d}, name COLLATE NOCASE, item_id LIMIT ?4 OFFSET ?5",
+        "{} SELECT item_id, name, base_unit, qty, revenue, cost, profit, rv, rc FROM flt \n         ORDER BY ({ord}) IS NULL, ({ord}) {d}, name COLLATE NOCASE, item_id LIMIT ?4 OFFSET ?5",
         profit_ctes(),
         ord = profit_order(order),
         d = dir(desc)
@@ -91,13 +99,7 @@ pub(super) fn item_profit(conn: &SqliteConn, q: &ReportListQuery) -> Result<Item
         params![q.from, q.to, q.search],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
-    let page_sql = format!(
-        "{ctes} SELECT item_id, name, base_unit, qty, revenue, cost, profit FROM flt \
-         ORDER BY ({ord}) IS NULL, ({ord}) {d}, name COLLATE NOCASE, item_id LIMIT ?4 OFFSET ?5",
-        ord = profit_order(q.order),
-        d = dir(q.desc)
-    );
-    let mut stmt = conn.prepare(&page_sql)?;
+    let mut stmt = conn.prepare(&profit_page_sql(q.order, q.desc))?;
     let rows = stmt
         .query_map(params![q.from, q.to, q.search, q.limit as i64, q.offset as i64], |r| {
             let (revenue, cost, profit): (f64, f64, f64) = (r.get(4)?, r.get(5)?, r.get(6)?);
@@ -111,11 +113,13 @@ pub(super) fn item_profit(conn: &SqliteConn, q: &ReportListQuery) -> Result<Item
                 cost,
                 profit,
                 margin_pct: margin(profit, revenue),
+                returns_value: round2(r.get(7)?),
+                returned_cost: round2(r.get(8)?),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Reconciliation (FR-38): every non-opening bill in range, ignoring the search.
+    // Reconciliation (FR-38, DD-91): every row of the range, ignoring the search.
     let items_profit: f64 = conn.query_row(
         &format!("WITH {} SELECT COALESCE(SUM(rev - cost), 0.0) FROM line", line_cte()),
         params![q.from, q.to],
@@ -141,6 +145,7 @@ pub(super) fn item_profit(conn: &SqliteConn, q: &ReportListQuery) -> Result<Item
             charges: round2(charges),
             replacement_cost: round2(replacement),
             bills_profit: round2(bills),
+            pnl_gross_profit: 0.0, // filled by the repository from `pnl` of the same range
         },
         total_count: count as usize,
         page: 0,

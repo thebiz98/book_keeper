@@ -108,7 +108,7 @@ fn consecutive_returns_get_distinct_ret_codes_for_both_sides() {
     // Sold 2 of the line: returns (even scrap, DD-05) reverse real allocations.
     inventory.deplete_stock_for_sale(&mut *tx, 15, 7, 2.0).unwrap();
     tx.commit().unwrap();
-    exec(&db, "UPDATE sale_items SET quantity = 2, unit_price = 500 WHERE id = 15");
+    exec(&db, "UPDATE sale_items SET quantity = 2, unit_price = 500, total_amount = 1000 WHERE id = 15");
 
     let customer = |qty: f64| CustomerReturnPayload {
         original_sale_id: Some(900_015),

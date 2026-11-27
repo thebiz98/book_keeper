@@ -17,7 +17,7 @@ describe('ReportsPage', () => {
     render(<ReportsPage />);
     await waitFor(() => !!document.querySelector('[data-testid="pnl"]') && !!document.querySelector('[data-testid="cashflow"]') && !!document.querySelector('[data-testid="valuation"]'));
     const ids = Array.from(document.querySelectorAll('[data-testid="pnl"] [data-testid]')).map((e) => e.getAttribute('data-testid'));
-    expect(ids).toEqual(['pnl-gross-sales', 'pnl-sales-discounts', 'pnl-sales-returns', 'pnl-net-sales', 'pnl-cogs', 'pnl-service-misc', 'pnl-gross-profit', 'pnl-other-income', 'pnl-losses', 'pnl-opex', 'pnl-net-profit', 'pnl-purchases']);
+    expect(ids).toEqual(['pnl-gross-sales', 'pnl-sales-discounts', 'pnl-sales-returns', 'pnl-net-sales', 'pnl-cogs', 'pnl-returned-goods-cost', 'pnl-service-misc', 'pnl-gross-profit', 'pnl-other-income', 'pnl-losses', 'pnl-opex', 'pnl-net-profit', 'pnl-purchases']);
     expect(document.querySelector('[data-testid="pnl-service-misc"]')!.textContent).toContain('₹25.00');
     expect(document.querySelector('[data-testid="pnl-net-profit"]')!.textContent).toContain('₹400.00');
     expect(document.querySelector('[data-testid="pnl-opex"]')!.textContent).toContain('₹50.00');
@@ -51,6 +51,25 @@ describe('ReportsPage', () => {
     expect(t('pnl-sale-charges')).toContain('50.00');
     expect(t('pnl-purchase-discounts')).toContain('10.00');
     expect(t('pnl-purchase-charges')).toContain('40.00');
+  });
+
+  it('shows the returned goods cost and the purchase discount reversed from the backend (FR-56, DD-87)', async () => {
+    installApi({
+      getPnLReport: { grossSales: 1000, salesReturns: 100, netSales: 900, cogs: 600, returnedGoodsCost: 60, grossProfit: 360, inventoryLosses: 0, netProfit: 355, totalPurchases: 700, salesDiscounts: 0, otherIncome: -5, saleChargesIncome: 0, purchaseDiscountsIncome: 0, purchaseDiscountReversed: 5, purchaseChargesExpense: 0, operatingExpenses: 0, expensesByType: [] },
+      getCashFlowReport: { salesCashInflow: 0, customerSettlementsInflow: 0, vendorRefundsInflow: 0, purchaseCashOutflow: 0, vendorSettlementsOutflow: 0, refundsCashOutflow: 0, expensesCashOutflow: 0, netCashBalance: 0 },
+      getStockValuationReport: { totalValuation: 0, activeLotsCount: 0, categoriesBreakdown: [] },
+    });
+    render(<ReportsPage />);
+    await waitFor(() => !!document.querySelector('[data-testid="pnl"]'));
+    const t = (id: string) => document.querySelector('[data-testid="' + id + '"]')!.textContent ?? '';
+    expect(t('pnl-cogs')).toContain('by sale date');
+    expect(t('pnl-cogs')).toContain('600.00');
+    expect(t('pnl-returned-goods-cost')).toContain('Returned goods cost');
+    expect(t('pnl-returned-goods-cost')).toContain('60.00');
+    // DD-56: gross profit is the backend's figure, never 900 - 600 + 60 recomputed here.
+    expect(t('pnl-gross-profit')).toContain('360.00');
+    expect(t('pnl-purchase-discount-reversed')).toContain('Purchase discount reversed');
+    expect(t('pnl-purchase-discount-reversed')).toContain('5.00');
   });
 
   it('shows an error when a report fails', async () => {
