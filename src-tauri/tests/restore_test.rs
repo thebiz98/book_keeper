@@ -6,7 +6,7 @@ mod common;
 use book_keeper::data::sqlite::connection::create_pool;
 use book_keeper::data::sqlite::migrations::{latest_version, run_migrations};
 use book_keeper::services::r#impl::restore::{
-    apply_pending_restore, dismiss_restore_failure, list_backups, preview_restore, restore_failure, stage_restore,
+    apply_pending_restore, dismiss_restore_failure, list_backups, preview_restore, preview_restore_for, restore_failure, stage_restore,
     FAILED_MARKER, PENDING_MARKER, STAGED_FILE,
 };
 use rusqlite::Connection;
@@ -126,7 +126,7 @@ fn staged_restore_is_swapped_in_with_a_safety_copy() {
     make_db(&db, 5);
     let backup = t.join("old.db");
     make_db(&backup, 2);
-    stage_restore(t.path(), &backup).unwrap();
+    stage_restore(t.path(), &db, &backup).unwrap();
     assert!(t.join(STAGED_FILE).is_file() && t.join(PENDING_MARKER).is_file());
 
     let out = apply_pending_restore(t.path(), &db, &backups).unwrap().expect("applied");
@@ -152,7 +152,7 @@ fn safety_copy_follows_the_backup_folder_saved_in_the_live_db() {
         .unwrap();
     let backup = t.join("old.db");
     make_db(&backup, 1);
-    stage_restore(t.path(), &backup).unwrap();
+    stage_restore(t.path(), &db, &backup).unwrap();
     apply_pending_restore(t.path(), &db, &backups).unwrap().unwrap();
     assert_eq!(files(&chosen).len(), 1, "{:?}", files(&chosen));
     assert!(!backups.exists());
@@ -164,7 +164,7 @@ fn failed_swap_keeps_current_data_and_reports_once() {
     make_db(&db, 5);
     let backup = t.join("old.db");
     make_db(&backup, 2);
-    stage_restore(t.path(), &backup).unwrap();
+    stage_restore(t.path(), &db, &backup).unwrap();
     // The staged copy gets damaged before the next start.
     std::fs::write(t.join(STAGED_FILE), vec![0x42u8; 8192]).unwrap();
 
@@ -179,9 +179,49 @@ fn failed_swap_keeps_current_data_and_reports_once() {
 
 #[test]
 fn staging_a_refused_file_writes_nothing() {
-    let (t, _db, _backups) = app_dir();
+    let (t, db, _backups) = app_dir();
     let junk = t.join("junk.db");
     std::fs::write(&junk, vec![0x42u8; 8192]).unwrap();
-    assert!(stage_restore(t.path(), &junk).is_err());
+    assert!(stage_restore(t.path(), &db, &junk).is_err());
     assert!(!t.join(STAGED_FILE).exists() && !t.join(PENDING_MARKER).exists());
+}
+
+#[test]
+fn the_live_database_and_app_owned_files_are_refused() {
+    let (t, db, _backups) = app_dir();
+    make_db(&db, 2);
+    let p = preview_restore_for(&db, &db, t.path()).unwrap();
+    assert_eq!(p.refusal.as_deref(), Some("This is the database in use, not a backup."));
+    // A differently spelled path to the same file is caught too.
+    let dotted = t.path().join(".").join("shop.db");
+    assert!(preview_restore_for(&dotted, &db, t.path()).unwrap().refusal.unwrap().contains("in use"));
+    // The staged file inside the app data folder.
+    let staged = t.join(STAGED_FILE);
+    make_db(&staged, 1);
+    assert!(preview_restore_for(&staged, &db, t.path()).unwrap().refusal.unwrap().contains("in use"));
+    assert!(stage_restore(t.path(), &db, &db).is_err());
+    assert!(!t.join(PENDING_MARKER).exists());
+    // An ordinary backup elsewhere in the folder is fine.
+    let ok = t.join("backups").join("book_keeper_backup_20260101_0900.db");
+    std::fs::create_dir_all(ok.parent().unwrap()).unwrap();
+    make_db(&ok, 1);
+    assert!(preview_restore_for(&ok, &db, t.path()).unwrap().refusal.is_none());
+}
+
+#[test]
+fn retry_io_retries_then_gives_up() {
+    use book_keeper::services::r#impl::restore::retry_io;
+    let mut calls = 0;
+    let r = retry_io(5, std::time::Duration::from_millis(1), || {
+        calls += 1;
+        if calls < 3 { Err(std::io::Error::other("busy")) } else { Ok(calls) }
+    });
+    assert_eq!(r.unwrap(), 3);
+    let mut calls = 0;
+    let r: std::io::Result<()> = retry_io(4, std::time::Duration::from_millis(1), || {
+        calls += 1;
+        Err(std::io::Error::other("busy"))
+    });
+    assert!(r.is_err());
+    assert_eq!(calls, 4);
 }

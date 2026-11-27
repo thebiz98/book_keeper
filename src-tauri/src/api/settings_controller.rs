@@ -86,22 +86,29 @@ pub async fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupFileIn
     super::run_blocking(move || restore::list_backups(&dir)).await
 }
 #[tauri::command]
-pub async fn preview_restore(path: String) -> Result<RestorePreview, AppError> {
-    super::run_blocking(move || restore::preview_restore(std::path::Path::new(&path))).await
+pub async fn preview_restore(
+    state: State<'_, AppState>,
+    data_dir: State<'_, AppDataDir>,
+    path: String,
+) -> Result<RestorePreview, AppError> {
+    let (live, dir) = (state.db_path.clone(), data_dir.0.clone());
+    super::run_blocking(move || restore::preview_restore_for(std::path::Path::new(&path), &live, &dir)).await
 }
-/// Stages the restore and restarts the app shortly after, so the UI gets this answer first.
-/// The swap happens at the next start-up (DD-99).
+/// Stages the restore and closes the app shortly after, so the UI gets this answer first. A clean
+/// exit (not a respawn) releases `shop.db` and works under `tauri dev`. The swap happens when the
+/// owner opens the app again (DD-99).
 #[tauri::command]
 pub async fn stage_restore(
     app: tauri::AppHandle,
+    state: State<'_, AppState>,
     data_dir: State<'_, AppDataDir>,
     path: String,
 ) -> Result<(), AppError> {
-    let dir = data_dir.0.clone();
-    super::run_blocking(move || restore::stage_restore(&dir, std::path::Path::new(&path)).map(|_| ())).await?;
+    let (dir, live) = (data_dir.0.clone(), state.db_path.clone());
+    super::run_blocking(move || restore::stage_restore(&dir, &live, std::path::Path::new(&path)).map(|_| ())).await?;
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(1500));
-        app.restart();
+        app.exit(0);
     });
     Ok(())
 }

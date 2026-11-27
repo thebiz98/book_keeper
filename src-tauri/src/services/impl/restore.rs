@@ -24,6 +24,7 @@ const KINDS: [(BackupKind, &str); 5] = [
 ];
 
 const NOT_A_BACKUP: &str = "This is not a Book Keeper backup file.";
+const LIVE_DB: &str = "This is the database in use, not a backup.";
 
 /// One file in the backup folder.
 #[derive(Debug, Clone, Serialize)]
@@ -134,6 +135,26 @@ fn refused(path: &Path, schema_version: i64, integrity_ok: bool, newer: bool, re
     }
 }
 
+/// True when `path` is the live database, or a file in the app data folder that the app itself
+/// owns (`restore_staged.db`, `shop.db` and its `-wal` / `-shm` / `.restoring` siblings).
+pub fn is_live_file(path: &Path, live_db: &Path, app_data_dir: &Path) -> bool {
+    let Ok(p) = path.canonicalize() else { return false };
+    if live_db.canonicalize().is_ok_and(|l| l == p) {
+        return true;
+    }
+    let in_app_dir = p.parent().zip(app_data_dir.canonicalize().ok()).is_some_and(|(a, b)| a == b);
+    let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    in_app_dir && (name == STAGED_FILE || name.starts_with("shop.db"))
+}
+
+/// `preview_restore`, but a source that is the database in use is refused first.
+pub fn preview_restore_for(path: &Path, live_db: &Path, app_data_dir: &Path) -> Result<RestorePreview, AppError> {
+    if is_live_file(path, live_db, app_data_dir) {
+        return Ok(refused(path, 0, false, false, LIVE_DB));
+    }
+    preview_restore(path)
+}
+
 /// Opens `path` without modifying it, checks it and counts what the owner will recognise. Never writes.
 pub fn preview_restore(path: &Path) -> Result<RestorePreview, AppError> {
     if !path.is_file() {
@@ -211,8 +232,8 @@ fn now_rfc3339() -> String {
 
 /// Checks `source`, copies it next to the database as `restore_staged.db` and writes the
 /// pending marker. The swap itself happens at the next start-up.
-pub fn stage_restore(app_data_dir: &Path, source: &Path) -> Result<RestorePreview, AppError> {
-    let preview = preview_restore(source)?;
+pub fn stage_restore(app_data_dir: &Path, live_db: &Path, source: &Path) -> Result<RestorePreview, AppError> {
+    let preview = preview_restore_for(source, live_db, app_data_dir)?;
     if let Some(reason) = &preview.refusal {
         return Err(AppError::ValidationError { field: "path".into(), message: reason.clone() });
     }
@@ -250,11 +271,39 @@ pub fn stage_restore(app_data_dir: &Path, source: &Path) -> Result<RestorePrevie
     Ok(preview)
 }
 
+/// Runs `f` until it succeeds, up to `attempts` times with `delay` between tries. An antivirus
+/// scan or indexer can hold a file for a moment; the last error is returned if it never frees up.
+pub fn retry_io<T>(
+    attempts: u32,
+    delay: std::time::Duration,
+    mut f: impl FnMut() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    let mut n = 1;
+    loop {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) if n >= attempts => return Err(e),
+            Err(_) => {
+                n += 1;
+                std::thread::sleep(delay);
+            }
+        }
+    }
+}
+
+/// About 10 s in total.
+const LOCK_RETRIES: u32 = 40;
+const LOCK_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+
 fn remove_sidecars(db: &Path) {
     for suffix in ["-wal", "-shm"] {
         let mut s = db.as_os_str().to_owned();
         s.push(suffix);
-        let _ = std::fs::remove_file(PathBuf::from(s));
+        let p = PathBuf::from(s);
+        let _ = retry_io(LOCK_RETRIES, LOCK_RETRY_DELAY, || match std::fs::remove_file(&p) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        });
     }
 }
 
@@ -266,7 +315,10 @@ fn replace_file(from: &Path, target: &Path) -> Result<(), AppError> {
     let _ = std::fs::remove_file(&tmp);
     let result = std::fs::copy(from, &tmp)
         .map_err(|e| io_err("Cannot copy the backup into place", e))
-        .and_then(|_| std::fs::rename(&tmp, target).map_err(|e| io_err("Cannot replace the database file", e)));
+        .and_then(|_| {
+            retry_io(LOCK_RETRIES, LOCK_RETRY_DELAY, || std::fs::rename(&tmp, target))
+                .map_err(|e| io_err("Cannot replace the database file", e))
+        });
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }

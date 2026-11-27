@@ -75,7 +75,7 @@ export const SettingsPage: React.FC = () => {
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [restoreNotice, setRestoreNotice] = useState<Notice>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
-  const [restarting, setRestarting] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   // The shell sets the app-store `requestBackup` flag for Ctrl+B; it runs a backup into the current folder.
   const requestBackup = useAppStore((s) => (s as unknown as { requestBackup?: boolean }).requestBackup);
@@ -195,7 +195,7 @@ export const SettingsPage: React.FC = () => {
     if (!restorePath) return;
     try {
       await api.stageRestore(restorePath);
-      setRestarting(true);
+      setClosing(true);
     } catch (err) {
       setRestoreNotice({ kind: 'error', text: errorMessage(err) });
     } finally {
@@ -414,7 +414,7 @@ export const SettingsPage: React.FC = () => {
           )}
           <p className="text-xs text-slate-500">
             Pick a backup from the backup folder, or browse for a file. Your current data is saved as a
-            &quot;Before restore&quot; backup first, then the app restarts.
+            &quot;Before restore&quot; backup first, then the app closes; open it again to finish the restore.
           </p>
           <div className="max-h-48 overflow-auto rounded border border-slate-200 dark:border-slate-700" data-testid="backup-list">
             {backups.length === 0 ? (
@@ -465,16 +465,15 @@ export const SettingsPage: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="danger"
-              disabled={!preview || preview.refusal !== null || restarting}
+              disabled={!preview || preview.refusal !== null || closing}
               onClick={() => setConfirmRestore(true)}
             >
               Restore
             </Button>
           </div>
-          {restarting && (
+          {closing && (
             <p role="status" className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-              Restarting to finish the restore... If the app doesn&apos;t reopen, close and open it again; the
-              restore finishes on the next start.
+              Closing the app. Open it again to finish the restore.
             </p>
           )}
           <NoticeLine notice={restoreNotice} />
@@ -484,7 +483,7 @@ export const SettingsPage: React.FC = () => {
       <ConfirmDialog
         isOpen={confirmRestore}
         title="Restore from backup"
-        message="Your current data is saved as a 'Before restore' backup first. The app will restart."
+        message="Your current data is saved as a 'Before restore' backup first. The app will close; open it again to finish the restore."
         confirmText="Restore"
         variant="danger"
         onConfirm={handleRestore}

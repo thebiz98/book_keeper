@@ -490,7 +490,7 @@ export interface ApiClient {
   backupDatabase(destinationPath: string): Promise<string>;
   listBackups(): Promise<BackupFileInfo[]>;                    // FR-60: backup folder, newest first
   previewRestore(path: string): Promise<RestorePreview>;       // backend dry run; the UI only prints it
-  stageRestore(path: string): Promise<void>;                   // the app then restarts and swaps at startup
+  stageRestore(path: string): Promise<void>;                   // the app then closes; the swap runs when it is opened again
   dismissRestoreFailure(): Promise<void>;
   verifyDatabaseIntegrity(): Promise<boolean>;
   getShopSettings(): Promise<ShopSettings>;

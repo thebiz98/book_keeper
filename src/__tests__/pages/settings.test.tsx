@@ -228,8 +228,8 @@ describe('SettingsPage restore from backup', () => {
     await click(confirm!);
     await flush();
     expect(api.stageRestore).toHaveBeenCalledWith(backupRow.path);
-    expect(bodyText()).toContain('Restarting to finish the restore');
-    expect(bodyText()).toContain("close and open it again");
+    expect(bodyText()).toContain('Closing the app. Open it again to finish the restore.');
+    expect(bodyText()).not.toContain('Restarting');
   });
 
   it('shows the backend refusal and keeps Restore off', async () => {

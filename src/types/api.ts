@@ -941,7 +941,7 @@ export interface ApiClient {
   listBackups(): Promise<BackupFileInfo[]>;
   /** Backend dry run: integrity, schema, counts, and the refusal reason if any. */
   previewRestore(path: string): Promise<RestorePreview>;
-  /** Stages the restore; the app then restarts and swaps the data at start-up. */
+  /** Stages the restore; the app then closes; the data is swapped when it is opened again. */
   stageRestore(path: string): Promise<void>;
   dismissRestoreFailure(): Promise<void>;
   /** Testing only: the backend refuses unless testing mode is on. Writes a pre-reset backup first. */
