@@ -7,11 +7,11 @@ import { installApi, waitFor, bodyText, click, flush, setInput } from './helpers
 
 const profitReport = (over: Partial<ItemProfitReport> = {}): ItemProfitReport => ({
   rows: [
-    { itemId: 1, name: 'Paper', baseUnit: 'SHEET', qtySold: 12, revenue: 120, cost: 60, profit: 60, marginPct: 50 },
+    { itemId: 1, name: 'Paper', baseUnit: 'SHEET', qtySold: 12, revenue: 120, cost: 60, profit: 60, marginPct: 50, returnsValue: 17, returnedCost: 8 },
     { itemId: 2, name: 'Pen', baseUnit: 'PCS', qtySold: 2, revenue: 20, cost: 25, profit: -5, marginPct: -25 },
   ],
   totals: { revenue: 140, cost: 85, profit: 55, marginPct: 39.29 },
-  reconciliation: { itemsProfit: 55, charges: 10, replacementCost: 3, billsProfit: 62 },
+  reconciliation: { itemsProfit: 55, charges: 10, replacementCost: 3, billsProfit: 62, pnlGrossProfit: 55 },
   totalCount: 2,
   page: 1,
   pageSize: 20,
@@ -54,7 +54,13 @@ describe('ItemProfitPanel (FR-38)', () => {
     expect(totals).toContain('39.3%');
     const rec = document.querySelector('[data-testid="item-profit-reconciliation"]')!.textContent!;
     expect(rec).toContain('55.00');
+    expect(rec).toContain('P&L gross profit');
     expect(rec).toContain('62.00');
+    // FR-56: Returns / Returned cost columns show the backend's row values.
+    const heads = Array.from(document.querySelectorAll('[data-testid="item-profit"] th')).map((h) => h.textContent ?? '');
+    expect(heads).toEqual(expect.arrayContaining(['Returns', 'Returned cost']));
+    expect(document.querySelector('[data-testid="item-profit-returns"]')!.textContent).toContain('17.00');
+    expect(document.querySelector('[data-testid="item-profit-returned-cost"]')!.textContent).toContain('8.00');
     expect(api.getItemProfitReport.mock.calls[0][0]).toMatchObject({
       fromDate: '2026-11-01', toDate: '2026-11-25', search: null, sort: { field: 'profit', dir: 'DESC' }, page: 1,
     });

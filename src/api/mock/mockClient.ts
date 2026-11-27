@@ -755,6 +755,7 @@ export class MockApiClient implements ApiClient {
         earliestBillDate: p.oldestBillDate ?? localDate(),
         totalInvoiced: p.balanceDue,
         totalPaid: 0,
+        paidAndCredited: 0,
         balanceDue: p.balanceDue,
         isActive: p.isActive,
       }));
@@ -1212,7 +1213,8 @@ export class MockApiClient implements ApiClient {
       grossSales: 120000,
       salesReturns: 2000,
       netSales: 118000,
-      cogs: 85000,
+      cogs: 86000,
+      returnedGoodsCost: 1000,
       serviceMiscCosts: 0,
       grossProfit: 33000,
       inventoryLosses: 500,
@@ -1222,6 +1224,7 @@ export class MockApiClient implements ApiClient {
       otherIncome: 900,
       saleChargesIncome: 700,
       purchaseDiscountsIncome: 200,
+      purchaseDiscountReversed: 0,
       purchaseChargesExpense: 300,
       operatingExpenses: 1500,
       expensesByType: [
@@ -1245,7 +1248,7 @@ export class MockApiClient implements ApiClient {
     return {
       rows: [],
       totals: { revenue: 0, cost: 0, profit: 0, marginPct: null },
-      reconciliation: { itemsProfit: 0, charges: 0, replacementCost: 0, billsProfit: 0 },
+      reconciliation: { itemsProfit: 0, charges: 0, replacementCost: 0, billsProfit: 0, pnlGrossProfit: 0 },
       totalCount: 0,
       page: filter.page ?? 1,
       pageSize: filter.pageSize ?? 50,

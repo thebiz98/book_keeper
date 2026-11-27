@@ -551,6 +551,8 @@ export interface PartyDueSummary {
   earliestBillDate: string;
   totalInvoiced: number;
   totalPaid: number;
+  /** L3: upfront + settlements + return credits of the open bills (totalInvoiced - balanceDue). */
+  paidAndCredited?: number;
   balanceDue: number;
   /** FR-46: false for a deleted party that still has dues (badge only). Absent = active. */
   isActive?: boolean;
@@ -591,7 +593,10 @@ export interface PnLReport {
   grossSales: number;
   salesReturns: number;
   netSales: number;
+  /** DD-91: gross FIFO cost by sale date + replacement cost by return date. */
   cogs: number;
+  /** DD-91: cost of customer-returned goods credited on the return date. */
+  returnedGoodsCost?: number;
   /** Miscellaneous service costs (FR-37), shown under COGS. */
   serviceMiscCosts?: number;
   grossProfit: number;
@@ -752,13 +757,23 @@ export interface ItemProfitRow {
   cost: number;
   profit: number;
   marginPct: number | null;
+  /** DD-91: refund value of the item's returns dated in range. */
+  returnsValue?: number;
+  /** DD-91: returned cost credited in range (as the P&L). */
+  returnedCost?: number;
 }
 
 export interface ItemProfitReport {
   rows: ItemProfitRow[];
   totals: { revenue: number; cost: number; profit: number; marginPct: number | null };
-  /** items profit + charges - replacement cost = bills profit (FR-38). */
-  reconciliation: { itemsProfit: number; charges: number; replacementCost: number; billsProfit: number };
+  /** DD-91: items profit = P&L gross profit of the range (FR-38). */
+  reconciliation: {
+    itemsProfit: number;
+    charges: number;
+    replacementCost: number;
+    billsProfit: number;
+    pnlGrossProfit?: number;
+  };
   totalCount: number;
   page: number;
   pageSize: number;
