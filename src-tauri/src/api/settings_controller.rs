@@ -26,7 +26,7 @@ pub fn build_config_view(state: &AppState) -> AppConfigView {
             .last_auto_backup(&dir.to_string_lossy())
             .ok()
             .flatten()
-            .map(|t| t.format("%Y-%m-%dT%H:%M:00").to_string()),
+            .map(|t| t.format("%Y-%m-%dT%H:%M:00+05:30").to_string()),
     }
 }
 

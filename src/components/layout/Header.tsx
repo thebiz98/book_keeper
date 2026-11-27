@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/useAppStore';
 import { useThemeStore } from '@/store/useThemeStore';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
+import { IST_TZ } from '@/lib/dates';
 
 const ROUTE_TITLES: Record<string, string> = {
   dashboard: 'Executive Command Cockpit',
@@ -59,6 +60,7 @@ export const Header: React.FC = () => {
   const shopName = shopProfile?.shopName || 'Book Keeper';
 
   const formattedDateTime = currentTime.toLocaleString('en-IN', {
+    timeZone: IST_TZ,
     day: '2-digit',
     month: 'short',
     year: 'numeric',
