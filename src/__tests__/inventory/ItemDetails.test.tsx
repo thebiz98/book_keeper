@@ -211,9 +211,30 @@ describe('Inventory keyboard map (D1)', () => {
   });
 });
 
+describe('ItemDetailsDrawer for a service', () => {
+  it('shows Can make, hides stock-only parts and opens on Sales', async () => {
+    const api = installApi({
+      getItemSales: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, limit: 10 }),
+    });
+    const svc = makeItem({ itemId: 3, name: 'Lamination', itemType: 'SERVICE', currentStock: 0, canMake: 6 });
+    render(<ItemDetailsDrawer item={svc} onClose={() => {}} onEdit={() => {}} />);
+    await flush();
+    const body = document.body.textContent ?? '';
+    expect(body).toContain('Can make');
+    expect(body).toContain('Can make 6');
+    expect(body).not.toContain('Out of Stock');
+    expect(body).not.toContain('Low Stock Level');
+    expect(() => byText(document.body, 'button', 'Lots')).toThrow();
+    expect(() => byText(document.body, 'button', 'Purchases')).toThrow();
+    expect(byText(document.body, 'button', 'Sales')).toBeTruthy();
+    expect(api.getItemSales).toHaveBeenCalledWith(3, 1, 10);
+    expect(api.getItemLots).not.toHaveBeenCalled();
+  });
+});
+
 describe('Low Stock Level edit availability (FR-50)', () => {
   it('a physical item has an Edit button; a service and a deleted item are read-only', () => {
-    installApi({});
+    installApi({ getItemSales: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, limit: 10 }) });
     const view = (item: ReturnType<typeof makeItem>) => {
       const r = render(<ItemDetailsDrawer item={item} onClose={() => {}} onEdit={() => {}} />);
       const has = document.querySelector(`button[aria-label="Edit low stock level for ${item.name}"]`) !== null;

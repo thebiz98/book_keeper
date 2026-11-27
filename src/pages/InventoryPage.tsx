@@ -28,7 +28,8 @@ import { ItemEditDrawer } from '@/components/domain/ItemEditDrawer';
 import { ItemDetailsDrawer } from '@/components/domain/ItemDetailsDrawer';
 import { LotInspector } from '@/components/domain/LotInspector';
 import { ImportItemsDialog } from '@/components/domain/ImportItemsDialog';
-import { StockStatusBadge } from '@/components/common/StockStatusBadge';
+import { ItemStockStatus } from '@/components/common/ItemStockStatus';
+import { isService } from '@/lib/itemKind';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -271,7 +272,7 @@ export const InventoryPage: React.FC = () => {
             ) : (
               items.map((item) => {
                 const isOpen = expanded.has(item.itemId);
-                const isService = item.itemType === 'SERVICE';
+                const service = isService(item);
                 return (
                   <React.Fragment key={item.itemId}>
                     <TableRow
@@ -287,7 +288,7 @@ export const InventoryPage: React.FC = () => {
                       }}
                     >
                       <TableCell className="text-center">
-                        {!isService && (
+                        {!service && (
                           <button
                             type="button"
                             aria-label={`${isOpen ? 'Hide' : 'Show'} lots for ${item.name}`}
@@ -301,7 +302,7 @@ export const InventoryPage: React.FC = () => {
                       </TableCell>
                       <TableCell className="font-semibold text-slate-900 dark:text-slate-100">
                         {item.name}
-                        {isService && (
+                        {service && (
                           <span
                             data-testid="service-badge"
                             className="ml-2 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 dark:border-violet-800 dark:bg-violet-950/60 dark:text-violet-300"
@@ -312,25 +313,10 @@ export const InventoryPage: React.FC = () => {
                       </TableCell>
                       <TableCell className="text-xs text-slate-500">{item.baseUnit}</TableCell>
                       <TableCell align="right" mono className="text-xs">
-                        {isService ? (
-                          <span data-testid="can-make">
-                            {item.canMake != null ? `Can make ${item.canMake}` : '—'}
-                          </span>
-                        ) : (
-                          item.currentStock
-                        )}
+                        {service ? '—' : item.currentStock}
                       </TableCell>
                       <TableCell className="text-center">
-                        {isService ? (
-                          <span className="text-slate-400">—</span>
-                        ) : (
-                          <StockStatusBadge
-                            currentStock={item.currentStock}
-                            isLowStock={item.isLowStock}
-                            lowStockThreshold={item.lowStockThreshold}
-                            baseUnit={item.baseUnit}
-                          />
-                        )}
+                        <ItemStockStatus item={item} />
                       </TableCell>
                       <TableCell align="right" mono className="text-slate-400 text-xs">
                         {item.mrp !== null ? <CurrencyDisplay amount={item.mrp} size="sm" /> : '—'}
@@ -338,7 +324,7 @@ export const InventoryPage: React.FC = () => {
                       <TableCell align="right" mono className="font-bold text-slate-900 dark:text-slate-100">
                         <CurrencyDisplay amount={item.defaultSalePrice} size="sm" />
                       </TableCell>
-                      <TableCell className="text-center text-xs font-mono">{isService ? '—' : item.bundles.length}</TableCell>
+                      <TableCell className="text-center text-xs font-mono">{service ? '—' : item.bundles.length}</TableCell>
                       <TableCell className="text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
@@ -348,12 +334,12 @@ export const InventoryPage: React.FC = () => {
                               setEditingItem(item);
                               setDrawerOpen(true);
                             }}
-                            title={isService ? 'Edit service and components' : 'Edit item and bundles'}
+                            title={service ? 'Edit service and components' : 'Edit item and bundles'}
                             className="p-1 rounded text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
-                          {!isService && (
+                          {!service && (
                             <button
                               type="button"
                               aria-label={`Adjust stock for ${item.name}`}
@@ -389,7 +375,7 @@ export const InventoryPage: React.FC = () => {
                         </div>
                       </TableCell>
                     </TableRow>
-                    {isOpen && !isService && (
+                    {isOpen && !service && (
                       <TableRow data-testid="lot-expansion">
                         <TableCell colSpan={COLS} className="bg-slate-50/70 dark:bg-slate-800/30 py-2">
                           <LotInspector key={item.currentStock} itemId={item.itemId} baseUnit={item.baseUnit} />

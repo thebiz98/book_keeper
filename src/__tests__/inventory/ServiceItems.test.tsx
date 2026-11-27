@@ -59,7 +59,7 @@ describe('Service items in the item list (FR-36)', () => {
     const [rPaper, rPrint, rLabour] = rows;
     expect(rPaper.querySelector('[data-testid="service-badge"]')).toBeNull();
     expect(rPrint.querySelector('[data-testid="service-badge"]')?.textContent).toBe('Service');
-    expect(rPrint.querySelector('[data-testid="can-make"]')?.textContent).toBe('Can make 12');
+    expect(rPrint.querySelector('[data-testid="can-make"]')?.textContent).toBe('Can make 12 PRINT');
     expect(rLabour.querySelector('[data-testid="can-make"]')?.textContent).toBe('—');
     expect(rPrint.textContent).not.toContain('Out of Stock');
     for (const label of ['Adjust stock for', 'Set stock for', 'Add bundle for', 'Show lots for']) {

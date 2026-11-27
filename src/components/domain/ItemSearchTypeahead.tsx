@@ -2,7 +2,8 @@ import React from 'react';
 import { api } from '@/api';
 import type { ItemSearchResult } from '@/types';
 import { LiveSearchTypeahead } from '../common/LiveSearchTypeahead';
-import { StockStatusBadge } from '../common/StockStatusBadge';
+import { ItemStockStatus } from '../common/ItemStockStatus';
+import { isService } from '@/lib/itemKind';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { TYPEAHEAD_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 
@@ -119,18 +120,12 @@ export const ItemSearchTypeahead: React.FC<ItemSearchTypeaheadProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {item.itemType === 'SERVICE' ? (
+          {isService(item) && (
             <span data-testid="service-result-tag" className="text-[10px] font-semibold text-violet-700 dark:text-violet-300">
-              Service{item.canMake != null ? ` · can make ${item.canMake}` : ''}
+              Service
             </span>
-          ) : (
-            <StockStatusBadge
-              currentStock={item.currentStock}
-              isLowStock={item.isLowStock}
-              lowStockThreshold={item.lowStockThreshold}
-              baseUnit={item.baseUnit}
-            />
           )}
+          <ItemStockStatus item={item} />
           <div className="text-right font-mono font-semibold text-xs">
             <CurrencyDisplay amount={item.defaultSalePrice} size="sm" />
           </div>

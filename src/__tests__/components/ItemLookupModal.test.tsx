@@ -38,4 +38,20 @@ describe('ItemLookupModal (FR-40)', () => {
     await flush(60);
     expect(document.querySelector('[data-testid="lookup-result"]')).toBeNull();
   });
+
+  it('a service result card shows Can make N, not Out of Stock', async () => {
+    installApi({
+      searchItemsFts: vi.fn(async () => [
+        makeItem({ itemId: 7, name: 'Printing', itemType: 'SERVICE', currentStock: 0, canMake: 9 }),
+      ]),
+    });
+    render(<ItemLookupModal isOpen onClose={vi.fn()} />);
+    typeInto(input(), 'pri');
+    await flush(60);
+    press(input(), 'Enter');
+    await flush(0);
+    const card = document.querySelector('[data-testid="lookup-result"]')!;
+    expect(card.textContent).toContain('Can make 9');
+    expect(card.textContent).not.toContain('Out of Stock');
+  });
 });
