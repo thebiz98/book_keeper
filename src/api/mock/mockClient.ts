@@ -976,7 +976,7 @@ export class MockApiClient implements ApiClient {
     ];
   }
   async previewStockAdjustment(_payload: Parameters<ApiClient['previewStockAdjustment']>[0]) {
-    return { previousStock: 0, newStock: 0, unitCost: null, lossValue: 0, valueChange: 0 };
+    return { previousStock: 0, newStock: 0, unitCost: null, lossValue: 0, valueChange: 0, undoableWriteoffs: [] };
   }
   async previewSetItemStock(payload: Parameters<ApiClient['previewSetItemStock']>[0]) {
     return {
@@ -987,6 +987,10 @@ export class MockApiClient implements ApiClient {
       newStock: payload.countedQuantity,
       unitCost: null,
       valueChange: 0,
+      mode: null,
+      options: [],
+      choiceRequired: false,
+      undoableWriteoffs: [],
     };
   }
   async updateOpeningLotQuantity(payload: Parameters<ApiClient['updateOpeningLotQuantity']>[0]) {
@@ -1132,6 +1136,7 @@ export class MockApiClient implements ApiClient {
         quantity: 100,
         remainingQuantity: this.items.find((i) => i.id === itemId)?.currentStock ?? 0,
         unitCost: 5,
+        fifoRank: 1,
       },
     ];
   }

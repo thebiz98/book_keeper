@@ -225,6 +225,8 @@ export interface ItemLot {
   quantity: number;
   remainingQuantity: number;
   unitCost: number;
+  /** DD-92 (S7): 1-based place in the FIFO draw (entry order) among lots with stock; null when used up. */
+  fifoRank?: number | null;
 }
 
 /** FR-23: one bill that contains an item (Item details Sales / Purchases tabs). */

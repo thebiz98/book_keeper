@@ -288,6 +288,8 @@ export interface LotPriceUpdateResult {
   newUnitCost: number;
   /** Null for OPENING / ADJUSTMENT lots (no bill). */
   bill: LotPriceBillEffect | null;
+  /** DD-92 (S11): the lot was sold or written off from, so past COGS and losses change. */
+  recostsHistory?: boolean;
 }
 
 export interface DeleteSettlementResult {
@@ -501,6 +503,32 @@ export interface StockAdjustmentPreview {
   unitCost: number | null;
   lossValue: number;
   valueChange: number;
+  /** DD-92: increases only, earlier write-offs that can be undone instead. */
+  undoableWriteoffs?: UndoableWriteoff[];
+}
+
+/** DD-92: an earlier write-off of the item that G7 can undo. */
+export interface UndoableWriteoff {
+  adjustmentId: number;
+  adjustmentDate: string;
+  /** Units written off (positive). */
+  quantity: number;
+  reason: AdjustmentReason;
+  loss: number;
+}
+
+/** FR-57 scope B: how Set stock applies a change. */
+export type SetStockMode = 'OPENING_CORRECTION' | 'ADJUSTMENT';
+
+/** One path Set stock offers; the backend decides which are enabled (DD-56). */
+export interface SetStockOption {
+  mode: SetStockMode;
+  label: string;
+  detail: string;
+  enabled: boolean;
+  disabledReason: string | null;
+  /** The typed unit cost is used (found stock). */
+  takesUnitCost: boolean;
 }
 
 export interface StockAdjustmentPayload {
@@ -525,6 +553,8 @@ export interface SetItemStockPayload {
   unitCost: number | null;
   adjustmentDate: string;
   notes: string | null;
+  /** The path picked from the preview's options; null = the only enabled one. */
+  mode?: SetStockMode | null;
 }
 
 export interface SetItemStockResult {
@@ -535,6 +565,13 @@ export interface SetItemStockResult {
   newStock: number;
   unitCost: number | null;
   valueChange: number;
+  /** Path applied or previewed; null when nothing changes or a choice is needed. */
+  mode?: SetStockMode | null;
+  /** Paths for this change (one when the item has no opening lot). */
+  options?: SetStockOption[];
+  /** Two paths are enabled: nothing applied until the user picks one. */
+  choiceRequired?: boolean;
+  undoableWriteoffs?: UndoableWriteoff[];
 }
 
 /** FR-51: corrected quantity of one OPENING lot. */
