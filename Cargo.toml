@@ -1,3 +1,11 @@
 [workspace]
 members = ["src-tauri"]
 resolver = "2"
+
+# Release exe (scripts/launch.cmd runs `tauri build --no-bundle`): smaller and faster.
+# Only affects release builds; `tauri dev` and `cargo test` stay on the debug profile.
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"

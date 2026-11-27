@@ -193,6 +193,8 @@ takes a few minutes; later launches take about 10 s.
   * Closing the window or pressing Ctrl+C in the terminal stops everything.
 
 --- Windows: Desktop Shortcut (no install, no .exe build) ---
+(Development machines. A machine that only runs the app should use the
+scripts\launch.cmd shortcut in section 8, Option A+.)
 The repo ships scripts\dev-launch.cmd, which runs `npx tauri dev` from the
 project folder (and runs `npm install` first if node_modules is missing).
 Create a desktop shortcut to it once, from PowerShell in the project root:
@@ -269,6 +271,32 @@ Double-click target\release\book-keeper.exe, or put a shortcut to it on the
 desktop. The UI is embedded, so no dev server is needed. It needs only the
 WebView2 runtime, which ships with Windows 10/11. Copy the exe anywhere;
 it uses the same %APPDATA% database as dev mode.
+
+--- Option A+: Shop machine shortcut (clone, then run; recommended) ---
+For a machine that only RUNS the app (development happens elsewhere).
+scripts\launch.cmd (logic in scripts\launch.ps1) does, on every launch:
+  1. git pull --ff-only   (skipped with a note when offline or not possible)
+  2. if the checked-out commit differs from target\release\.built-commit, or
+     the exe is missing: npm ci (only when package-lock.json changed), then
+     npx tauri build --no-bundle   (release exe, no installers; a few minutes)
+  3. starts target\release\book-keeper.exe and closes the console.
+No change since the last build -> the app opens immediately. A failed build
+keeps the console open with the error and offers to open the previous exe.
+A second launch while the app is open does not start a second copy.
+Create the shortcut once, from PowerShell in the project root:
+
+$proj = (Get-Location).Path
+$desk = [Environment]::GetFolderPath('Desktop')
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$desk\Book Keeper.lnk")
+$lnk.TargetPath = "$proj\scripts\launch.cmd"
+$lnk.WorkingDirectory = $proj
+$lnk.IconLocation = "$proj\src-tauri\icons\icon.ico"
+$lnk.WindowStyle = 7          # console starts minimized; it pops up only to build or show an error
+$lnk.Description = "Book Keeper (updates and rebuilds when needed)"
+$lnk.Save()
+
+Push only reviewed, merged work to main: the shop machine picks it up on the
+next launch. target\debug is not used here and can be deleted to free space.
 
 --- Option B: Install ---
 Double-click Book Keeper_0.1.0_arm64-setup.exe (NSIS, installs per user, no
