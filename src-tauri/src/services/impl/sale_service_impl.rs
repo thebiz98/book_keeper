@@ -7,9 +7,9 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, check_not_after_follow_up, round2, MONEY_EPS};
 use crate::services::r#impl::bill_guard::{
-    evaluate_sale_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
+    earliest_follow_up, evaluate_sale_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
     PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
 };
 use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party};
@@ -665,6 +665,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleServiceImpl<I, P
         let g = evaluate_sale_guard(tx, sale_id)?;
         if let Some(reason) = g.reasons.iter().find(|r| r.blocks_edit) {
             return Err(locked(reason));
+        }
+        // DD-94: a later date must stay on or before the bill's earliest payment or return.
+        if payload.transaction_date > old.transaction_date {
+            let earliest = earliest_follow_up(tx, TransactionType::Sale, sale_id)?;
+            check_not_after_follow_up(&payload.transaction_date, earliest, "bill")?;
         }
 
         // DD-89: diff the payload against the stored lines; nothing is written until every check

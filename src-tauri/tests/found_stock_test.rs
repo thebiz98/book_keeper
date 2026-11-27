@@ -328,7 +328,8 @@ fn no_opening_lot_keeps_the_single_adjustment_path() {
 }
 
 /// DD-95 (H7): a unit restocked by a linked customer return is back in the lot's remaining but still
-/// tied to its sale allocation. Today's floor (`quantity - remaining`) counts it as unused.
+/// tied to its sale allocation, so it counts as used: the opening correction takes only the units
+/// never sold, and the return stays deletable.
 #[test]
 fn opening_correction_floor_with_a_restocked_customer_return() {
     let e = env();
@@ -344,19 +345,20 @@ fn opening_correction_floor_with_a_restocked_customer_return() {
     }).unwrap();
     assert_eq!((e.stock(id), e.lot(lot).unwrap().remaining_quantity), (4.0, 4.0));
 
-    // The correction may take all 4 (2 never sold + 2 restocked): the lot drops to 2 although
-    // its allocations depleted 4. Stock and lot flow invariants still hold.
+    // Only the 2 never-sold units are unused; the 2 restocked ones count as sold.
     let p = e.inv.preview_set_item_stock(set(id, 0.0, None)).unwrap();
-    assert!(p.options[0].enabled, "today's floor treats the restocked units as unused");
-    e.inv.set_item_stock(set(id, 0.0, Some(SetStockMode::OpeningCorrection))).unwrap();
+    let opening = p.options.iter().find(|o| o.mode == SetStockMode::OpeningCorrection).unwrap();
+    assert!(!opening.enabled);
+    let why = opening.disabled_reason.clone().unwrap();
+    assert!(why.contains("Only 2 PCS") && why.contains("customer return"), "{why}");
+    assert!(e.inv.set_item_stock(set(id, 0.0, Some(SetStockMode::OpeningCorrection))).is_err());
+    e.inv.set_item_stock(set(id, 2.0, Some(SetStockMode::OpeningCorrection))).unwrap();
     let l = e.lot(lot).unwrap();
-    assert_eq!((l.quantity, l.remaining_quantity, e.stock(id)), (2.0, 0.0, 0.0));
+    assert_eq!((l.quantity, l.remaining_quantity, e.stock(id)), (4.0, 2.0, 2.0));
     e.check();
 
-    // Unsafe part, left for H7 / DD-95: deleting the return now has no restocked units to take back.
-    let del = e.rets.delete_return(ret.return_id);
-    // The message says the units were "sold or moved": misleading, and a dead end until the opening is raised again.
-    assert!(matches!(&del, Err(AppError::BillLocked { code, .. }) if code == "RESTOCKED_CONSUMED"), "{del:?}");
+    // The return still deletes: its 2 restocked units are taken back out of the lot.
+    e.rets.delete_return(ret.return_id).unwrap();
     assert_eq!((e.stock(id), e.lot(lot).unwrap().remaining_quantity), (0.0, 0.0));
     e.check();
 }

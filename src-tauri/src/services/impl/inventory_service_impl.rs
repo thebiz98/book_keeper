@@ -93,6 +93,38 @@ fn locked(code: &str, message: impl Into<String>) -> AppError {
     AppError::BillLocked { code: code.to_string(), message: message.into() }
 }
 
+/// DD-95: the least quantity a lot can be edited to: everything drawn from it, Σ sale allocations
+/// `quantity_depleted` (restocked customer-return units included: they are back in `remaining` but
+/// still tied to their allocation, and the return delete takes them out again) + Σ outflows.
+pub(crate) fn lot_floor(uow: &mut dyn TransactionContext, lot: &PurchaseItem) -> Result<f64, AppError> {
+    let drawn = uow.allocations().sum_depleted_for_lot(lot.id)? + uow.outflow_allocations().sum_for_lot(lot.id)?;
+    Ok(drawn.max(lot.quantity - lot.remaining_quantity).max(0.0))
+}
+
+/// S2 / DD-95: puts `back` units on a lot (a sale or outflow reversal). Never clamped: more than
+/// the lot's own quantity (or a negative result) means the stock records disagree, so the whole
+/// command fails with `STOCK_INVARIANT` and its transaction rolls back.
+fn restore_to_lot(uow: &mut dyn TransactionContext, lot: &PurchaseItem, back: f64) -> Result<(), AppError> {
+    let restored = lot.remaining_quantity + back;
+    if !restored.is_finite() || restored > lot.quantity + EPS || restored < -EPS {
+        return Err(stock_invariant(uow, lot)?);
+    }
+    uow.purchases().update_remaining_quantity(lot.id, restored)
+}
+
+/// The `STOCK_INVARIANT` error for `lot`, named by its bill code.
+fn stock_invariant(uow: &mut dyn TransactionContext, lot: &PurchaseItem) -> Result<AppError, AppError> {
+    let code = uow
+        .purchases()
+        .find_transaction_by_id(lot.purchase_transaction_id)?
+        .map(|h| h.transaction_code)
+        .unwrap_or_else(|| format!("#{}", lot.id));
+    Ok(locked(
+        "STOCK_INVARIANT",
+        format!("Stock records don't match for lot {code} ('{}'). Nothing was changed.", lot.item_name),
+    ))
+}
+
 impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
 
     /// FR-31 draw over one item's open lots in the strategy's order, skipping `skip` base units that
@@ -404,7 +436,14 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
             return Ok((opt, Vec::new()));
         }
         let need = -delta;
-        let unused: f64 = openings.iter().map(|l| l.remaining_quantity).sum();
+        // DD-95: a lot can come down to its floor only, so restocked return units are not unused.
+        let mut unused = 0.0;
+        let mut restocked = 0.0;
+        for l in openings {
+            let (u, r) = Self::opening_unused(tx, l.purchase_item_id)?;
+            unused += u;
+            restocked += r;
+        }
         let mut opt = SetStockOption {
             mode: SetStockMode::OpeningCorrection,
             label,
@@ -431,10 +470,46 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
             } else {
                 reason.push_str(" The rest has been sold.");
             }
+            if restocked > EPS {
+                reason.push_str(" Units back from a customer return count as sold until that return is deleted.");
+            }
             opt.enabled = false;
             opt.disabled_reason = Some(reason);
         }
         Ok((opt, undoable))
+    }
+
+    /// S2 dry run of a `RestoreOutflow` step: every lot must have room for the units it gets back,
+    /// so the delete guard shows `STOCK_INVARIANT` before the delete is tried.
+    fn check_outflow_room(tx: &mut dyn TransactionContext, source_type: OutflowSourceType, source_id: i64) -> Result<(), AppError> {
+        let mut per_lot: Vec<(i64, f64)> = Vec::new();
+        for o in tx.outflow_allocations().find_by_source(source_type, source_id)? {
+            match per_lot.iter_mut().find(|(l, _)| *l == o.purchase_item_id) {
+                Some(e) => e.1 += o.quantity_depleted,
+                None => per_lot.push((o.purchase_item_id, o.quantity_depleted)),
+            }
+        }
+        for (lot_id, back) in per_lot {
+            let lot = tx
+                .purchases()
+                .find_purchase_item_by_id(lot_id)?
+                .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+            if lot.remaining_quantity + back > lot.quantity + EPS {
+                return Err(stock_invariant(tx, &lot)?);
+            }
+        }
+        Ok(())
+    }
+
+    /// DD-95: `(unused, restocked)` of one opening lot: `unused = quantity - floor` is what an
+    /// opening correction may take off; `restocked` = units back from returns still in `remaining`.
+    fn opening_unused(tx: &mut dyn TransactionContext, lot_id: i64) -> Result<(f64, f64), AppError> {
+        let lot = tx
+            .purchases()
+            .find_purchase_item_by_id(lot_id)?
+            .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
+        let unused = (lot.quantity - lot_floor(tx, &lot)?).max(0.0);
+        Ok((unused, (lot.remaining_quantity - unused).max(0.0)))
     }
 
     /// Applies an opening correction of `delta` through G6's `update_opening_quantity_in_tx`:
@@ -468,12 +543,15 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
                 .purchases()
                 .find_purchase_item_by_id(l.purchase_item_id)?
                 .ok_or_else(|| AppError::not_found("PurchaseItem", l.purchase_item_id.to_string()))?;
-            let take = lot.remaining_quantity.min(left);
+            // DD-95: down to the floor only (restocked return units stay).
+            let floor = lot_floor(tx, &lot)?;
+            let unused = (lot.quantity - floor).max(0.0);
+            let take = unused.min(left);
             if take <= EPS {
                 continue;
             }
-            let quantity = if (lot.remaining_quantity - take).abs() <= EPS {
-                lot.quantity - lot.remaining_quantity // exactly the consumed floor
+            let quantity = if (unused - take).abs() <= EPS {
+                floor // exactly the floor
             } else {
                 lot.quantity - take
             };
@@ -708,7 +786,8 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
         // D10: a deleted item is only history; editing its opening stock would use it.
         ensure_active_item(&item)?;
         let old_stock = item.current_stock;
-        let consumed = lot.quantity - lot.remaining_quantity;
+        // DD-95: the floor counts restocked customer-return units as used.
+        let consumed = lot_floor(tx, &lot)?;
         if p.quantity + EPS < consumed {
             // Checked here so 0 gets the floor message, not edit_purchase_lot's "must be positive".
             // FR-57: name the write-offs inside "already used" so the user can undo them (G7).
@@ -1282,8 +1361,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                     .purchases()
                     .find_purchase_item_by_id(a.purchase_item_id)?
                     .ok_or_else(|| AppError::not_found("PurchaseItem", a.purchase_item_id.to_string()))?;
-                uow.purchases()
-                    .update_remaining_quantity(lot.id, (lot.remaining_quantity + back).min(lot.quantity))?;
+                restore_to_lot(uow, &lot, back)?;
                 // X4: credit the lot's own item. A service line's allocations sit on its components' lots.
                 match per_item.iter_mut().find(|(i, _)| *i == lot.item_id) {
                     Some(e) => e.1 += back,
@@ -1305,6 +1383,8 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             .ok_or_else(|| AppError::not_found("PurchaseItem", lot_id.to_string()))?;
         require_positive("quantity", e.quantity)?;
         let consumed = lot.quantity - lot.remaining_quantity;
+        // DD-95: never below what was drawn, restocked return units included.
+        let floor = lot_floor(uow, &lot)?;
         let referenced = uow.purchases().is_lot_referenced(lot_id)?;
         if e.item_id != lot.item_id {
             if referenced {
@@ -1315,10 +1395,10 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             }
             find_item(uow, e.item_id)?;
         }
-        if e.quantity + EPS < consumed {
+        if e.quantity + EPS < floor {
             return Err(locked(
                 "LOT_BELOW_CONSUMED",
-                format!("'{}': at least {consumed} already used, quantity cannot go below that", lot.item_name),
+                format!("'{}': at least {floor} already used, quantity cannot go below that", lot.item_name),
             ));
         }
         let new_remaining = (e.quantity - consumed).max(0.0);
@@ -1376,6 +1456,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
         let mut plan = ReturnUndoPlan::default();
         match r.return_type {
             ReturnType::Vendor => {
+                Self::check_outflow_room(uow, OutflowSourceType::VendorReturn, r.id)?;
                 plan.steps.push(ReturnUndoStep::RestoreOutflow {
                     source_type: OutflowSourceType::VendorReturn,
                     source_id: r.id,
@@ -1388,6 +1469,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                 // (restocked) units are taken out again.
                 let mut restored: Vec<(i64, f64)> = Vec::new();
                 if r.settlement_type == SettlementType::Replacement {
+                    Self::check_outflow_room(uow, OutflowSourceType::Replacement, r.id)?;
                     plan.steps.push(ReturnUndoStep::RestoreOutflow {
                         source_type: OutflowSourceType::Replacement,
                         source_id: r.id,
@@ -1514,10 +1596,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                             .purchases()
                             .find_purchase_item_by_id(o.purchase_item_id)?
                             .ok_or_else(|| AppError::not_found("PurchaseItem", o.purchase_item_id.to_string()))?;
-                        uow.purchases().update_remaining_quantity(
-                            lot.id,
-                            (lot.remaining_quantity + o.quantity_depleted).min(lot.quantity),
-                        )?;
+                        restore_to_lot(uow, &lot, o.quantity_depleted)?;
                         uow.items().apply_stock_delta(lot.item_id, o.quantity_depleted)?;
                     }
                 }

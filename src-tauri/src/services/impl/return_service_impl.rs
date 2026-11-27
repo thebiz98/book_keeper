@@ -8,7 +8,7 @@ use crate::core::dtos::{validate_date_range, BillEditGuard, DeleteReturnResult,
 };
 use crate::core::entities::{Item, ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, check_not_before_bill, round2, MONEY_EPS};
 use crate::core::value_objects::{
     LotSource, OutflowSourceType, PartyType, ReturnLineType, ReturnType, SettlementType, StockCondition,
     TransactionType,
@@ -148,20 +148,9 @@ fn resolve_party(
     Ok((party_id, party_name))
 }
 
+/// Return item check (customer lines, replacements and vendor lines): a deleted item is
+/// `DeletedReference(ITEM)` (DD-90), a service is refused (DD-67).
 fn active_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Item, AppError> {
-    let item = tx
-        .items()
-        .find_by_id(item_id)?
-        .ok_or_else(|| AppError::not_found("Item", item_id.to_string()))?;
-    if !item.is_active {
-        return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", item.name)));
-    }
-    reject_service_return(&item)?;
-    Ok(item)
-}
-
-/// Vendor-return item check: a deleted item is `DeletedReference(ITEM)` (DD-90), a service is refused.
-fn active_vendor_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Item, AppError> {
     let item = tx
         .items()
         .find_by_id(item_id)?
@@ -171,6 +160,10 @@ fn active_vendor_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<I
     }
     reject_service_return(&item)?;
     Ok(item)
+}
+
+fn active_vendor_item(tx: &mut dyn TransactionContext, item_id: i64) -> Result<Item, AppError> {
+    active_item(tx, item_id)
 }
 
 /// DD-67: services are corrected by bill edit/delete, never returned or issued as replacements.
@@ -242,6 +235,10 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
         if sale.as_ref().is_some_and(|s| s.is_opening_balance) {
             return Err(validation("original_sale_id", "An opening balance has no items to return"));
         }
+        // DD-94: a return follows its bill.
+        if let Some(s) = &sale {
+            check_not_before_bill("Return", &payload.return_date, &s.transaction_date)?;
+        }
         let (party_id, party_name) = resolve_party(
             tx,
             payload.party_id,
@@ -272,7 +269,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                         .ok_or_else(|| AppError::not_found("Item", line.item_id.to_string()))?;
                     reject_service_return(&sold)?;
                     if !sold.is_active {
-                        return Err(validation("item_id", format!("'{}' is deleted. Restore the item first.", sold.name)));
+                        return Err(AppError::deleted_reference("ITEM", sold.id, &sold.name));
                     }
                     // Refund cap = the sold rate net of the bill-level discount share (FR-19).
                     let s = sale.as_ref().expect("a linked line implies the original sale");
@@ -480,6 +477,8 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                 if p.source != LotSource::Purchase {
                     return Err(validation("original_purchase_id", "Only a PURCHASE bill can be returned to a vendor"));
                 }
+                // DD-94: a return follows its bill.
+                check_not_before_bill("Return", &payload.return_date, &p.transaction_date)?;
                 Some(p)
             }
             None => None,
@@ -525,6 +524,8 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             if lot.item_id != it.item_id {
                 return Err(validation(&format!("items[{i}].item_id"), format!("'{}' is not on lot {}", item.name, header.transaction_code)));
             }
+            // DD-94: goods go back no earlier than the bill they came on (also with no linked bill).
+            check_not_before_bill("Return", &payload.return_date, &header.transaction_date)?;
             let total_drawn = drawn.entry(lot_id).or_insert(0.0);
             *total_drawn += it.quantity;
             if *total_drawn > lot.remaining_quantity + EPS {

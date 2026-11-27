@@ -7,6 +7,7 @@ use crate::core::money::round2;
 use crate::core::value_objects::{LotSource, OutflowSourceType, PaymentKind, ReturnType, TransactionType};
 use crate::data::contracts::unit_of_work::TransactionContext;
 use crate::services::contracts::inventory_service::{InventoryService, ReturnUndoPlan};
+use crate::services::r#impl::inventory_service_impl::lot_floor;
 
 pub const LINKED_RETURNS: &str = "LINKED_RETURNS";
 pub const RETURN_CREDITS: &str = "RETURN_CREDITS";
@@ -18,6 +19,8 @@ pub const PARTY_REQUIRED_WITH_PAYMENTS: &str = "PARTY_REQUIRED_WITH_PAYMENTS";
 pub const NEWER_RETURN: &str = "NEWER_RETURN";
 pub const OPENING_BALANCE: &str = "OPENING_BALANCE";
 pub const SETTLEMENTS_ON_BILL: &str = "SETTLEMENTS_ON_BILL";
+/// R9: the return-delete dry run failed with an error that is not a guard refusal.
+pub const RETURN_UNDO_FAILED: &str = "RETURN_UNDO_FAILED";
 
 /// Says which tool changes this stock record instead (G8: always point to the right place).
 fn not_a_purchase_message(code: &str, source: LotSource) -> String {
@@ -178,7 +181,8 @@ pub fn evaluate_purchase_guard(tx: &mut dyn TransactionContext, purchase_id: i64
         any_referenced |= referenced;
         g.lot_limits.push(LotEditLimit {
             purchase_item_id: lot.id,
-            consumed_quantity: (lot.quantity - lot.remaining_quantity).max(0.0),
+            // DD-95: the edit floor, restocked return units included.
+            consumed_quantity: lot_floor(tx, &lot)?,
             referenced,
             vendor_returned,
         });
@@ -192,6 +196,34 @@ pub fn evaluate_purchase_guard(tx: &mut dyn TransactionContext, purchase_id: i64
         ));
     }
     Ok(finish(g))
+}
+
+/// DD-94: the bill's earliest follow-up as `(date, noun)`: its earliest `SETTLEMENT` row
+/// ("payment") or earliest linked return ("return"), whichever comes first. The bill's own
+/// `UPFRONT` row moves with it and is not a limit. `None` when the bill has neither.
+pub fn earliest_follow_up(
+    tx: &mut dyn TransactionContext,
+    tx_type: TransactionType,
+    bill_id: i64,
+) -> Result<Option<(String, &'static str)>, AppError> {
+    let payment = tx
+        .settlements()
+        .list_by_transaction(tx_type, bill_id)?
+        .into_iter()
+        .filter(|s| s.kind == PaymentKind::Settlement)
+        .map(|s| s.settlement_date)
+        .min();
+    let return_type = match tx_type {
+        TransactionType::Sale => ReturnType::Customer,
+        TransactionType::Purchase => ReturnType::Vendor,
+    };
+    let ret = tx.returns().list_linked(return_type, bill_id)?.into_iter().map(|r| r.return_date).min();
+    Ok(match (payment, ret) {
+        (Some(p), Some(r)) if r < p => Some((r, "return")),
+        (Some(p), _) => Some((p, "payment")),
+        (None, Some(r)) => Some((r, "return")),
+        (None, None) => None,
+    })
 }
 
 /// DD-88 / E7: a party change moves the bill's SETTLEMENT rows only after the user confirmed it.
@@ -239,7 +271,15 @@ pub fn evaluate_return_guard(
     let sum = |k: PaymentKind| round2(ledger.iter().filter(|l| l.kind == k).map(|l| l.amount_paid).sum::<f64>());
     g.removed_cash_amount = round2(sum(PaymentKind::RefundOut) + sum(PaymentKind::RefundIn));
     g.removed_credit_amount = sum(PaymentKind::ReturnCredit);
-    if let Err(AppError::BillLocked { code, message }) = check_return_deletable(tx, &r, inv) {
+    // R9: any failure of the dry run blocks delete, not only a guard refusal.
+    if let Err(e) = check_return_deletable(tx, &r, inv) {
+        let (code, message) = match e {
+            AppError::BillLocked { code, message } => (code, message),
+            AppError::ValidationError { message, .. } | AppError::DeletedReference { message, .. } => {
+                (RETURN_UNDO_FAILED.to_string(), message)
+            }
+            other => (RETURN_UNDO_FAILED.to_string(), other.to_string()),
+        };
         g.reasons.push(GuardReason { code, message, blocks_edit: false, blocks_delete: true });
     }
     let mut g = finish(g);

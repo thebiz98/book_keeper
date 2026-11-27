@@ -154,7 +154,8 @@ fn partial_bill_balance_moves_and_becomes_paid_when_upfront_covers_it() {
 }
 
 #[test]
-fn settled_later_bill_never_gets_an_invented_upfront() {
+fn settled_later_bill_stays_paid_and_the_extra_goes_to_upfront() {
+    // DD-96 (D8): a fully paid bill stays paid however it was paid.
     let e = env();
     seed_party(&e.db, 1, "V", PartyType::Vendor);
     e.item(1);
@@ -163,8 +164,9 @@ fn settled_later_bill_never_gets_an_invented_upfront() {
     e.acct.settle_bill_payment(settle_payload(1, TransactionType::Purchase, Some(p), 100.0)).unwrap();
     assert_eq!(e.pur(p).payment_status, Paid);
     let b = e.set(lot, 12.0).unwrap().bill.unwrap();
-    assert_eq!((b.new_total, b.new_paid, b.balance_due, b.payment_status), (120.0, 100.0, 20.0, Partial));
-    assert!(e.ledger(p).iter().all(|r| r.kind != PaymentKind::Upfront));
+    assert_eq!((b.new_total, b.new_paid, b.balance_due, b.payment_status), (120.0, 120.0, 0.0, Paid));
+    assert_eq!(kind_sum(&e.ledger(p), PaymentKind::Upfront), 20.0);
+    assert_eq!(kind_sum(&e.ledger(p), PaymentKind::Settlement), 100.0);
     e.check();
 }
 

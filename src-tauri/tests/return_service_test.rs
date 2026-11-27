@@ -400,7 +400,9 @@ fn tc_ret_011_replacement_validation() {
         tx.items().update(&it).unwrap();
         tx.commit().unwrap();
     }
-    assert!(is_validation(&e.rets.create_customer_return(mk(vec![line(1, Some(sl), 1.0, 10.0, R)], Some(sale), issue(2, 1.0)))));
+    // DD-90 (H7): a deleted issued item is a DeletedReference with a Restore offer.
+    let r = e.rets.create_customer_return(mk(vec![line(1, Some(sl), 1.0, 10.0, R)], Some(sale), issue(2, 1.0)));
+    assert!(matches!(&r, Err(AppError::DeletedReference { entity, id: 2, .. }) if entity == "ITEM"), "{r:?}");
     e.assert_stock();
 }
 
@@ -426,7 +428,7 @@ fn list_returns_is_paginated_newest_first_and_filtered() {
     let e = env();
     seed_party(&e.db, 5, "V", PartyType::Vendor);
     seed_stocked_item(&e.db, &e.inv, 1, 20.0, 5.0, 10.0);
-    e.db.pool.get().unwrap().execute("UPDATE purchase_transactions SET party_id = 5 WHERE id = 1", []).unwrap();
+    e.db.pool.get().unwrap().execute_batch("UPDATE purchase_transactions SET party_id = 5, transaction_date = '2026-11-01' WHERE id = 1; UPDATE purchase_items SET transaction_date = '2026-11-01' WHERE purchase_transaction_id = 1;").unwrap(); // DD-94: the lot predates the returns
     for (i, date) in ["2026-11-01", "2026-11-05", "2026-11-03"].iter().enumerate() {
         let mut p = cust(None, None, SettlementType::Refund, vec![line(1, None, 1.0 + i as f64, 10.0, R)]);
         p.return_date = date.to_string();

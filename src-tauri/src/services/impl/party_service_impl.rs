@@ -5,12 +5,13 @@ use crate::core::entities::{
     UpdatePartyPayload,
 };
 use crate::core::error::AppError;
-use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, check_not_after_follow_up, round2, MONEY_EPS};
 use crate::core::value_objects::{LotSource, PartyType, PaymentStatus, TransactionType};
 use crate::data::contracts::search_indexer::FtsIndex;
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::data::sqlite::fts::sync_after_commit;
 use crate::services::contracts::party_service::PartyService;
+use crate::services::r#impl::bill_guard::earliest_follow_up;
 use crate::services::r#impl::party_guard::ensure_active_party;
 use crate::services::r#impl::payment_service_impl::recompute_bill;
 
@@ -77,6 +78,7 @@ pub(crate) fn apply_opening_balance(
                 }
                 Some(mut h) => {
                     check_not_below_applied(tx, TransactionType::Sale, h.id, amount)?;
+                    check_opening_date(tx, TransactionType::Sale, h.id, &h.transaction_date, &date)?;
                     if amount <= MONEY_EPS {
                         tx.sales().delete_transaction(h.id)?;
                         return Ok(());
@@ -124,6 +126,7 @@ pub(crate) fn apply_opening_balance(
                 }
                 Some(mut h) => {
                     check_not_below_applied(tx, TransactionType::Purchase, h.id, amount)?;
+                    check_opening_date(tx, TransactionType::Purchase, h.id, &h.transaction_date, &date)?;
                     if amount <= MONEY_EPS {
                         tx.purchases().delete_transaction(h.id)?;
                         return Ok(());
@@ -150,16 +153,40 @@ pub(crate) fn check_opening_update(
     party: Option<&Party>,
     input: &OpeningBalanceInput,
 ) -> Result<(), AppError> {
-    let (amount, _) = check_opening(input)?;
+    let (amount, date) = check_opening(input)?;
     let Some(party) = party else { return Ok(()) };
-    let (tx_type, bill_id) = match party.party_type {
-        PartyType::Customer => (TransactionType::Sale, tx.sales().find_opening_for_party(party.id)?.map(|h| h.id)),
-        PartyType::Vendor => (TransactionType::Purchase, tx.purchases().find_opening_for_party(party.id)?.map(|h| h.id)),
+    let (tx_type, bill) = match party.party_type {
+        PartyType::Customer => (
+            TransactionType::Sale,
+            tx.sales().find_opening_for_party(party.id)?.map(|h| (h.id, h.transaction_date)),
+        ),
+        PartyType::Vendor => (
+            TransactionType::Purchase,
+            tx.purchases().find_opening_for_party(party.id)?.map(|h| (h.id, h.transaction_date)),
+        ),
     };
-    match bill_id {
-        Some(id) => check_not_below_applied(tx, tx_type, id, amount),
+    match bill {
+        Some((id, old_date)) => {
+            check_not_below_applied(tx, tx_type, id, amount)?;
+            check_opening_date(tx, tx_type, id, &old_date, &date)
+        }
         None => Ok(()),
     }
+}
+
+/// DD-94: an opening balance's As of date may move later only up to its earliest settlement.
+fn check_opening_date(
+    tx: &mut dyn TransactionContext,
+    tx_type: TransactionType,
+    bill_id: i64,
+    old_date: &str,
+    new_date: &str,
+) -> Result<(), AppError> {
+    if new_date <= old_date {
+        return Ok(());
+    }
+    let earliest = earliest_follow_up(tx, tx_type, bill_id)?;
+    check_not_after_follow_up(new_date, earliest, "opening balance")
 }
 
 /// The new amount cannot go below what settlements and return credits already applied.

@@ -6,7 +6,9 @@ use crate::core::dtos::{
 };
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
-use crate::core::money::{cash_direction, check_date, check_entry_date_now, round2, CashDirection, MONEY_EPS};
+use crate::core::money::{
+    cash_direction, check_date, check_entry_date_now, check_not_before_bill, round2, CashDirection, MONEY_EPS,
+};
 use crate::core::value_objects::{LotSource, PartyType, PaymentKind, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::accounting_service::AccountingService;
@@ -305,16 +307,16 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
             }
             seen.push(*bill_id);
             // The bill must exist, belong to the party (PURCHASE-source for purchases) and cover the amount.
-            let (owner, balance) = match tx_type {
+            let (owner, balance, bill_date) = match tx_type {
                 TransactionType::Sale => tx
                     .sales()
                     .find_transaction_by_id(*bill_id)?
-                    .map(|b| (b.party_id, b.balance_due)),
+                    .map(|b| (b.party_id, b.balance_due, b.transaction_date)),
                 TransactionType::Purchase => tx
                     .purchases()
                     .find_transaction_by_id(*bill_id)?
                     .filter(|b| b.source == LotSource::Purchase)
-                    .map(|b| (b.party_id, b.balance_due)),
+                    .map(|b| (b.party_id, b.balance_due, b.transaction_date)),
             }
             .ok_or_else(|| AppError::NotFound {
                 entity: match tx_type {
@@ -333,6 +335,8 @@ impl<P: PaymentService, U: UnitOfWork> AccountingServiceImpl<P, U> {
             if amount > balance + MONEY_EPS {
                 return Err(validation(&field, "Settlement amount exceeds the bill's balance"));
             }
+            // DD-94: a payment follows its bill (single, lump sum and batch all come through here).
+            check_not_before_bill("Payment", date, &bill_date)?;
             amounts.push(amount);
         }
 
@@ -465,11 +469,15 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
             require_active_party(&mut *tx, pid)?;
         }
         let bill_id = old.transaction_id.ok_or_else(|| validation("transaction_id", "Settlement has no bill"))?;
-        let balance = match old.transaction_type {
-            TransactionType::Sale => tx.sales().find_transaction_by_id(bill_id)?.map(|b| b.balance_due),
-            TransactionType::Purchase => tx.purchases().find_transaction_by_id(bill_id)?.map(|b| b.balance_due),
+        let (balance, bill_date) = match old.transaction_type {
+            TransactionType::Sale => tx.sales().find_transaction_by_id(bill_id)?.map(|b| (b.balance_due, b.transaction_date)),
+            TransactionType::Purchase => {
+                tx.purchases().find_transaction_by_id(bill_id)?.map(|b| (b.balance_due, b.transaction_date))
+            }
         }
         .ok_or_else(|| AppError::NotFound { entity: "Bill".to_string(), id: bill_id.to_string() })?;
+        // DD-94: an edited payment still follows its bill.
+        check_not_before_bill("Payment", &payload.settlement_date, &bill_date)?;
         if amount > round2(balance + old.amount_paid) + MONEY_EPS {
             return Err(validation("amount_paid", "Settlement amount exceeds the bill's balance"));
         }

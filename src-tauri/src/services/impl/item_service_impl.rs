@@ -9,7 +9,7 @@ use crate::core::clock::today_local;
 use crate::core::constants::EPS;
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
-use crate::core::money::round2;
+use crate::core::money::{check_entry_date_now, round2};
 use crate::core::stock_rules::{
     is_low_stock, validate_low_stock_threshold, DEFAULT_LOW_STOCK_THRESHOLD,
 };
@@ -492,11 +492,14 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         }
 
         if initial_stock != 0.0 {
+            // S6 / FR-28: the shop computer's local day (was the UTC date), through the entry-date check.
+            let opening_date = today_local();
+            check_entry_date_now("initial_stock_date", &opening_date)?;
             // initial_cost is required (or a prior lot): never derived from the sale price (DD-12).
             self.inventory_service.create_source_lot(
                 &mut *tx,
                 LotSource::Opening,
-                &chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                &opening_date,
                 item_id,
                 initial_stock,
                 payload.initial_cost,

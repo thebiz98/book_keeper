@@ -17,6 +17,8 @@ pub trait OutflowAllocationRepository {
         source_id: i64,
     ) -> Result<Vec<StockOutflowAllocation>, AppError>;
     fn exists_for_lot(&self, lot_id: i64, source_type: OutflowSourceType) -> Result<bool, AppError>;
+    /// DD-95: Σ `quantity_depleted` of every outflow allocation on the lot (all source types).
+    fn sum_for_lot(&self, lot_id: i64) -> Result<f64, AppError>;
     /// Distinct `source_id`s of the type that drew from the lot.
     fn source_ids_for_lot(&self, lot_id: i64, source_type: OutflowSourceType) -> Result<Vec<i64>, AppError>;
     /// FR-20 re-cost (`ADJUSTMENT` and `REPLACEMENT` rows only; vendor returns are locked).

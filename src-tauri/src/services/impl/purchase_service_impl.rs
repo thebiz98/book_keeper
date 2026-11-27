@@ -7,12 +7,12 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, check_not_after_follow_up, round2, MONEY_EPS};
 use crate::services::r#impl::bill_guard::{
-    evaluate_purchase_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
+    earliest_follow_up, evaluate_purchase_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
     PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
 };
-use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party};
+use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party, require_active_party};
 use crate::services::r#impl::item_guard::{ensure_active_item, require_active_item};
 use crate::services::r#impl::bill_math::{
     apply_bill_charges_edit, bill_preview, compute_bill_totals, delete_bill_charges, lot_price_upfront, insert_bill_charges,
@@ -364,6 +364,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         if let Some(reason) = g.reasons.iter().find(|r| r.blocks_edit) {
             return Err(locked(reason));
         }
+        // DD-94: a later date must stay on or before the bill's earliest payment or return.
+        if payload.transaction_date > old.transaction_date {
+            let earliest = earliest_follow_up(tx, TransactionType::Purchase, purchase_id)?;
+            check_not_after_follow_up(&payload.transaction_date, earliest, "bill")?;
+        }
 
         // DD-89: lots, charges and the UPFRONT row are kept in place; only what changed is written.
         let r = resolve_purchase(tx, payload, old.party_id, true)?;
@@ -596,6 +601,13 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         let totals = compute_bill_totals(&line_totals, &charges)?;
         let upfront_new =
             lot_price_upfront(totals.total_amount, g.applied_amount, g.upfront_amount, header.balance_due)?;
+        // DD-90 / DD-96: a fully paid bill keeps paid by moving its UPFRONT cash; for a deleted
+        // vendor that is a new payment, so it is refused like a raised due.
+        if let Some(pid) = header.party_id {
+            if (upfront_new - g.upfront_amount).abs() > MONEY_EPS {
+                require_active_party(tx, pid)?;
+            }
+        }
         self.inventory_service.edit_purchase_lot(tx, lot.id, &edit)?;
         let updated = PurchaseTransaction {
             total_amount: totals.total_amount,
