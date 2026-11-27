@@ -556,3 +556,8 @@ Money and stock correctness after the owner's full review (HLD FR-53..FR-59, §1
 - Set stock snaps a residue below 1e-6 to 0, and low stock uses `current_stock < threshold − EPS` (S9). `evaluate_return_guard` treats any error of the dry run as blocking delete (R9).
 - UI rule moves (DD-56): typed cost 0, the per-pack price of `LotPriceEditModal`, `itemForm` / `BundleCreationModal` validation, the `ReturnFormVendor` lot filter and maximum, the `openBills.ts` FIFO sort, dues sums and the `NewPurchasePage` cost per base unit all come from the backend.
 - **Left as they are:** S10, a back-dated negative adjustment is valued at today's lots (the preview shows the cost; date order does not cover adjustments). Previews take the write lock (`BEGIN IMMEDIATE` then rollback): a performance note only, no wrong data.
+
+**DD-98 — Sales History totals row (2026-11-27, v1.9 J1).**
+- Totals cover **every bill matching the filters (all pages)**, are computed **only in SQL** (one aggregate that replaces the `COUNT(*)` query, same `history_where`, opening bills excluded) and only when `include_totals` is set. No summing in Rust or the UI (DD-56).
+- Profit total = Σ the bill-based `profit_expr()` (FR-34), only with `include_profit`. With no status or search filter it equals item-profit `reconciliation.bills_profit` for the same dates; it is not the P&L Gross Profit (returns dated by return date).
+- Sales only; the profit cell follows the session "Show profit" toggle. Purchase history is unchanged.
