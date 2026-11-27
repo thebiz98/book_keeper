@@ -69,7 +69,10 @@ describe('NewPurchasePage', () => {
   });
 
   it('shows the multiplier preview and normalised line math for a bundle', async () => {
-    const { container } = mount();
+    // The cost per base unit is the backend's figure (DD-97): 100 per box / 25 = 4.
+    const { container } = mount({
+      previewPurchase: vi.fn(async (p: PreviewIn) => ({ ...fakeBillPreview(p), lineCostPerBaseUnit: p.items.map(() => 4) })),
+    });
     await flush();
     const { act } = await import('react');
     act(() => pickItem(makeItem({ bundles: [box] })));

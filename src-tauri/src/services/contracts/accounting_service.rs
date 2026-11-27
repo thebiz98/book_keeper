@@ -1,5 +1,5 @@
 use crate::core::dtos::{
-    DeleteSettlementResult, PartyDueSummary, PartyLedgerView, SettleAllocation, SettleBatchPayload, SettlePaymentPayload,
+    DeleteSettlementResult, OpenBillRow, PartyDueSummary, PartyLedgerView, SettleAllocation, SettleBatchPayload, SettlePaymentPayload,
     SettlementHistoryFilter, SettlementHistoryPage, SettlementResult, UpdateSettlementPayload,
 };
 use crate::core::entities::PaymentSettlement;
@@ -44,6 +44,10 @@ pub trait AccountingService: Send + Sync {
 
     /// D8: deletes a SETTLEMENT row and recomputes its bill; other kinds are rejected.
     fn delete_settlement(&self, settlement_id: i64) -> Result<DeleteSettlementResult, AppError>;
+
+    /// DD-97: the open (balance > 0) bills of a party of the given side, oldest first
+    /// (`transaction_date, id`), opening-balance bills included. Read-only.
+    fn get_party_open_bills(&self, party_id: i64, transaction_type: TransactionType) -> Result<Vec<OpenBillRow>, AppError>;
 
     /// FR-42: `SETTLEMENT` rows across all parties, newest first, paged in SQL, with totals.
     /// Read-only. Rejects page < 1, page_size outside 1..=200 and from_date > to_date.
@@ -114,6 +118,10 @@ impl<T: AccountingService + ?Sized> AccountingService for std::sync::Arc<T> {
 
     fn get_settlement_history(&self, filter: SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError> {
         (**self).get_settlement_history(filter)
+    }
+
+    fn get_party_open_bills(&self, party_id: i64, transaction_type: TransactionType) -> Result<Vec<OpenBillRow>, AppError> {
+        (**self).get_party_open_bills(party_id, transaction_type)
     }
 
     fn apply_return_credit(

@@ -145,6 +145,29 @@ struct PartyRow {
     phone: Option<String>,
     notes: Option<String>,
     opening: Option<OpeningBalanceInput>,
+    /// False when the As Of Date cell was blank: an existing opening bill keeps its own date (L2).
+    as_of_given: bool,
+}
+
+/// The opening input for a party that already exists: a blank As Of Date keeps the date of its
+/// current opening bill (L2); a new party or a given date uses the row's value.
+fn opening_for_existing(
+    tx: &mut dyn TransactionContext,
+    party: &Party,
+    row: &PartyRow,
+) -> Result<Option<OpeningBalanceInput>, AppError> {
+    let Some(o) = &row.opening else { return Ok(None) };
+    if row.as_of_given {
+        return Ok(Some(o.clone()));
+    }
+    let old = match party.party_type {
+        PartyType::Customer => tx.sales().find_opening_for_party(party.id)?.map(|h| h.transaction_date),
+        PartyType::Vendor => tx.purchases().find_opening_for_party(party.id)?.map(|h| h.transaction_date),
+    };
+    Ok(Some(match old {
+        Some(date) => OpeningBalanceInput { amount: o.amount, as_of_date: date },
+        None => o.clone(),
+    }))
 }
 
 fn parse_party_rows(raws: &[RawRow], errors: &mut Vec<ImportRowError>, warnings: &mut Vec<ImportRowWarning>) -> Vec<PartyRow> {
@@ -218,6 +241,7 @@ fn parse_party_rows(raws: &[RawRow], errors: &mut Vec<ImportRowError>, warnings:
                     phone: Some(raw.text(P_PHONE).trim().to_string()).filter(|p| !p.is_empty()),
                     notes: clean_optional(Some(&raw.text(P_NOTES))),
                     opening,
+                    as_of_given: !date_text.is_empty(),
                 });
             }
         }
@@ -258,7 +282,10 @@ fn check_parties(
         // Same checks the party screen applies on save (FR-35, FR-28, below what is settled).
         let check = match (&row.opening, &existing) {
             (Some(o), None) => check_opening_update(tx, None, o),
-            (Some(o), Some(e)) if update => check_opening_update(tx, Some(e), o),
+            (Some(_), Some(e)) if update => match opening_for_existing(tx, e, &row)? {
+                Some(o) => check_opening_update(tx, Some(e), &o),
+                None => Ok(()),
+            },
             _ => Ok(()),
         };
         if let Err(AppError::ValidationError { message, .. }) = check {
@@ -543,8 +570,8 @@ impl<U: UnitOfWork> RecordImportService for RecordImportServiceImpl<U> {
                     }
                     party.updated_at = now.clone();
                     tx.parties().update(&party)?;
-                    if let Some(o) = &row.opening {
-                        apply_opening_balance(&mut *tx, &party, o)?;
+                    if let Some(o) = opening_for_existing(&mut *tx, &party, &row)? {
+                        apply_opening_balance(&mut *tx, &party, &o)?;
                     }
                     summary.updated += 1;
                     touched.push(party.id);

@@ -9,7 +9,7 @@ use crate::core::clock::today_local;
 use crate::core::constants::EPS;
 use crate::core::entities::{Item, ItemBundle};
 use crate::core::error::AppError;
-use crate::core::money::round2;
+use crate::core::money::{check_entry_date_now, round2};
 use crate::core::stock_rules::{
     is_low_stock, validate_low_stock_threshold, DEFAULT_LOW_STOCK_THRESHOLD,
 };
@@ -315,16 +315,15 @@ fn not_found(entity: &str, id: i64) -> AppError {
 }
 
 impl<U: UnitOfWork, I: InventoryService> ItemServiceImpl<U, I> {
-    /// Reindex after commit. A failure is logged and surfaced as `SearchIndexError`; the master
-    /// data is already committed and the next startup rebuilds on mismatch.
-    fn reindex(&self, item: &Item, bundles: &[ItemBundle]) -> Result<(), AppError> {
-        self.search_indexer.index_item_with_bundles(item, bundles).map_err(|e| {
-            eprintln!("[search] reindex of item #{} failed: {e}", item.id);
-            match e {
-                AppError::SearchIndexError(_) => e,
-                other => AppError::SearchIndexError(other.to_string()),
+    /// Reindex after commit (L5, DD-97). The master data is already committed, so a failure is
+    /// retried once, then logged and swallowed; the next startup rebuilds on a count mismatch.
+    fn reindex(&self, item: &Item, bundles: &[ItemBundle]) {
+        for attempt in 1..=2 {
+            match self.search_indexer.index_item_with_bundles(item, bundles) {
+                Ok(()) => return,
+                Err(e) => eprintln!("[search] reindex of item #{} failed (attempt {attempt}): {e}", item.id),
             }
-        })
+        }
     }
 
     fn validate_and_build_bundle(
@@ -492,11 +491,14 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         }
 
         if initial_stock != 0.0 {
+            // S6 / FR-28: the shop computer's local day (was the UTC date), through the entry-date check.
+            let opening_date = today_local();
+            check_entry_date_now("initial_stock_date", &opening_date)?;
             // initial_cost is required (or a prior lot): never derived from the sale price (DD-12).
             self.inventory_service.create_source_lot(
                 &mut *tx,
                 LotSource::Opening,
-                &chrono::Utc::now().format("%Y-%m-%d").to_string(),
+                &opening_date,
                 item_id,
                 initial_stock,
                 payload.initial_cost,
@@ -519,7 +521,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let saved = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
         let bundles = tx.bundles().find_by_item_id(item_id)?;
         tx.commit()?;
-        self.reindex(&saved, &bundles)?;
+        self.reindex(&saved, &bundles);
         Ok(item_id)
     }
 
@@ -562,7 +564,15 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         existing.name = clean_name(&payload.name);
         existing.category = clean_optional(payload.category.as_deref());
         existing.barcode = barcode;
-        existing.base_unit = payload.base_unit.trim().to_string();
+        let new_unit = payload.base_unit.trim().to_string();
+        // L6 (DD-97): the base unit is the unit of every stored quantity, so it is fixed once the
+        // item has stock, a lot or a bill line.
+        if new_unit != existing.base_unit
+            && (existing.current_stock.abs() > EPS || tx.items().has_stock_or_bills(item_id)?)
+        {
+            return Err(invalid("base_unit", "Base unit can't change once the item has stock or bills."));
+        }
+        existing.base_unit = new_unit;
         existing.mrp = payload.mrp; // None clears the MRP
         existing.default_sale_price = payload.default_sale_price;
         if let Some(t) = payload.low_stock_threshold {
@@ -578,7 +588,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let bundles = tx.bundles().find_by_item_id(item_id)?;
         tx.commit()?;
 
-        self.reindex(&existing, &bundles)
+        self.reindex(&existing, &bundles);
+        Ok(())
     }
 
     fn update_low_stock_threshold(&self, item_id: i64, threshold: f64) -> Result<ItemSearchResult, AppError> {
@@ -620,7 +631,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let bundles = tx.bundles().find_by_item_id(item_id)?;
         tx.commit()?;
 
-        self.reindex(&item, &bundles)?;
+        self.reindex(&item, &bundles);
         Ok(SavedBundle::new(bundle, item.default_sale_price))
     }
 
@@ -635,7 +646,7 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let bundles = tx.bundles().find_by_item_id(existing.item_id)?;
         tx.commit()?;
 
-        self.reindex(&item, &bundles)?;
+        self.reindex(&item, &bundles);
         Ok(SavedBundle::new(bundle, item.default_sale_price))
     }
 
@@ -649,7 +660,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let bundles = tx.bundles().find_by_item_id(existing.item_id)?;
         tx.commit()?;
 
-        self.reindex(&item, &bundles)
+        self.reindex(&item, &bundles);
+        Ok(())
     }
 
     fn get_bundle_suggestions(&self) -> Result<Vec<BundleSuggestion>, AppError> {
@@ -734,7 +746,8 @@ impl<U: UnitOfWork, I: InventoryService> ItemService for ItemServiceImpl<U, I> {
         let restored = tx.items().find_by_id(item_id)?.ok_or_else(|| not_found("Item", item_id))?;
         let bundles = tx.bundles().find_by_item_id(item_id)?;
         tx.commit()?;
-        self.reindex(&restored, &bundles)
+        self.reindex(&restored, &bundles);
+        Ok(())
     }
 
     fn list_deleted_items(

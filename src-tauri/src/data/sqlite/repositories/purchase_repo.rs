@@ -52,6 +52,16 @@ fn map_item(r: &Row<'_>) -> rusqlite::Result<PurchaseItem> {
     })
 }
 
+/// DD-97: the entry price of a lot, per pack with a pack label else per base unit, to 4 decimals.
+fn lot_entry_price(l: &ItemLot) -> f64 {
+    let per = if l.pack_label.is_some() {
+        l.unit_cost * l.quantity / if l.pack_quantity != 0.0 { l.pack_quantity } else { 1.0 }
+    } else {
+        l.unit_cost
+    };
+    (per * 10_000.0).round() / 10_000.0
+}
+
 fn opt_id(id: i64) -> Option<i64> {
     if id > 0 { Some(id) } else { None }
 }
@@ -333,8 +343,15 @@ impl PurchaseRepository for SqlitePurchaseRepository {
                     pack_label: r.get(9)?,
                     pack_quantity: r.get(10)?,
                     fifo_rank: None,
+                    entry_price: 0.0,
                 })
             })?
+            .map(|r| {
+                r.map(|mut l| {
+                    l.entry_price = lot_entry_price(&l);
+                    l
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }

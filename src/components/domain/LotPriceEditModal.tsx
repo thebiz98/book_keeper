@@ -20,13 +20,6 @@ export interface LotPriceEditModalProps {
   onSaved: () => void;
 }
 
-/** Price shown for editing: per pack when the lot has a pack label, else per base unit. */
-export function lotEntryPrice(lot: ItemLot): number {
-  const total = lot.unitCost * lot.quantity;
-  const per = lot.packLabel ? total / (lot.packQuantity || 1) : lot.unitCost;
-  return Number(per.toFixed(4));
-}
-
 const Row: React.FC<{ label: string; old: React.ReactNode; next: React.ReactNode }> = ({ label, old, next }) => (
   <div className="flex items-center justify-between text-xs">
     <span className="text-slate-500">{label}</span>
@@ -54,7 +47,7 @@ export const LotPriceEditModal: React.FC<LotPriceEditModalProps> = ({ lot, baseU
 
   useEffect(() => {
     if (!lot) return;
-    setPrice(lotEntryPrice(lot));
+    setPrice(lot.entryPrice ?? lot.unitCost); // computed by the backend (DD-97)
     setError(null);
     setEditingRow(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps

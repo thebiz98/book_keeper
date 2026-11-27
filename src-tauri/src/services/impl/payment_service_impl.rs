@@ -1,7 +1,7 @@
 use crate::core::dtos::{RecordPaymentPayload, RecordRefundPayload};
 use crate::core::entities::PaymentSettlement;
 use crate::core::error::AppError;
-use crate::core::money::{round2, MONEY_EPS};
+use crate::core::money::{check_finite_amount, round2, MONEY_EPS};
 use crate::core::value_objects::{PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::TransactionContext;
 use crate::services::contracts::payment_service::{BillUpfront, PaymentService};
@@ -110,6 +110,7 @@ impl PaymentService for PaymentServiceImpl {
         if !payload.amount_paid.is_finite() {
             return Err(validation("amount_paid", "Payment amount must be a finite number"));
         }
+        check_finite_amount("amount_paid", payload.amount_paid)?;
         let amount = round2(payload.amount_paid);
         if amount <= 0.0 {
             return Err(validation(
@@ -154,6 +155,7 @@ impl PaymentService for PaymentServiceImpl {
         if !payload.amount.is_finite() {
             return Err(validation("amount", "Refund amount must be a finite number"));
         }
+        check_finite_amount("amount", payload.amount)?;
         let amount = round2(payload.amount);
         if amount <= 0.0 {
             return Err(validation("amount", format!("Refund amount must be positive, got {}", payload.amount)));

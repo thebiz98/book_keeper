@@ -38,6 +38,8 @@ fn validation(field: &str, message: impl Into<String>) -> AppError {
 #[derive(Debug, Clone, Default)]
 pub struct BillFigures {
     pub line_totals: Vec<f64>,
+    /// Purchases: per-base-unit cost of each line (see `BillPreview::line_cost_per_base_unit`).
+    pub line_cost_per_base_unit: Vec<f64>,
     pub totals: Option<BillTotals>,
     pub applied: f64,
     pub open: f64,
@@ -73,6 +75,7 @@ pub fn bill_preview(
     });
     Ok(BillPreview {
         line_totals: fig.line_totals,
+        line_cost_per_base_unit: fig.line_cost_per_base_unit,
         items_subtotal: t.items_subtotal,
         charges_total: t.charges_total,
         discounts_total: t.discounts_total,
@@ -336,6 +339,9 @@ pub fn sale_payment_split(status: PaymentStatus, total_amount: f64, paid: f64) -
 /// FR-25 / V4 payment rule for a lot price edit. `applied = SETTLEMENT + RETURN_CREDIT`,
 /// `upfront_old = UPFRONT`, `old_balance_due` is the bill's balance before the edit. Returns the new
 /// UPFRONT amount, or `BillLocked TOTAL_BELOW_APPLIED` when the new total is below what was applied.
+/// DD-96 (D8): a bill fully paid before the edit stays fully paid however it was paid (upfront
+/// only, or upfront plus settlements): the difference goes to its UPFRONT row. A part-paid or
+/// unpaid bill keeps its upfront (capped at the new open amount) and takes the change in its balance.
 pub fn lot_price_upfront(
     new_total: f64,
     applied: f64,
@@ -352,8 +358,8 @@ pub fn lot_price_upfront(
         });
     }
     let open = round2(open.max(0.0));
-    if old_balance_due <= MONEY_EPS && applied <= MONEY_EPS {
-        return Ok(round2(new_total));
+    if old_balance_due <= MONEY_EPS {
+        return Ok(open);
     }
     Ok(round2(upfront_old.min(open)))
 }

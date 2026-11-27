@@ -18,6 +18,8 @@ pub trait AllocationRepository {
     fn delete_allocation(&mut self, allocation_id: i64) -> Result<(), AppError>;
     /// FR-20: removes every allocation of a sale line; returns the count.
     fn delete_by_sale_item_id(&mut self, sale_item_id: i64) -> Result<usize, AppError>;
+    /// DD-95: Σ `quantity_depleted` of every sale allocation on the lot (returned units included).
+    fn sum_depleted_for_lot(&self, lot_id: i64) -> Result<f64, AppError>;
     /// Distinct sale lines that drew from the lot.
     fn sale_item_ids_for_lot(&self, lot_id: i64) -> Result<Vec<i64>, AppError>;
     /// FR-20 re-cost: sets `unit_cost` on every allocation of the lot.

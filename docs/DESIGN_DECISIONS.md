@@ -535,7 +535,7 @@ Money and stock correctness after the owner's full review (HLD FR-53..FR-59, §1
 - `preview_item_delete` returns `write_off { quantity, base_unit, loss }` (null without stock). A hard delete (DD-79) never has stock, so it is unaffected. Undoing the write-off (G7) requires restoring the item first.
 
 **DD-94 — Date order (2026-11-26, v1.7 FR-59, owner D7; finding E10). Extends DD-58.**
-- Checks run inside the `*_in_tx` bodies, so previews show them; error `ValidationError` with code `DATE_ORDER` naming the limiting date.
+- Checks run inside the `*_in_tx` bodies, so previews show them; error `BillLocked` with code `DATE_ORDER` naming the limiting date (as built: `ValidationError` carries no code).
 - Return date ≥ linked bill date. Settlement date ≥ bill date (single, batch, edit). Bill edit date ≤ earliest `SETTLEMENT` and earliest linked return (UPFRONT moves with the bill). Opening-balance As of date ≤ earliest settlement of the `OB-` bill.
 - Not covered: stock adjustments (S10, DD-97).
 

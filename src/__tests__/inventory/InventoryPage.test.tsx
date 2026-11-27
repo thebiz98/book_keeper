@@ -239,31 +239,40 @@ describe('Item edit drawer', () => {
     });
   });
 
-  it('edit sends the changed Low Stock Level; negative shows a field error', async () => {
+  it('edit sends the changed Low Stock Level; a negative is the backend rule (DD-56)', async () => {
     const { api, container } = mount();
     await flush();
     await openEdit(container);
     const low = inputByLabel(container, /Low Stock Level/);
     expect(low.value).toBe('5');
+    api.updateItem.mockRejectedValueOnce({
+      type: 'ValidationError',
+      details: { field: 'low_stock_threshold', message: 'Low stock level must be a number that is 0 or more' },
+    });
     typeInto(low, '-1');
     click(byText(container, 'button', /Save Changes/));
     await flush();
-    expect(api.updateItem).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('Low stock level must be 0 or more');
+    expect(api.updateItem).toHaveBeenCalledWith(1, expect.objectContaining({ lowStockThreshold: -1 }));
+    expect(container.textContent).toContain('Low stock level must be a number that is 0 or more');
     typeInto(low, '12');
     click(byText(container, 'button', /Save Changes/));
     await flush();
     expect(api.updateItem).toHaveBeenCalledWith(1, expect.objectContaining({ lowStockThreshold: 12 }));
   });
 
-  it('rejects MRP 0 on the client', async () => {
-    const { api, container } = mount();
+  it('MRP 0 is a backend rule (DD-56): sent as typed, its refusal shows under MRP', async () => {
+    const { api, container } = mount({
+      updateItem: vi.fn().mockRejectedValue({
+        type: 'ValidationError',
+        details: { field: 'mrp', message: 'MRP must be greater than 0 (leave it empty for no MRP)' },
+      }),
+    });
     await flush();
     await openEdit(container);
     typeInto(inputByLabel(container, /^MRP/), '0');
     click(byText(container, 'button', /Save Changes/));
     await flush();
-    expect(api.updateItem).not.toHaveBeenCalled();
+    expect(api.updateItem).toHaveBeenCalledWith(1, expect.objectContaining({ mrp: 0 }));
     expect(container.textContent).toContain('MRP must be greater than 0');
   });
 
@@ -280,6 +289,25 @@ describe('Item edit drawer', () => {
     await flush();
     const err = Array.from(container.querySelectorAll('[role="alert"]')).find((e) => e.textContent === 'Barcode already in use');
     expect(err).toBeTruthy(); // barcode is no longer a field, so the message shows as the form error
+  });
+
+  it('a backend base-unit refusal shows its message, restores the stored unit and disables the field (L6)', async () => {
+    const { container } = mount({
+      updateItem: vi.fn().mockRejectedValue({
+        type: 'ValidationError',
+        details: { field: 'base_unit', message: "Base unit can't change once the item has stock or bills." },
+      }),
+    });
+    await flush();
+    await openEdit(container);
+    const unit = inputByLabel(container, /Base Unit/);
+    typeInto(unit, 'KG');
+    click(byText(container, 'button', /Save Changes/));
+    await flush();
+    expect(container.textContent).toContain("Base unit can't change once the item has stock or bills.");
+    const after = inputByLabel(container, /Base Unit/);
+    expect(after.disabled).toBe(true);
+    expect(after.value).toBe('PCS');
   });
 
   it('edit drawer has no Category/Barcode fields and preserves both on save (D5)', async () => {

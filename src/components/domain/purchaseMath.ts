@@ -35,6 +35,3 @@ export interface PurchaseLine {
 export const lineBaseQuantity = (l: Pick<PurchaseLine, 'quantity' | 'unitsPerBundle'>) =>
   round6(l.quantity * l.unitsPerBundle);
 
-/** Display: the line's cost per base unit. */
-export const lineCostPerBase = (l: Pick<PurchaseLine, 'unitCost' | 'unitsPerBundle'>) =>
-  l.unitCost / l.unitsPerBundle;

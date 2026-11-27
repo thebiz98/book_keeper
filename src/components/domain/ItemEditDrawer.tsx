@@ -43,6 +43,8 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
 
   const [name, setName] = useState('');
   const [baseUnit, setBaseUnit] = useState('PCS');
+  // L6 (DD-97): set when the backend refuses a unit change (the item has stock, lots or bills).
+  const [unitLocked, setUnitLocked] = useState(false);
   const [mrp, setMrp] = useState('');
   const [price, setPrice] = useState('');
   const [initialStock, setInitialStock] = useState('');
@@ -74,6 +76,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
     if (!isOpen) return;
     setName(item?.name ?? '');
     setBaseUnit(item?.baseUnit ?? 'PCS');
+    setUnitLocked(false);
     setMrp(numText(item?.mrp));
     setPrice(item ? String(item.defaultSalePrice) : '');
     setInitialStock('');
@@ -164,8 +167,14 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
       }
       const f = validationField(err);
       const key = f ? FIELD_MAP[f] : undefined;
-      if (key) setErrors({ [key]: errorMessage(err) });
-      else setFormError(errorMessage(err) || 'Failed to save item');
+      if (key) {
+        setErrors({ [key]: errorMessage(err) });
+        if (f === 'base_unit' && item) {
+          // The backend decided the unit is fixed: show the stored unit, not editable.
+          setBaseUnit(item.baseUnit);
+          setUnitLocked(true);
+        }
+      } else setFormError(errorMessage(err) || 'Failed to save item');
     } finally {
       busy.current = false;
       setSaving(false);
@@ -292,6 +301,7 @@ export const ItemEditDrawer: React.FC<ItemEditDrawerProps> = ({
             label={isService ? 'Unit * (e.g. PRINT)' : 'Base Unit *'}
             value={baseUnit}
             onChange={(e) => setBaseUnit(e.target.value.toUpperCase())}
+            disabled={unitLocked}
             error={errors.baseUnit}
           />
           {isService ? (

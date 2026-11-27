@@ -346,7 +346,8 @@ fn returns_of_a_deleted_item_are_rejected_but_existing_returns_can_be_deleted() 
     e.items.delete_item(pen, false).unwrap();
     assert!(e.sales.get_sale_details(sale).unwrap().items[0].item_deleted, "pickers disable the line");
     let err = e.rets.create_customer_return(ret(1.0)).unwrap_err();
-    assert!(err.to_string().contains("'Pen' is deleted. Restore the item first."), "{err}");
+    assert!(matches!(&err, AppError::DeletedReference { entity, .. } if entity == "ITEM"), "{err}");
+    assert!(err.to_string().contains("'Pen' is deleted. Restore it first."), "{err}");
     let vr = VendorReturnPayload {
         original_purchase_id: None, party_id: Some(90), return_date: DAY.into(),
         settlement_type: SettlementType::Refund, reason: None, notes: None,

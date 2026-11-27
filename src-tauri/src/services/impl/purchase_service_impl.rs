@@ -7,12 +7,12 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_entry_date_now, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, check_finite_amount, check_line_total, check_not_after_follow_up, round2, MONEY_EPS};
 use crate::services::r#impl::bill_guard::{
-    evaluate_purchase_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
+    earliest_follow_up, evaluate_purchase_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
     PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
 };
-use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party};
+use crate::services::r#impl::party_guard::{check_due_not_raised, deleted_party, require_active_party};
 use crate::services::r#impl::item_guard::{ensure_active_item, require_active_item};
 use crate::services::r#impl::bill_math::{
     apply_bill_charges_edit, bill_preview, compute_bill_totals, delete_bill_charges, lot_price_upfront, insert_bill_charges,
@@ -78,6 +78,7 @@ fn validate_purchase_shape(payload: &CreatePurchasePayload) -> Result<(), AppErr
     if !payload.paid_amount.is_finite() || payload.paid_amount < 0.0 {
         return Err(validation("paid_amount", "paid_amount must be a non-negative number"));
     }
+    let mut bill_total = 0.0_f64;
     for line in &payload.items {
         if !line.bundle_quantity.is_finite() || line.bundle_quantity <= 0.0 {
             return Err(validation(
@@ -88,7 +89,11 @@ fn validate_purchase_shape(payload: &CreatePurchasePayload) -> Result<(), AppErr
         if !line.unit_cost.is_finite() || line.unit_cost < 0.0 {
             return Err(validation("unit_cost", "unit_cost must be a non-negative number"));
         }
+        check_line_total("unit_cost", line.bundle_quantity, line.unit_cost)?;
+        bill_total += line.bundle_quantity * line.unit_cost;
+        check_finite_amount("unit_cost", bill_total)?;
     }
+    check_finite_amount("paid_amount", payload.paid_amount)?;
     Ok(())
 }
 
@@ -176,6 +181,15 @@ fn resolve_purchase(
     Ok(ResolvedPurchase { party_id: payload.party_id, party_name, lines })
 }
 
+/// DD-97: per-base-unit cost of each line, as its lot will store it (rounded line total over the
+/// base quantity), to 4 decimals. The purchase screen shows it instead of dividing in the UI.
+fn line_costs_per_base_unit(r: &ResolvedPurchase) -> Vec<f64> {
+    r.lines
+        .iter()
+        .map(|l| if l.base_qty > 0.0 { (l.line_total / l.base_qty * 10_000.0).round() / 10_000.0 } else { 0.0 })
+        .collect()
+}
+
 fn price_purchase(
     tx: &mut dyn TransactionContext,
     payload: &CreatePurchasePayload,
@@ -187,6 +201,7 @@ fn price_purchase(
     let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
     let totals = compute_bill_totals(&line_totals, &charges)?;
     fig.set_totals(&line_totals, totals, applied);
+    fig.line_cost_per_base_unit = line_costs_per_base_unit(r);
     Ok((charges, totals))
 }
 
@@ -364,6 +379,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         if let Some(reason) = g.reasons.iter().find(|r| r.blocks_edit) {
             return Err(locked(reason));
         }
+        // DD-94: a later date must stay on or before the bill's earliest payment or return.
+        if payload.transaction_date > old.transaction_date {
+            let earliest = earliest_follow_up(tx, TransactionType::Purchase, purchase_id)?;
+            check_not_after_follow_up(&payload.transaction_date, earliest, "bill")?;
+        }
 
         // DD-89: lots, charges and the UPFRONT row are kept in place; only what changed is written.
         let r = resolve_purchase(tx, payload, old.party_id, true)?;
@@ -388,6 +408,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
         let totals = compute_bill_totals(&line_totals, &charge_plan.charges)?;
         fig.set_totals(&line_totals, totals, g.applied_amount);
+        fig.line_cost_per_base_unit = line_costs_per_base_unit(&r);
 
         // Lots: kept lines update in place (ids kept: allocations point at them), the rest are
         // removed (if unreferenced) or created.
@@ -510,6 +531,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         if !payload.unit_price.is_finite() || payload.unit_price < 0.0 {
             return Err(validation("unit_price", "unit_price must be a non-negative number"));
         }
+        check_finite_amount("unit_price", payload.unit_price)?;
         let lot = tx
             .purchases()
             .find_purchase_item_by_id(payload.purchase_item_id)?
@@ -596,6 +618,13 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         let totals = compute_bill_totals(&line_totals, &charges)?;
         let upfront_new =
             lot_price_upfront(totals.total_amount, g.applied_amount, g.upfront_amount, header.balance_due)?;
+        // DD-90 / DD-96: a fully paid bill keeps paid by moving its UPFRONT cash; for a deleted
+        // vendor that is a new payment, so it is refused like a raised due.
+        if let Some(pid) = header.party_id {
+            if (upfront_new - g.upfront_amount).abs() > MONEY_EPS {
+                require_active_party(tx, pid)?;
+            }
+        }
         self.inventory_service.edit_purchase_lot(tx, lot.id, &edit)?;
         let updated = PurchaseTransaction {
             total_amount: totals.total_amount,

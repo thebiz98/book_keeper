@@ -52,6 +52,14 @@ impl OutflowAllocationRepository for SqliteOutflowAllocationRepository {
         )?)
     }
 
+    fn sum_for_lot(&self, lot_id: i64) -> Result<f64, AppError> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(SUM(quantity_depleted), 0.0) FROM stock_outflow_allocations WHERE purchase_item_id = ?1",
+            params![lot_id],
+            |r| r.get(0),
+        )?)
+    }
+
     fn source_ids_for_lot(&self, lot_id: i64, source_type: OutflowSourceType) -> Result<Vec<i64>, AppError> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT source_id FROM stock_outflow_allocations WHERE purchase_item_id = ?1 AND source_type = ?2 ORDER BY source_id",

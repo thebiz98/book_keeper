@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lineBaseQuantity, lineCostPerBase, type PurchaseLine } from '@/components/domain/purchaseMath';
+import { lineBaseQuantity, type PurchaseLine } from '@/components/domain/purchaseMath';
 import { prefillFromLocation, queuePurchasePrefill, takePurchasePrefill } from '@/pages/purchasePrefill';
 
 const line = (over: Partial<PurchaseLine> = {}): PurchaseLine => ({
@@ -18,10 +18,9 @@ const line = (over: Partial<PurchaseLine> = {}): PurchaseLine => ({
 // DD-56: line totals, bill totals and the payment rules are the backend's (preview_purchase, tested in
 // Rust). Only the display-only unit conversions remain here.
 describe('purchase line unit conversions (display only)', () => {
-  it('converts bundles to base units and shows the cost per base unit', () => {
+  it('converts bundles to base units (the cost per base unit is the backend preview, DD-97)', () => {
     const l = line();
     expect(lineBaseQuantity(l)).toBe(100);
-    expect(lineCostPerBase(l)).toBe(4);
   });
 
   it('supports decimal quantities', () => {

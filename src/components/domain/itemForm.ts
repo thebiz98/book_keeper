@@ -40,9 +40,9 @@ export interface ItemFormInput {
 export type ItemFormMode =
   /** Edit drawer: stock fields are not part of the form. */
   | 'edit'
-  /** Create drawer: opening stock is optional, cost required when stock > 0. */
+  /** Create drawer: opening stock is optional, cost required when stock is entered. */
   | 'create'
-  /** Quick create on New Sale: stock and purchase price are both required (> 0). */
+  /** Quick create on New Sale: stock and purchase price are both required. */
   | 'quick-stock'
   /** Quick create on New Purchase: no stock fields. */
   | 'quick'
@@ -70,38 +70,23 @@ export function validateItemForm(
   const costVal = parseOptional(input.initialCost);
   const lowVal = parseOptional(input.lowStock);
 
+  // Format and required-field checks only (DD-56, DD-97): the backend refuses negative, zero or
+  // too-large values, and its message lands on the field through FIELD_MAP.
+  const notNumber = (v: number | null) => v !== null && !Number.isFinite(v);
   if (!input.name.trim()) errs.name = 'Item name is required';
   if (!input.baseUnit.trim()) errs.baseUnit = 'Base unit is required';
-  if (priceVal === null || !Number.isFinite(priceVal) || priceVal < 0) {
-    errs.defaultSalePrice = 'Enter a sale price (0 or more)';
-  }
-  if (mode !== 'service' && (lowVal === null || !Number.isFinite(lowVal) || lowVal < 0)) {
-    errs.lowStockThreshold = 'Low stock level must be 0 or more';
-  }
+  if (priceVal === null || !Number.isFinite(priceVal)) errs.defaultSalePrice = 'Enter a sale price';
+  if (mode !== 'service' && notNumber(lowVal)) errs.lowStockThreshold = 'Enter a number for the low stock level';
   const svcCostVal = parseOptional(input.serviceCost ?? '');
-  if (mode === 'service' && svcCostVal !== null && (!Number.isFinite(svcCostVal) || svcCostVal < 0)) {
-    errs.serviceCost = 'Service cost must be 0 or more (leave empty for none)';
-  }
-  if (mrpVal !== null && (!Number.isFinite(mrpVal) || mrpVal <= 0)) {
-    errs.mrp = 'MRP must be greater than 0 (leave empty for none)';
-  }
+  if (mode === 'service' && notNumber(svcCostVal)) errs.serviceCost = 'Enter a number (leave empty for none)';
+  if (notNumber(mrpVal)) errs.mrp = 'Enter a number (leave empty for none)';
   if (mode === 'create') {
-    if (stockVal !== null && (!Number.isFinite(stockVal) || stockVal < 0)) {
-      errs.initialStock = 'Initial stock cannot be negative';
-    }
-    if (costVal !== null && (!Number.isFinite(costVal) || costVal < 0)) {
-      errs.initialCost = 'Cost cannot be negative';
-    }
-    if (stockVal !== null && stockVal > 0 && costVal === null) {
-      errs.initialCost = 'Enter the cost of the opening stock';
-    }
+    if (notNumber(stockVal)) errs.initialStock = 'Enter a number';
+    if (notNumber(costVal)) errs.initialCost = 'Enter a number';
+    if (stockVal !== null && costVal === null) errs.initialCost = 'Enter the cost of the opening stock';
   } else if (mode === 'quick-stock') {
-    if (stockVal === null || !Number.isFinite(stockVal) || stockVal <= 0) {
-      errs.initialStock = 'Stock on hand must be greater than 0';
-    }
-    if (costVal === null || !Number.isFinite(costVal) || costVal <= 0) {
-      errs.initialCost = 'Purchase price must be greater than 0';
-    }
+    if (stockVal === null || !Number.isFinite(stockVal)) errs.initialStock = 'Enter the stock on hand';
+    if (costVal === null || !Number.isFinite(costVal)) errs.initialCost = 'Enter the purchase price';
   }
   if (Object.keys(errs).length > 0) return { errors: errs, values: null };
   return {

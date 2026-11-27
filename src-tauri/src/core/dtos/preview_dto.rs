@@ -61,6 +61,10 @@ pub struct BillPaymentPreview {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BillPreview {
     pub line_totals: Vec<f64>,
+    /// DD-97, purchases only: what each line costs per base unit (`line total ÷ base quantity`, 4
+    /// decimals), i.e. the unit cost its lot will carry. Empty for a sale.
+    #[serde(default)]
+    pub line_cost_per_base_unit: Vec<f64>,
     pub items_subtotal: f64,
     pub charges_total: f64,
     pub discounts_total: f64,

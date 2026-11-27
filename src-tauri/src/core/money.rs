@@ -5,9 +5,32 @@ use crate::core::value_objects::{PaymentKind, TransactionType};
 /// Tolerance for comparing two already-rounded money amounts (half a paisa).
 pub const MONEY_EPS: f64 = 0.005;
 
-/// Rounds a currency amount to 2 decimal places (DD-15).
+/// Rounds a currency amount to 2 decimal places, half away from zero (DD-15, DD-97).
+/// The TypeScript `round2` in `src/lib/money.ts` is the same function (shared vectors in
+/// `tests/fixtures/round2_vectors.json`).
 pub fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
+}
+
+/// Largest quantity, rate or total accepted anywhere (L7, DD-97); keeps every product finite.
+pub const MAX_AMOUNT: f64 = 1e12;
+
+/// `x` must be finite and `|x| <= MAX_AMOUNT`.
+pub fn check_finite_amount(field: &str, x: f64) -> Result<(), crate::core::error::AppError> {
+    if !x.is_finite() || x.abs() > MAX_AMOUNT {
+        return Err(crate::core::error::AppError::ValidationError {
+            field: field.to_string(),
+            message: "That number is too large".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// A line `quantity x rate` must have finite parts below the cap and a total below the cap.
+pub fn check_line_total(field: &str, quantity: f64, rate: f64) -> Result<(), crate::core::error::AppError> {
+    check_finite_amount(field, quantity)?;
+    check_finite_amount(field, rate)?;
+    check_finite_amount(field, quantity * rate)
 }
 
 /// Rate net of the bill discount share: `unit_price * clamp(1 - discounts / items_subtotal, 0, 1)`.
@@ -61,6 +84,45 @@ pub fn check_entry_date(field: &str, date: &str, today: &str) -> Result<(), crat
         });
     }
     Ok(())
+}
+
+/// DD-94 error code: an entry dated out of order with the bill it follows.
+pub const DATE_ORDER: &str = "DATE_ORDER";
+
+/// `2026-11-12` as `12 Nov 2026` for messages; an unparsable value is shown as is.
+pub fn display_date(iso: &str) -> String {
+    chrono::NaiveDate::parse_from_str(iso, "%Y-%m-%d")
+        .map(|d| d.format("%d %b %Y").to_string())
+        .unwrap_or_else(|_| iso.to_string())
+}
+
+/// DD-94: an event that follows a bill (`what` = "Return", "Payment") cannot be dated before it.
+/// `BillLocked { code: DATE_ORDER }`: "Return date can't be before the bill date (12 Nov 2026)".
+pub fn check_not_before_bill(what: &str, date: &str, bill_date: &str) -> Result<(), crate::core::error::AppError> {
+    if date < bill_date {
+        return Err(crate::core::error::AppError::BillLocked {
+            code: DATE_ORDER.to_string(),
+            message: format!("{what} date can't be before the bill date ({})", display_date(bill_date)),
+        });
+    }
+    Ok(())
+}
+
+/// DD-94: a bill (or opening balance) moved to `new_date` must stay on or before its earliest
+/// follow-up `(date, noun)`, e.g. `("2026-11-14", "payment")`:
+/// "This bill has a payment on 14 Nov 2026, so its date can't be later".
+pub fn check_not_after_follow_up(
+    new_date: &str,
+    earliest: Option<(String, &str)>,
+    subject: &str,
+) -> Result<(), crate::core::error::AppError> {
+    match earliest {
+        Some((d, noun)) if new_date > d.as_str() => Err(crate::core::error::AppError::BillLocked {
+            code: DATE_ORDER.to_string(),
+            message: format!("This {subject} has a {noun} on {}, so its date can't be later", display_date(&d)),
+        }),
+        _ => Ok(()),
+    }
 }
 
 /// `check_entry_date` against the service clock (`core::clock::today_local`).

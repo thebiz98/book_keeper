@@ -177,6 +177,36 @@ describe('ReturnFormCustomer', () => {
     expect(api.createCustomerReturn).not.toHaveBeenCalled();
   });
 
+  it('a deleted item behind the refusal shows Restore, and restoring re-runs the preview (DD-90)', async () => {
+    let deleted = true;
+    const api = installApi({
+      getSaleDetails: async () => saleDetail(),
+      previewCustomerReturn: async () => {
+        if (deleted) {
+          throw { type: 'DeletedReference', details: { entity: 'ITEM', id: 2, name: 'Notebook', message: "'Notebook' is deleted. Restore it first." } };
+        }
+        return result;
+      },
+      restoreItem: async () => {
+        deleted = false;
+      },
+      createCustomerReturn: async () => result,
+    });
+    render(<ReturnFormCustomer initialBillId={5} />);
+    await waitFor(() => bodyText().includes('Notebook'));
+    setInput(document.querySelector('input[aria-label="Return quantity for Notebook"]')!, '3');
+    await settle();
+    expect(byTestId('deleted-ref-restore').textContent).toContain("Restore 'Notebook'");
+    click(buttonByText('Record Return'));
+    await flush();
+    expect(api.createCustomerReturn).not.toHaveBeenCalled();
+    click(byTestId('deleted-ref-restore'));
+    await settle();
+    expect(api.restoreItem).toHaveBeenCalledWith(2);
+    expect(document.querySelector('[data-testid="deleted-ref-alert"]')).toBeNull();
+    expect(document.querySelector('[data-testid="refund-preview"]')!.textContent).toContain('₹100.00 credited');
+  });
+
   it('builds a replacement payload and shows the issued value the backend reports', async () => {
     const api = installApi({
       getSaleDetails: async () => saleDetail(),
@@ -339,5 +369,30 @@ describe('ReturnFormVendor', () => {
     await waitFor(() => bodyText().includes('No stock of this item from Vendor B to return'));
     expect(api.listVendorReturnLots).toHaveBeenLastCalledWith(9, 7, null);
     expect(bodyText()).not.toContain('PUR-0012');
+  });
+
+  it('a deleted vendor behind the refusal shows Restore (DD-90)', async () => {
+    let deleted = true;
+    const api = installApi({
+      getPurchaseDetails: async () => purchaseDetail(),
+      previewVendorReturn: async () => {
+        if (deleted) {
+          throw { type: 'DeletedReference', details: { entity: 'PARTY', id: 4, name: 'Vendor', message: "'Vendor' is deleted. Restore it first." } };
+        }
+        return result;
+      },
+      restoreParty: async () => {
+        deleted = false;
+      },
+    });
+    render(<ReturnFormVendor initialBillId={8} />);
+    await waitFor(() => bodyText().includes('Notebook'));
+    setInput(document.querySelector('input[aria-label="Return quantity for Notebook"]')!, '2');
+    await settle();
+    expect(byTestId('deleted-ref-restore').textContent).toContain("Restore 'Vendor'");
+    click(byTestId('deleted-ref-restore'));
+    await settle();
+    expect(api.restoreParty).toHaveBeenCalledWith(4);
+    expect(document.querySelector('[data-testid="deleted-ref-alert"]')).toBeNull();
   });
 });

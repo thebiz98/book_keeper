@@ -74,6 +74,14 @@ impl AllocationRepository for SqliteAllocationRepository {
         Ok(self.conn.execute("DELETE FROM sale_stock_allocations WHERE sale_item_id = ?1", params![sale_item_id])?)
     }
 
+    fn sum_depleted_for_lot(&self, lot_id: i64) -> Result<f64, AppError> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(SUM(quantity_depleted), 0.0) FROM sale_stock_allocations WHERE purchase_item_id = ?1",
+            params![lot_id],
+            |r| r.get(0),
+        )?)
+    }
+
     fn sale_item_ids_for_lot(&self, lot_id: i64) -> Result<Vec<i64>, AppError> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT sale_item_id FROM sale_stock_allocations WHERE purchase_item_id = ?1 ORDER BY sale_item_id",

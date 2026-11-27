@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { CreditDuesPage } from '@/pages/CreditDuesPage';
-import type { PartyDueSummary, SaleHistoryRow } from '@/types';
+import type { OpenBillRow, PartyDueSummary } from '@/types';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText } from './helpers';
 
 const party: PartyDueSummary = {
@@ -15,32 +15,22 @@ const party: PartyDueSummary = {
   totalPaid: 200,
   balanceDue: 300,
 };
-const bill = (id: number, date: string, due: number, status: 'UNPAID' | 'PARTIAL'): SaleHistoryRow => ({
+const bill = (id: number, date: string, due: number, status: 'UNPAID' | 'PARTIAL'): OpenBillRow => ({
   id,
   transactionCode: `SAL-${id}`,
   transactionDate: date,
-  createdAt: `${date}T10:00:00`,
-  partyId: 7,
-  partyName: 'Sharma Traders',
-  lineCount: 1,
   totalAmount: due + 50,
   paidAmount: 50,
   balanceDue: due,
   paymentStatus: status,
-  itemsSubtotal: 0,
-  chargesTotal: 0,
-  discountsTotal: 0,
+  isOpeningBalance: false,
 });
 
 function setup() {
   return installApi({
     getPartyDuesSummary: [party],
-    getSalesHistory: async (f: { paymentStatus?: string }) => ({
-      items: f.paymentStatus === 'UNPAID' ? [bill(2, '2026-01-02', 200, 'UNPAID')] : [bill(1, '2026-01-01', 100, 'PARTIAL')],
-      total: 1,
-      page: 1,
-      limit: 200,
-    }),
+    // DD-97: the backend returns the open bills oldest first.
+    getPartyOpenBills: [bill(1, '2026-01-01', 100, 'PARTIAL'), bill(2, '2026-01-02', 200, 'UNPAID')],
     settleBillPayment: { settlementIds: [1], billsTouched: [1] },
     settleBillsBatch: { settlementIds: [1, 2], billsTouched: [1, 2] },
     // DD-56: the split and the over-limit refusal are the backend's; canned here.
@@ -95,6 +85,24 @@ describe('CreditDuesPage', () => {
     const payload = api.settleBillPayment.mock.calls[0][0];
     expect(payload).toMatchObject({ partyId: 7, transactionType: 'SALE', transactionId: 1, amountPaid: 100 });
     expect(payload.settlementDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('shows the backend DATE_ORDER refusal of a payment dated before its bill (DD-94)', async () => {
+    const msg = "Payment date can't be before the bill date (01 Jan 2026)";
+    const api = setup();
+    api.settleBillPayment.mockImplementation(async () => {
+      throw { type: 'BillLocked', details: { code: 'DATE_ORDER', message: msg } };
+    });
+    render(<CreditDuesPage />);
+    await waitFor(() => bodyText().includes('Sharma Traders'));
+    click(document.querySelector('[aria-label^="Toggle open bills"]')!);
+    await waitFor(() => !!document.querySelector('[data-testid="open-bills"]'));
+    const rows = document.querySelectorAll('[data-testid="open-bills"] tbody tr');
+    click(buttonByText('Settle', rows[0] as HTMLElement));
+    await flush();
+    click(buttonByText('Record Settlement', document.querySelector('[role="dialog"]')!));
+    await waitFor(() => bodyText().includes(msg));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   it('Settle bills sends one batch payload and previews the FIFO fill', async () => {

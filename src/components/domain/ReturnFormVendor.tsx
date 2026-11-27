@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePreview } from '@/hooks/usePreview';
 import { Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
+import { deletedReference } from '@/api/errors';
+import type { DeletedNotice } from './billEdit/useBillEditSave';
+import { DeletedReferenceAlert } from '../common/DeletedReferenceAlert';
 import { todayLocal } from '@/lib/dates';
 import type {
   ItemSearchResult,
@@ -74,6 +77,9 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // DD-90: a deleted item or party behind a refusal (preview or save) offers Restore.
+  const [saveDeleted, setSaveDeleted] = useState<DeletedNotice | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [result, setResult] = useState<ReturnResult | null>(null);
 
   const loadBill = useCallback((id: number) => {
@@ -164,14 +170,26 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
   const preview = usePreview<VendorReturnPayload, ReturnResult>({
     input: payload,
     fetcher: (p) => api.previewVendorReturn(p),
+    refreshKey,
   });
+  const previewDeleted = preview.errors.find((e) => e.deleted);
+  const deleted: DeletedNotice | null = previewDeleted?.deleted
+    ? { deleted: previewDeleted.deleted, message: previewDeleted.message }
+    : saveDeleted;
+  const shownErrors = preview.errors.filter((e) => !e.deleted);
+  const onRestored = () => {
+    setSaveDeleted(null);
+    setRefreshKey((k) => k + 1);
+  };
 
   const submit = async () => {
     setError(null);
+    setSaveDeleted(null);
     if (mode === 'BILL' && !detail) return setError('Select a purchase bill first');
     if (mode === 'VENDOR' && !vendor) return setError('Select a vendor first');
     if (!payload) return setError('Enter a return quantity for at least one line');
     if (preview.isLoading) return;
+    if (deleted) return;
     if (preview.errors.length > 0) return setError(preview.errors[0].message);
     setBusy(true);
     try {
@@ -180,7 +198,9 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
       refreshAppMetrics();
       onDone?.();
     } catch (e) {
-      setError(errorMessage(e));
+      const ref = deletedReference(e);
+      if (ref) setSaveDeleted({ deleted: { entity: ref.entity, id: ref.id, name: ref.name }, message: ref.message });
+      else setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -336,10 +356,11 @@ export const ReturnFormVendor: React.FC<ReturnFormVendorProps> = ({ initialBillI
 
       <RefundPreview
         result={preview.data}
-        errors={preview.errors}
+        errors={shownErrors}
         label="Preview (reduces payable first, rest is cash from vendor)"
       />
 
+      {deleted && <DeletedReferenceAlert deleted={deleted.deleted} message={deleted.message} onRestored={onRestored} />}
       {error && (
         <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
           {error}
