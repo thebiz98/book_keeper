@@ -6,6 +6,11 @@ import { installApi, flush, waitFor, click, buttonByText, bodyText, setInput } f
 
 const pick = vi.hoisted(() => vi.fn());
 vi.mock('@/api/pickFolder', () => ({ pickFolder: pick }));
+const pickBackup = vi.hoisted(() => vi.fn());
+vi.mock('@/api/fileDialog', async (orig) => ({
+  ...(await orig<typeof import('@/api/fileDialog')>()),
+  pickFile: pickBackup,
+}));
 
 const view = (over: Partial<AppConfigView> = {}): AppConfigView => ({
   testingMode: false,
@@ -13,6 +18,7 @@ const view = (over: Partial<AppConfigView> = {}): AppConfigView => ({
   isDefaultDirectory: true,
   lastAutoBackupAt: null,
   timeZone: 'Asia/Kolkata',
+  restoreFailure: null,
   ...over,
 });
 
@@ -165,5 +171,94 @@ describe('SettingsPage testing tools', () => {
     await click(confirmBtn());
     await waitFor(() => bodyText().includes('Reset is disabled outside testing mode'));
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+});
+
+const backupRow = {
+  path: 'C:/data/backups/book_keeper_auto_20261127_0900.db',
+  fileName: 'book_keeper_auto_20261127_0900.db',
+  kind: 'AUTO' as const,
+  stamp: '2026-11-27T03:30:00Z',
+  sizeBytes: 2_400_000,
+};
+const goodPreview = {
+  path: backupRow.path,
+  schemaVersion: 12,
+  integrityOk: true,
+  newerThanApp: false,
+  itemCount: 42,
+  saleBillCount: 120,
+  lastBillDate: '2026-11-27',
+  refusal: null,
+};
+
+function setupRestore(preview = goodPreview, config = view()) {
+  return installApi({
+    getShopSettings: { id: 1, shopName: 'Shop', phone: null, address: null, taxId: null },
+    getAppConfig: config,
+    listBackups: [backupRow],
+    previewRestore: async () => preview,
+    stageRestore: async () => undefined,
+    dismissRestoreFailure: async () => undefined,
+  });
+}
+
+const restoreButtons = () =>
+  Array.from(document.body.querySelectorAll('button')).filter((b) => (b.textContent ?? '').trim().startsWith('Restore'));
+
+describe('SettingsPage restore from backup', () => {
+  beforeEach(() => pickBackup.mockReset());
+
+  it('lists backups with kind and size, previews the chosen one and restores after confirming', async () => {
+    const api = setupRestore();
+    render(<SettingsPage />);
+    await waitFor(() => bodyText().includes('Auto'));
+    expect(bodyText()).toContain('2.3 MB');
+    expect(restoreButtons()[0].disabled).toBe(true);
+
+    await click(buttonByText('Auto'));
+    await waitFor(() => bodyText().includes('42 items, 120 sale bills'));
+    expect(api.previewRestore).toHaveBeenCalledWith(backupRow.path);
+    expect(restoreButtons()[0].disabled).toBe(false);
+
+    await click(restoreButtons()[0]);
+    await waitFor(() => bodyText().includes("saved as a 'Before restore' backup first"));
+    expect(api.stageRestore).not.toHaveBeenCalled();
+    const confirm = restoreButtons().find((b) => b !== restoreButtons()[0] && b.textContent?.includes('Enter'));
+    await click(confirm!);
+    await flush();
+    expect(api.stageRestore).toHaveBeenCalledWith(backupRow.path);
+    expect(bodyText()).toContain('Restarting to finish the restore');
+    expect(bodyText()).toContain("close and open it again");
+  });
+
+  it('shows the backend refusal and keeps Restore off', async () => {
+    setupRestore({ ...goodPreview, integrityOk: false, refusal: 'This backup is damaged (the integrity check failed).' });
+    render(<SettingsPage />);
+    await waitFor(() => bodyText().includes('Auto'));
+    await click(buttonByText('Auto'));
+    await waitFor(() => bodyText().includes('This backup is damaged'));
+    expect(restoreButtons()[0].disabled).toBe(true);
+  });
+
+  it('Browse previews the picked file', async () => {
+    const api = setupRestore();
+    pickBackup.mockResolvedValue('D:/usb/old.db');
+    render(<SettingsPage />);
+    await waitFor(() => bodyText().includes('Auto'));
+    await click(buttonByText('Browse'));
+    await waitFor(() => bodyText().includes('42 items'));
+    expect(api.previewRestore).toHaveBeenCalledWith('D:/usb/old.db');
+    expect(bodyText()).toContain('D:/usb/old.db');
+  });
+
+  it('shows a failed restore once and dismisses it', async () => {
+    const api = setupRestore(goodPreview, view({ restoreFailure: 'Cannot replace the database file' }));
+    render(<SettingsPage />);
+    await waitFor(() => bodyText().includes('Cannot replace the database file'));
+    await click(buttonByText('Dismiss'));
+    await flush();
+    expect(api.dismissRestoreFailure).toHaveBeenCalled();
+    expect(bodyText()).not.toContain('Cannot replace the database file');
   });
 });
