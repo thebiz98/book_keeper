@@ -809,11 +809,16 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseService for 
                 item.pack_label.as_deref(),
                 units_per_pack(item.quantity, item.pack_quantity),
             )?;
+            let units_per_bundle =
+                item.pack_label.as_ref().map(|_| units_per_pack(item.quantity, item.pack_quantity));
+            let base_unit = tx.items().find_by_id(item.item_id)?.map(|i| i.base_unit);
             details.push(PurchaseItemDetail {
                 purchase_item: item,
                 item_name,
                 bundle_name,
                 bundle_id,
+                units_per_bundle,
+                base_unit,
             });
         }
         let settlements = tx.settlements().list_by_transaction(TransactionType::Purchase, purchase_id)?;

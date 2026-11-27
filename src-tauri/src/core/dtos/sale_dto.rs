@@ -167,6 +167,13 @@ pub struct SaleItemDetail {
     /// a bundle that no longer exists. The edit form loads the line by it.
     #[serde(default)]
     pub bundle_id: Option<i64>,
+    /// Base units in one pack of this line (`quantity / pack_quantity`); `None` for a base-unit line.
+    /// Printed next to the bundle name on the bill.
+    #[serde(default)]
+    pub units_per_bundle: Option<f64>,
+    /// The item's base unit (e.g. "pcs"); `None` when the item no longer exists.
+    #[serde(default)]
+    pub base_unit: Option<String>,
     /// Base units of this line already returned by customer returns.
     pub returned_quantity: f64,
     /// FIFO cost breakdown of the line.

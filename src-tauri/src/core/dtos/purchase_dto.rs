@@ -75,6 +75,12 @@ pub struct PurchaseItemDetail {
     /// E4 / DD-89: the item's bundle of this lot, resolved like `SaleItemDetail::bundle_id`.
     #[serde(default)]
     pub bundle_id: Option<i64>,
+    /// Base units in one pack of this line; `None` for a base-unit line (printed on the bill).
+    #[serde(default)]
+    pub units_per_bundle: Option<f64>,
+    /// The item's base unit (e.g. "pcs"); `None` when the item no longer exists.
+    #[serde(default)]
+    pub base_unit: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
