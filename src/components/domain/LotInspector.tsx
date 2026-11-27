@@ -23,20 +23,6 @@ const SOURCE_STYLE: Record<LotSource, string> = {
   RETURN: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-800',
 };
 
-/**
- * DD-92 (S7): the backend's FIFO order, which is entry order (lot id), never the lot date.
- * Lots with stock first (by `fifoRank`), then used-up lots, newest entry first.
- */
-export function sortLots(lots: ItemLot[]): ItemLot[] {
-  const rank = (l: ItemLot) => l.fifoRank ?? null;
-  return [...lots].sort((a, b) => {
-    const ra = rank(a);
-    const rb = rank(b);
-    if ((ra === null) !== (rb === null)) return ra !== null ? -1 : 1;
-    if (ra !== null && rb !== null) return ra - rb;
-    return b.purchaseItemId - a.purchaseItemId;
-  });
-}
 
 export interface LotInspectorProps {
   itemId: number;
@@ -70,7 +56,8 @@ export const LotInspector: React.FC<LotInspectorProps> = ({ itemId, baseUnit, ed
     api
       .getItemLots(itemId)
       .then((res) => {
-        if (!cancelled) setLots(sortLots(res));
+        // DD-92 (S7): the backend's order, entry order (lot id), which is the FIFO order; never by date.
+        if (!cancelled) setLots(res);
       })
       .catch((e) => {
         if (!cancelled) setError(errorMessage(e));

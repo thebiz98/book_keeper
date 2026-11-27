@@ -90,7 +90,7 @@ describe('InventoryPage catalog', () => {
     expect((byText(container, 'button', 'Next') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('expands a row into the lot inspector: FIFO (entry) order from the backend rank, source badge and vendor', async () => {
+  it('expands a row into the lot inspector: entry (FIFO) order as returned, rank, source badge and vendor', async () => {
     const lots = [
       { purchaseItemId: 1, purchaseTransactionId: 1, transactionCode: 'PUR-0001', source: 'PURCHASE', transactionDate: '2026-01-01', vendorName: 'Old Vendor', quantity: 10, remainingQuantity: 0, unitCost: 5, fifoRank: null },
       { purchaseItemId: 2, purchaseTransactionId: 2, transactionCode: 'ADJ-0001', source: 'ADJUSTMENT', transactionDate: '2026-03-01', vendorName: null, quantity: 4, remainingQuantity: 3, unitCost: 6, fifoRank: 1 },
@@ -102,14 +102,14 @@ describe('InventoryPage catalog', () => {
     await flush();
     expect(api.getItemLots).toHaveBeenCalledWith(1);
     const lotRows = Array.from(container.querySelectorAll('[data-testid="lot-row"]'));
-    // S7: entry order (id), not the lot date: ADJ-0001 (id 2) is drawn before the earlier-dated PUR-0002 (id 3).
-    expect(lotRows.map((r) => r.querySelectorAll('td')[2].textContent)).toEqual(['ADJ-0001', 'PUR-0002', 'PUR-0001']);
-    expect(lotRows.map((r) => r.querySelector('[data-testid="lot-fifo-rank"]')!.textContent)).toEqual(['1', '2', '—']);
+    // S7: entry order (id) as the backend returns it, not the lot date; the rank says which open lot FIFO draws first.
+    expect(lotRows.map((r) => r.querySelectorAll('td')[2].textContent)).toEqual(['PUR-0001', 'ADJ-0001', 'PUR-0002']);
+    expect(lotRows.map((r) => r.querySelector('[data-testid="lot-fifo-rank"]')!.textContent)).toEqual(['—', '1', '2']);
     expect(container.querySelector('[data-testid="lot-order-label"]')!.textContent).toContain('FIFO order (entry order)');
-    expect(lotRows[1].textContent).toContain('Purchase');
-    expect(lotRows[1].textContent).toContain('Acme');
-    expect(lotRows[0].textContent).toContain('Adjustment');
-    expect(lotRows[0].textContent).toContain('—');
+    expect(lotRows[2].textContent).toContain('Purchase');
+    expect(lotRows[2].textContent).toContain('Acme');
+    expect(lotRows[1].textContent).toContain('Adjustment');
+    expect(lotRows[1].textContent).toContain('—');
   });
 });
 
