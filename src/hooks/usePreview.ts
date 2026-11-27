@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { errorMessage, isAppError } from '@/api/errors';
+import { deletedReference, errorMessage, isAppError } from '@/api/errors';
 import type { PreviewError } from '@/types';
 
 /** Previews follow typing closely: short enough to feel live, long enough to coalesce keystrokes. */
@@ -27,7 +27,8 @@ export interface UsePreviewResult<TOut> {
 
 function toErrors(e: unknown): PreviewError[] {
   const field = isAppError(e) && e.type === 'ValidationError' ? e.details.field : isAppError(e) && e.type === 'BillLocked' ? e.details.code : '';
-  return [{ field, message: errorMessage(e) }];
+  const ref = deletedReference(e);
+  return [ref ? { field, message: errorMessage(e), deleted: { entity: ref.entity, id: ref.id, name: ref.name } } : { field, message: errorMessage(e) }];
 }
 
 function dataErrors(d: unknown): PreviewError[] {

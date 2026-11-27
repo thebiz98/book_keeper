@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePreview } from '@/hooks/usePreview';
 import { Trash2 } from 'lucide-react';
 import { api, errorMessage } from '@/api';
+import { deletedReference } from '@/api/errors';
+import type { DeletedNotice } from './billEdit/useBillEditSave';
+import { DeletedReferenceAlert } from '../common/DeletedReferenceAlert';
 import { todayLocal } from '@/lib/dates';
 import type {
   CustomerReturnItemPayload,
@@ -94,6 +97,9 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // DD-90: a deleted item or party behind a refusal (preview or save) offers Restore.
+  const [saveDeleted, setSaveDeleted] = useState<DeletedNotice | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [result, setResult] = useState<ReturnResult | null>(null);
 
   const loadBill = useCallback((id: number) => {
@@ -206,15 +212,27 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
   const preview = usePreview<CustomerReturnPayload, ReturnResult>({
     input: payload,
     fetcher: (p) => api.previewCustomerReturn(p),
+    refreshKey,
   });
+  const previewDeleted = preview.errors.find((e) => e.deleted);
+  const deleted: DeletedNotice | null = previewDeleted?.deleted
+    ? { deleted: previewDeleted.deleted, message: previewDeleted.message }
+    : saveDeleted;
+  const shownErrors = preview.errors.filter((e) => !e.deleted);
+  const onRestored = () => {
+    setSaveDeleted(null);
+    setRefreshKey((k) => k + 1);
+  };
   const returnedValue = preview.data?.totalAmount ?? 0;
   const issuedValue = preview.data?.issuedValue ?? 0;
 
   const submit = async () => {
     setError(null);
+    setSaveDeleted(null);
     if (mode === 'BILL' && !detail) return setError('Select a bill first');
     if (!payload) return setError('Enter a return quantity for at least one line');
     if (preview.isLoading) return; // wait for the backend's verdict on exactly what is on screen
+    if (deleted) return;
     if (preview.errors.length > 0) return setError(preview.errors[0].message);
     setBusy(true);
     try {
@@ -223,7 +241,9 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
       refreshAppMetrics();
       onDone?.();
     } catch (e) {
-      setError(errorMessage(e));
+      const ref = deletedReference(e);
+      if (ref) setSaveDeleted({ deleted: { entity: ref.entity, id: ref.id, name: ref.name }, message: ref.message });
+      else setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -469,7 +489,7 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
       </div>
 
       {settlement === 'REFUND' ? (
-        <RefundPreview result={preview.data} errors={preview.errors} />
+        <RefundPreview result={preview.data} errors={shownErrors} />
       ) : (
         <div className="flex flex-col gap-2" data-testid="replacement-section">
           <FieldLabel>Items to issue</FieldLabel>
@@ -497,9 +517,9 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
               </button>
             </div>
           ))}
-          {preview.errors.length > 0 && (
+          {shownErrors.length > 0 && (
             <p role="alert" data-testid="return-preview-error" className="text-xs text-rose-600 dark:text-rose-400">
-              {preview.errors[0].message}
+              {shownErrors[0].message}
             </p>
           )}
           {issue.length > 0 && preview.data != null && (
@@ -512,6 +532,7 @@ export const ReturnFormCustomer: React.FC<ReturnFormCustomerProps> = ({ initialB
         </div>
       )}
 
+      {deleted && <DeletedReferenceAlert deleted={deleted.deleted} message={deleted.message} onRestored={onRestored} />}
       {error && (
         <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 font-medium">
           {error}

@@ -30,6 +30,11 @@ pub async fn update_settlement(state: State<'_, AppState>, settlement_id: i64, p
     super::run_blocking(move || svc.update_settlement(settlement_id, payload)).await
 }
 #[tauri::command]
+pub async fn get_party_open_bills(state: State<'_, AppState>, party_id: i64, transaction_type: crate::core::value_objects::TransactionType) -> Result<Vec<OpenBillRow>, AppError> {
+    let svc = state.accounting_service.clone();
+    super::run_blocking(move || svc.get_party_open_bills(party_id, transaction_type)).await
+}
+#[tauri::command]
 pub async fn get_settlement_history(state: State<'_, AppState>, filter: SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError> {
     let svc = state.accounting_service.clone();
     super::run_blocking(move || svc.get_settlement_history(filter)).await

@@ -47,6 +47,7 @@ import type {
   SaleHistoryRow,
   SettlementHistoryFilter,
   SettlementHistoryPage,
+  OpenBillRow,
   ShopSettings,
   AppConfigView,
   ResetScope,
@@ -797,6 +798,22 @@ export class MockApiClient implements ApiClient {
   }
   async deleteSettlement(_settlementId: number) {
     return { removedAmount: 0, transactionId: 0 };
+  }
+  async getPartyOpenBills(partyId: number, transactionType: TransactionType): Promise<OpenBillRow[]> {
+    const rows: (SaleHistoryRow | PurchaseHistoryRow)[] = transactionType === 'SALE' ? this.sales : this.purchases;
+    return rows
+      .filter((r) => r.partyId === partyId && r.balanceDue > 0)
+      .map((r) => ({
+        id: r.id,
+        transactionCode: r.transactionCode,
+        transactionDate: r.transactionDate,
+        totalAmount: r.totalAmount,
+        paidAmount: r.paidAmount,
+        balanceDue: r.balanceDue,
+        paymentStatus: r.paymentStatus,
+        isOpeningBalance: r.isOpeningBalance ?? false,
+      }))
+      .sort((a, b) => (a.transactionDate === b.transactionDate ? a.id - b.id : a.transactionDate < b.transactionDate ? -1 : 1));
   }
   async getSettlementHistory(_filter: SettlementHistoryFilter): Promise<SettlementHistoryPage> {
     return { rows: [], totalReceived: 0, totalPaid: 0, totalCount: 0 };

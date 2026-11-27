@@ -4,27 +4,23 @@ import { CreditDuesPage } from '@/pages/CreditDuesPage';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { PartyLedgerDrawer } from '@/components/domain/PartyLedgerDrawer';
 import { amountFromRows, rowsFromAllocations } from '@/components/domain/BatchSettlementForm';
-import type { PartyDueSummary, SaleDetailView, SaleHistoryRow } from '@/types';
+import type { OpenBillRow, PartyDueSummary, SaleDetailView } from '@/types';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText } from './helpers';
 
 const party: PartyDueSummary = {
   partyId: 7, partyName: 'Sharma Traders', phone: '999', partyType: 'CUSTOMER', unsettledBillsCount: 3,
   earliestBillDate: '2026-01-01', totalInvoiced: 900, totalPaid: 0, balanceDue: 600,
 };
-const bill = (id: number, date: string, due: number): SaleHistoryRow => ({
-  id, transactionCode: `SAL-${id}`, transactionDate: date, createdAt: `${date}T10:00:00`, partyId: 7,
-  partyName: 'Sharma Traders', lineCount: 1, totalAmount: due, paidAmount: 0, balanceDue: due, paymentStatus: 'UNPAID',
-  itemsSubtotal: 0, chargesTotal: 0, discountsTotal: 0,
+const bill = (id: number, date: string, due: number): OpenBillRow => ({
+  id, transactionCode: `SAL-${id}`, transactionDate: date, totalAmount: due, paidAmount: 0, balanceDue: due,
+  paymentStatus: 'UNPAID', isOpeningBalance: false,
 });
 const BILLS = [bill(1, '2026-01-01', 100), bill(2, '2026-01-02', 200), bill(3, '2026-01-03', 300)];
 
 function setupDues() {
   return installApi({
     getPartyDuesSummary: [party],
-    getSalesHistory: async (f: { paymentStatus?: string }) =>
-      f.paymentStatus === 'UNPAID'
-        ? { items: BILLS, total: 3, page: 1, limit: 200 }
-        : { items: [], total: 0, page: 1, limit: 200 },
+    getPartyOpenBills: BILLS,
     settleBillsBatch: { settlementIds: [1], billsTouched: [1] },
     // DD-56: the oldest-first split is the backend's; canned for the 250 case.
     previewSettlementAllocation: async () => [

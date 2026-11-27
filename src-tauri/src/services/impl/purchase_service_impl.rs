@@ -181,6 +181,15 @@ fn resolve_purchase(
     Ok(ResolvedPurchase { party_id: payload.party_id, party_name, lines })
 }
 
+/// DD-97: per-base-unit cost of each line, as its lot will store it (rounded line total over the
+/// base quantity), to 4 decimals. The purchase screen shows it instead of dividing in the UI.
+fn line_costs_per_base_unit(r: &ResolvedPurchase) -> Vec<f64> {
+    r.lines
+        .iter()
+        .map(|l| if l.base_qty > 0.0 { (l.line_total / l.base_qty * 10_000.0).round() / 10_000.0 } else { 0.0 })
+        .collect()
+}
+
 fn price_purchase(
     tx: &mut dyn TransactionContext,
     payload: &CreatePurchasePayload,
@@ -192,6 +201,7 @@ fn price_purchase(
     let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
     let totals = compute_bill_totals(&line_totals, &charges)?;
     fig.set_totals(&line_totals, totals, applied);
+    fig.line_cost_per_base_unit = line_costs_per_base_unit(r);
     Ok((charges, totals))
 }
 
@@ -398,6 +408,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         let line_totals: Vec<f64> = r.lines.iter().map(|l| l.line_total).collect();
         let totals = compute_bill_totals(&line_totals, &charge_plan.charges)?;
         fig.set_totals(&line_totals, totals, g.applied_amount);
+        fig.line_cost_per_base_unit = line_costs_per_base_unit(&r);
 
         // Lots: kept lines update in place (ids kept: allocations point at them), the rest are
         // removed (if unreferenced) or created.

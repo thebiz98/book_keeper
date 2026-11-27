@@ -2,6 +2,20 @@ use serde::{Deserialize, Serialize};
 use crate::core::entities::{Party, PaymentSettlement, ReturnTransaction};
 use crate::core::value_objects::{PaymentStatus, TransactionType};
 
+/// One open bill of a party (DD-97: the settle dialogs take the list in backend order, oldest
+/// first by `transaction_date, id`, which is also the FIFO settlement order).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenBillRow {
+    pub id: i64,
+    pub transaction_code: String,
+    pub transaction_date: String,
+    pub total_amount: f64,
+    pub paid_amount: f64,
+    pub balance_due: f64,
+    pub payment_status: PaymentStatus,
+    pub is_opening_balance: bool,
+}
+
 /// Outstanding dues of one party, aggregated over its open bills (`balance_due > 0`).
 /// Customers: sales; vendors: `source = PURCHASE` purchases (DD-07).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

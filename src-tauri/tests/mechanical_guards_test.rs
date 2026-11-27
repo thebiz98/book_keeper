@@ -14,6 +14,7 @@ use book_keeper::core::money::{round2, MAX_AMOUNT};
 use book_keeper::core::value_objects::*;
 use book_keeper::data::contracts::search_indexer::ItemSearchIndexer;
 use book_keeper::data::contracts::unit_of_work::UnitOfWork;
+use book_keeper::services::contracts::accounting_service::AccountingService;
 use book_keeper::services::contracts::inventory_service::InventoryService;
 use book_keeper::services::contracts::item_service::ItemService;
 use book_keeper::services::contracts::purchase_service::PurchaseService;
@@ -174,4 +175,61 @@ fn l4_round2_vectors_match_the_shared_file() {
     for (input, expected) in vectors {
         assert!((round2(input) - expected).abs() < 1e-9, "round2({input}) = {} expected {expected}", round2(input));
     }
+}
+
+#[test]
+fn dd97_open_bills_come_oldest_first_from_the_backend() {
+    let db = TestDb::new();
+    seed_party(&db, 1, "Asha", PartyType::Customer);
+    {
+        let mut tx = db.begin_transaction().unwrap();
+        seed_sale_bill(&mut *tx, 1, Some(1), 100.0, 0.0, "2026-11-10");
+        seed_sale_bill(&mut *tx, 2, Some(1), 200.0, 0.0, "2026-11-02");
+        seed_sale_bill(&mut *tx, 3, Some(1), 300.0, 0.0, "2026-11-02");
+        seed_sale_bill(&mut *tx, 4, Some(1), 50.0, 50.0, "2026-11-01"); // fully paid: not open
+        tx.commit().unwrap();
+    }
+    let acct = AccountingServiceImpl::new(PaymentServiceImpl, db.clone());
+    let ids: Vec<i64> = acct.get_party_open_bills(1, TransactionType::Sale).unwrap().iter().map(|b| b.id).collect();
+    assert_eq!(ids, vec![2, 3, 1], "date, then id; paid bills are left out");
+    assert!(acct.get_party_open_bills(1, TransactionType::Purchase).unwrap().is_empty());
+}
+
+#[test]
+fn dd97_purchase_preview_and_lots_carry_the_per_unit_figures() {
+    let db = TestDb::new();
+    let inv: Inv = InventoryServiceImpl::new(FifoStrategy, db.clone());
+    let items = ItemServiceImpl::new(db.clone(), Arc::new(db.indexer()), inv.clone());
+    let id = items.create_item(new_item("Pen", "PCS")).unwrap();
+    let bundle = items
+        .create_bundle(CreateBundlePayload {
+            item_id: Some(id), bundle_name: "Box".into(), units_per_bundle: 25.0, mrp: None, default_bundle_price: None, barcode: None,
+        })
+        .unwrap()
+        .bundle.id;
+    let purchases = PurchaseServiceImpl::new(inv.clone(), PaymentServiceImpl, db.clone());
+    let payload = purchase_payload(None, PaymentStatus::Paid, 400.0, &[(id, Some(bundle), 4.0, 100.0)]);
+    let pv = purchases
+        .preview_purchase(
+            None,
+            PreviewPurchasePayload {
+                confirm_move_settlements: false,
+                transaction_date: payload.transaction_date.clone(),
+                party_id: None,
+                supplier_invoice_ref: None,
+                payment_status: None,
+                paid_amount: None,
+                payment_mode: None,
+                notes: None,
+                items: payload.items.clone(),
+                charges: vec![],
+            },
+        )
+        .unwrap();
+    assert_eq!(pv.line_cost_per_base_unit, vec![4.0], "100 per Box / 25");
+    purchases.create_purchase(payload).unwrap();
+    let lots = inv.get_item_lots(id).unwrap();
+    assert_eq!(lots.len(), 1);
+    assert_eq!(lots[0].unit_cost, 4.0);
+    assert_eq!(lots[0].entry_price, 100.0, "per Box, as the Edit Purchase Price modal asks");
 }

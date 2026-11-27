@@ -68,8 +68,8 @@ describe('ItemQuickCreateModal on the sale screen (FR-24)', () => {
     click(saveBtn());
     await flush();
     expect(api.createItem).not.toHaveBeenCalled();
-    expect(modalText()).toContain('Stock on hand must be greater than 0');
-    expect(modalText()).toContain('Purchase price must be greater than 0');
+    expect(modalText()).toContain('Enter the stock on hand');
+    expect(modalText()).toContain('Enter the purchase price');
 
     await fillSale('20', '12', '8.5');
     click(saveBtn());

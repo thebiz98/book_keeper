@@ -292,6 +292,11 @@ pub struct ItemLot {
     /// `None` for a used-up lot.
     #[serde(default)]
     pub fifo_rank: Option<i64>,
+    /// DD-97: the price the lot was entered at, per pack when it has a pack label, else per base
+    /// unit (4 decimals). It is what the Edit Purchase Price modal starts from and what
+    /// `update_lot_purchase_price` takes.
+    #[serde(default)]
+    pub entry_price: f64,
 }
 
 /// One open lot in a sale-row lot draw (FR-31).

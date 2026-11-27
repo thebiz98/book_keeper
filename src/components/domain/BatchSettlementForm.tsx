@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '@/api';
 import { usePreview } from '@/hooks/usePreview';
 import { todayLocal } from '@/lib/dates';
+import { round2 } from '@/lib/money';
 import type { SettleAllocation, TransactionType } from '@/types';
 import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
@@ -28,7 +29,7 @@ export function rowsFromAllocations(bills: OpenBill[], allocations: SettleAlloca
 
 /** Rows -> amount: the sum of the ticked rows the user entered (display; the backend validates on save). */
 export function amountFromRows(rows: BatchRows): number {
-  return Object.values(rows).reduce((s, r) => s + (r.checked ? r.amount : 0), 0);
+  return round2(Object.values(rows).reduce((s, r) => s + (r.checked ? r.amount : 0), 0));
 }
 
 export interface BatchSettlementFormProps {
@@ -82,7 +83,7 @@ export const BatchSettlementForm: React.FC<BatchSettlementFormProps> = ({
     };
   }, [transactionType, partyId]);
 
-  const outstanding = bills.reduce((s, b) => s + b.balanceDue, 0); // display
+  const outstanding = round2(bills.reduce((s, b) => s + b.balanceDue, 0)); // display
 
   /** Set while the Amount box drives the rows; typing it asks the backend for the oldest-first split. */
   const [typed, setTyped] = useState<number | null>(null);

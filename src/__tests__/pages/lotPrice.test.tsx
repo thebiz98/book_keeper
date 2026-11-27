@@ -130,7 +130,7 @@ describe('LotPriceEditModal', () => {
   it('asks for the price per pack when the lot has a pack label', async () => {
     installApi({ previewLotPurchasePrice: async (p: { unitPrice: number }) => ({ purchaseItemId: 11, oldUnitCost: 10, newUnitCost: p.unitPrice, bill: null }) });
     render(
-      <LotPriceEditModal lot={lot({ source: 'OPENING', packLabel: 'Box of 5', packQuantity: 2, quantity: 10 })} baseUnit="PCS" onClose={() => {}} onSaved={() => {}} />
+      <LotPriceEditModal lot={lot({ source: 'OPENING', packLabel: 'Box of 5', packQuantity: 2, quantity: 10, entryPrice: 50 })} baseUnit="PCS" onClose={() => {}} onSaved={() => {}} />
     );
     await flush();
     expect(bodyText()).toContain('Purchase price per Box of 5');

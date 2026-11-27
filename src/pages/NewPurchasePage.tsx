@@ -20,7 +20,7 @@ import { BillChargesPanel, type BillChargesPanelHandle } from '@/components/doma
 import { BillFooterTotals } from '@/components/domain/BillFooterTotals';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { toChargeInputs, type BillChargeLine } from '@/lib/billMath';
-import { lineBaseQuantity, lineCostPerBase, type PurchaseLine } from '@/components/domain/purchaseMath';
+import { lineBaseQuantity, type PurchaseLine } from '@/components/domain/purchaseMath';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { QuantityInput } from '@/components/common/QuantityInput';
 import { Button } from '@/components/ui/Button';
@@ -646,7 +646,7 @@ export const NewPurchasePage: React.FC<NewPurchasePageProps> = ({
                     </div>
                   </TableCell>
                   <TableCell align="right" mono className="text-slate-500 text-xs">
-                    {lineCostPerBase(l).toFixed(4)}
+                    {totals?.lineCostPerBaseUnit?.[idx] != null ? totals.lineCostPerBaseUnit[idx].toFixed(4) : '—'}
                   </TableCell>
                   <TableCell align="right" mono>
                     <CurrencyDisplay amount={l.unitCost} size="sm" />

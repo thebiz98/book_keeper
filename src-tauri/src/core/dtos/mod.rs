@@ -23,7 +23,7 @@ pub use correction_dto::{
     SettlementsToMove,
 };
 pub use dues_dto::{
-    DeleteSettlementResult, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
+    DeleteSettlementResult, OpenBillRow, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
     SettleAllocation, SettleBatchPayload, SettlePaymentPayload, SettlementHistoryFilter, SettlementHistoryPage,
     SettlementHistoryRow, SettlementResult, UpdateSettlementPayload,
 };

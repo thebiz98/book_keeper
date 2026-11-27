@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use crate::core::dtos::{
-    LedgerCashSummary, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
+    LedgerCashSummary, OpenBillRow, PartyDueSummary, PartyLedgerBill, PartyLedgerEntry, PartyLedgerView,
     DeleteSettlementResult, RecordPaymentPayload, SettlementHistoryFilter, SettlementHistoryPage, SettleAllocation, SettleBatchPayload, SettlePaymentPayload, SettlementResult,
     UpdateSettlementPayload,
 };
@@ -376,6 +376,42 @@ impl<P: PaymentService, U: UnitOfWork> AccountingService for AccountingServiceIm
             r.balance_due = round2(r.balance_due);
         }
         Ok(rows)
+    }
+
+    fn get_party_open_bills(&self, party_id: i64, transaction_type: TransactionType) -> Result<Vec<OpenBillRow>, AppError> {
+        let mut tx = self.uow.begin_read()?;
+        Ok(match transaction_type {
+            TransactionType::Sale => tx
+                .sales()
+                .list_open_for_party(party_id)?
+                .into_iter()
+                .map(|b| OpenBillRow {
+                    id: b.id,
+                    transaction_code: b.transaction_code,
+                    transaction_date: b.transaction_date,
+                    total_amount: round2(b.total_amount),
+                    paid_amount: round2(b.paid_amount),
+                    balance_due: round2(b.balance_due),
+                    payment_status: b.payment_status,
+                    is_opening_balance: b.is_opening_balance,
+                })
+                .collect(),
+            TransactionType::Purchase => tx
+                .purchases()
+                .list_open_for_party(party_id)?
+                .into_iter()
+                .map(|b| OpenBillRow {
+                    id: b.id,
+                    transaction_code: b.transaction_code,
+                    transaction_date: b.transaction_date,
+                    total_amount: round2(b.total_amount),
+                    paid_amount: round2(b.paid_amount),
+                    balance_due: round2(b.balance_due),
+                    payment_status: b.payment_status,
+                    is_opening_balance: b.is_opening_balance,
+                })
+                .collect(),
+        })
     }
 
     fn get_settlement_history(&self, filter: SettlementHistoryFilter) -> Result<SettlementHistoryPage, AppError> {

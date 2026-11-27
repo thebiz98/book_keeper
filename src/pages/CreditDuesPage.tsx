@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { User, Truck, Search, ChevronDown, ChevronRight, History } from 'lucide-react';
 import { api, errorMessage } from '@/api';
+import { round2 } from '@/lib/money';
 import type { PartyDueSummary, PartyType } from '@/types';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { PaymentStatusBadge } from '@/components/common/PaymentStatusBadge';
@@ -143,7 +144,7 @@ export const CreditDuesPage: React.FC = () => {
   const filtered = duesList.filter(
     (d) => !q || d.partyName.toLowerCase().includes(q) || (d.phone ?? '').toLowerCase().includes(q)
   );
-  const totalOutstanding = filtered.reduce((acc, d) => acc + d.balanceDue, 0);
+  const totalOutstanding = round2(filtered.reduce((acc, d) => acc + d.balanceDue, 0));
 
   const columns: DataTableColumn<PartyDueSummary>[] = [
     {

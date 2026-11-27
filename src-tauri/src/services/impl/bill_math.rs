@@ -38,6 +38,8 @@ fn validation(field: &str, message: impl Into<String>) -> AppError {
 #[derive(Debug, Clone, Default)]
 pub struct BillFigures {
     pub line_totals: Vec<f64>,
+    /// Purchases: per-base-unit cost of each line (see `BillPreview::line_cost_per_base_unit`).
+    pub line_cost_per_base_unit: Vec<f64>,
     pub totals: Option<BillTotals>,
     pub applied: f64,
     pub open: f64,
@@ -73,6 +75,7 @@ pub fn bill_preview(
     });
     Ok(BillPreview {
         line_totals: fig.line_totals,
+        line_cost_per_base_unit: fig.line_cost_per_base_unit,
         items_subtotal: t.items_subtotal,
         charges_total: t.charges_total,
         discounts_total: t.discounts_total,

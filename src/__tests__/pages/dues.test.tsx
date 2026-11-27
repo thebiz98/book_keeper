@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { CreditDuesPage } from '@/pages/CreditDuesPage';
-import type { PartyDueSummary, SaleHistoryRow } from '@/types';
+import type { OpenBillRow, PartyDueSummary } from '@/types';
 import { installApi, flush, waitFor, click, setInput, buttonByText, bodyText } from './helpers';
 
 const party: PartyDueSummary = {
@@ -15,32 +15,22 @@ const party: PartyDueSummary = {
   totalPaid: 200,
   balanceDue: 300,
 };
-const bill = (id: number, date: string, due: number, status: 'UNPAID' | 'PARTIAL'): SaleHistoryRow => ({
+const bill = (id: number, date: string, due: number, status: 'UNPAID' | 'PARTIAL'): OpenBillRow => ({
   id,
   transactionCode: `SAL-${id}`,
   transactionDate: date,
-  createdAt: `${date}T10:00:00`,
-  partyId: 7,
-  partyName: 'Sharma Traders',
-  lineCount: 1,
   totalAmount: due + 50,
   paidAmount: 50,
   balanceDue: due,
   paymentStatus: status,
-  itemsSubtotal: 0,
-  chargesTotal: 0,
-  discountsTotal: 0,
+  isOpeningBalance: false,
 });
 
 function setup() {
   return installApi({
     getPartyDuesSummary: [party],
-    getSalesHistory: async (f: { paymentStatus?: string }) => ({
-      items: f.paymentStatus === 'UNPAID' ? [bill(2, '2026-01-02', 200, 'UNPAID')] : [bill(1, '2026-01-01', 100, 'PARTIAL')],
-      total: 1,
-      page: 1,
-      limit: 200,
-    }),
+    // DD-97: the backend returns the open bills oldest first.
+    getPartyOpenBills: [bill(1, '2026-01-01', 100, 'PARTIAL'), bill(2, '2026-01-02', 200, 'UNPAID')],
     settleBillPayment: { settlementIds: [1], billsTouched: [1] },
     settleBillsBatch: { settlementIds: [1, 2], billsTouched: [1, 2] },
     // DD-56: the split and the over-limit refusal are the backend's; canned here.

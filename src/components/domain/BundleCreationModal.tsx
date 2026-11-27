@@ -103,13 +103,10 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
     const mrpVal = parseOptional(mrp);
 
     if (!bundleName.trim()) errs.bundleName = 'Bundle name is required';
-    if (!Number.isFinite(mult) || mult <= 1) errs.unitsPerBundle = 'Multiplier must be greater than 1';
-    if (price !== null && (!Number.isFinite(price) || price <= 0)) {
-      errs.defaultBundlePrice = 'Price must be greater than 0 (or leave empty)';
-    }
-    if (mrpVal !== null && (!Number.isFinite(mrpVal) || mrpVal <= 0)) {
-      errs.mrp = 'MRP must be greater than 0 (or leave empty)';
-    }
+    // Format only (DD-56, DD-97): the ranges (multiplier, price, MRP) are the backend's to refuse.
+    if (!Number.isFinite(mult)) errs.unitsPerBundle = 'Enter a number for the multiplier';
+    if (price !== null && !Number.isFinite(price)) errs.defaultBundlePrice = 'Enter a number (or leave empty)';
+    if (mrpVal !== null && !Number.isFinite(mrpVal)) errs.mrp = 'Enter a number (or leave empty)';
     setFieldErrors(errs);
     if (Object.keys(errs).length > 0) {
       setError(null);

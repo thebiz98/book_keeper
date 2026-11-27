@@ -235,6 +235,18 @@ export interface SettlementHistoryRow {
   notes: string | null;
 }
 
+/** DD-97: one open bill in backend order (oldest first), for the settle dialogs. */
+export interface OpenBillRow {
+  id: number;
+  transactionCode: string;
+  transactionDate: string;
+  totalAmount: number;
+  paidAmount: number;
+  balanceDue: number;
+  paymentStatus: PaymentStatus;
+  isOpeningBalance: boolean;
+}
+
 export interface SettlementHistoryPage {
   rows: SettlementHistoryRow[];
   totalReceived: number;
@@ -459,6 +471,8 @@ export interface BillPaymentPreview {
 /** DD-56: what a sale/purchase would look like when saved. Every figure comes from the backend. */
 export interface BillPreview {
   lineTotals: number[];
+  /** DD-97, purchases: each line's cost per base unit (4 decimals) as its lot will store it. */
+  lineCostPerBaseUnit?: number[];
   itemsSubtotal: number;
   chargesTotal: number;
   discountsTotal: number;
@@ -797,6 +811,8 @@ export interface ApiClient {
   getPartyLedger(partyId: number): Promise<PartyLedgerView>;
   /** FR-42: SETTLEMENT rows across all parties, newest first, paged in SQL, with totals over the filter. */
   getSettlementHistory(filter: SettlementHistoryFilter): Promise<SettlementHistoryPage>;
+  /** DD-97: open bills of a party, oldest first (the FIFO order), opening balance included. */
+  getPartyOpenBills(partyId: number, transactionType: TransactionType): Promise<OpenBillRow[]>;
 
   // Parties
   createParty(payload: CreatePartyPayload): Promise<number>;

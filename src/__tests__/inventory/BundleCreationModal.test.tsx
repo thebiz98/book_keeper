@@ -44,15 +44,20 @@ describe('BundleCreationModal', () => {
     expect(document.querySelector(`label[for="${active.id}"]`)?.textContent).toContain('Bundle Sale Price');
   });
 
-  it('requires multiplier > 1 and does not call the API', async () => {
-    const { container, api } = mount();
+  it('multiplier range is the backend rule (DD-56): sent as typed, its refusal shows on the field', async () => {
+    const { container, api } = mount({
+      createBundle: vi.fn().mockRejectedValue({
+        type: 'ValidationError',
+        details: { field: 'units_per_bundle', message: 'Units per bundle must be greater than 1' },
+      }),
+    });
     await flush(60);
     typeInto(nameInput(container), 'Single');
     typeInto(multInput(container), '1');
     click(byText(container, 'button', /Create Bundle/));
     await flush();
-    expect(api.createBundle).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('Multiplier must be greater than 1');
+    expect(api.createBundle).toHaveBeenCalledWith(expect.objectContaining({ unitsPerBundle: 1 }));
+    expect(container.textContent).toContain('Units per bundle must be greater than 1');
   });
 
   it('Ctrl+Enter saves; MRP, price and barcode go through; full ItemBundle is returned', async () => {
