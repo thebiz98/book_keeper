@@ -213,7 +213,7 @@ describe('Inventory keyboard map (D1)', () => {
 
 describe('Low Stock Level edit availability (FR-50)', () => {
   it('a physical item has an Edit button; a service and a deleted item are read-only', () => {
-    installApi({});
+    installApi({ getItemSales: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, limit: 10 }) });
     const view = (item: ReturnType<typeof makeItem>) => {
       const r = render(<ItemDetailsDrawer item={item} onClose={() => {}} onEdit={() => {}} />);
       const has = document.querySelector(`button[aria-label="Edit low stock level for ${item.name}"]`) !== null;

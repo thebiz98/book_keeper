@@ -9,7 +9,8 @@ import { Button } from '../ui/Button';
 import { Tabs } from '../ui/Tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/Table';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
-import { StockStatusBadge } from '../common/StockStatusBadge';
+import { ItemStockStatus } from '../common/ItemStockStatus';
+import { isService } from '@/lib/itemKind';
 import { LotInspector } from './LotInspector';
 import { BillDetailDrawer } from './BillDetailDrawer';
 import { Pager } from './Pager';
@@ -128,7 +129,7 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
   // After a bill opened from here changes, the refreshed row (stock included) replaces the prop's values.
   const [fresh, setFresh] = useState<ItemSearchResult | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
-  const base = itemProp && fresh && fresh.itemId === itemProp.itemId ? { ...itemProp, currentStock: fresh.currentStock } : itemProp;
+  const base = itemProp && fresh && fresh.itemId === itemProp.itemId ? { ...itemProp, currentStock: fresh.currentStock, canMake: fresh.canMake } : itemProp;
   const item =
     base && savedLevel && savedLevel.itemId === base.itemId
       ? { ...base, lowStockThreshold: savedLevel.lowStockThreshold, isLowStock: savedLevel.isLowStock }
@@ -137,6 +138,16 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
   const itemId = item?.itemId ?? null;
   // FR-45: a deleted item opens read-only (from past bills and reports); Restore lives only in Deleted items.
   const deleted = item?.isActive === false;
+  // A service holds no stock: no Lots / Purchases, and Sales is the only (default) tab.
+  const service = item ? isService(item) : false;
+  const tabs: { id: TabId; label: string }[] = service
+    ? [{ id: 'sales', label: 'Sales' }]
+    : [
+        { id: 'lots', label: 'Lots' },
+        { id: 'sales', label: 'Sales' },
+        { id: 'purchases', label: 'Purchases' },
+      ];
+  const activeTab: TabId = service ? 'sales' : tab;
 
   useEffect(() => {
     setTab('lots');
@@ -173,32 +184,37 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
           <div className="space-y-4" data-testid="item-details">
             <div className="flex items-start justify-between gap-3">
               <div className="grid grid-cols-3 gap-x-6 gap-y-3 flex-1">
-                <Stat label="Stock">
-                  <span className="font-mono">
-                    {item.currentStock} {item.baseUnit}
-                  </span>
-                </Stat>
+                {service ? (
+                  <Stat label="Can make">
+                    <span className="font-mono">
+                      {item.canMake != null ? `${item.canMake} ${item.baseUnit}` : '—'}
+                    </span>
+                  </Stat>
+                ) : (
+                  <Stat label="Stock">
+                    <span className="font-mono">
+                      {item.currentStock} {item.baseUnit}
+                    </span>
+                  </Stat>
+                )}
                 <Stat label="Status">
-                  <StockStatusBadge
-                    currentStock={item.currentStock}
-                    isLowStock={item.isLowStock}
-                    lowStockThreshold={item.lowStockThreshold}
-                    baseUnit={item.baseUnit}
-                  />
+                  <ItemStockStatus item={item} />
                 </Stat>
-                <Stat label="Low Stock Level">
-                  <LowStockLevelField
-                    itemId={item.itemId}
-                    itemName={item.name}
-                    value={item.lowStockThreshold}
-                    baseUnit={item.baseUnit}
-                    editable={!deleted && item.itemType !== 'SERVICE'}
-                    onSaved={(row) => {
-                      setSavedLevel(row);
-                      onItemUpdated?.(row);
-                    }}
-                  />
-                </Stat>
+                {!service && (
+                  <Stat label="Low Stock Level">
+                    <LowStockLevelField
+                      itemId={item.itemId}
+                      itemName={item.name}
+                      value={item.lowStockThreshold}
+                      baseUnit={item.baseUnit}
+                      editable={!deleted}
+                      onSaved={(row) => {
+                        setSavedLevel(row);
+                        onItemUpdated?.(row);
+                      }}
+                    />
+                  </Stat>
+                )}
                 <Stat label="MRP">{item.mrp !== null ? <CurrencyDisplay amount={item.mrp} size="sm" /> : '—'}</Stat>
                 <Stat label="Sale Price">
                   <CurrencyDisplay amount={item.defaultSalePrice} size="sm" />
@@ -226,22 +242,18 @@ export const ItemDetailsDrawer: React.FC<ItemDetailsDrawerProps> = ({
             </div>
 
             <Tabs
-              tabs={[
-                { id: 'lots', label: 'Lots' },
-                { id: 'sales', label: 'Sales' },
-                { id: 'purchases', label: 'Purchases' },
-              ]}
-              activeTab={tab}
+              tabs={tabs}
+              activeTab={activeTab}
               onChange={(id) => setTab(id as TabId)}
             />
 
-            {tab === 'lots' && (
+            {activeTab === 'lots' && (
               <LotInspector key={item.currentStock} itemId={item.itemId} baseUnit={item.baseUnit} editable={!deleted} />
             )}
-            {tab === 'sales' && (
+            {activeTab === 'sales' && (
               <BillsTab key={historyKey} itemId={item.itemId} kind="SALE" onView={(id) => setViewBill({ kind: 'SALE', id })} />
             )}
-            {tab === 'purchases' && (
+            {activeTab === 'purchases' && (
               <BillsTab key={historyKey} itemId={item.itemId} kind="PURCHASE" onView={(id) => setViewBill({ kind: 'PURCHASE', id })} />
             )}
           </div>
