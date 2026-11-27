@@ -12,6 +12,7 @@ export interface FileFilter {
 export const SPREADSHEET_FILTERS: FileFilter[] = [
   { name: 'Spreadsheet (.xlsx, .csv)', extensions: ['xlsx', 'csv', 'xls'] },
 ];
+export const BACKUP_FILTERS: FileFilter[] = [{ name: 'Backup', extensions: ['db'] }];
 export const VEDBILL_FILTERS: FileFilter[] = [{ name: 'VedBill backup (.vb)', extensions: ['vb'] }];
 
 /** True when native dialogs / file drop are available. */

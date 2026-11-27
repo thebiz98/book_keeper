@@ -235,6 +235,14 @@ export class TauriClient implements ApiClient {
   getAppConfig: ApiClient['getAppConfig'] = () => invokeCmd('get_app_config');
   setBackupDirectory: ApiClient['setBackupDirectory'] = (path) =>
     invokeCmd('set_backup_directory', { path });
+
+  listBackups: ApiClient['listBackups'] = () => invokeCmd('list_backups');
+
+  previewRestore: ApiClient['previewRestore'] = (path) => invokeCmd('preview_restore', { path });
+
+  stageRestore: ApiClient['stageRestore'] = (path) => invokeCmd('stage_restore', { path });
+
+  dismissRestoreFailure: ApiClient['dismissRestoreFailure'] = () => invokeCmd('dismiss_restore_failure');
   resetData: ApiClient['resetData'] = (scope) => invokeCmd('reset_data', { scope });
   verifyDatabaseIntegrity: ApiClient['verifyDatabaseIntegrity'] = () =>
     invokeCmd('verify_database_integrity');

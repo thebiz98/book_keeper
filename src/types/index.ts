@@ -716,6 +716,30 @@ export interface AppConfigView {
   lastAutoBackupAt: string | null;
   /** IANA shop time zone from app config (e.g. Asia/Kolkata). */
   timeZone: string;
+  /** Why the last restore failed (FR-60); null when none or dismissed. */
+  restoreFailure: string | null;
+}
+
+/** A backup file in the backup folder (FR-60). */
+export interface BackupFileInfo {
+  path: string;
+  fileName: string;
+  kind: 'AUTO' | 'MANUAL' | 'PRE_RESET' | 'PRE_MIGRATION' | 'PRE_RESTORE';
+  /** UTC instant; format with the shop time zone. */
+  stamp: string;
+  sizeBytes: number;
+}
+
+/** Backend dry run of a restore (FR-60). `refusal` is set when the file can't be restored. */
+export interface RestorePreview {
+  path: string;
+  schemaVersion: number;
+  integrityOk: boolean;
+  newerThanApp: boolean;
+  itemCount: number;
+  saleBillCount: number;
+  lastBillDate: string | null;
+  refusal: string | null;
 }
 
 export type ResetScope = 'Transactions' | 'All';
