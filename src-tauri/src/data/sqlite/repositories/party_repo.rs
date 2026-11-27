@@ -253,7 +253,8 @@ impl PartyRepository for SqlitePartyRepository {
         };
         let sql = format!(
             "SELECT p.id, p.name, p.phone, COUNT(t.id), MIN(t.transaction_date), \
-                    SUM(t.total_amount), SUM(t.paid_amount), SUM(t.balance_due), p.is_active \
+                    SUM(t.total_amount), SUM(t.paid_amount), SUM(t.balance_due), p.is_active, \
+                    SUM(t.total_amount - t.balance_due) \
              FROM parties p JOIN {table} t ON t.party_id = p.id AND t.balance_due > 0{source_filter} \
              WHERE p.party_type = ?1 \
              GROUP BY p.id ORDER BY p.name COLLATE NOCASE, p.id"
@@ -270,6 +271,7 @@ impl PartyRepository for SqlitePartyRepository {
                     earliest_bill_date: r.get(4)?,
                     total_invoiced: r.get(5)?,
                     total_paid: r.get(6)?,
+                    paid_and_credited: r.get(9)?,
                     balance_due: r.get(7)?,
                     is_active: r.get(8)?,
                 })

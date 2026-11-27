@@ -911,8 +911,13 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             None
         };
         let items = tx.sales().list_items_by_transaction_id(sale_id)?;
-        let returned: std::collections::HashMap<i64, f64> =
-            tx.sales().get_returned_quantities_for_sale(sale_id)?.into_iter().collect();
+        // (returned qty, returned cost_amount) per line; DD-91: the cost a line's returns credit back.
+        let returned: std::collections::HashMap<i64, (f64, f64)> = tx
+            .sales()
+            .get_returned_quantities_for_sale(sale_id)?
+            .into_iter()
+            .map(|(id, q, c)| (id, (q, c)))
+            .collect();
         // FR-37 / X3: misc. cost per line comes from the one shared SQL fragment.
         let line_misc: std::collections::HashMap<i64, f64> =
             tx.sales().list_line_misc_costs(sale_id)?.into_iter().collect();
@@ -922,16 +927,16 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
             let item_name = item.item_name.clone();
             let bundle_name = item.pack_label.clone();
             let allocations = tx.allocations().find_by_sale_item_id(item.id)?;
-            let returned_quantity = returned.get(&item.id).copied().unwrap_or(0.0);
+            let (returned_quantity, returned_cost) = returned.get(&item.id).copied().unwrap_or((0.0, 0.0));
             let net_unit_price = net_unit_price(item.unit_price, sale.items_subtotal, sale.discounts_total);
-            // FR-34: cost net of returned units; revenue net of the bill discount share (FR-19 rule).
+            // FR-34 / DD-91: gross cost less the cost its linked returns credited (the same terms as
+            // `bill_profit_parts.cost_net`); revenue net of the bill discount share (FR-19 rule).
             let misc_cost = round2(line_misc.get(&item.id).copied().unwrap_or(0.0));
             let master = tx.items().find_by_id(item.item_id)?;
             let is_service = master.as_ref().is_some_and(|i| i.item_type == ItemType::Service);
             let item_deleted = master.as_ref().is_some_and(|i| !i.is_active);
             let cost_amount = round2(
-                allocations.iter().map(|a| (a.quantity_depleted - a.returned_quantity) * a.unit_cost).sum::<f64>()
-                    + misc_cost,
+                allocations.iter().map(|a| a.quantity_depleted * a.unit_cost).sum::<f64>() - returned_cost + misc_cost,
             );
             let share = net_unit_price_factor(sale.items_subtotal, sale.discounts_total);
             let profit = round2(item.total_amount * share - cost_amount);
