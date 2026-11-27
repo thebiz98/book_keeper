@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { Modal } from '@/components/ui/Modal';
 import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
-import { StockStatusBadge } from '@/components/common/StockStatusBadge';
+import { ItemStockStatus } from '@/components/common/ItemStockStatus';
 import { useAppStore } from '@/store/useAppStore';
 import { api } from '@/api';
 import { setShopTimeZone } from '@/lib/dates';
@@ -76,7 +76,7 @@ export const ItemLookupModal: React.FC<{ isOpen: boolean; onClose: () => void }>
             className="shrink-0 rounded-md border border-slate-200 dark:border-slate-800 p-3 text-sm flex flex-col gap-1"
           >
             <span className="font-semibold">{item.name}</span>
-            <StockStatusBadge currentStock={item.currentStock} baseUnit={item.baseUnit} />
+            <ItemStockStatus item={item} />
             <span>
               Rate: <CurrencyDisplay amount={item.defaultSalePrice} />
               {item.mrp != null && (
