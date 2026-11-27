@@ -50,6 +50,7 @@ describe('Sales history', () => {
       searchQuery: null,
       page: 1,
       limit: 25,
+      includeTotals: true,
     });
     expect(bodyText()).toContain('Ram Snapshot');
     // Actions are icon buttons now (FR-34): the Settle action is found by its accessible name.

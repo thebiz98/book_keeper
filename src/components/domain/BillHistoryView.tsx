@@ -8,6 +8,7 @@ import type {
   PaymentStatusFilter,
   PurchaseHistoryRow,
   SaleHistoryRow,
+  SalesHistoryTotals,
   TransactionType,
 } from '@/types';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
@@ -103,7 +104,7 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
   const setShowProfit = useAppStore((s) => s.setShowProfit);
   const showProfit = isSale && storeShowProfit;
 
-  const live = useLiveSearch<{ items: Row[]; total: number }>({
+  const live = useLiveSearch<{ items: Row[]; total: number; totals?: SalesHistoryTotals | null }>({
     initial: { items: [], total: 0 },
     emptyBehavior: 'fetch',
     debounceMs: LIST_SEARCH_DEBOUNCE_MS,
@@ -118,6 +119,7 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
         page,
         limit: HISTORY_PAGE_SIZE,
         ...(showProfit ? { includeProfit: true } : {}),
+        ...(isSale ? { includeTotals: true } : {}),
       };
       return isSale ? api.getSalesHistory(filter) : api.getPurchasesHistory(filter);
     },
@@ -126,6 +128,7 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
   const error = live.error ? errorMessage(live.error) : null;
   const rows: Row[] = live.error ? [] : live.results.items;
   const total = live.error ? 0 : live.results.total;
+  const totals = isSale && !live.error ? live.results.totals ?? null : null;
   const searchInput = live.query;
   const setSearchInput = live.setQuery;
   const load = useCallback(() => void live.refresh(), [live.refresh]);
@@ -262,6 +265,24 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
     },
   ];
 
+  const footer = totals
+    ? {
+        code: `Total (${totals.billCount} ${totals.billCount === 1 ? 'bill' : 'bills'})`,
+        total: <CurrencyDisplay amount={totals.totalAmount} />,
+        paid: <CurrencyDisplay amount={totals.paidAmount} />,
+        due: <CurrencyDisplay amount={totals.balanceDue} colored />,
+        ...(showProfit && totals.profit != null
+          ? {
+              profit: (
+                <span title="Bill profit of every bill in this list (returns of these bills included). The Reports P&L counts returns by return date.">
+                  <CurrencyDisplay amount={totals.profit} colored />
+                </span>
+              ),
+            }
+          : {}),
+      }
+    : undefined;
+
   return (
     <div className="flex flex-col gap-4 flex-1 min-h-0">
       <div className="shrink-0 flex flex-wrap items-center gap-3 bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
@@ -319,6 +340,8 @@ export const BillHistoryView: React.FC<BillHistoryViewProps> = ({ kind }) => {
         onRetry={load}
         emptyMessage={isSale ? 'No sales invoices match the filters.' : 'No purchases match the filters.'}
         onRowClick={(r) => setDetail({ id: r.id, mode: 'view' })}
+        footer={footer}
+        footerTestId="history-totals"
         total={total}
         page={page}
         limit={HISTORY_PAGE_SIZE}
