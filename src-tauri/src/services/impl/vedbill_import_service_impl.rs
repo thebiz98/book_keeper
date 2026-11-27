@@ -57,12 +57,11 @@ fn qty(v: f64) -> String {
     }
 }
 
-/// VedBill dates are `YYYY-MM-DD` or ISO-8601 UTC timestamps; returns the India-time calendar date.
+/// VedBill dates are `YYYY-MM-DD` or ISO-8601 UTC timestamps; returns the shop-zone calendar date.
 pub(crate) fn normalize_date(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
-        let ist = chrono::FixedOffset::east_opt(crate::core::clock::IST_OFFSET_SECS).expect("valid IST offset");
-        return Some(dt.with_timezone(&ist).format("%Y-%m-%d").to_string());
+        return Some(dt.with_timezone(&crate::core::clock::shop_tz()).format("%Y-%m-%d").to_string());
     }
     let head = raw.get(..10)?;
     chrono::NaiveDate::parse_from_str(head, "%Y-%m-%d").ok().map(|d| d.format("%Y-%m-%d").to_string())

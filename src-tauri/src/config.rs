@@ -21,7 +21,15 @@ pub struct BackupConfig {
 pub struct AppConfig {
     /// Enables the testing-only data reset tools (UI and backend).
     pub testing_mode: bool,
+    /// IANA zone name of the shop (e.g. `Asia/Kolkata`): drives "today", backup stamps and shown
+    /// times. Stored data stays UTC, so changing it needs no data change.
+    #[serde(default = "default_tz")]
+    pub time_zone: String,
     pub backup: BackupConfig,
+}
+
+fn default_tz() -> String {
+    "Asia/Kolkata".to_string()
 }
 
 impl Default for AppConfig {
@@ -29,6 +37,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             testing_mode: false,
+            time_zone: default_tz(),
             backup: BackupConfig { interval_hours: 24, retention_days: 7, on_exit: true },
         }
     }
@@ -41,8 +50,18 @@ impl AppConfig {
         Self::parse(COMPILED_JSON).expect("src-tauri/app.config.json is invalid")
     }
 
+    /// Parses the JSON; an unknown time zone name is an error.
     pub fn parse(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(json)
+        let cfg: Self = serde_json::from_str(json)?;
+        cfg.time_zone
+            .parse::<chrono_tz::Tz>()
+            .map_err(|e| <serde_json::Error as serde::de::Error>::custom(format!("timeZone '{}': {e}", cfg.time_zone)))?;
+        Ok(cfg)
+    }
+
+    /// The configured shop time zone (validated by `parse`; falls back to Asia/Kolkata).
+    pub fn tz(&self) -> chrono_tz::Tz {
+        self.time_zone.parse().unwrap_or(chrono_tz::Asia::Kolkata)
     }
 }
 
@@ -55,6 +74,23 @@ mod tests {
         let cfg = AppConfig::compiled();
         assert!(cfg.backup.interval_hours > 0);
         assert!(cfg.backup.retention_days > 0);
+        assert!(cfg.time_zone.parse::<chrono_tz::Tz>().is_ok());
+    }
+
+    #[test]
+    fn missing_time_zone_defaults_to_kolkata() {
+        let cfg = AppConfig::parse(r#"{"testingMode":false,"backup":{"intervalHours":6,"retentionDays":3,"onExit":false}}"#)
+            .unwrap();
+        assert_eq!(cfg.time_zone, "Asia/Kolkata");
+        assert_eq!(cfg.tz(), chrono_tz::Asia::Kolkata);
+    }
+
+    #[test]
+    fn unknown_time_zone_is_rejected() {
+        let r = AppConfig::parse(
+            r#"{"testingMode":false,"timeZone":"Mars/Base","backup":{"intervalHours":6,"retentionDays":3,"onExit":false}}"#,
+        );
+        assert!(r.is_err());
     }
 
     #[test]

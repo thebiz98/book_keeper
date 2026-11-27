@@ -39,7 +39,7 @@ impl<U: UnitOfWork> ReportServiceImpl<U> {
     }
 
     fn today(&self) -> NaiveDate {
-        self.fixed_today.unwrap_or_else(|| crate::core::clock::now_ist().date_naive())
+        self.fixed_today.unwrap_or_else(|| crate::core::clock::now_local().date_naive())
     }
 }
 

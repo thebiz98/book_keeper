@@ -13,6 +13,8 @@ pub struct AppConfigView {
     pub backup_directory: String,
     pub is_default_directory: bool,
     pub last_auto_backup_at: Option<String>,
+    /// IANA shop time zone from app config; the UI formats stamps in it.
+    pub time_zone: String,
 }
 
 pub fn build_config_view(state: &AppState) -> AppConfigView {
@@ -26,7 +28,14 @@ pub fn build_config_view(state: &AppState) -> AppConfigView {
             .last_auto_backup(&dir.to_string_lossy())
             .ok()
             .flatten()
-            .map(|t| t.format("%Y-%m-%dT%H:%M:00+05:30").to_string()),
+            .and_then(|t| {
+                use chrono::TimeZone;
+                crate::core::clock::shop_tz()
+                    .from_local_datetime(&t)
+                    .earliest()
+                    .map(|d| d.with_timezone(&chrono::Utc).to_rfc3339())
+            }),
+        time_zone: state.config.time_zone.clone(),
     }
 }
 
