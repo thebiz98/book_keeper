@@ -46,7 +46,7 @@ describe('BillDetailDrawer actions (FR-20)', () => {
     const onClose = vi.fn();
     render(<BillDetailDrawer kind="SALE" billId={5} onClose={onClose} />);
     await waitFor(() => !!document.querySelector('[data-testid="bill-edit"]:not([disabled])'));
-    expect(bodyText()).toContain('Edited 2026-11-21');
+    expect(bodyText()).toContain('Edited 21 Nov 2026');
     click(document.querySelector('[data-testid="bill-edit"]')!);
     await waitFor(() => !!document.querySelector('[data-testid="sale-edit-form"] [data-testid="edit-line"]'));
     expect(bodyText()).toContain('Editing SAL-1005');
