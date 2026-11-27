@@ -105,7 +105,7 @@ impl E {
 }
 
 fn file(content: &str) -> String {
-    let p = std::env::temp_dir().join(format!("bk_pdel_{}.csv", uuid::Uuid::new_v4()));
+    let p = common::temp_file("pdel", "csv");
     std::fs::write(&p, content).unwrap();
     p.to_str().unwrap().to_string()
 }

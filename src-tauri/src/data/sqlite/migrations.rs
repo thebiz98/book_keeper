@@ -529,12 +529,41 @@ fn main_db_file(conn: &rusqlite::Connection) -> Result<Option<std::path::PathBuf
     Ok(None)
 }
 
-/// Snapshot via `VACUUM INTO` to `<db dir>/backups/book_keeper_premigration_v{from}_to_v{to}_YYYYMMDD_HHMM.db`
+/// The Settings backup folder, only when the column exists, is set, and a probe file can be written
+/// there. `None` means "use the default folder".
+fn chosen_backup_dir(conn: &rusqlite::Connection) -> Option<std::path::PathBuf> {
+    let has_col: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('shop_settings') WHERE name = 'backup_directory'",
+            [],
+            |r| r.get(0),
+        )
+        .ok()?;
+    if has_col == 0 {
+        return None;
+    }
+    let value: Option<String> = conn
+        .query_row("SELECT backup_directory FROM shop_settings WHERE id = 1", [], |r| r.get(0))
+        .ok()?;
+    let dir = std::path::PathBuf::from(value?.trim());
+    if dir.as_os_str().is_empty() {
+        return None;
+    }
+    std::fs::create_dir_all(&dir).ok()?;
+    let probe = dir.join(format!(".bk_write_test_{}", std::process::id()));
+    std::fs::write(&probe, b"ok").ok()?;
+    let _ = std::fs::remove_file(&probe);
+    Some(dir)
+}
+
+/// Snapshot via `VACUUM INTO` to `<backup folder>/book_keeper_premigration_v{from}_to_v{to}_YYYYMMDD_HHMM.db`
 /// (`_2`, `_3`, ... on a name clash). Skipped for in-memory databases.
 fn premigration_backup(conn: &rusqlite::Connection, from: i64, to: i64) -> Result<(), AppError> {
     let Some(db_file) = main_db_file(conn)? else { return Ok(()) };
     let fail = |what: String| AppError::MigrationError(format!("pre-migration backup failed, nothing was changed: {what}"));
-    let dir = db_file.parent().map(|p| p.join("backups")).unwrap_or_else(|| std::path::PathBuf::from("backups"));
+    let fallback = db_file.parent().map(|p| p.join("backups")).unwrap_or_else(|| std::path::PathBuf::from("backups"));
+    // Follow the folder chosen in Settings (when the column exists and the folder is usable).
+    let dir = chosen_backup_dir(conn).unwrap_or_else(|| fallback.clone());
     std::fs::create_dir_all(&dir).map_err(|e| fail(format!("cannot create '{}': {e}", dir.display())))?;
     let stamp = crate::core::clock::now_local().format("%Y%m%d_%H%M");
     let prefix = format!("book_keeper_premigration_v{from}_to_v{to}_{stamp}");

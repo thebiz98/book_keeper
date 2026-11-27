@@ -15,10 +15,18 @@ fn main() {
             if let Some(parent) = db_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
+            // A restore staged by the last run is swapped in now, before any connection opens.
+            let default_backup_dir = dir.join(book_keeper::app_state::DEFAULT_BACKUP_DIR);
+            match book_keeper::services::r#impl::restore::apply_pending_restore(&dir, &db_path, &default_backup_dir) {
+                Ok(Some(o)) => eprintln!("[restore] restored from backup; safety copy: {:?}", o.safety_copy),
+                Ok(None) => {}
+                Err(e) => eprintln!("[restore] restore failed, current data kept: {e}"),
+            }
+            app.manage(settings_controller::AppDataDir(dir.clone()));
             let state = book_keeper::app_state::build_sqlite_app_state_with_config(
                 &db_path,
                 book_keeper::config::AppConfig::compiled(),
-                dir.join(book_keeper::app_state::DEFAULT_BACKUP_DIR),
+                default_backup_dir,
             )?;
             let backup_svc = state.backup_service.clone();
             let backup_cfg = state.config.backup.clone();
@@ -37,6 +45,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             settings_controller::backup_database,
             settings_controller::get_app_config,
+            settings_controller::dismiss_restore_failure,
+            settings_controller::list_backups,
+            settings_controller::preview_restore,
+            settings_controller::stage_restore,
             maintenance_controller::reset_data,
             settings_controller::set_backup_directory,
             item_controller::create_bundle,

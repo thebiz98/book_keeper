@@ -141,8 +141,7 @@ fn errors_roll_back_everything() {
 #[test]
 fn bad_files_get_clear_messages() {
     let (_db, svc) = setup();
-    let dir = std::env::temp_dir();
-    let not_zip = dir.join(format!("bk_{}.vb", uuid::Uuid::new_v4()));
+    let not_zip = common::temp_file("notzip", "vb");
     std::fs::write(&not_zip, b"hello").unwrap();
     let e = svc.validate_vedbill_import(not_zip.to_str().unwrap()).unwrap_err();
     assert!(e.to_string().contains("not a VedBill backup"), "{e}");

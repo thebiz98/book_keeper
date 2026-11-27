@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Save, DatabaseBackup, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api, errorMessage } from '@/api';
 import { pickFolder } from '@/api/pickFolder';
-import type { AppConfigView, ResetScope } from '@/types';
+import type { AppConfigView, BackupFileInfo, ResetScope, RestorePreview } from '@/types';
+import { pickFile, BACKUP_FILTERS } from '@/api/fileDialog';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { useAppStore } from '@/store/useAppStore';
 import { useThemeStore } from '@/store/useThemeStore';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
@@ -28,6 +30,17 @@ const NoticeLine: React.FC<{ notice: Notice }> = ({ notice }) =>
       {notice.text}
     </p>
   ) : null;
+
+const KIND_LABEL: Record<BackupFileInfo['kind'], string> = {
+  AUTO: 'Auto',
+  MANUAL: 'Manual',
+  PRE_RESET: 'Before reset',
+  PRE_MIGRATION: 'Before upgrade',
+  PRE_RESTORE: 'Before restore',
+};
+
+const formatSize = (bytes: number): string =>
+  bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 const RESET_PHRASE: Record<ResetScope, string> = { Transactions: 'RESET', All: 'DELETE ALL' };
 
@@ -57,6 +70,12 @@ export const SettingsPage: React.FC = () => {
   const [resetNotice, setResetNotice] = useState<Notice>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const [lastBackup, setLastBackup] = useState<{ path: string; at: Date } | null>(null);
+  const [backups, setBackups] = useState<BackupFileInfo[]>([]);
+  const [restorePath, setRestorePath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<RestorePreview | null>(null);
+  const [restoreNotice, setRestoreNotice] = useState<Notice>(null);
+  const [confirmRestore, setConfirmRestore] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   // The shell sets the app-store `requestBackup` flag for Ctrl+B; it runs a backup into the current folder.
   const requestBackup = useAppStore((s) => (s as unknown as { requestBackup?: boolean }).requestBackup);
@@ -68,6 +87,18 @@ export const SettingsPage: React.FC = () => {
       .then(setConfig)
       .catch((err) => setDbNotice({ kind: 'error', text: `Failed to load backup settings: ${errorMessage(err)}` }));
   }, []);
+
+  // The backup list follows the backup folder (it changes with Choose folder / Use default).
+  const backupDir = config?.backupDirectory;
+  const refreshBackups = () => {
+    api
+      .listBackups()
+      .then(setBackups)
+      .catch((err) => setRestoreNotice({ kind: 'error', text: errorMessage(err) }));
+  };
+  useEffect(() => {
+    if (backupDir !== undefined) refreshBackups();
+  }, [backupDir]);
 
   useEffect(() => {
     api
@@ -123,6 +154,7 @@ export const SettingsPage: React.FC = () => {
       const written = await api.backupDatabase(config.backupDirectory);
       setDbNotice({ kind: 'success', text: `Backup written to ${written}` });
       setLastBackup({ path: written, at: new Date() });
+      refreshBackups();
     } catch (err) {
       setDbNotice({ kind: 'error', text: errorMessage(err) });
     } finally {
@@ -136,6 +168,47 @@ export const SettingsPage: React.FC = () => {
       setConfig(await api.setBackupDirectory(path));
     } catch (err) {
       setDbNotice({ kind: 'error', text: errorMessage(err) });
+    }
+  };
+
+  const selectRestoreFile = async (path: string) => {
+    setRestorePath(path);
+    setPreview(null);
+    setRestoreNotice(null);
+    try {
+      setPreview(await api.previewRestore(path));
+    } catch (err) {
+      setRestoreNotice({ kind: 'error', text: errorMessage(err) });
+    }
+  };
+
+  const handleBrowseBackup = async () => {
+    try {
+      const picked = await pickFile(BACKUP_FILTERS, config?.backupDirectory, 'Choose a backup file');
+      if (picked) await selectRestoreFile(picked);
+    } catch (err) {
+      setRestoreNotice({ kind: 'error', text: errorMessage(err) });
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!restorePath) return;
+    try {
+      await api.stageRestore(restorePath);
+      setClosing(true);
+    } catch (err) {
+      setRestoreNotice({ kind: 'error', text: errorMessage(err) });
+    } finally {
+      setConfirmRestore(false);
+    }
+  };
+
+  const dismissRestoreFailure = async () => {
+    try {
+      await api.dismissRestoreFailure();
+      setConfig((c) => (c ? { ...c, restoreFailure: null } : c));
+    } catch (err) {
+      setRestoreNotice({ kind: 'error', text: errorMessage(err) });
     }
   };
 
@@ -321,6 +394,101 @@ export const SettingsPage: React.FC = () => {
           <NoticeLine notice={dbNotice} />
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Restore from backup</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {config?.restoreFailure && (
+            <div
+              role="alert"
+              data-testid="restore-failure"
+              className="flex items-start justify-between gap-2 rounded border border-rose-300 p-2 text-xs text-rose-600 dark:border-rose-900 dark:text-rose-400"
+            >
+              <span>The last restore did not finish and your data is unchanged: {config.restoreFailure}</span>
+              <Button variant="outline" size="sm" onClick={dismissRestoreFailure}>
+                Dismiss
+              </Button>
+            </div>
+          )}
+          <p className="text-xs text-slate-500">
+            Pick a backup from the backup folder, or browse for a file. Your current data is saved as a
+            &quot;Before restore&quot; backup first, then the app closes; open it again to finish the restore.
+          </p>
+          <div className="max-h-48 overflow-auto rounded border border-slate-200 dark:border-slate-700" data-testid="backup-list">
+            {backups.length === 0 ? (
+              <p className="p-2 text-xs text-slate-500">No backups in the backup folder yet.</p>
+            ) : (
+              <ul>
+                {backups.map((b) => (
+                  <li key={b.path}>
+                    <button
+                      type="button"
+                      onClick={() => selectRestoreFile(b.path)}
+                      aria-pressed={restorePath === b.path}
+                      className={`flex w-full items-center justify-between gap-3 px-2 py-1.5 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                        restorePath === b.path ? 'bg-blue-50 dark:bg-slate-800' : ''
+                      }`}
+                    >
+                      <span>{formatDateTime(b.stamp)}</span>
+                      <span className="text-slate-500">
+                        {KIND_LABEL[b.kind]} · {formatSize(b.sizeBytes)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" onClick={handleBrowseBackup}>
+              Browse…
+            </Button>
+          </div>
+          {restorePath && (
+            <div className="text-xs" data-testid="restore-preview">
+              <p className="font-mono break-all text-slate-500">{restorePath}</p>
+              {preview && !preview.refusal && (
+                <p>
+                  {preview.itemCount} items, {preview.saleBillCount} sale bills, last bill{' '}
+                  {preview.lastBillDate ?? 'none'}. Integrity: {preview.integrityOk ? 'OK' : 'failed'}.
+                </p>
+              )}
+              {preview?.refusal && (
+                <p role="alert" className="font-medium text-rose-600 dark:text-rose-400">
+                  {preview.refusal}
+                </p>
+              )}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="danger"
+              disabled={!preview || preview.refusal !== null || closing}
+              onClick={() => setConfirmRestore(true)}
+            >
+              Restore
+            </Button>
+          </div>
+          {closing && (
+            <p role="status" className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              Closing the app. Open it again to finish the restore.
+            </p>
+          )}
+          <NoticeLine notice={restoreNotice} />
+        </CardContent>
+      </Card>
+
+      <ConfirmDialog
+        isOpen={confirmRestore}
+        title="Restore from backup"
+        message="Your current data is saved as a 'Before restore' backup first. The app will close; open it again to finish the restore."
+        confirmText="Restore"
+        variant="danger"
+        onConfirm={handleRestore}
+        onCancel={() => setConfirmRestore(false)}
+      />
 
       {config?.testingMode === true && (
         <Card className="border-rose-300 dark:border-rose-900">

@@ -79,7 +79,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 * **FR-11: Data Portability & Local Backup** *(v1 scope)*
   * Import items with opening stock from CSV / Excel (`.xlsx`): a dry-run validation report (row-level errors, duplicates) precedes execution with a conflict strategy (`SKIP`, `OVERWRITE`, `ADD_STOCK`); opening stock creates `OPENING`-source lots at the row's purchase cost. All-or-nothing.
   * One-click local database backup to a user-selected folder or external USB drive, plus a database integrity check.
-  * *Deferred to v2:* all exports, parties import, opening dues, VedBill migration, restore from backup.
+  * *Deferred to v2:* all exports, parties import, opening dues, VedBill migration. *(Restore from backup moved into scope in v1.9, FR-60.)*
 * **FR-12: Future Invoicing Foundation**
   * *(v1.2, 2026-11-23)* Printing is now in scope: see FR-27.
   * Transactions are stored with unique sequential transaction codes, customer/vendor relationships, line-item breakdowns, and shop profile headers, allowing instant printable bill generation without schema changes.
@@ -390,6 +390,11 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * The opening lot of a new item uses the shop computer's local date and the same future-date check (FR-28). A party re-import with a blank As of date keeps the existing date.
   * **Hardening shipped with it:** a lot reprice on a fully paid bill keeps it paid in full (Assumption 26); a purchase lot cannot shrink below what was drawn from it, restocked customer-return units included; a stock reversal that would overflow a lot is an error, never clamped; Set stock leaves no rounding residue; a return whose delete check fails for any reason keeps Delete disabled; one rounding rule for the backend and the UI; a search-index refresh that fails after commit is logged and retried, never reported as a failed save; the base unit is locked once the item has stock or bills; huge numbers that would overflow a total are refused.
   * **Use case.** *Actor:* owner. *Trigger:* a payment entered against an old bill with the wrong day. *Steps:* Settle, pick a date before the bill date, Save. *Outcome:* refused with the bill date named; the user picks a valid date.
+* **FR-60: Restore from backup** *(added 2026-11-28, v1.9, DD-99; FR-11 rev.)*
+  * Settings lists the backup folder's files (date, kind: Auto / Manual / Before reset / Before upgrade / Before restore, size) and has Browse... for a file elsewhere. Choosing one shows the backend's check: integrity, schema, active items, sale bills, last bill date. A damaged file, or one made by a newer app version, is refused with the reason and Restore stays off.
+  * Restore asks to confirm ("Your current data is saved as a 'Before restore' backup first. The app will close; open it again to finish the restore."), then the app closes and swaps the data the next time it opens. A source that is the database in use is refused. A failed swap keeps the current data and shows the reason once in Settings.
+  * A backup of an older version is upgraded on start-up like any database (with the usual pre-upgrade snapshot).
+  * **Use case.** *Actor:* owner. *Trigger:* wrong data after a bad import. *Steps:* Settings → Restore from backup → pick yesterday's auto backup → check the counts → Restore → confirm. *Outcome:* the app reopens with yesterday's data; "Before restore" holds the data from just before, so the restore can be undone the same way.
   * **Errors.** `DATE_ORDER` as above; `STOCK_INVARIANT` "Stock records don't match for lot <code>. Nothing was changed." (an internal check, reported instead of hiding the mismatch); "Base unit can't change once the item has stock or bills."
 
 ### 2.2. Non-Functional Requirements (NFR)
@@ -494,6 +499,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
 61. **Found stock is never a gain; Increase reasons, cost 0, the Undo hint, Lot Inspector order (FR-57).**
 62. **Deleting an item with stock: Just delete or Book as loss (FR-58).**
 63. **Entry dates in order, plus stock, rounding and guard hardening (FR-59).**
+64. **Restore from backup (FR-60).**
 
 ### 3.2. Out of Scope (Deferred to v2 / Future Versions)
 1. **Physical Printing & PDF/Image Generation**: Thermal receipt printing, paper printouts, and PDF/image export of invoices or summaries are strictly out of scope for v1 (the Sale Summary Dialog is strictly an on-screen modal).

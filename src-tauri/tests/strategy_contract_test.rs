@@ -169,7 +169,8 @@ fn invariant_holds_for_fifo_and_lifo_on_the_same_sequence() {
 
 #[test]
 fn strategy_is_swappable_through_app_state_di() {
-    let path = std::env::temp_dir().join(format!("bk_strategy_{}.db", uuid::Uuid::new_v4()));
+    let tmp = common::TempDir::new("strategy");
+    let path = tmp.join("shop.db");
     let app = book_keeper::app_state::build_sqlite_app_state_with_strategy(&path, Arc::new(LifoStrategy)).unwrap();
     let id = app.item_service.create_item(CreateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,
         name: "Pen".into(), category: None, barcode: None, base_unit: "PCS".into(), mrp: None,

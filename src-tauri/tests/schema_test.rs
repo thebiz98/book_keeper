@@ -17,6 +17,7 @@ use rusqlite::Connection;
 /// Each database lives in its own unique folder, so the `backups/` folder written next to it
 /// by the pre-migration backup (DD-29) is private to the test.
 fn temp_path(tag: &str) -> PathBuf {
+    common::sweep_stale_temp();
     let dir = std::env::temp_dir().join(format!("bk_schema_{tag}_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir.join("shop.db")
@@ -1125,4 +1126,47 @@ fn frozen_v12_fixture_matches_the_migrated_schema() {
     drop(migrated);
     cleanup(&p1);
     cleanup(&p2);
+}
+
+fn premig_in(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(Result::ok)
+                .filter(|e| e.file_name().to_string_lossy().starts_with("book_keeper_premigration_"))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+#[test]
+fn premigration_backup_follows_the_chosen_backup_folder() {
+    let (path, conn) = db_from_fixtures("premigdir", &[V1, V2]);
+    let chosen = path.parent().unwrap().join("chosen_folder");
+    conn.execute("UPDATE shop_settings SET backup_directory = ?1 WHERE id = 1", [chosen.to_str().unwrap()]).unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert_eq!(premig_in(&chosen), 1);
+    assert!(premigration_files(&path).is_empty(), "default folder must stay unused");
+    drop(conn);
+    cleanup(&path);
+}
+
+#[test]
+fn premigration_backup_falls_back_when_column_missing_or_folder_unusable() {
+    // Schema v1 has no backup_directory column.
+    let (path, conn) = db_from_fixtures("premigcol", &[V1]);
+    run_migrations(&conn).expect("upgrade");
+    assert_eq!(premigration_files(&path).len(), 1);
+    drop(conn);
+    cleanup(&path);
+
+    // A folder that cannot be created (its parent is a file).
+    let (path, conn) = db_from_fixtures("premigbad", &[V1, V2]);
+    let blocker = path.parent().unwrap().join("blocker");
+    std::fs::write(&blocker, b"file").unwrap();
+    let bad = blocker.join("sub");
+    conn.execute("UPDATE shop_settings SET backup_directory = ?1 WHERE id = 1", [bad.to_str().unwrap()]).unwrap();
+    run_migrations(&conn).expect("upgrade");
+    assert_eq!(premigration_files(&path).len(), 1);
+    drop(conn);
+    cleanup(&path);
 }

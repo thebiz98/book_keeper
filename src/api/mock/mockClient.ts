@@ -50,6 +50,8 @@ import type {
   OpenBillRow,
   ShopSettings,
   AppConfigView,
+  BackupFileInfo,
+  RestorePreview,
   ResetScope,
   ResetSummary,
   StockAdjustment,
@@ -1345,8 +1347,35 @@ export class MockApiClient implements ApiClient {
       isDefaultDirectory: this.backupDir === null,
       lastAutoBackupAt: null,
       timeZone: 'Asia/Kolkata',
+      restoreFailure: null,
     };
   }
+  async listBackups(): Promise<BackupFileInfo[]> {
+    const dir = this.backupDir ?? MOCK_DEFAULT_BACKUP_DIR;
+    return [
+      {
+        path: `${dir}/book_keeper_auto_20261127_0900.db`,
+        fileName: 'book_keeper_auto_20261127_0900.db',
+        kind: 'AUTO',
+        stamp: '2026-11-27T03:30:00Z',
+        sizeBytes: 2_400_000,
+      },
+    ];
+  }
+  async previewRestore(path: string): Promise<RestorePreview> {
+    return {
+      path,
+      schemaVersion: 12,
+      integrityOk: true,
+      newerThanApp: false,
+      itemCount: 42,
+      saleBillCount: 120,
+      lastBillDate: '2026-11-27',
+      refusal: null,
+    };
+  }
+  async stageRestore(_path: string): Promise<void> {}
+  async dismissRestoreFailure(): Promise<void> {}
   async getAppConfig() {
     return this.mockConfigView();
   }

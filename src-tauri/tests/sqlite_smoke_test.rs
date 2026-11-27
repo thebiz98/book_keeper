@@ -1,3 +1,5 @@
+mod common;
+
 use book_keeper::app_state::build_sqlite_app_state;
 use book_keeper::core::dtos::{
     CreateItemPayload, CreatePurchaseItemPayload, CreatePurchasePayload, CreateSaleItemPayload,
@@ -7,7 +9,8 @@ use book_keeper::core::value_objects::PaymentStatus;
 
 #[test]
 fn sqlite_end_to_end_smoke() {
-    let path = std::env::temp_dir().join(format!("bk_smoke_{}.db", uuid::Uuid::new_v4()));
+    let tmp = common::TempDir::new("smoke");
+    let path = tmp.join("shop.db");
     let state = build_sqlite_app_state(&path).expect("build state");
 
     let item_id = state
@@ -85,7 +88,8 @@ fn sqlite_end_to_end_smoke() {
 #[test]
 fn sales_history_honours_start_end_date_filter() {
     use book_keeper::core::dtos::SalesHistoryFilter;
-    let path = std::env::temp_dir().join(format!("bk_hist_{}.db", uuid::Uuid::new_v4()));
+    let tmp = common::TempDir::new("hist");
+    let path = tmp.join("shop.db");
     let state = build_sqlite_app_state(&path).expect("build state");
     let item_id = state.item_service.create_item(CreateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,
         name: "Pencil".into(), category: None, barcode: None, base_unit: "pcs".into(), mrp: None,
@@ -121,7 +125,8 @@ fn sales_history_honours_start_end_date_filter() {
 #[test]
 fn tc_exp_015_expense_type_index_is_repaired_at_startup() {
     use book_keeper::core::dtos::{CreateExpenseTypePayload, ExpensePayload};
-    let path = std::env::temp_dir().join(format!("bk_smoke_exp_{}.db", uuid::Uuid::new_v4()));
+    let tmp = common::TempDir::new("smoke_exp");
+    let path = tmp.join("shop.db");
     {
         let state = build_sqlite_app_state(&path).expect("build state");
         for n in ["Printer Ink", "Electricity Bill"] {

@@ -18,6 +18,7 @@ pub mod party_service_impl;
 pub mod payment_service_impl;
 pub mod purchase_service_impl;
 pub mod record_import_service_impl;
+pub mod restore;
 pub mod report_service_impl;
 pub mod return_service_impl;
 pub mod sale_service_impl;
