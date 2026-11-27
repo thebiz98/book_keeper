@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '../testUtils';
 import { SettingsPage } from '@/pages/SettingsPage';
-import type { AppConfigView } from '@/types';
+import type { AppConfigView, RestorePreview } from '@/types';
 import { installApi, flush, waitFor, click, buttonByText, bodyText, setInput } from './helpers';
 
 const pick = vi.hoisted(() => vi.fn());
@@ -181,7 +181,7 @@ const backupRow = {
   stamp: '2026-11-27T03:30:00Z',
   sizeBytes: 2_400_000,
 };
-const goodPreview = {
+const goodPreview: RestorePreview = {
   path: backupRow.path,
   schemaVersion: 12,
   integrityOk: true,
