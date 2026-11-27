@@ -1,6 +1,6 @@
 ﻿# Design Decisions Record (v1 alignment, 2026-11-21)
 
-This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagree. All five docs have been updated to match it. `D-xx` refers to `docs/reviews/00_DOC_ALIGNMENT.md`.
+This record is authoritative wherever the HLD, LLD, UI LLD or UI/UX spec disagree. All five docs have been updated to match it. `D-xx` refers to the 2026-11-22 doc-alignment review (`docs/reviews/00_DOC_ALIGNMENT.md`, removed 2026-11-28; see git history, e.g. `git show 61b13a3:docs/reviews/00_DOC_ALIGNMENT.md`).
 
 ## Money
 
