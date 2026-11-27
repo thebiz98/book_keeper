@@ -78,7 +78,7 @@ fn today() -> String {
 }
 
 fn tomorrow() -> String {
-    (book_keeper::core::clock::now_ist() +chrono::Duration::days(1)).format("%Y-%m-%d").to_string()
+    (book_keeper::core::clock::now_ist() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string()
 }
 
 fn has_error(rep: &ImportValidationReport, field: &str, needle: &str) -> bool {
