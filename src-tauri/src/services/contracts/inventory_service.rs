@@ -1,8 +1,8 @@
 use crate::core::dtos::{
-    ItemBillRef, ItemLot, LotDraw, OpeningQuantityResult, Paginated, PreviewServiceCostPayload, PriorLine, ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
+    AdjustmentListRow, ItemBillRef, ItemLot, LotDraw, OpeningQuantityResult, Paginated, PreviewServiceCostPayload, PriorLine, ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
     StockAdjustmentPreview, StockAdjustmentResult, UpdateOpeningQuantityPayload, AdjustmentUndoGuard,
 };
-use crate::core::entities::{PurchaseItem, StockAdjustment};
+use crate::core::entities::{PurchaseItem};
 use crate::core::error::AppError;
 use crate::core::value_objects::{LotSource, OutflowSourceType};
 use crate::data::contracts::unit_of_work::TransactionContext;
@@ -219,7 +219,7 @@ pub trait InventoryService: Send + Sync {
         item_id: Option<i64>,
         page: Option<usize>,
         limit: Option<usize>,
-    ) -> Result<Paginated<StockAdjustment>, AppError>;
+    ) -> Result<Paginated<AdjustmentListRow>, AppError>;
 
     /// Every item whose cached `current_stock` differs from Σ lot remainders (beyond EPS), as
     /// `(item_id, cached, lots_sum)`.
@@ -420,7 +420,7 @@ impl<T: InventoryService + ?Sized> InventoryService for std::sync::Arc<T> {
         item_id: Option<i64>,
         page: Option<usize>,
         limit: Option<usize>,
-    ) -> Result<Paginated<StockAdjustment>, AppError> {
+    ) -> Result<Paginated<AdjustmentListRow>, AppError> {
         (**self).list_adjustments(item_id, page, limit)
     }
 

@@ -151,3 +151,22 @@ pub struct AdjustmentUndoGuard {
     /// Effect on stock value: positive for a reduction undone, negative for an increase undone.
     pub value_change: f64,
 }
+
+/// One row of the Adjustments list (`list_stock_adjustments`): the adjustment with its item and value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AdjustmentListRow {
+    pub id: i64,
+    pub adjustment_date: String,
+    pub created_at: String,
+    pub item_id: i64,
+    pub item_name: String,
+    pub base_unit: String,
+    pub item_is_active: bool,
+    /// Signed: negative = reduction.
+    pub quantity: f64,
+    pub reason: AdjustmentReason,
+    pub unit_cost: Option<f64>,
+    pub notes: Option<String>,
+    /// Positive. Reduction: the FIFO loss (matches Inventory Losses); increase: `quantity x unit_cost`.
+    pub value: f64,
+}
