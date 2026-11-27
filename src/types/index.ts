@@ -553,6 +553,24 @@ export interface StockAdjustment {
   createdAt: string;
 }
 
+/** Rust AdjustmentListRow: one Adjustments list row, with item and backend-computed value. */
+export interface AdjustmentListRow {
+  id: number;
+  adjustmentDate: string;
+  createdAt: string;
+  itemId: number;
+  itemName: string;
+  baseUnit: string;
+  itemIsActive: boolean;
+  /** Signed: negative = reduction. */
+  quantity: number;
+  reason: AdjustmentReason;
+  unitCost: number | null;
+  notes: string | null;
+  /** Positive. Reduction: FIFO loss (matches Inventory Losses); increase: quantity x unit cost. */
+  value: number;
+}
+
 /** Rust PartyDueSummary. */
 export interface PartyDueSummary {
   partyId: number;

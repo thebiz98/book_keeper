@@ -55,7 +55,7 @@ import type {
   AppConfigView,
   ResetScope,
   ResetSummary,
-  StockAdjustment,
+  AdjustmentListRow,
   StockCondition,
   StockValuationReport,
   TransactionType,
@@ -895,7 +895,7 @@ export interface ApiClient {
     itemId?: number,
     page?: number,
     limit?: number
-  ): Promise<Paginated<StockAdjustment>>;
+  ): Promise<Paginated<AdjustmentListRow>>;
 
   // Reports
   getDashboardMetrics(): Promise<DashboardMetrics>;
