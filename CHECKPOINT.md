@@ -30,9 +30,9 @@
   - Run cargo from PowerShell/cmd, not Git Bash, because Git's `/usr/bin/link` shadows MSVC `link.exe`.
   - All cargo builds use `C:\custom_apps\book_keeper\target`.
 - **Running the app.**
-  - The desktop shortcut runs `scripts\dev-launch.cmd`, which runs `dev-launch.ps1` → `npx tauri dev`.
-  - The console closes when the app closes. A build error keeps it open.
-  - Only what is checked out in this folder runs.
+  - Shop machine: the "Book Keeper" shortcut runs `scripts\launch.cmd` → `launch.ps1`: `git pull --ff-only`, rebuild `target\release\book-keeper.exe` with `npx tauri build --no-bundle` only when HEAD differs from `target\release\.built-commit`, then start the exe. Whatever is pushed to `main` goes live on its next launch.
+  - Development machines: `scripts\dev-launch.cmd` → `npx tauri dev`. The console closes when the app closes; a build error keeps it open.
+  - Only what is checked out in the folder runs.
 - **Data.**
   - The database is `%APPDATA%\com.bookkeeper.app\shop.db`.
   - Backups are in `%APPDATA%\com.bookkeeper.app\backups` (auto every 24 h and on close, kept 7 days) or in the folder chosen in Settings.
