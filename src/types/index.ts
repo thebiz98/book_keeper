@@ -329,6 +329,10 @@ export interface SaleItemDetail {
   bundleName: string | null;
   /** E4 / DD-89: the item's bundle this line was sold in (null: base units or a bundle that is gone). */
   bundleId?: number | null;
+  /** Base units in one pack of the line (null: a base-unit line). Printed next to the bundle name. */
+  unitsPerBundle?: number | null;
+  /** The item's base unit, e.g. "pcs" (null: the item is gone). */
+  baseUnit?: string | null;
   /** Base units already returned. */
   returnedQuantity: number;
   allocations: SaleStockAllocation[];
@@ -398,6 +402,10 @@ export interface PurchaseItemDetail {
   bundleName: string | null;
   /** E4 / DD-89: the item's bundle of this lot (null: base units or a bundle that is gone). */
   bundleId?: number | null;
+  /** Base units in one pack of the line (null: a base-unit line). Printed next to the bundle name. */
+  unitsPerBundle?: number | null;
+  /** The item's base unit, e.g. "pcs" (null: the item is gone). */
+  baseUnit?: string | null;
 }
 
 /** Ledger row (payment_settlement). */

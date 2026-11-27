@@ -27,15 +27,275 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* Bill printing (FR-27): the print view lives in #print-root, hidden on screen. */
+/*
+ * Bill printing (FR-27, FR-43). The print view lives in #print-root, hidden on screen. Layout rules
+ * are scoped to #print-root but sit outside @media print, so the print flow can measure the bill
+ * off-screen (#print-root.print-measure) with the same layout it prints with, then pick a size:
+ *   half  - the top half of the A4 (tear-off bill), with a dashed cut line
+ *   full  - one whole A4
+ *   multi - flows over several A4 pages; the column header repeats, pages are numbered
+ * Content width = 210mm - 2 x 10mm = 190mm.
+ */
 #print-root {
   display: none;
+}
+#print-root.print-measure {
+  display: block;
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 190mm;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+#print-root {
+  font-size: 9.5pt;
+  line-height: 1.3;
+  font-family: ui-sans-serif, system-ui, 'Segoe UI', Roboto, Arial, sans-serif;
+  color: #000;
+}
+#print-root .print-doc {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 0.8pt solid #000;
+  padding: 3mm 3.5mm 2.5mm;
+}
+#print-root .print-doc[data-size='half'] {
+  min-height: 136mm;
+}
+/* Tear-off half sheet: a dashed cut line under the bill, near the middle of the A4. */
+#print-root .print-cut {
+  margin-top: 3mm;
+  border-top: 0.6pt dashed #000;
+  height: 0;
+}
+#print-root .print-doc[data-size='full'] {
+  min-height: 280mm;
+}
+#print-root .print-doc[data-size='multi'] {
+  page: bill-multi;
+}
+
+/* Shop band: name centred, date on the right, closed by a double rule. */
+#print-root .print-shop {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  padding-bottom: 1.5mm;
+  border-bottom: 2pt double #000;
+}
+#print-root .print-shop-main {
+  text-align: center;
+}
+#print-root .print-shop h1 {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 20pt;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  margin: 0 0 1mm;
+}
+#print-root .print-shop-contact {
+  font-size: 8.5pt;
+}
+#print-root .print-shop-date {
+  text-align: right;
+  white-space: nowrap;
+}
+#print-root .print-label {
+  font-size: 7.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #444;
+  margin-right: 1.5mm;
+}
+
+/* Customer | caption | bill no. */
+#print-root .print-meta {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4mm;
+  margin: 2mm 0;
+}
+#print-root .print-caption {
+  border: 0.8pt solid #000;
+  padding: 0.8mm 5mm;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+#print-root .print-bill-meta {
+  text-align: right;
+}
+
+/*
+ * Item grid: three tables with one colgroup (items, ruled filler, totals) read as one ruled box.
+ * Column rules run the full height, no rules between items (bill-book look). Only the filler
+ * grows to fill a half / full sheet.
+ */
+#print-root .print-items {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+#print-root .print-lines {
+  width: 100%;
+  flex: 0 0 auto;
+  table-layout: fixed;
+  border-collapse: collapse;
+  border: 0.8pt solid #000;
+  border-bottom: 0;
+  font-variant-numeric: tabular-nums;
+}
+#print-root .print-lines.print-filler {
+  flex: 1 1 auto;
+  border-top: 0;
+}
+#print-root .print-lines.print-filler td {
+  height: 3mm;
+  padding: 0;
+}
+#print-root .print-lines.print-totals-table {
+  border-top: 0;
+  border-bottom: 0.8pt solid #000;
+}
+#print-root .print-col-num {
+  width: 12mm;
+}
+#print-root .print-col-qty {
+  width: 20mm;
+}
+#print-root .print-col-rate {
+  width: 27mm;
+}
+#print-root .print-col-amount {
+  width: 30mm;
+}
+#print-root .print-lines thead {
+  display: table-header-group;
+}
+#print-root .print-lines th {
+  text-align: left;
+  font-size: 8pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 0.8pt solid #000;
+  padding: 1mm 2mm;
+}
+#print-root .print-lines td {
+  padding: 0.9mm 2mm;
+  vertical-align: top;
+  border-left: 0.5pt solid #000;
+  border-right: 0.5pt solid #000;
+  overflow-wrap: anywhere;
+}
+#print-root .print-lines tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+#print-root .print-item-name {
+  font-weight: 600;
+}
+#print-root .print-bundle {
+  font-size: 8.5pt;
+}
+#print-root .print-num {
+  text-align: center !important;
+}
+#print-root .print-right {
+  text-align: right !important;
+}
+
+/* Subtotal, numbered charges, total: kept together at the bottom of the bill. */
+#print-root .print-totals {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+#print-root .print-lines .print-subtotal td {
+  border-top: 0.8pt solid #000;
+  padding-top: 1.2mm;
+}
+#print-root .print-lines .print-charges-head td {
+  border-top: 0.5pt solid #000;
+  font-size: 8pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 1.2mm;
+}
+#print-root .print-lines .print-total td {
+  border-top: 1.2pt solid #000;
+  font-size: 11pt;
+  font-weight: 700;
+  padding-top: 1.2mm;
+  padding-bottom: 1.2mm;
+  vertical-align: middle;
+}
+#print-root .print-lines .print-total td.print-words {
+  font-size: 8pt;
+  font-weight: 400;
+  font-style: italic;
+}
+
+/*
+ * Footer (manual footer space): payment summary and notes at the top left, the rest left blank for
+ * handwriting; "For <shop>" and the signatory line on the right.
+ */
+#print-root .print-footer {
+  margin-top: 1.5mm;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+#print-root .print-summary {
+  font-size: 8.5pt;
+}
+#print-root .print-notes {
+  margin: 1mm 0 0;
+  font-size: 8.5pt;
+}
+#print-root .print-manual-footer {
+  display: flex;
+  align-items: stretch;
+  gap: 6mm;
+  min-height: 22mm;
+}
+#print-root .print-manual-space {
+  flex: 1 1 auto;
+}
+#print-root .print-sign {
+  width: 55mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: center;
+  font-size: 8.5pt;
+}
+#print-root .print-sign-for {
+  font-weight: 600;
+  padding-top: 1mm;
+}
+#print-root .print-sign-line {
+  border-top: 0.5pt solid #000;
+  padding-top: 0.8mm;
 }
 
 @media print {
   @page {
     size: A4;
-    margin: 15mm;
+    margin: 8mm 10mm;
+  }
+  @page bill-multi {
+    @bottom-right {
+      content: 'Page ' counter(page) ' of ' counter(pages);
+      font-size: 8pt;
+    }
   }
 
   html,
@@ -53,116 +313,16 @@ body {
 
   #print-root {
     display: block !important;
+    position: static !important;
+    visibility: visible !important;
     background: #fff !important;
-    color: #000 !important;
-    font-size: 10.5pt;
-    font-family: ui-sans-serif, system-ui, 'Segoe UI', Roboto, Arial, sans-serif;
   }
-
   #print-root,
   #print-root * {
     color: #000 !important;
     background: transparent !important;
-    border-color: #999 !important;
   }
-
-  /* FR-43: one A4 content area (297mm - 2 x 15mm); the items area stretches so charges sit at its bottom. */
-  #print-root .print-doc {
-    display: flex;
-    flex-direction: column;
-    min-height: 267mm;
-  }
-  #print-root .print-shop {
-    text-align: center;
-    font-size: 10pt;
-    padding-bottom: 2mm;
-    border-bottom: 0.5pt solid #999;
-  }
-  #print-root .print-shop h1 {
-    font-size: 20pt;
-    font-weight: 700;
-    margin: 0 0 1mm;
-  }
-  #print-root .print-caption {
-    text-align: center;
-    font-size: 9pt;
-    margin: 1mm 0 3mm;
-  }
-  #print-root .print-parties {
-    display: flex;
-    justify-content: space-between;
-    gap: 6mm;
-    margin-bottom: 4mm;
-  }
-  #print-root .print-party-right {
-    text-align: right;
-  }
-  #print-root .print-items {
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-  }
-  #print-root .print-lines {
-    width: 100%;
-    flex: 1 1 auto;
-    border-collapse: collapse;
-    border: 0.5pt solid #999;
-    font-variant-numeric: tabular-nums;
-  }
-  #print-root .print-lines thead {
-    display: table-header-group;
-  }
-  #print-root .print-lines th {
-    text-align: left;
-    font-weight: 700;
-    border-bottom: 0.5pt solid #999;
-    padding: 1mm 2mm;
-  }
-  #print-root .print-lines td {
-    padding: 1mm 2mm;
-    vertical-align: top;
-  }
-  #print-root .print-lines tbody tr:not(.print-spacer):not(.print-total) td {
-    border-bottom: 0.5pt solid #ddd !important;
-  }
-  #print-root .print-lines tr {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  #print-root .print-lines .print-spacer {
-    height: 100%;
-  }
-  #print-root .print-lines .print-spacer td {
-    height: 10mm;
-    padding: 0;
-    border-bottom: 0 !important;
-  }
-  #print-root .print-lines .print-subtotal td {
-    border-top: 0.5pt solid #999 !important;
-  }
-  #print-root .print-lines .print-subtotal,
-  #print-root .print-lines .print-totals tr:not(.print-total) {
-    break-after: avoid;
-    page-break-after: avoid;
-  }
-  #print-root .print-lines .print-total td {
-    font-weight: 700;
-    border-top: 0.5pt solid #999 !important;
-    border-bottom: 0 !important;
-  }
-  #print-root .print-num {
-    width: 14mm;
-  }
-  #print-root .print-right {
-    text-align: right !important;
-  }
-  #print-root .print-footer {
-    margin-top: 3mm;
-    font-size: 9.5pt;
-    break-inside: avoid;
-  }
-  #print-root .print-notes {
-    margin: 2mm 0 0;
-    break-inside: avoid;
+  #print-root .print-label {
+    color: #444 !important;
   }
 }

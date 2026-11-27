@@ -957,11 +957,16 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
                 item.pack_label.as_deref(),
                 units_per_pack(item.quantity, item.pack_quantity),
             )?;
+            let units_per_bundle =
+                item.pack_label.as_ref().map(|_| units_per_pack(item.quantity, item.pack_quantity));
+            let base_unit = master.as_ref().map(|i| i.base_unit.clone());
             details.push(SaleItemDetail {
                 sale_item: item,
                 item_name,
                 bundle_name,
                 bundle_id,
+                units_per_bundle,
+                base_unit,
                 returned_quantity,
                 allocations,
                 net_unit_price,
