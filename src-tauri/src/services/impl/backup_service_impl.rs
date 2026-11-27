@@ -21,7 +21,9 @@ fn integrity_ok(conn: &rusqlite::Connection) -> Result<String, AppError> {
 }
 
 impl BackupServiceImpl {
-    /// Online backup of the live database into the (reserved, empty) `dest`, verifying both ends.
+    /// Online backup of the live database into the new file `dest`, verifying both ends.
+    /// One step (`-1`) copies every page under a single read snapshot, so concurrent writers
+    /// never restart the copy.
     fn copy_and_verify(&self, dest: &Path) -> Result<(), AppError> {
         let src_conn = rusqlite::Connection::open(&self.db_path)
             .map_err(|e| AppError::DatabaseError(format!("Failed to open source db: {e}")))?;
@@ -36,9 +38,22 @@ impl BackupServiceImpl {
         {
             let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
                 .map_err(|e| AppError::DatabaseError(format!("Backup initialization failed: {e}")))?;
-            backup
-                .run_to_completion(5, std::time::Duration::from_millis(100), None)
-                .map_err(|e| AppError::DatabaseError(format!("Backup execution failed: {e}")))?;
+            // `run_to_completion` rejects -1, so step directly; Busy/Locked (a writer holds the
+            // lock for a moment) is retried briefly.
+            let mut waits = 0;
+            loop {
+                use rusqlite::backup::StepResult;
+                match backup.step(-1) {
+                    Ok(StepResult::Done) => break,
+                    Ok(StepResult::More) => {}
+                    Ok(StepResult::Busy | StepResult::Locked) if waits < 100 => {
+                        waits += 1;
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Ok(_) => return Err(AppError::DatabaseError("Backup execution failed: database busy".into())),
+                    Err(e) => return Err(AppError::DatabaseError(format!("Backup execution failed: {e}"))),
+                }
+            }
         }
         let dst_state = integrity_ok(&dst_conn)?;
         if dst_state != "ok" {
@@ -97,8 +112,22 @@ impl BackupServiceImpl {
             return Err(AppError::IoError("Backup target cannot be the live database".into()));
         }
 
-        let result = self.copy_and_verify(&final_dest_path);
+        // Copy into `<final>.tmp` and only then rename over our own zero-byte reservation, so a
+        // killed run never leaves a half-written file under a backup name.
+        let mut tmp_name = final_dest_path.as_os_str().to_owned();
+        tmp_name.push(".tmp");
+        let tmp_path = PathBuf::from(tmp_name);
+        let _ = std::fs::remove_file(&tmp_path);
+        let result = self.copy_and_verify(&tmp_path).and_then(|()| {
+            // All connections to the tmp file are closed by now. Windows `rename` replaces the
+            // reservation; nothing but our own empty reservation is ever replaced.
+            std::fs::rename(&tmp_path, &final_dest_path)
+                .map_err(|e| AppError::IoError(format!("Cannot finish backup file: {e}")))
+        });
         if let Err(e) = result {
+            for ext in ["", "-wal", "-shm", "-journal"] {
+                let _ = std::fs::remove_file(format!("{}{ext}", tmp_path.display()));
+            }
             let _ = std::fs::remove_file(&final_dest_path);
             return Err(e);
         }
@@ -127,6 +156,7 @@ impl BackupService for BackupServiceImpl {
         let now = crate::core::clock::now_local().naive_local();
         let doomed = select_for_deletion(&names, now, retention_days);
         let mut deleted = Vec::new();
+        sweep_stale_tmp(dir, &names);
         for name in doomed {
             match std::fs::remove_file(Path::new(dir).join(&name)) {
                 Ok(()) => deleted.push(name),
@@ -160,6 +190,22 @@ impl BackupService for BackupServiceImpl {
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
 
         Ok(integrity == "ok")
+    }
+}
+
+/// Deletes `book_keeper_*.db.tmp` files older than an hour, left by a killed backup.
+fn sweep_stale_tmp(dir: &str, names: &[String]) {
+    let limit = std::time::Duration::from_secs(60 * 60);
+    for name in names.iter().filter(|n| n.starts_with("book_keeper_") && n.ends_with(".db.tmp")) {
+        let p = Path::new(dir).join(name);
+        let old = std::fs::metadata(&p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > limit);
+        if old {
+            let _ = std::fs::remove_file(&p);
+        }
     }
 }
 
