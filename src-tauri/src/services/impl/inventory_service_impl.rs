@@ -2,9 +2,10 @@ use std::sync::Arc;
 use crate::core::constants::EPS;
 use crate::core::dtos::{
     ItemBillRef, ItemLot, LotDraw, LotDrawComponent, OpeningQuantityResult, UpdateOpeningQuantityPayload, AdjustmentUndoGuard, AdjustmentUndoReason, LotDrawLot, PageRequest, Paginated, PreviewServiceCostPayload, PriorLine,
-    ServiceCostPreview, SetItemStockPayload, SetItemStockResult, StockAdjustmentPayload,
-    StockAdjustmentPreview, StockAdjustmentResult,
+    ServiceCostPreview, SetItemStockPayload, SetItemStockResult, SetStockMode, SetStockOption, StockAdjustmentPayload,
+    StockAdjustmentPreview, StockAdjustmentResult, UndoableWriteoff,
 };
+use crate::services::r#impl::item_guard::ensure_active_item;
 use crate::core::money::{check_entry_date_now, net_unit_price, round2};
 use crate::core::entities::{
     Item, PurchaseItem, PurchaseTransaction, ReturnTransaction, StockAdjustment, StockOutflowAllocation,
@@ -271,9 +272,15 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
         if payload.reason == AdjustmentReason::UnrecordedStock && payload.quantity < 0.0 {
             return Err(validation("quantity", "Unrecorded stock can only add stock; use Count correction to reduce it"));
         }
+        if payload.quantity > 0.0 && !payload.reason.allows_increase() {
+            // DD-92 (S3): found stock is Unrecorded stock or a Count correction, never a gain.
+            return Err(validation("reason", "Damaged, Expired and Theft can only reduce stock."));
+        }
 
         let item = find_item(tx, payload.item_id)?;
         require_stockable(&item)?;
+        // Probed before the write, so the adjustment being made is never listed.
+        let undoable_writeoffs = if payload.quantity > 0.0 { self.undoable_writeoffs(tx, item.id)? } else { Vec::new() };
         let (adjustment_id, loss_value, cost_used) = self.post_adjustment(
             tx,
             &item,
@@ -297,8 +304,188 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
                 unit_cost: cost_used,
                 loss_value,
                 value_change,
+                undoable_writeoffs,
             },
         ))
+    }
+
+    /// G7 dry run of undoing one adjustment, inside the caller's transaction (savepoint, rolled back).
+    /// `None` when the undo guard refuses it.
+    fn undo_probe(&self, tx: &mut dyn TransactionContext, adj: &StockAdjustment) -> Result<Option<UndoableWriteoff>, AppError> {
+        tx.savepoint("undo_probe")?;
+        let probe = self.undo_adjustment_in_tx(tx, adj.id);
+        tx.rollback_to_savepoint("undo_probe")?;
+        match probe {
+            Ok(g) => Ok(Some(UndoableWriteoff {
+                adjustment_id: adj.id,
+                adjustment_date: adj.adjustment_date.clone(),
+                quantity: -adj.quantity,
+                reason: adj.reason,
+                loss: g.loss_removed,
+            })),
+            Err(AppError::BillLocked { .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// DD-92: the item's reductions, newest first (max 5), that G7 says can be undone.
+    fn undoable_writeoffs(&self, tx: &mut dyn TransactionContext, item_id: i64) -> Result<Vec<UndoableWriteoff>, AppError> {
+        let (rows, _) = tx.adjustments().list_adjustments(Some(item_id), 0, 50)?;
+        let mut out = Vec::new();
+        for a in rows.iter().filter(|a| a.quantity < 0.0) {
+            if out.len() >= 5 {
+                break;
+            }
+            if let Some(w) = self.undo_probe(tx, a)? {
+                out.push(w);
+            }
+        }
+        Ok(out)
+    }
+
+    /// The reductions (write-offs) that drew from any of `lot_ids`, oldest first.
+    fn writeoffs_on_lots(tx: &mut dyn TransactionContext, lot_ids: &[i64]) -> Result<Vec<StockAdjustment>, AppError> {
+        let mut ids: Vec<i64> = Vec::new();
+        for &lot in lot_ids {
+            for id in tx.outflow_allocations().source_ids_for_lot(lot, OutflowSourceType::Adjustment)? {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+        ids.sort_unstable();
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(a) = tx.adjustments().find_by_id(id)? {
+                out.push(a);
+            }
+        }
+        Ok(out)
+    }
+
+    /// "write-off #3 (2026-11-20, 2 PCS), ..." or `None` when no write-off drew from the lots.
+    fn name_writeoffs(writeoffs: &[StockAdjustment], unit: &str) -> Option<String> {
+        if writeoffs.is_empty() {
+            return None;
+        }
+        let names: Vec<String> = writeoffs
+            .iter()
+            .map(|a| format!("#{} ({}, {} {unit})", a.id, a.adjustment_date, -a.quantity))
+            .collect();
+        let noun = if names.len() == 1 { "write-off" } else { "write-offs" };
+        Some(format!("{noun} {}", names.join(", ")))
+    }
+
+    /// FR-57 scope B: the "Opening stock was entered wrong" path for a Set stock change of `delta`.
+    /// `openings` are the item's OPENING lots in id order. Returns the option and, when it is
+    /// disabled by write-offs, the undoable ones among them.
+    fn opening_option(
+        &self,
+        tx: &mut dyn TransactionContext,
+        item: &Item,
+        openings: &[ItemLot],
+        delta: f64,
+    ) -> Result<(SetStockOption, Vec<UndoableWriteoff>), AppError> {
+        let unit = &item.base_unit;
+        let label = "Opening stock was entered wrong (no loss)".to_string();
+        if delta > 0.0 {
+            let newest = openings.last().expect("caller passes at least one opening lot");
+            let opt = SetStockOption {
+                mode: SetStockMode::OpeningCorrection,
+                label,
+                detail: format!(
+                    "Raises the opening stock by {delta} {unit} at its cost (₹{}). No adjustment is recorded.",
+                    newest.unit_cost
+                ),
+                enabled: true,
+                disabled_reason: None,
+                takes_unit_cost: false,
+            };
+            return Ok((opt, Vec::new()));
+        }
+        let need = -delta;
+        let unused: f64 = openings.iter().map(|l| l.remaining_quantity).sum();
+        let mut opt = SetStockOption {
+            mode: SetStockMode::OpeningCorrection,
+            label,
+            detail: format!("Takes {need} {unit} off the unused opening stock. No loss is booked."),
+            enabled: true,
+            disabled_reason: None,
+            takes_unit_cost: false,
+        };
+        let mut undoable = Vec::new();
+        if unused + EPS < need {
+            let lot_ids: Vec<i64> = openings.iter().map(|l| l.purchase_item_id).collect();
+            let writeoffs = Self::writeoffs_on_lots(tx, &lot_ids)?;
+            let unused_r = (unused * 1e6).round() / 1e6;
+            let mut reason = format!(
+                "Only {unused_r} {unit} of the opening stock is unused, so it cannot take off {need} {unit}."
+            );
+            if let Some(named) = Self::name_writeoffs(&writeoffs, unit) {
+                reason.push_str(&format!(" The rest is used, including {named}: undo those first, then set the stock again."));
+                for a in &writeoffs {
+                    if let Some(w) = self.undo_probe(tx, a)? {
+                        undoable.push(w);
+                    }
+                }
+            } else {
+                reason.push_str(" The rest has been sold.");
+            }
+            opt.enabled = false;
+            opt.disabled_reason = Some(reason);
+        }
+        Ok((opt, undoable))
+    }
+
+    /// Applies an opening correction of `delta` through G6's `update_opening_quantity_in_tx`:
+    /// down takes unused remaining from the newest opening lot first; up raises the newest one.
+    /// Returns `(value_change, unit_cost of the raised lot)`.
+    fn apply_opening_correction(
+        &self,
+        tx: &mut dyn TransactionContext,
+        openings: &[ItemLot],
+        delta: f64,
+    ) -> Result<(f64, Option<f64>), AppError> {
+        if delta > 0.0 {
+            let newest = openings.last().expect("caller passes at least one opening lot");
+            let lot = tx
+                .purchases()
+                .find_purchase_item_by_id(newest.purchase_item_id)?
+                .ok_or_else(|| AppError::not_found("PurchaseItem", newest.purchase_item_id.to_string()))?;
+            let r = self.update_opening_quantity_in_tx(
+                tx,
+                &UpdateOpeningQuantityPayload { purchase_item_id: lot.id, quantity: lot.quantity + delta },
+            )?;
+            return Ok((r.value_change, Some(lot.unit_cost)));
+        }
+        let mut left = -delta;
+        let mut value_change = 0.0;
+        for l in openings.iter().rev() {
+            if left <= EPS {
+                break;
+            }
+            let lot = tx
+                .purchases()
+                .find_purchase_item_by_id(l.purchase_item_id)?
+                .ok_or_else(|| AppError::not_found("PurchaseItem", l.purchase_item_id.to_string()))?;
+            let take = lot.remaining_quantity.min(left);
+            if take <= EPS {
+                continue;
+            }
+            let quantity = if (lot.remaining_quantity - take).abs() <= EPS {
+                lot.quantity - lot.remaining_quantity // exactly the consumed floor
+            } else {
+                lot.quantity - take
+            };
+            let r = self.update_opening_quantity_in_tx(tx, &UpdateOpeningQuantityPayload { purchase_item_id: lot.id, quantity })?;
+            value_change += r.value_change;
+            left -= take;
+        }
+        if left > EPS {
+            // The option check above makes this unreachable; never write a partial correction.
+            return Err(locked("OPENING_STOCK_USED", "The unused opening stock cannot cover this decrease"));
+        }
+        Ok((round2(value_change), None))
     }
 
     /// Body of `set_item_stock` inside the caller's transaction; shared with the preview (DD-56).
@@ -321,36 +508,106 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
         require_stockable(&item)?;
         let previous = item.current_stock;
         let delta = ((p.counted_quantity - previous) * 1e6).round() / 1e6;
-        if delta.abs() <= EPS {
-            // Nothing written.
-            return Ok(SetItemStockResult {
-                adjustment_id: None,
-                delta: 0.0,
-                reason: None,
-                previous_stock: previous,
-                new_stock: previous,
-                unit_cost: None,
-                value_change: 0.0,
-            });
-        }
-        let (reason, cost_in) = if delta > 0.0 {
-            (AdjustmentReason::UnrecordedStock, p.unit_cost)
-        } else {
-            (AdjustmentReason::CountCorrection, None)
-        };
-        let (id, loss, cost_used) =
-            self.post_adjustment(tx, &item, &p.adjustment_date, delta, reason, cost_in, p.notes.clone())?;
-        let new_stock = tx.items().find_by_id(item.id)?.map(|i| i.current_stock).unwrap_or(previous + delta);
-        let value_change = if delta > 0.0 { round2(delta * cost_used.unwrap_or(0.0)) } else { -round2(loss) };
-        Ok(SetItemStockResult {
-            adjustment_id: Some(id),
-            delta,
-            reason: Some(reason),
+        let mut out = SetItemStockResult {
+            adjustment_id: None,
+            delta: 0.0,
+            reason: None,
             previous_stock: previous,
-            new_stock,
-            unit_cost: cost_used,
-            value_change,
-        })
+            new_stock: previous,
+            unit_cost: None,
+            value_change: 0.0,
+            mode: None,
+            options: Vec::new(),
+            choice_required: false,
+            undoable_writeoffs: Vec::new(),
+        };
+        if delta.abs() <= EPS {
+            return Ok(out); // Nothing written.
+        }
+        out.delta = delta;
+
+        // FR-57 scope B: the paths for this change, decided here (DD-56). Probes run before any write.
+        let openings: Vec<ItemLot> = tx
+            .purchases()
+            .list_lots_for_item(item.id)?
+            .into_iter()
+            .filter(|l| l.source == LotSource::Opening)
+            .collect();
+        if delta > 0.0 {
+            out.undoable_writeoffs = self.undoable_writeoffs(tx, item.id)?;
+        }
+        if !openings.is_empty() {
+            let (opt, undoable) = self.opening_option(tx, &item, &openings, delta)?;
+            out.options.push(opt);
+            if delta < 0.0 {
+                out.undoable_writeoffs = undoable;
+            }
+        }
+        out.options.push(if delta > 0.0 {
+            SetStockOption {
+                mode: SetStockMode::Adjustment,
+                label: "Found / unrecorded stock".to_string(),
+                detail: "Adds a lot at the unit cost. No gain is booked: profit comes when it sells.".to_string(),
+                enabled: true,
+                disabled_reason: None,
+                takes_unit_cost: true,
+            }
+        } else {
+            SetStockOption {
+                mode: SetStockMode::Adjustment,
+                label: "Lost, damaged or miscounted (loss)".to_string(),
+                detail: "Records a count correction: its FIFO cost is an Inventory Loss.".to_string(),
+                enabled: true,
+                disabled_reason: None,
+                takes_unit_cost: false,
+            }
+        });
+        let mode = match p.mode {
+            Some(m) => {
+                let opt = out
+                    .options
+                    .iter()
+                    .find(|o| o.mode == m)
+                    .ok_or_else(|| validation("mode", format!("'{}' has no opening stock to correct", item.name)))?;
+                if !opt.enabled {
+                    return Err(validation("mode", opt.disabled_reason.clone().unwrap_or_default()));
+                }
+                m
+            }
+            None => {
+                let enabled: Vec<SetStockMode> = out.options.iter().filter(|o| o.enabled).map(|o| o.mode).collect();
+                if enabled.len() != 1 {
+                    // Two paths: the user picks; nothing is applied (the commit refuses this result).
+                    out.choice_required = true;
+                    return Ok(out);
+                }
+                enabled[0]
+            }
+        };
+        out.mode = Some(mode);
+
+        match mode {
+            SetStockMode::Adjustment => {
+                let (reason, cost_in) = if delta > 0.0 {
+                    (AdjustmentReason::UnrecordedStock, p.unit_cost)
+                } else {
+                    (AdjustmentReason::CountCorrection, None)
+                };
+                let (id, loss, cost_used) =
+                    self.post_adjustment(tx, &item, &p.adjustment_date, delta, reason, cost_in, p.notes.clone())?;
+                out.adjustment_id = Some(id);
+                out.reason = Some(reason);
+                out.unit_cost = cost_used;
+                out.value_change = if delta > 0.0 { round2(delta * cost_used.unwrap_or(0.0)) } else { -round2(loss) };
+            }
+            SetStockMode::OpeningCorrection => {
+                let (value_change, cost) = self.apply_opening_correction(tx, &openings, delta)?;
+                out.unit_cost = cost;
+                out.value_change = value_change;
+            }
+        }
+        out.new_stock = tx.items().find_by_id(item.id)?.map(|i| i.current_stock).unwrap_or(previous + delta);
+        Ok(out)
     }
 
     /// Body of `undo_stock_adjustment` inside the caller's transaction; shared with the guard (DD-56, FR-52).
@@ -447,14 +704,23 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
         if header.source != LotSource::Opening {
             return Err(validation("purchase_item_id", "Only opening stock can be edited here"));
         }
-        let old_stock = find_item(tx, lot.item_id)?.current_stock;
+        let item = find_item(tx, lot.item_id)?;
+        // D10: a deleted item is only history; editing its opening stock would use it.
+        ensure_active_item(&item)?;
+        let old_stock = item.current_stock;
         let consumed = lot.quantity - lot.remaining_quantity;
         if p.quantity + EPS < consumed {
             // Checked here so 0 gets the floor message, not edit_purchase_lot's "must be positive".
-            return Err(locked(
-                "LOT_BELOW_CONSUMED",
-                format!("'{}': at least {consumed} already used, quantity cannot go below that", lot.item_name),
-            ));
+            // FR-57: name the write-offs inside "already used" so the user can undo them (G7).
+            let writeoffs = Self::writeoffs_on_lots(tx, &[lot.id])?;
+            let message = match Self::name_writeoffs(&writeoffs, &item.base_unit) {
+                Some(named) => format!(
+                    "'{}': at least {consumed} already used, including {named}. Quantity cannot go below that: undo those write-offs first (Returns & Adjustments), then edit again.",
+                    lot.item_name
+                ),
+                None => format!("'{}': at least {consumed} already used, quantity cannot go below that", lot.item_name),
+            };
+            return Err(locked("LOT_BELOW_CONSUMED", message));
         }
         let mut lot_removed = false;
         if p.quantity <= EPS && consumed <= EPS {
@@ -788,6 +1054,10 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
     fn set_item_stock(&self, p: SetItemStockPayload) -> Result<SetItemStockResult, AppError> {
         let mut tx = self.uow.begin_transaction()?;
         let result = self.set_item_stock_in_tx(&mut *tx, &p)?;
+        if result.choice_required {
+            // The body applied nothing; never default silently to the loss (FR-57 scope B).
+            return Err(validation("mode", "Choose why the stock changed: opening stock entered wrong, or a stock adjustment"));
+        }
         tx.commit()?;
         Ok(result)
     }
@@ -939,7 +1209,13 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
 
     fn get_item_lots(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError> {
         let mut tx = self.uow.begin_read()?;
-        tx.purchases().list_lots_for_item(item_id)
+        let mut lots = tx.purchases().list_lots_for_item(item_id)?;
+        // DD-92 (S7): the strategy's own draw order (FIFO = entry order, by id), never the date.
+        let order = self.strategy.open_lots_in_draw_order(&mut *tx, item_id)?;
+        for l in lots.iter_mut() {
+            l.fifo_rank = order.iter().position(|o| o.id == l.purchase_item_id).map(|i| i as i64 + 1);
+        }
+        Ok(lots)
     }
 
     fn get_item_sales(&self, item_id: i64, page: Option<usize>, limit: Option<usize>) -> Result<Paginated<ItemBillRef>, AppError> {

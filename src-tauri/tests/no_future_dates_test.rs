@@ -276,6 +276,7 @@ fn stock_adjustment_and_set_stock() {
         unit_cost: None,
         adjustment_date: d.into(),
         notes: None,
+        mode: None,
     };
     with_today(TODAY, || {
         assert_future(e.inv.create_adjustment(adj(TOMORROW)), "adjustment_date");

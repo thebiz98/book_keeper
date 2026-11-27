@@ -15,7 +15,7 @@ pub mod return_dto;
 pub mod sale_dto;
 
 pub use adjustment_dto::{
-    AdjustmentItemPayload, AdjustmentUndoGuard, AdjustmentUndoReason, OpeningQuantityResult, SetItemStockPayload, UpdateOpeningQuantityPayload, SetItemStockResult, StockAdjustmentPayload, StockAdjustmentResult,
+    AdjustmentItemPayload, AdjustmentUndoGuard, AdjustmentUndoReason, OpeningQuantityResult, SetItemStockPayload, UpdateOpeningQuantityPayload, SetItemStockResult, SetStockMode, SetStockOption, StockAdjustmentPayload, StockAdjustmentResult, UndoableWriteoff,
 };
 pub use charge_dto::{BillChargeInput, CreateChargeTypePayload};
 pub use correction_dto::{

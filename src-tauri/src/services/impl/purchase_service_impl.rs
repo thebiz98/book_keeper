@@ -20,7 +20,7 @@ use crate::services::r#impl::bill_math::{
     validate_charge_inputs, BillFigures, BillTotals, ResolvedCharge,
 };
 use crate::services::contracts::payment_service::BillUpfront;
-use crate::core::value_objects::{LotSource, PartyType, PaymentKind, PaymentStatus, TransactionType};
+use crate::core::value_objects::{LotSource, OutflowSourceType, PartyType, PaymentKind, PaymentStatus, TransactionType};
 use crate::data::contracts::unit_of_work::{TransactionContext, UnitOfWork};
 use crate::services::contracts::inventory_service::{InventoryService, LotEdit};
 use crate::services::contracts::payment_service::PaymentService;
@@ -521,6 +521,10 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         if header.source == LotSource::Return {
             return Err(validation("purchase_item_id", "Lots created by customer returns cannot be re-priced"));
         }
+        // DD-92 (S11): sold from or moved out (adjustment, replacement, vendor return), so past COGS / losses use this cost.
+        let recosts_history = !tx.allocations().sale_item_ids_for_lot(lot.id)?.is_empty()
+            || tx.outflow_allocations().exists_for_lot(lot.id, OutflowSourceType::Adjustment)?
+            || tx.outflow_allocations().exists_for_lot(lot.id, OutflowSourceType::Replacement)?;
         let new_total_line = round2(lot.pack_quantity * payload.unit_price);
         let new_cost = new_total_line / lot.quantity;
         if (new_cost - lot.unit_cost).abs() <= 1e-9 {
@@ -539,6 +543,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
                 old_unit_cost: lot.unit_cost,
                 new_unit_cost: lot.unit_cost,
                 bill,
+                recosts_history,
             });
         }
         let edit = LotEdit {
@@ -563,6 +568,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
                 old_unit_cost: lot.unit_cost,
                 new_unit_cost: new_cost,
                 bill: None,
+                recosts_history,
             });
         }
         let g = evaluate_purchase_guard(tx, header.id)?;
@@ -640,6 +646,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
                 balance_due: after.balance_due,
                 payment_status: after.payment_status,
             }),
+            recosts_history,
         })
     }
 

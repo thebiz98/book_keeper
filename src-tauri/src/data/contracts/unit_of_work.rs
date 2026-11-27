@@ -50,6 +50,11 @@ pub trait TransactionContext {
     /// Explicitly aborts the transaction (automatic on drop if not committed).
     fn rollback(self: Box<Self>) -> Result<(), AppError>;
 
+    /// Opens a named savepoint inside the live transaction (DD-92: a dry run nested in a body).
+    fn savepoint(&mut self, name: &str) -> Result<(), AppError>;
+    /// Undoes everything since `savepoint(name)` and closes it.
+    fn rollback_to_savepoint(&mut self, name: &str) -> Result<(), AppError>;
+
     // Repositories scoped to the live transaction handle:
     fn items(&mut self) -> &mut dyn ItemRepository;
     fn bundles(&mut self) -> &mut dyn BundleRepository;

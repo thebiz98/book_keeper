@@ -184,4 +184,7 @@ pub struct StockAdjustmentPreview {
     pub loss_value: f64,
     /// `+qty x unit_cost` when adding, `-loss_value` when writing off.
     pub value_change: f64,
+    /// DD-92: for an increase, earlier write-offs of the item that G7 can undo (the "Undo it instead" hint).
+    #[serde(default)]
+    pub undoable_writeoffs: Vec<crate::core::dtos::adjustment_dto::UndoableWriteoff>,
 }

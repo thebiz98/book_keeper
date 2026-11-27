@@ -273,7 +273,12 @@ impl PurchaseRepository for SqlitePurchaseRepository {
         Ok(self
             .conn
             .query_row(
-                "SELECT unit_cost FROM purchase_items WHERE item_id = ?1 ORDER BY id DESC LIMIT 1",
+                // DD-92 (S8): the latest PURCHASE or OPENING lot first, so one mistyped adjustment
+                // cost does not carry forward; else the latest lot of any source.
+                "SELECT p.unit_cost FROM purchase_items p \
+                 JOIN purchase_transactions t ON t.id = p.purchase_transaction_id \
+                 WHERE p.item_id = ?1 \
+                 ORDER BY CASE WHEN t.source IN ('PURCHASE', 'OPENING') THEN 0 ELSE 1 END, p.id DESC LIMIT 1",
                 params![item_id],
                 |r| r.get::<_, f64>(0),
             )
@@ -327,6 +332,7 @@ impl PurchaseRepository for SqlitePurchaseRepository {
                     unit_cost: r.get(8)?,
                     pack_label: r.get(9)?,
                     pack_quantity: r.get(10)?,
+                    fifo_rank: None,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

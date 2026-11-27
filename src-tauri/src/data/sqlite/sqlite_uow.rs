@@ -139,6 +139,16 @@ impl TransactionContext for SqliteTransactionContext {
         Ok(())
     }
 
+    fn savepoint(&mut self, name: &str) -> Result<(), AppError> {
+        self.conn.execute_batch(&format!("SAVEPOINT {name}"))?;
+        Ok(())
+    }
+
+    fn rollback_to_savepoint(&mut self, name: &str) -> Result<(), AppError> {
+        self.conn.execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))?;
+        Ok(())
+    }
+
     fn items(&mut self) -> &mut dyn ItemRepository { &mut self.items }
     fn bundles(&mut self) -> &mut dyn BundleRepository { &mut self.bundles }
     fn purchases(&mut self) -> &mut dyn PurchaseRepository { &mut self.purchases }

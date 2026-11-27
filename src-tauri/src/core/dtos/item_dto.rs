@@ -288,6 +288,10 @@ pub struct ItemLot {
     pub quantity: f64,
     pub remaining_quantity: f64,
     pub unit_cost: f64,
+    /// DD-92 (S7): 1-based place in the FIFO draw (entry order, by id) among lots with stock left;
+    /// `None` for a used-up lot.
+    #[serde(default)]
+    pub fifo_rank: Option<i64>,
 }
 
 /// One open lot in a sale-row lot draw (FR-31).

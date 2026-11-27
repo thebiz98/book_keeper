@@ -20,7 +20,8 @@ pub trait PurchaseRepository {
     /// Lots of any source with `remaining_quantity > 0`. Order is NOT part of the contract (it is
     /// `id` only for determinism); allocation strategies sort the lots themselves.
     fn get_active_lots_for_item(&self, item_id: i64) -> Result<Vec<PurchaseItem>, AppError>;
-    /// `unit_cost` of the item's most recent lot (highest id, any source, any remaining).
+    /// `unit_cost` of the item's most recent PURCHASE or OPENING lot (highest id, any remaining),
+    /// else of its most recent lot of any source (DD-92, S8).
     fn get_latest_lot_cost(&self, item_id: i64) -> Result<Option<f64>, AppError>;
     /// Lot inspector rows (header code, source, date, vendor), oldest lot first.
     fn list_lots_for_item(&self, item_id: i64) -> Result<Vec<ItemLot>, AppError>;

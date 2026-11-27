@@ -246,7 +246,7 @@ fn test_tc_inv_013_unrecorded_stock_must_be_positive() {
 
 fn set(item_id: i64, counted: f64, cost: Option<f64>) -> SetItemStockPayload {
     SetItemStockPayload {
-        item_id, counted_quantity: counted, unit_cost: cost, adjustment_date: "2026-11-21".into(), notes: None,
+        item_id, counted_quantity: counted, unit_cost: cost, adjustment_date: "2026-11-21".into(), notes: None, mode: None,
     }
 }
 
@@ -421,7 +421,7 @@ fn adjustment_validation_rejects_bad_input() {
     let mut empty_date = adj(1, 1.0, AdjustmentReason::Damaged, None);
     empty_date.adjustment_date = String::new();
     assert!(matches!(inv.create_adjustment(empty_date), Err(AppError::ValidationError { .. })));
-    assert!(matches!(inv.create_adjustment(adj(404, 1.0, AdjustmentReason::Damaged, Some(1.0))), Err(AppError::NotFound { .. })));
+    assert!(matches!(inv.create_adjustment(adj(404, 1.0, AdjustmentReason::CountCorrection, Some(1.0))), Err(AppError::NotFound { .. })));
     assert!(matches!(inv.create_adjustment(adj(1, 1.0, AdjustmentReason::Damaged, Some(-2.0))), Err(AppError::ValidationError { .. })));
     // inactive item
     let mut tx = db.begin_transaction().unwrap();
@@ -429,7 +429,7 @@ fn adjustment_validation_rejects_bad_input() {
     item.is_active = false;
     tx.items().update(&item).unwrap();
     tx.commit().unwrap();
-    assert!(matches!(inv.create_adjustment(adj(1, 1.0, AdjustmentReason::Damaged, Some(1.0))), Err(AppError::ValidationError { .. })));
+    assert!(matches!(inv.create_adjustment(adj(1, 1.0, AdjustmentReason::CountCorrection, Some(1.0))), Err(AppError::ValidationError { .. })));
     assert_eq!(stock(&db, 1).0, 10.0);
 }
 
@@ -704,7 +704,7 @@ fn g6_edit_up_and_to_zero_when_unused() {
 
 fn set_stock(inv: &Inv, id: i64, counted: f64) -> i64 {
     inv.set_item_stock(SetItemStockPayload {
-        item_id: id, counted_quantity: counted, unit_cost: None, adjustment_date: "2026-11-26".into(), notes: None,
+        item_id: id, counted_quantity: counted, unit_cost: None, adjustment_date: "2026-11-26".into(), notes: None, mode: Some(SetStockMode::Adjustment),
     })
     .unwrap()
     .adjustment_id
