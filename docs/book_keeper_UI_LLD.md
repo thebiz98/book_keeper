@@ -792,7 +792,7 @@ UI only; no backend, schema or IPC change.
 * **Tests (Vitest, `openingQty.test.tsx`).** used / minimum / preview / save; backend refusal blocks Save; save error shown.
 
 ## Undo a Stock Adjustment (FR-52, DD-85, `feat/adjustment-undo`, v1.6 G7)
-* **`AdjustmentsHistoryList`.** Every row has an **Undo** button (`Undo adjustment #N`). It opens a `ConfirmDialog` after fetching `get_adjustment_undo_guard`; the text is built only from the guard's numbers ("Puts 5 PCS back into stock and removes ₹X from Inventory Losses" / "Removes 5 PCS added by this adjustment"). When the guard blocks, the reason is shown and Undo is disabled. Confirm passes the async function to `ConfirmDialog` (pending guard). After success the list reloads and `refreshAppMetrics()` runs.
+* **`AdjustmentsHistoryList`.** Every row has an **Undo** button (`Undo adjustment #N`). It opens a `ConfirmDialog` after fetching `get_adjustment_undo_guard`; the text is built only from the guard's numbers ("Puts 5 PCS back into stock and removes ₹X from Inventory Losses" / "Removes 5 PCS added by this adjustment"). When the guard blocks, the reason is shown and Undo is disabled. Confirm passes the async function to `ConfirmDialog` (pending guard). After success the list reloads and `refreshAppMetrics()` runs. The columns are Ref, Date, Item, Change, Reason, Value, Notes and Undo; the Value comes from the backend `list_stock_adjustments` row (loss = FIFO cost of the write-off, matching Inventory Losses; added = qty × unit cost), never computed in the UI.
 * **Tests (Vitest).** Undo opens the effect, confirm calls `undoStockAdjustment`; blocked reason disables Undo.
 
 ## v1.7 money and stock correctness (FR-53..FR-59, DD-86..DD-97, H1..H7)

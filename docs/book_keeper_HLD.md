@@ -1580,6 +1580,7 @@ interface StockAdjustmentPayload {
 
 // Command: list_stock_adjustments
 // Input: { item_id?: number, page: number, limit: number }
+// Output: Paginated<AdjustmentListRow> (adds item_name, base_unit, item_is_active, value)
 ```
 
 #### 7. Financial Reports & Backup Domain (`reports_api`, `settings_api`)
