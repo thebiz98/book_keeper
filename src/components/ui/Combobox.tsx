@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, ChevronDown, Check } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, HIGHLIGHT_ROW } from '@/lib/utils';
 import { useEscapeLayer } from '@/hooks/useHotkeys';
 
 export interface ComboboxOption<T = string | number> {
@@ -180,7 +180,7 @@ export function Combobox<T extends string | number = string>({
                     onMouseEnter={() => setHighlightedIndex(idx)}
                     className={cn(
                       'flex items-center justify-between px-3 py-1.5 text-xs cursor-pointer select-none transition-colors',
-                      isHighlighted && 'bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100',
+                      isHighlighted && HIGHLIGHT_ROW,
                       isSelected && 'font-semibold text-blue-600 dark:text-blue-400',
                       opt.disabled && 'opacity-40 cursor-not-allowed'
                     )}

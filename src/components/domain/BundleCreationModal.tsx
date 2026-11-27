@@ -7,6 +7,7 @@ import { Modal } from '../ui/Modal';
 import { FormActions, enterToSubmit } from '../ui/FormActions';
 import { TextInput } from '../ui/TextInput';
 import { parseOptional, validationField } from './formUtils';
+import { HIGHLIGHT_ROW } from '@/lib/utils';
 
 export interface BundleCreationModalProps {
   isOpen: boolean;
@@ -219,7 +220,7 @@ export const BundleCreationModal: React.FC<BundleCreationModalProps> = ({
                     }}
                     onMouseEnter={() => setHighlight(idx)}
                     className={`flex items-center gap-1.5 px-3 py-1 text-xs cursor-pointer ${
-                      idx === highlight ? 'bg-blue-50 dark:bg-blue-950/40' : ''
+                      idx === highlight ? HIGHLIGHT_ROW : ''
                     }`}
                   >
                     <Package className="h-3 w-3 text-slate-400" />

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useId } from 'react';
 import { useLiveSearch, TYPEAHEAD_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 import { User, Truck, Search, Check, ChevronDown, UserPlus } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, HIGHLIGHT_ROW } from '@/lib/utils';
 import { api, errorMessage } from '@/api';
 import type { Party, PartyListRow, PartyType } from '@/types';
 import { useEscapeLayer, useHotkey, type HotkeyScope } from '@/hooks/useHotkeys';
@@ -321,7 +321,7 @@ export const PartySelector: React.FC<PartySelectorProps> = ({
               const isHi = idx === highlighted;
               const base = cn(
                 'flex items-center justify-between px-3 py-2 text-xs cursor-pointer select-none transition-colors',
-                isHi ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                isHi ? HIGHLIGHT_ROW : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
               );
               const common = {
                 id: `${listId}-opt-${idx}`,

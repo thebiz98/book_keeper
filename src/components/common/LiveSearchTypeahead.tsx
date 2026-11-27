@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useId } from 'react';
 import { Search, Loader2, Plus } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, HIGHLIGHT_ROW } from '@/lib/utils';
 import { useEscapeLayer } from '@/hooks/useHotkeys';
 import { useLiveSearch, TYPEAHEAD_DEBOUNCE_MS } from '@/hooks/useLiveSearch';
 
@@ -317,7 +317,7 @@ export function LiveSearchTypeahead<T>({
                     className={cn(
                       'cursor-pointer transition-colors border-b border-slate-50 dark:border-slate-800/60 last:border-0 select-none',
                       highlighted
-                        ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100'
+                        ? HIGHLIGHT_ROW
                         : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
                     )}
                   >
@@ -337,7 +337,7 @@ export function LiveSearchTypeahead<T>({
                   className={cn(
                     'flex items-center gap-2 px-3 py-2 text-xs font-medium cursor-pointer select-none',
                     highlightedIndex === results.length
-                      ? 'bg-blue-50/80 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100'
+                      ? HIGHLIGHT_ROW
                       : 'text-blue-700 dark:text-blue-300 hover:bg-slate-50 dark:hover:bg-slate-800/40'
                   )}
                 >
