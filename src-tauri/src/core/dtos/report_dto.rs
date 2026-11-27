@@ -61,7 +61,12 @@ pub struct PnLReport {
     pub gross_sales: f64,
     pub sales_returns: f64,
     pub net_sales: f64,
+    /// DD-91: gross FIFO cost of the period's sales by bill date + replacement cost by return date.
     pub cogs: f64,
+    /// DD-91: cost of customer-returned goods credited by return date (linked lines, restockable or
+    /// scrap, and unlinked restockable lines). Gross profit uses `cogs - returned_goods_cost`.
+    #[serde(default)]
+    pub returned_goods_cost: f64,
     /// Miscellaneous service costs (FR-37): service targets not covered by component FIFO cost.
     #[serde(default)]
     pub service_misc_costs: f64,
@@ -147,15 +152,22 @@ pub struct ItemProfitRow {
     pub item_id: i64,
     pub name: String,
     pub base_unit: String,
-    /// Units sold net of linked customer returns.
+    /// DD-91: units sold on bills dated in range less units returned (linked or not) in range.
     pub qty_sold: f64,
-    /// Line totals less the bill discount share and linked refunds.
+    /// Line totals less the bill discount share (bill date), less `returns_value` (return date).
     pub revenue: f64,
-    /// Net FIFO cost (scrapped units keep theirs) plus misc. cost.
+    /// Gross FIFO cost + misc. cost (bill date) + replacement units issued, less `returned_cost`
+    /// (return date). Scrapped units are an Inventory Loss in the P&L, not item cost.
     pub cost: f64,
     pub profit: f64,
     /// `profit / revenue * 100`; `None` when revenue is 0.
     pub margin_pct: Option<f64>,
+    /// Refund value of the item's customer REFUND lines dated in range.
+    #[serde(default)]
+    pub returns_value: f64,
+    /// Returned cost credited in range, as in the P&L `returned_goods_cost`.
+    #[serde(default)]
+    pub returned_cost: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -166,13 +178,18 @@ pub struct ItemProfitTotals {
     pub margin_pct: Option<f64>,
 }
 
-/// `items_profit + charges - replacement_cost = bills_profit` over every non-opening bill in range.
+/// DD-91: `items_profit` (Σ every row, ignoring the search) = `pnl_gross_profit` of the range.
+/// `charges`, `replacement_cost` and `bills_profit` (Σ FR-34 profit of the bills dated in range,
+/// whose returns count whenever they happen) are shown for reference.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ItemProfitReconciliation {
     pub items_profit: f64,
     pub charges: f64,
     pub replacement_cost: f64,
     pub bills_profit: f64,
+    /// P&L gross profit of the same range (`report_repo::pnl`).
+    #[serde(default)]
+    pub pnl_gross_profit: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

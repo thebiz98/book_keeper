@@ -10,7 +10,7 @@ use crate::core::money::round2;
 use crate::core::dtos::{InventorySpeedReport, ItemProfitReport};
 use crate::data::contracts::report_repository::{ReportListQuery, ReportRepository};
 use crate::data::sqlite::repositories::item_analytics_sql;
-use crate::data::sqlite::service_sql::misc_cost_sql;
+use crate::data::sqlite::service_sql::{misc_cost_sql, returned_cost_filter, returned_cost_sql};
 use crate::data::sqlite::{opt_enum_col, SqliteConn};
 
 pub struct SqliteReportRepository {
@@ -24,12 +24,13 @@ impl SqliteReportRepository {
 }
 
 /// All P&L components in one statement (?1 = from, ?2 = to, inclusive lexical date range).
+/// DD-91: sale COGS is gross by bill date; returned cost is credited by return date (`pnl()`).
 const PNL_SQL: &str = "SELECT
   (SELECT COALESCE(SUM(items_subtotal), 0.0) FROM sale_transactions
      WHERE is_opening_balance = 0 AND transaction_date BETWEEN ?1 AND ?2),
   (SELECT COALESCE(SUM(total_amount), 0.0) FROM return_transactions
      WHERE return_type = 'CUSTOMER' AND settlement_type = 'REFUND' AND return_date BETWEEN ?1 AND ?2),
-  (SELECT COALESCE(SUM((a.quantity_depleted - a.returned_quantity) * a.unit_cost), 0.0)
+  (SELECT COALESCE(SUM(a.quantity_depleted * a.unit_cost), 0.0)
      FROM sale_stock_allocations a
      JOIN sale_items si ON si.id = a.sale_item_id
      JOIN sale_transactions s ON s.id = si.sale_transaction_id
@@ -75,28 +76,36 @@ const PNL_SQL: &str = "SELECT
 impl ReportRepository for SqliteReportRepository {
     fn pnl(&self, from: &str, to: &str) -> Result<PnLReport, AppError> {
         // FR-37 / X3: misc. cost of the period's service lines comes from the shared fragment.
+        // DD-91: returned cost of customer lines is credited on the return date.
         let sql = format!(
             "{PNL_SQL}, (SELECT COALESCE(SUM({}), 0.0) FROM sale_items si \
              JOIN sale_transactions s ON s.id = si.sale_transaction_id \
-             WHERE s.is_opening_balance = 0 AND s.transaction_date BETWEEN ?1 AND ?2)",
-            misc_cost_sql("si")
+             WHERE s.is_opening_balance = 0 AND s.transaction_date BETWEEN ?1 AND ?2), \
+             (SELECT COALESCE(SUM({}), 0.0) FROM return_items ri \
+             JOIN return_transactions r ON r.id = ri.return_transaction_id \
+             WHERE r.return_type = 'CUSTOMER' AND ri.line_type = 'RETURNED' AND {} \
+               AND r.return_date BETWEEN ?1 AND ?2)",
+            misc_cost_sql("si"),
+            returned_cost_sql("ri"),
+            returned_cost_filter("ri")
         );
-        let v: [f64; 15] = self.conn.query_row(&sql, params![from, to], |r| {
-            let mut a = [0.0; 15];
+        let v: [f64; 16] = self.conn.query_row(&sql, params![from, to], |r| {
+            let mut a = [0.0; 16];
             for (i, slot) in a.iter_mut().enumerate() {
                 *slot = r.get(i)?;
             }
             Ok(a)
         })?;
-        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses, sale_disc, sale_chg, pur_disc, pur_chg, disc_rev, misc] =
+        let [gross, returns, cogs_sales, cogs_repl, loss_adj, loss_scrap, purchases, vendor_returns, expenses, sale_disc, sale_chg, pur_disc, pur_chg, disc_rev, misc, returned_cost] =
             v;
         let gross_sales = round2(gross);
         let sales_returns = round2(returns);
         let sales_discounts = round2(sale_disc);
         let net_sales = round2(gross_sales - sales_discounts - sales_returns);
         let cogs = round2(cogs_sales + cogs_repl);
+        let returned_goods_cost = round2(returned_cost);
         let service_misc_costs = round2(misc);
-        let gross_profit = round2(net_sales - cogs - service_misc_costs);
+        let gross_profit = round2(net_sales - (cogs - returned_goods_cost) - service_misc_costs);
         let inventory_losses = round2(loss_adj + loss_scrap);
         let sale_charges_income = round2(sale_chg);
         let purchase_discounts_income = round2(pur_disc);
@@ -110,6 +119,7 @@ impl ReportRepository for SqliteReportRepository {
             sales_returns,
             net_sales,
             cogs,
+            returned_goods_cost,
             service_misc_costs,
             gross_profit,
             inventory_losses,
@@ -272,7 +282,10 @@ impl ReportRepository for SqliteReportRepository {
     }
 
     fn item_profit(&self, q: &ReportListQuery) -> Result<ItemProfitReport, AppError> {
-        item_analytics_sql::item_profit(&self.conn, q)
+        // DD-91: the item rows of a range add up to the P&L gross profit of the same range.
+        let mut rep = item_analytics_sql::item_profit(&self.conn, q)?;
+        rep.reconciliation.pnl_gross_profit = self.pnl(q.from, q.to)?.gross_profit;
+        Ok(rep)
     }
 
     fn inventory_speed(

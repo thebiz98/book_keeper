@@ -214,8 +214,10 @@ fn test_e2e_5_step_lifecycle_scenario() {
     let pnl = report_service.get_pnl_report("2026-11-20", "2026-11-20").expect("pnl");
     assert_eq!(
         (pnl.gross_sales, pnl.sales_returns, pnl.net_sales, pnl.cogs, pnl.gross_profit, pnl.inventory_losses, pnl.net_profit),
-        (1200.0, 100.0, 1100.0, 560.0, 540.0, 0.0, 540.0)
+        (1200.0, 100.0, 1100.0, 620.0, 540.0, 0.0, 540.0)
     );
+    // DD-91: COGS is gross (620); the restocked 10 @ 6 are credited on the return date.
+    assert_eq!(pnl.returned_goods_cost, 60.0);
 
     let sales_cash = 1200.0;
     let purchases_cash = 500.0 + 300.0;

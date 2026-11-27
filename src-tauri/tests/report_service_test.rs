@@ -190,7 +190,9 @@ fn test_tc_rep_004_full_pnl_statement() {
     assert_eq!(p.gross_sales, 1000.0);
     assert_eq!(p.sales_returns, 150.0);
     assert_eq!(p.net_sales, 850.0);
-    assert_eq!(p.cogs, 512.0);
+    // DD-91: gross 600 + replacement 12; the 100 returned cost (60 + 30 + 10) is credited apart.
+    assert_eq!(p.cogs, 612.0);
+    assert_eq!(p.returned_goods_cost, 100.0);
     assert_eq!(p.gross_profit, 338.0);
     assert_eq!(p.inventory_losses, 50.0);
     assert_eq!(p.net_profit, 288.0);
