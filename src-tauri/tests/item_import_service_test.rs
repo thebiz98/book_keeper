@@ -26,13 +26,13 @@ fn setup() -> (TestDb, ItemImportServiceImpl<InventoryServiceImpl<FifoStrategy>>
 }
 
 fn csv_file(body: &str) -> std::path::PathBuf {
-    let p = std::env::temp_dir().join(format!("bk_import_{}.csv", uuid::Uuid::new_v4()));
+    let p = common::temp_file("import", "csv");
     std::fs::write(&p, format!("{HEADER}\n{body}")).unwrap();
     p
 }
 
 fn raw_csv(content: &str) -> std::path::PathBuf {
-    let p = std::env::temp_dir().join(format!("bk_import_{}.csv", uuid::Uuid::new_v4()));
+    let p = common::temp_file("import", "csv");
     std::fs::write(&p, content).unwrap();
     p
 }
@@ -192,7 +192,7 @@ fn windows_1252_csv_is_read() {
     let (db, svc) = setup();
     let mut bytes = HEADER.as_bytes().to_vec();
     bytes.extend_from_slice(b"\nCaf\xe9 Mug,,,PCS,,10,5,,,\n");
-    let p = std::env::temp_dir().join(format!("bk_import_{}.csv", uuid::Uuid::new_v4()));
+    let p = common::temp_file("import", "csv");
     std::fs::write(&p, bytes).unwrap();
     svc.execute_items_import(s(&p), ConflictStrategy::Skip).unwrap();
     assert_eq!(item(&db, "Café Mug").name, "Café Mug");
@@ -213,8 +213,8 @@ fn number_errors_say_how_to_fix() {
 fn template_round_trip_csv_and_xlsx() {
     use book_keeper::services::r#impl::import_template_writer::write_template;
     let (db, svc) = setup();
-    let dir = std::env::temp_dir().join(format!("bk_tpl_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let guard = common::TempDir::new("tpl");
+    let dir = guard.path().to_path_buf();
 
     for (fmt, ext) in [(TemplateFormat::Csv, "csv"), (TemplateFormat::Xlsx, "xlsx")] {
         // A wrong extension is corrected to the chosen format.
@@ -244,7 +244,7 @@ fn template_round_trip_csv_and_xlsx() {
 }
 
 fn csv_low(body: &str) -> String {
-    let p = std::env::temp_dir().join(format!("bk_import_{}.csv", uuid::Uuid::new_v4()));
+    let p = common::temp_file("import", "csv");
     std::fs::write(&p, format!("{HEADER},Low Stock Level\n{body}")).unwrap();
     p.to_str().unwrap().to_string()
 }
@@ -277,7 +277,7 @@ fn imp_lsl_03_overwrite_updates_only_when_non_blank_and_add_stock_ignores() {
 #[test]
 fn imp_lsl_04_header_suggestion() {
     let (_db, svc) = setup();
-    let f = std::env::temp_dir().join(format!("bk_import_{}.csv", uuid::Uuid::new_v4()));
+    let f = common::temp_file("import", "csv");
     std::fs::write(&f, "Item Name,Base Unit,Sale Price,Purchase Cost,Reorder Level\nA,PCS,1,1,3\n").unwrap();
     let rep = svc.validate_items_import(f.to_str().unwrap()).unwrap();
     let h = rep.header_issues.iter().find(|i| i.column == "Reorder Level").unwrap();

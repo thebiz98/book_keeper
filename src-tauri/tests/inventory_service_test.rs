@@ -548,7 +548,8 @@ fn tc_low_08_service_items_are_never_low() {
 
 #[test]
 fn startup_repairs_a_drifted_stock_cache() {
-    let path = std::env::temp_dir().join(format!("bk_inv_startup_{}.db", uuid::Uuid::new_v4()));
+    let tmp = common::TempDir::new("inv_startup");
+    let path = tmp.join("shop.db");
     {
         let app = book_keeper::app_state::build_sqlite_app_state(&path).unwrap();
         let id = app.item_service.create_item(CreateItemPayload { item_type: None, service_cost: None, components: None, low_stock_threshold: None,

@@ -64,7 +64,7 @@ impl Env {
 }
 
 fn file(ext: &str, content: &str) -> String {
-    let p = std::env::temp_dir().join(format!("bk_rec_{}.{ext}", uuid::Uuid::new_v4()));
+    let p = common::temp_file("rec", ext);
     std::fs::write(&p, content).unwrap();
     p.to_str().unwrap().to_string()
 }
@@ -166,7 +166,7 @@ fn xlsx_with(items: &[&[&str]], comps: Option<&[&[&str]]>) -> String {
             }
         }
     }
-    let p = std::env::temp_dir().join(format!("bk_rec_{}.xlsx", uuid::Uuid::new_v4()));
+    let p = common::temp_file("rec", "xlsx");
     wb.save(&p).unwrap();
     p.to_str().unwrap().to_string()
 }
@@ -245,7 +245,7 @@ fn items_components_sheet_header_problem_is_a_header_issue() {
     for (c, h) in ["Service Name", "Component Name", "Qty Per Unt"].iter().enumerate() {
         ws.write_string(0, c as u16, *h).unwrap();
     }
-    let p = std::env::temp_dir().join(format!("bk_rec_{}.xlsx", uuid::Uuid::new_v4()));
+    let p = common::temp_file("rec", "xlsx");
     wb.save(&p).unwrap();
     let rep = e.items_imp.validate_items_import(p.to_str().unwrap()).unwrap();
     assert!(rep.header_issues.iter().any(|i| i.message.starts_with("Components sheet:")), "{rep:?}");
@@ -513,8 +513,8 @@ fn expenses_execute_rolls_back_created_types_when_a_row_fails() {
 fn templates_of_every_kind_validate_cleanly_with_zero_rows() {
     use calamine::{open_workbook_auto, Reader};
     let e = env();
-    let dir = std::env::temp_dir().join(format!("bk_tpl_rec_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let guard = common::TempDir::new("tpl_rec");
+    let dir = guard.path().to_path_buf();
     for fmt in [TemplateFormat::Csv, TemplateFormat::Xlsx] {
         for kind in [ImportKind::Items, ImportKind::ServiceComponents, ImportKind::Parties, ImportKind::Expenses] {
             let saved = write_import_template(kind, dir.join(format!("{kind:?}.txt")).to_str().unwrap(), fmt).unwrap();

@@ -228,7 +228,7 @@ fn name_clash_with_a_deleted_item_on_create_and_import() {
     assert!(matches!(e.items.update_item(other, update_payload("PEN")), Err(AppError::DeletedNameClash { .. })));
 
     let svc = ItemImportServiceImpl::new(e.db.clone(), e.inv.clone()).with_indexer(Arc::new(e.db.indexer()));
-    let f = std::env::temp_dir().join(format!("bk_del_{}.csv", uuid::Uuid::new_v4()));
+    let f = common::temp_file("del", "csv");
     std::fs::write(
         &f,
         "Item Name,Category,Barcode,Base Unit,MRP,Sale Price,Purchase Cost,Opening Stock,Packaging Bundle,Units Per Bundle\nPen,,,PCS,,10,1,,,\n",
@@ -444,7 +444,7 @@ fn list_deleted_items_search_paging_and_value() {
 
 fn import_two(e: &E) -> (i64, i64) {
     let svc = ItemImportServiceImpl::new(e.db.clone(), e.inv.clone()).with_indexer(Arc::new(e.db.indexer()));
-    let f = std::env::temp_dir().join(format!("bk_del_{}.csv", uuid::Uuid::new_v4()));
+    let f = common::temp_file("del", "csv");
     std::fs::write(
         &f,
         "Item Name,Category,Barcode,Base Unit,MRP,Sale Price,Purchase Cost,Opening Stock,Packaging Bundle,Units Per Bundle\nImp A,,,PCS,,10,2,5,Box,6\nImp B,,,PCS,,10,3,4,,\n",

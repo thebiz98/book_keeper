@@ -9,21 +9,21 @@ use book_keeper::services::contracts::backup_service::BackupService;
 use common::BackupServiceImpl;
 use std::path::PathBuf;
 
-fn live_db() -> (PathBuf, PathBuf, BackupServiceImpl) {
-    let dir = std::env::temp_dir().join(format!("bk_backup_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
+fn live_db() -> (PathBuf, PathBuf, BackupServiceImpl, common::TempDir) {
+    let guard = common::TempDir::new("backup");
+    let dir = guard.path().to_path_buf();
     let live = dir.join("shop.db");
     let pool = create_pool(&live).unwrap();
     run_migrations(&pool.get().unwrap()).unwrap();
     drop(pool);
     let dest = dir.join("out");
     std::fs::create_dir_all(&dest).unwrap();
-    (live.clone(), dest, BackupServiceImpl::new(live))
+    (live.clone(), dest, BackupServiceImpl::new(live), guard)
 }
 
 #[test]
 fn name_format_collision_suffix_and_integrity() {
-    let (_live, dest, svc) = live_db();
+    let (_live, dest, svc, _guard) = live_db();
     let d = dest.to_str().unwrap();
     let p1 = svc.backup_database(d).unwrap();
     let p2 = svc.backup_database(d).unwrap();
@@ -54,7 +54,7 @@ fn name_format_collision_suffix_and_integrity() {
 
 #[test]
 fn rejects_missing_dir_file_and_live_db() {
-    let (live, dest, svc) = live_db();
+    let (live, dest, svc, _guard) = live_db();
     let missing = dest.join("nope");
     assert!(svc.backup_database(missing.to_str().unwrap()).is_err());
     assert!(!missing.exists(), "must not create directories");
@@ -78,7 +78,7 @@ fn ts(s: &str) -> chrono::NaiveDateTime {
 
 #[test]
 fn backup_to_dir_creates_missing_folder_and_uses_kind_prefix() {
-    let (_live, dest, svc) = live_db();
+    let (_live, dest, svc, _guard) = live_db();
     let nested = dest.join("a").join("b");
     let p = svc.backup_to_dir(nested.to_str().unwrap(), BackupKind::Auto).unwrap();
     assert!(nested.is_dir());
@@ -133,7 +133,7 @@ fn rotation_rule_keeps_manual_unknown_and_newest_auto() {
 
 #[test]
 fn rotate_deletes_old_auto_files_on_disk() {
-    let (_live, dest, svc) = live_db();
+    let (_live, dest, svc, _guard) = live_db();
     let d = dest.to_str().unwrap();
     for n in ["book_keeper_auto_20200101_1000.db", "book_keeper_prereset_20200101_1000.db", "book_keeper_backup_20200101_1000.db"] {
         std::fs::write(dest.join(n), b"x").unwrap();
@@ -158,7 +158,7 @@ fn is_due_rules() {
 
 #[test]
 fn change_detection_uses_file_times() {
-    let (live, dest, svc) = live_db();
+    let (live, dest, svc, _guard) = live_db();
     assert!(db_changed_since_last_auto(&live, &dest), "no auto backup yet");
     std::thread::sleep(std::time::Duration::from_millis(50));
     svc.backup_to_dir(dest.to_str().unwrap(), BackupKind::Auto).unwrap();
@@ -193,4 +193,52 @@ fn premigration_files_are_parsed_and_rotated_like_prereset() {
         select_for_deletion(&names, now, 7),
         vec!["book_keeper_premigration_v2_to_v3_20260102_1000.db".to_string()]
     );
+}
+
+// ---- tmp-then-rename copy ----
+
+fn files_in(dir: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn backup_leaves_no_tmp_file_and_result_is_healthy() {
+    let (_live, dest, svc, _guard) = live_db();
+    let p = svc.backup_database(dest.to_str().unwrap()).unwrap();
+    let names = files_in(&dest);
+    assert_eq!(names.len(), 1, "{names:?}");
+    assert!(!names.iter().any(|n| n.contains(".tmp")), "{names:?}");
+    assert!(std::fs::metadata(&p).unwrap().len() > 0);
+    let conn = rusqlite::Connection::open(&p).unwrap();
+    let ok: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+    assert_eq!(ok, "ok");
+}
+
+#[test]
+fn failed_backup_leaves_neither_tmp_nor_final_file() {
+    let (live, dest, svc, _guard) = live_db();
+    // Not a database: the source open/integrity check fails after the name was reserved.
+    std::fs::write(&live, vec![0x42u8; 4096]).unwrap();
+    assert!(svc.backup_database(dest.to_str().unwrap()).is_err());
+    assert!(files_in(&dest).is_empty(), "{:?}", files_in(&dest));
+}
+
+#[test]
+fn rotate_removes_only_stale_tmp_files() {
+    let (_live, dest, svc, _guard) = live_db();
+    let old = dest.join("book_keeper_auto_20260101_0900.db.tmp");
+    let fresh = dest.join("book_keeper_auto_20260102_0900.db.tmp");
+    std::fs::write(&old, b"x").unwrap();
+    std::fs::write(&fresh, b"x").unwrap();
+    let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600);
+    std::fs::File::options().write(true).open(&old).unwrap().set_modified(two_hours_ago).unwrap();
+    svc.rotate(dest.to_str().unwrap(), 30).unwrap();
+    assert!(!old.exists());
+    assert!(fresh.exists());
 }

@@ -1,5 +1,7 @@
 //! Test Suite: testing-only DataResetService (gate, pre-reset backup, scopes).
 
+mod common;
+
 use book_keeper::app_state::{build_sqlite_app_state_with_config, AppState};
 use book_keeper::config::AppConfig;
 use book_keeper::core::dtos::*;
@@ -15,16 +17,18 @@ struct Env {
     app: AppState,
     db: PathBuf,
     backups: PathBuf,
+    /// Declared last so it is dropped (folder deleted) after the app state.
+    _guard: common::TempDir,
 }
 
 fn env(testing_mode: bool) -> Env {
-    let dir = std::env::temp_dir().join(format!("bk_reset_{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let guard = common::TempDir::new("reset");
+    let dir = guard.path().to_path_buf();
     let db = dir.join("shop.db");
     let backups = dir.join("backups");
     let cfg = AppConfig { testing_mode, ..AppConfig::default() };
     let app = build_sqlite_app_state_with_config(&db, cfg, backups.clone()).unwrap();
-    Env { app, db, backups }
+    Env { app, db, backups, _guard: guard }
 }
 
 /// Item "Pen" with 10 opening units and a bundle, a customer, a purchase of 5, and a

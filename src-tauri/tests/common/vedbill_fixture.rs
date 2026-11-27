@@ -19,6 +19,7 @@ pub struct VbItem<'a> {
 pub type VbLot<'a> = (&'a str, &'a str, f64, f64);
 
 pub fn build_vb(items: &[VbItem], lots: &[VbLot], schema_version: i64) -> PathBuf {
+    super::sweep_stale_temp();
     let dir = std::env::temp_dir().join(format!("bk_vb_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     let db = dir.join("company.db");
