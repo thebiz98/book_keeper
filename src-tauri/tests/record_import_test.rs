@@ -544,3 +544,25 @@ fn strategy_update_is_an_alias_of_overwrite() {
     assert_eq!(s, ConflictStrategy::Overwrite);
     let _ = AppError::IoError(String::new());
 }
+
+#[test]
+fn l2_parties_update_with_blank_as_of_keeps_the_existing_opening_date() {
+    let e = env();
+    let id = e
+        .parties
+        .create_party(CreatePartyPayload {
+            name: "Ravi".into(),
+            phone: None,
+            party_type: PartyType::Customer,
+            notes: None,
+            opening_balance: Some(OpeningBalanceInput { amount: 1000.0, as_of_date: "2026-09-01".into() }),
+        })
+        .unwrap();
+    let f = party_csv(&["Ravi,CUSTOMER,,,1500,".into()]);
+    let rep = e.rec.validate_parties_import(&f, ConflictStrategy::Overwrite).unwrap();
+    assert!(rep.rows_with_errors.is_empty(), "{rep:?}");
+    let sum = e.rec.execute_parties_import(&f, ConflictStrategy::Overwrite).unwrap();
+    assert_eq!(sum.updated, 1);
+    let ob = e.parties.get_party(id).unwrap().opening_balance.unwrap();
+    assert_eq!((ob.amount, ob.as_of_date.as_str()), (1500.0, "2026-09-01"), "blank As Of keeps the date");
+}

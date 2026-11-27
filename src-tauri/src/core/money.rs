@@ -5,9 +5,32 @@ use crate::core::value_objects::{PaymentKind, TransactionType};
 /// Tolerance for comparing two already-rounded money amounts (half a paisa).
 pub const MONEY_EPS: f64 = 0.005;
 
-/// Rounds a currency amount to 2 decimal places (DD-15).
+/// Rounds a currency amount to 2 decimal places, half away from zero (DD-15, DD-97).
+/// The TypeScript `round2` in `src/lib/money.ts` is the same function (shared vectors in
+/// `tests/fixtures/round2_vectors.json`).
 pub fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
+}
+
+/// Largest quantity, rate or total accepted anywhere (L7, DD-97); keeps every product finite.
+pub const MAX_AMOUNT: f64 = 1e12;
+
+/// `x` must be finite and `|x| <= MAX_AMOUNT`.
+pub fn check_finite_amount(field: &str, x: f64) -> Result<(), crate::core::error::AppError> {
+    if !x.is_finite() || x.abs() > MAX_AMOUNT {
+        return Err(crate::core::error::AppError::ValidationError {
+            field: field.to_string(),
+            message: "That number is too large".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// A line `quantity x rate` must have finite parts below the cap and a total below the cap.
+pub fn check_line_total(field: &str, quantity: f64, rate: f64) -> Result<(), crate::core::error::AppError> {
+    check_finite_amount(field, quantity)?;
+    check_finite_amount(field, rate)?;
+    check_finite_amount(field, quantity * rate)
 }
 
 /// Rate net of the bill discount share: `unit_price * clamp(1 - discounts / items_subtotal, 0, 1)`.

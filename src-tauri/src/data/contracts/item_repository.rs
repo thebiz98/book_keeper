@@ -37,6 +37,8 @@ pub trait ItemRepository {
     fn services_using_active(&self, component_id: i64) -> Result<Vec<String>, AppError>;
     /// FR-45: `SUM(remaining_quantity * unit_cost)` of one item's lots.
     fn stock_value(&self, item_id: i64) -> Result<f64, AppError>;
+    /// L6: true when the item has any lot, sale line or return line (its base unit is then fixed).
+    fn has_stock_or_bills(&self, item_id: i64) -> Result<bool, AppError>;
     /// FR-45 A1: where the item is used (empty = never used, so a hard delete is allowed).
     fn usage_reasons(&self, item_id: i64) -> Result<Vec<String>, AppError>;
     /// FR-45 A1: permanently removes a never-used item: its OPENING lots (and any OPENING header

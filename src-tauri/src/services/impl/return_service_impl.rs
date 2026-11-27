@@ -8,7 +8,7 @@ use crate::core::dtos::{validate_date_range, BillEditGuard, DeleteReturnResult,
 };
 use crate::core::entities::{Item, ReturnItem, ReturnTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_entry_date_now, check_not_before_bill, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, check_finite_amount, check_line_total, check_not_before_bill, round2, MONEY_EPS};
 use crate::core::value_objects::{
     LotSource, OutflowSourceType, PartyType, ReturnLineType, ReturnType, SettlementType, StockCondition,
     TransactionType,
@@ -104,6 +104,7 @@ fn check_qty(field: &str, q: f64) -> Result<(), AppError> {
     if !q.is_finite() || q <= 0.0 {
         return Err(validation(field, format!("Quantity must be a positive finite number, got {q}")));
     }
+    check_finite_amount(field, q)?;
     Ok(())
 }
 
@@ -192,6 +193,7 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
             if !it.unit_price.is_finite() || it.unit_price < 0.0 {
                 return Err(validation("unit_price", "unit_price must be a non-negative finite number"));
             }
+            check_line_total("unit_price", it.quantity, it.unit_price)?;
             if let Some(c) = it.unit_cost_override {
                 if !c.is_finite() || c <= 0.0 {
                     return Err(validation("unit_cost_override", "unit_cost_override must be positive"));
@@ -538,7 +540,8 @@ impl<I: InventoryService, P: PaymentService, A: AccountingService, U: UnitOfWork
                 ));
             }
             let unit_price = lot.unit_cost * net_unit_price(1.0, header.items_subtotal, header.discounts_total);
-            lines.push(Line { name: item.name, lot_id, unit_price, total: round2(it.quantity * unit_price) });
+            // L4: the stored rate is rounded; the total comes from the exact net rate.
+            lines.push(Line { name: item.name, lot_id, unit_price: round2(unit_price), total: round2(it.quantity * unit_price) });
         }
 
         // ---- Writes -----------------------------------------------------------------------

@@ -7,7 +7,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_entry_date_now, check_not_after_follow_up, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, check_finite_amount, check_line_total, check_not_after_follow_up, round2, MONEY_EPS};
 use crate::services::r#impl::bill_guard::{
     earliest_follow_up, evaluate_sale_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
     PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
@@ -85,6 +85,7 @@ fn validate_sale_shape(payload: &CreateSalePayload) -> Result<(), AppError> {
     if !payload.paid_amount.is_finite() || payload.paid_amount < 0.0 {
         return Err(validation("paid_amount", "paid_amount must be a non-negative number"));
     }
+    let mut bill_total = 0.0_f64;
     for line in &payload.items {
         if !line.bundle_quantity.is_finite() || line.bundle_quantity <= 0.0 {
             return Err(validation(
@@ -95,7 +96,11 @@ fn validate_sale_shape(payload: &CreateSalePayload) -> Result<(), AppError> {
         if !line.unit_price.is_finite() || line.unit_price < 0.0 {
             return Err(validation("unit_price", "unit_price must be a non-negative number"));
         }
+        check_line_total("unit_price", line.bundle_quantity, line.unit_price)?;
+        bill_total += line.bundle_quantity * line.unit_price;
+        check_finite_amount("unit_price", bill_total)?;
     }
+    check_finite_amount("paid_amount", payload.paid_amount)?;
     Ok(())
 }
 
@@ -852,6 +857,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
         if !payload.unit_price.is_finite() || payload.unit_price < 0.0 {
             return Err(validation("unit_price", "unit_price must be a non-negative number"));
         }
+        check_line_total("unit_price", qty, payload.unit_price)?;
         let unit_price = match payload.entered_total {
             None => payload.unit_price,
             Some(t) if !t.is_finite() || t < 0.0 => {

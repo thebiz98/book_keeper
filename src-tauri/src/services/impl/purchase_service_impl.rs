@@ -7,7 +7,7 @@ use crate::core::dtos::{
 };
 use crate::core::entities::{Item, PurchaseItem, PurchaseTransaction};
 use crate::core::error::AppError;
-use crate::core::money::{check_entry_date_now, check_not_after_follow_up, round2, MONEY_EPS};
+use crate::core::money::{check_entry_date_now, check_finite_amount, check_line_total, check_not_after_follow_up, round2, MONEY_EPS};
 use crate::services::r#impl::bill_guard::{
     earliest_follow_up, evaluate_purchase_guard, locked, locked_with, settlements_move_check, PARTY_CHANGE_WITH_CREDITS,
     PARTY_REQUIRED_WITH_PAYMENTS, TOTAL_BELOW_APPLIED,
@@ -78,6 +78,7 @@ fn validate_purchase_shape(payload: &CreatePurchasePayload) -> Result<(), AppErr
     if !payload.paid_amount.is_finite() || payload.paid_amount < 0.0 {
         return Err(validation("paid_amount", "paid_amount must be a non-negative number"));
     }
+    let mut bill_total = 0.0_f64;
     for line in &payload.items {
         if !line.bundle_quantity.is_finite() || line.bundle_quantity <= 0.0 {
             return Err(validation(
@@ -88,7 +89,11 @@ fn validate_purchase_shape(payload: &CreatePurchasePayload) -> Result<(), AppErr
         if !line.unit_cost.is_finite() || line.unit_cost < 0.0 {
             return Err(validation("unit_cost", "unit_cost must be a non-negative number"));
         }
+        check_line_total("unit_cost", line.bundle_quantity, line.unit_cost)?;
+        bill_total += line.bundle_quantity * line.unit_cost;
+        check_finite_amount("unit_cost", bill_total)?;
     }
+    check_finite_amount("paid_amount", payload.paid_amount)?;
     Ok(())
 }
 
@@ -515,6 +520,7 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> PurchaseServiceImpl<
         if !payload.unit_price.is_finite() || payload.unit_price < 0.0 {
             return Err(validation("unit_price", "unit_price must be a non-negative number"));
         }
+        check_finite_amount("unit_price", payload.unit_price)?;
         let lot = tx
             .purchases()
             .find_purchase_item_by_id(payload.purchase_item_id)?

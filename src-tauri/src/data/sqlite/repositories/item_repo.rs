@@ -135,7 +135,7 @@ impl ItemRepository for SqliteItemRepository {
         let n = self.conn.execute(
             "UPDATE items SET name=?2, category=?3, barcode=?4, base_unit=?5, mrp=?6, \
              default_sale_price=?7, is_active=?8, updated_at=?9, item_type=?10, low_stock_threshold=?11, service_cost=?12, \
-             is_low_stock = (?10 = 'PHYSICAL' AND current_stock < ?11) WHERE id=?1",
+             is_low_stock = (?10 = 'PHYSICAL' AND current_stock < ?11 - 1e-6) WHERE id=?1",
             params![
                 item.id, item.name, item.category, item.barcode, item.base_unit, item.mrp,
                 item.default_sale_price, item.is_active, item.updated_at, t, item.low_stock_threshold,
@@ -148,7 +148,7 @@ impl ItemRepository for SqliteItemRepository {
     fn update_stock_cache(&mut self, item_id: i64, new_stock: f64) -> Result<(), AppError> {
         let n = self.conn.execute(
             "UPDATE items SET current_stock = ?2, \
-             is_low_stock = (item_type = 'PHYSICAL' AND ?2 < low_stock_threshold) WHERE id = ?1",
+             is_low_stock = (item_type = 'PHYSICAL' AND ?2 < low_stock_threshold - 1e-6) WHERE id = ?1",
             params![item_id, new_stock],
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
@@ -158,7 +158,7 @@ impl ItemRepository for SqliteItemRepository {
         // SQLite evaluates the right-hand sides against the OLD row values.
         let n = self.conn.execute(
             "UPDATE items SET current_stock = current_stock + ?1, \
-             is_low_stock = (item_type = 'PHYSICAL' AND (current_stock + ?1) < low_stock_threshold) WHERE id = ?2",
+             is_low_stock = (item_type = 'PHYSICAL' AND (current_stock + ?1) < low_stock_threshold - 1e-6) WHERE id = ?2",
             params![delta, item_id],
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
@@ -167,7 +167,7 @@ impl ItemRepository for SqliteItemRepository {
     fn update_low_stock_threshold(&mut self, item_id: i64, threshold: f64, updated_at: &str) -> Result<(), AppError> {
         let n = self.conn.execute(
             "UPDATE items SET low_stock_threshold = ?2, \
-             is_low_stock = (item_type = 'PHYSICAL' AND current_stock < ?2), updated_at = ?3 WHERE id = ?1",
+             is_low_stock = (item_type = 'PHYSICAL' AND current_stock < ?2 - 1e-6), updated_at = ?3 WHERE id = ?1",
             params![item_id, threshold, updated_at],
         )?;
         if n == 0 { Err(not_found(item_id)) } else { Ok(()) }
@@ -227,6 +227,16 @@ impl ItemRepository for SqliteItemRepository {
         )?;
         let rows = stmt.query_map(params![component_id], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    fn has_stock_or_bills(&self, item_id: i64) -> Result<bool, AppError> {
+        Ok(self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM purchase_items WHERE item_id = ?1) \
+                 OR EXISTS (SELECT 1 FROM sale_items WHERE item_id = ?1) \
+                 OR EXISTS (SELECT 1 FROM return_items WHERE item_id = ?1)",
+            params![item_id],
+            |r| r.get(0),
+        )?)
     }
 
     fn usage_reasons(&self, item_id: i64) -> Result<Vec<String>, AppError> {

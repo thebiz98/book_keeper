@@ -6,7 +6,7 @@ use crate::core::dtos::{
     StockAdjustmentPreview, StockAdjustmentResult, UndoableWriteoff,
 };
 use crate::services::r#impl::item_guard::ensure_active_item;
-use crate::core::money::{check_entry_date_now, net_unit_price, round2};
+use crate::core::money::{check_entry_date_now, check_finite_amount, net_unit_price, round2};
 use crate::core::entities::{
     Item, PurchaseItem, PurchaseTransaction, ReturnTransaction, StockAdjustment, StockOutflowAllocation,
 };
@@ -46,6 +46,7 @@ fn require_positive(field: &str, qty: f64) -> Result<(), AppError> {
     if !qty.is_finite() || qty <= 0.0 {
         return Err(validation(field, format!("Quantity must be a finite number greater than zero (got {qty})")));
     }
+    check_finite_amount(field, qty)?;
     Ok(())
 }
 
@@ -600,7 +601,15 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
             undoable_writeoffs: Vec::new(),
         };
         if delta.abs() <= EPS {
-            return Ok(out); // Nothing written.
+            // S9: counting 0 over a float residue stores 0, so the item can never read as low at level 0.
+            if p.counted_quantity < crate::core::stock_rules::STOCK_RESIDUE_EPS
+                && previous != 0.0
+                && previous.abs() < crate::core::stock_rules::STOCK_RESIDUE_EPS
+            {
+                tx.items().update_stock_cache(item.id, 0.0)?;
+                out.new_stock = 0.0;
+            }
+            return Ok(out); // No adjustment written.
         }
         out.delta = delta;
 
@@ -684,7 +693,12 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryServiceImpl<S, U> {
                 out.value_change = value_change;
             }
         }
-        out.new_stock = tx.items().find_by_id(item.id)?.map(|i| i.current_stock).unwrap_or(previous + delta);
+        let mut new_stock = tx.items().find_by_id(item.id)?.map(|i| i.current_stock).unwrap_or(previous + delta);
+        if new_stock != 0.0 && new_stock.abs() < crate::core::stock_rules::STOCK_RESIDUE_EPS {
+            tx.items().update_stock_cache(item.id, 0.0)?; // S9
+            new_stock = 0.0;
+        }
+        out.new_stock = new_stock;
         Ok(out)
     }
 
@@ -990,6 +1004,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
             if !cost.is_finite() || cost < 0.0 {
                 return Err(validation("unit_cost", format!("Unit cost must be a finite, non-negative number (got {cost})")));
             }
+            crate::core::money::check_line_total("unit_cost", quantity, cost)?;
             resolved.push((item, quantity, cost));
         }
 
@@ -1029,7 +1044,7 @@ impl<S: InventoryAllocationStrategy, U: UnitOfWork> InventoryService for Invento
                 pack_quantity: quantity,
                 quantity,
                 unit_cost: cost,
-                total_amount: quantity * cost,
+                total_amount: round2(quantity * cost),
                 remaining_quantity: quantity,
             };
             ids.push(uow.purchases().create_purchase_item(&lot)?);
