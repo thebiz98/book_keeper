@@ -207,8 +207,11 @@ $lnk.WindowStyle = 7          # start the console minimized
 $lnk.Save()
 
 Double-click "Book Keeper (dev)" on the desktop. A minimized console holds the
-dev server and logs; closing it also closes the app. If startup fails, the
-console stays open with the error.
+dev server and logs; closing it also closes the app. Closing the app (or a
+Restore from backup, which closes the app) also closes the console:
+scripts\dev-launch.ps1 watches the app and stops the dev server once it is gone,
+unless a Rust rebuild is relaunching it. If startup fails, the console stays open
+with the error.
 
 --- Where the data lives ---
 The real backend stores everything in one SQLite file:
