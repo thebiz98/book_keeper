@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { StockAdjustmentModal } from '@/components/domain/StockAdjustmentModal';
 import { BillDetailDrawer } from '@/components/domain/BillDetailDrawer';
 import { navigateWithParam } from '@/components/domain/navParams';
-import { formatIstTime } from '@/lib/dates';
+import { formatTime } from '@/lib/dates';
 
 interface Section<T> {
   data: T | null;
@@ -154,7 +154,7 @@ export const DashboardPage: React.FC = () => {
                     <TableRow key={`${t.kind}-${t.id}`} className="border-b border-slate-50 dark:border-slate-800/60">
                       <TableCell className="py-1.5 font-mono text-slate-500">
                         {t.date}
-                        {t.createdAt ? ` ${formatIstTime(t.createdAt)}` : ''}
+                        {t.createdAt ? ` ${formatTime(t.createdAt)}` : ''}
                       </TableCell>
                       <TableCell>{t.kind}</TableCell>
                       <TableCell className="font-mono font-semibold">{t.code}</TableCell>

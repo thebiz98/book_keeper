@@ -1322,6 +1322,7 @@ export class MockApiClient implements ApiClient {
       backupDirectory: this.backupDir ?? MOCK_DEFAULT_BACKUP_DIR,
       isDefaultDirectory: this.backupDir === null,
       lastAutoBackupAt: null,
+      timeZone: 'Asia/Kolkata',
     };
   }
   async getAppConfig() {

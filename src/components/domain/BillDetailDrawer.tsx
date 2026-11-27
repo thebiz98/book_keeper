@@ -20,7 +20,7 @@ import { SettlementEditModal } from './SettlementEditModal';
 import { refreshAppMetrics } from './navParams';
 import { PurchaseEditForm } from './billEdit/PurchaseEditForm';
 import { SaleEditForm } from './billEdit/SaleEditForm';
-import { formatIstDateTime } from '@/lib/dates';
+import { formatDateTime } from '@/lib/dates';
 
 export interface BillDetailDrawerProps {
   kind: TransactionType;
@@ -295,7 +295,7 @@ export const BillDetailDrawer: React.FC<BillDetailDrawerProps> = ({
             : `${kind === 'SALE' ? 'Invoice' : 'Purchase'} ${head.transactionCode}`
           : 'Bill details'
       }
-      description={head?.updatedAt ? `Edited ${formatIstDateTime(head.updatedAt)}` : undefined}
+      description={head?.updatedAt ? `Edited ${formatDateTime(head.updatedAt)}` : undefined}
       width="xl"
       footer={
         head && mode === 'view' && (

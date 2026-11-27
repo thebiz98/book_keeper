@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { ItemSearchResult } from '@/types';
 import { AppShell } from '@/components/layout/AppShell';
 import { Modal } from '@/components/ui/Modal';
@@ -6,6 +6,8 @@ import { ItemSearchTypeahead } from '@/components/domain/ItemSearchTypeahead';
 import { CurrencyDisplay } from '@/components/common/CurrencyDisplay';
 import { StockStatusBadge } from '@/components/common/StockStatusBadge';
 import { useAppStore } from '@/store/useAppStore';
+import { api } from '@/api';
+import { setShopTimeZone } from '@/lib/dates';
 import { useAppHotkeys } from '@/hooks/useAppHotkeys';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { NewSalePage } from '@/pages/NewSalePage';
@@ -98,11 +100,22 @@ const App: React.FC = () => {
 
   useAppHotkeys();
 
+  // Load the shop time zone once; remount the page only if it differs from the default.
+  const [zoneRev, setZoneRev] = useState(0);
+  useEffect(() => {
+    api
+      .getAppConfig()
+      .then((cfg) => {
+        if (cfg.timeZone && setShopTimeZone(cfg.timeZone)) setZoneRev((n) => n + 1);
+      })
+      .catch(() => {});
+  }, []);
+
   const Page = ROUTES[activeRoute] ?? DashboardPage;
 
   return (
     <AppShell>
-      <Page />
+      <Page key={zoneRev} />
       <ItemLookupModal isOpen={lookupOpen} onClose={closeLookup} />
     </AppShell>
   );

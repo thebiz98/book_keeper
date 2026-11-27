@@ -7,7 +7,7 @@ export function toLocalDateString(d: Date): string {
 }
 
 export function todayLocal(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: IST_TZ }).format(new Date());
+  return new Intl.DateTimeFormat('en-CA', { timeZone: shopTimeZone() }).format(new Date());
 }
 
 /** Parse YYYY-MM-DD as a local date (noon-safe, no UTC shift). */
@@ -39,8 +39,25 @@ export function startOfYear(date: string | Date = new Date()): string {
   return toLocalDateString(new Date(d.getFullYear(), 0, 1));
 }
 
-/** India time (UTC+05:30, no DST), independent of the PC's zone. */
-export const IST_TZ = 'Asia/Kolkata';
+const DEFAULT_TZ = 'Asia/Kolkata';
+let shopTz = DEFAULT_TZ;
+
+/** The shop time zone (from app config `timeZone`), independent of the PC's zone. */
+export function shopTimeZone(): string {
+  return shopTz;
+}
+
+/** Sets the shop zone; an invalid name is ignored. Returns true when the zone changed. */
+export function setShopTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-IN', { timeZone: tz });
+  } catch {
+    return false;
+  }
+  const changed = tz !== shopTz;
+  shopTz = tz;
+  return changed;
+}
 
 /**
  * Parses a stored timestamp. Zone-less stamps (SQLite `YYYY-MM-DD HH:MM:SS`) are UTC.
@@ -65,7 +82,7 @@ function toDate(ts: string | Date | null | undefined): Date | null {
 
 function istTime(d: Date): string {
   return new Intl.DateTimeFormat('en-IN', {
-    timeZone: IST_TZ,
+    timeZone: shopTimeZone(),
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
@@ -75,23 +92,23 @@ function istTime(d: Date): string {
 }
 
 /** `2:35 PM` in India time; empty when null/invalid. */
-export function formatIstTime(ts: string | null | undefined): string {
+export function formatTime(ts: string | null | undefined): string {
   const d = toDate(ts);
   return d ? istTime(d) : '';
 }
 
 /** `YYYY-MM-DD` of the instant in India time; empty when invalid. */
-export function istDateOf(ts: string | Date | null | undefined): string {
+export function shopDateOf(ts: string | Date | null | undefined): string {
   const d = toDate(ts);
-  return d ? new Intl.DateTimeFormat('en-CA', { timeZone: IST_TZ }).format(d) : '';
+  return d ? new Intl.DateTimeFormat('en-CA', { timeZone: shopTimeZone() }).format(d) : '';
 }
 
 /** `27 Nov 2026, 2:35 PM` in India time; empty when invalid. */
-export function formatIstDateTime(ts: string | Date | null | undefined): string {
+export function formatDateTime(ts: string | Date | null | undefined): string {
   const d = toDate(ts);
   if (!d) return '';
   const date = new Intl.DateTimeFormat('en-GB', {
-    timeZone: IST_TZ,
+    timeZone: shopTimeZone(),
     day: 'numeric',
     month: 'short',
     year: 'numeric',
