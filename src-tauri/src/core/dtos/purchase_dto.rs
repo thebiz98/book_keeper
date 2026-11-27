@@ -112,4 +112,7 @@ pub struct LotPriceUpdateResult {
     pub old_unit_cost: f64,
     pub new_unit_cost: f64,
     pub bill: Option<LotPriceBillEffect>,
+    /// DD-92 (S11): the lot was sold or written off from, so past COGS and losses change with its cost.
+    #[serde(default)]
+    pub recosts_history: bool,
 }

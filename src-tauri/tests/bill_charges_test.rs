@@ -207,7 +207,7 @@ fn source_lot_headers_have_zero_subtotal_and_no_charges() {
     let e = env();
     e.stocked();
     e.inv
-        .set_item_stock(SetItemStockPayload { item_id: 1, counted_quantity: 30.0, unit_cost: Some(3.0), adjustment_date: DAY.into(), notes: None })
+        .set_item_stock(SetItemStockPayload { item_id: 1, counted_quantity: 30.0, unit_cost: Some(3.0), adjustment_date: DAY.into(), notes: None, mode: None })
         .unwrap();
     let conn = e.db.pool.get().unwrap();
     let (n, sum): (i64, f64) = conn

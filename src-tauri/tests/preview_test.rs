@@ -764,7 +764,7 @@ fn adjustment_preview_reports_the_commands_errors() {
 }
 
 fn count(item: i64, counted: f64, cost: Option<f64>) -> SetItemStockPayload {
-    SetItemStockPayload { item_id: item, counted_quantity: counted, unit_cost: cost, adjustment_date: DAY.to_string(), notes: None }
+    SetItemStockPayload { item_id: item, counted_quantity: counted, unit_cost: cost, adjustment_date: DAY.to_string(), notes: None, mode: None }
 }
 
 #[test]
@@ -775,9 +775,9 @@ fn set_item_stock_preview_equals_command() {
         let done = e.inv.set_item_stock(p).unwrap();
         assert_eq!(pv, done);
     }
-    // Up: unit cost used is the explicit one, then the latest-lot default; down: the FIFO loss.
+    // Up: unit cost used is the explicit one, then the latest PURCHASE lot (DD-92 S8: not the 65 adjustment lot); down: the FIFO loss.
     let up = e.quiet(|| e.inv.preview_set_item_stock(count(1, 30.0, None)).unwrap());
-    assert_eq!((up.delta, up.unit_cost, up.value_change), (20.0, Some(65.0), 1300.0));
+    assert_eq!((up.delta, up.unit_cost, up.value_change), (20.0, Some(60.0), 1200.0));
     let down = e.quiet(|| e.inv.preview_set_item_stock(count(1, 0.0, None)).unwrap());
     assert_eq!(down.delta, -10.0);
     assert!(down.value_change < 0.0 && down.unit_cost.is_none());

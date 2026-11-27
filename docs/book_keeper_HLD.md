@@ -377,7 +377,8 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * A typed cost of **0** is kept (free stock). The default cost is the latest **purchase or opening** lot's cost, then any lot; with no lot the cost must be typed.
   * The Lot Inspector lists lots in **FIFO order, which is entry order** (Assumption 15) and is labelled so. The lot reprice dialog says "Past COGS and losses that used this lot will change."
   * **Use case.** *Actor:* owner. *Trigger:* 3 boxes are found in the store room. *Steps:* Inventory → Adjust → Increase, reason Unrecorded stock, cost prefilled; Save. *Outcome:* stock +3 at that cost; no P&L line.
-  * **Errors.** A reduction reason on an Increase: "Damaged, Expired and Theft can only reduce stock." Negative or non-numeric cost: "Cost must be 0 or more."
+  * **Set stock corrects opening stock** *(added 2026-11-27, owner)*. When the item has opening stock, Set stock asks why the count differs: **"Opening stock was entered wrong (no loss)"** or the stock adjustment (**"Lost, damaged or miscounted (loss)"** going down, **"Found / unrecorded stock"** going up). The backend decides which choices are open and why not; when both are open the owner must pick one (nothing is preselected, so a typo in opening stock is never booked as a loss), and when only one is open it is preselected. The opening correction edits the opening lot(s) like FR-51 (down: the unused opening stock, newest opening lot first; up: the newest opening lot at its cost) and records no adjustment and no P&L line. It is unavailable when the unused opening stock cannot cover the decrease; the reason names the write-offs that used it and offers **Undo** (FR-52). The FR-51 opening-quantity edit names those write-offs too, and refuses a deleted item ("'X' is deleted. Restore it first.").
+  * **Errors.** A reduction reason on an Increase: "Damaged, Expired and Theft can only reduce stock." Negative or non-numeric cost: "Cost must be 0 or more." Set stock saved without a pick while both choices are open: "Choose why the stock changed …".
 * **FR-58: Deleting an item with stock asks what to do with it** *(added 2026-11-26, v1.7, DD-93; FR-45 rev.; findings S5)*
   * When a soft-deleted item still has stock, the delete dialog offers two choices: **Just delete** (pre-selected): no P&L entry, the lots stay and come back on restore; it suits an item created by mistake. **Book as loss**: the remaining stock is written off first as a stock adjustment (Inventory Losses, at FIFO cost), then the item is deleted.
   * The dialog shows both effects from the backend preview ("12 PCS worth ₹840 leave Inventory value" / "₹840 booked as Inventory Losses today").
@@ -1851,6 +1852,9 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 // preview_stock_adjustment / preview_set_item_stock -> result gains
 //   undoable_writeoffs: [{ adjustment_id, adjustment_date, quantity, reason, loss }]   // from G7's undo guard
 // create_stock_adjustment: quantity > 0 accepts only UNRECORDED_STOCK | COUNT_CORRECTION; unit_cost 0 is kept
+// set_item_stock / preview_set_item_stock { ..., mode?: 'OPENING_CORRECTION' | 'ADJUSTMENT' } -> result gains
+//   mode, options: [{ mode, label, detail, enabled, disabled_reason, takes_unit_cost }], choice_required
+// get_item_lots -> ItemLot gains fifo_rank; LotPriceUpdateResult gains recosts_history
 
 // --- Item delete with stock (FR-58) — item_api
 // preview_item_delete -> ItemDeletePreview gains write_off: { quantity, base_unit, loss } | null   // null when no stock

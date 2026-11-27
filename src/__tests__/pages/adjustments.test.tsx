@@ -76,7 +76,7 @@ describe('StockAdjustmentModal (item search)', () => {
       adjustmentDate: todayLocal(),
       itemId: 9,
       quantity: 2.5,
-      reason: 'DAMAGED',
+      reason: 'UNRECORDED_STOCK', // S3: Increase switches a reduction-only reason to found stock
       unitCost: 12.75,
       notes: null,
     });
@@ -130,5 +130,38 @@ describe('StockAdjustmentModal (item search)', () => {
     await flush();
     expect(api.createStockAdjustment.mock.calls[0][0]).toMatchObject({ quantity: -1, unitCost: null, itemId: 9 });
     expect(document.querySelector('[data-testid="adjustment-result"]')!.textContent).toContain('₹40.00');
+  });
+});
+
+describe('StockAdjustmentModal found stock (DD-92)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('Increase offers only the found reasons, sends a typed 0 cost and offers Undo of an earlier write-off', async () => {
+    const api = installApi({
+      previewStockAdjustment: async (p: { quantity: number; unitCost: number | null }) => ({
+        ...previewOf({ ...p, unitCost: p.unitCost ?? 6 }),
+        undoableWriteoffs: p.quantity > 0 ? [{ adjustmentId: 7, adjustmentDate: '2026-11-20', quantity: 2, reason: 'DAMAGED', loss: 12 }] : [],
+      }),
+      undoStockAdjustment: { canUndo: true },
+    });
+    render(<StockAdjustmentModal isOpen onClose={() => {}} itemId={9} itemName="Gel Pen" currentStock={5} baseUnit="PCS" />);
+    await flush();
+    const selects = () => document.querySelectorAll('select');
+    setInput(selects()[0], 'INCREASE');
+    await settle();
+    const reasons = Array.from((selects()[1] as HTMLSelectElement).options).map((o) => o.value);
+    expect(reasons).toEqual(['UNRECORDED_STOCK', 'COUNT_CORRECTION']);
+    const nums = document.querySelectorAll('input[type="number"]');
+    setInput(nums[1], '0');
+    await settle();
+    expect(api.previewStockAdjustment.mock.calls.at(-1)![0]).toMatchObject({ quantity: 1, unitCost: 0 });
+    expect(document.querySelector('[data-testid="undo-writeoff-hint"]')!.textContent).toContain('#7');
+    const calls = api.previewStockAdjustment.mock.calls.length;
+    click(buttonByText('Undo'));
+    await settle();
+    expect(api.undoStockAdjustment).toHaveBeenCalledWith(7);
+    expect(api.previewStockAdjustment.mock.calls.length).toBeGreaterThan(calls);
   });
 });

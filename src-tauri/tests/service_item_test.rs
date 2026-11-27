@@ -303,7 +303,7 @@ fn services_are_never_stocked_each_path_is_rejected() {
         );
     }
     assert_eq!(
-        field_of(e.inv.set_item_stock(SetItemStockPayload { item_id: s, counted_quantity: 3.0, unit_cost: Some(1.0), adjustment_date: DAY.into(), notes: None })),
+        field_of(e.inv.set_item_stock(SetItemStockPayload { item_id: s, counted_quantity: 3.0, unit_cost: Some(1.0), adjustment_date: DAY.into(), notes: None, mode: None })),
         "item_id"
     );
     // opening stock / unrecorded stock lots, and lot-less outflows

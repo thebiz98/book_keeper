@@ -297,7 +297,7 @@ fn unrec_harness() -> (TestDb, InventoryServiceImpl<FifoStrategy>, SaleServiceIm
 }
 
 fn set_stock(item: i64, counted: f64, cost: Option<f64>) -> SetItemStockPayload {
-    SetItemStockPayload { item_id: item, counted_quantity: counted, unit_cost: cost, adjustment_date: TODAY.into(), notes: None }
+    SetItemStockPayload { item_id: item, counted_quantity: counted, unit_cost: cost, adjustment_date: TODAY.into(), notes: None, mode: None }
 }
 
 #[test]

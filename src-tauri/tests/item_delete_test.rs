@@ -203,7 +203,7 @@ fn every_write_to_a_deleted_item_is_refused() {
         assert!(msg_of(r).contains(deleted));
     }
     let r = e.inv.set_item_stock(SetItemStockPayload {
-        item_id: id, counted_quantity: 3.0, unit_cost: Some(1.0), adjustment_date: DAY.into(), notes: None,
+        item_id: id, counted_quantity: 3.0, unit_cost: Some(1.0), adjustment_date: DAY.into(), notes: None, mode: None,
     });
     assert!(msg_of(r).contains(deleted));
     assert_eq!(e.row(id).current_stock, 10.0);

@@ -90,11 +90,11 @@ describe('InventoryPage catalog', () => {
     expect((byText(container, 'button', 'Next') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('expands a row into the lot inspector: active lots first with source badge and vendor', async () => {
+  it('expands a row into the lot inspector: entry (FIFO) order as returned, rank, source badge and vendor', async () => {
     const lots = [
-      { purchaseItemId: 1, purchaseTransactionId: 1, transactionCode: 'PUR-0001', source: 'PURCHASE', transactionDate: '2026-01-01', vendorName: 'Old Vendor', quantity: 10, remainingQuantity: 0, unitCost: 5 },
-      { purchaseItemId: 2, purchaseTransactionId: 2, transactionCode: 'ADJ-0001', source: 'ADJUSTMENT', transactionDate: '2026-03-01', vendorName: null, quantity: 4, remainingQuantity: 3, unitCost: 6 },
-      { purchaseItemId: 3, purchaseTransactionId: 3, transactionCode: 'PUR-0002', source: 'PURCHASE', transactionDate: '2026-02-01', vendorName: 'Acme', quantity: 8, remainingQuantity: 8, unitCost: 7 },
+      { purchaseItemId: 1, purchaseTransactionId: 1, transactionCode: 'PUR-0001', source: 'PURCHASE', transactionDate: '2026-01-01', vendorName: 'Old Vendor', quantity: 10, remainingQuantity: 0, unitCost: 5, fifoRank: null },
+      { purchaseItemId: 2, purchaseTransactionId: 2, transactionCode: 'ADJ-0001', source: 'ADJUSTMENT', transactionDate: '2026-03-01', vendorName: null, quantity: 4, remainingQuantity: 3, unitCost: 6, fifoRank: 1 },
+      { purchaseItemId: 3, purchaseTransactionId: 3, transactionCode: 'PUR-0002', source: 'PURCHASE', transactionDate: '2026-02-01', vendorName: 'Acme', quantity: 8, remainingQuantity: 8, unitCost: 7, fifoRank: 2 },
     ];
     const { api, container } = mount({ getItemLots: vi.fn().mockResolvedValue(lots) });
     await flush();
@@ -102,9 +102,12 @@ describe('InventoryPage catalog', () => {
     await flush();
     expect(api.getItemLots).toHaveBeenCalledWith(1);
     const lotRows = Array.from(container.querySelectorAll('[data-testid="lot-row"]'));
-    expect(lotRows.map((r) => r.querySelectorAll('td')[1].textContent)).toEqual(['PUR-0002', 'ADJ-0001', 'PUR-0001']);
-    expect(lotRows[0].textContent).toContain('Purchase');
-    expect(lotRows[0].textContent).toContain('Acme');
+    // S7: entry order (id) as the backend returns it, not the lot date; the rank says which open lot FIFO draws first.
+    expect(lotRows.map((r) => r.querySelectorAll('td')[2].textContent)).toEqual(['PUR-0001', 'ADJ-0001', 'PUR-0002']);
+    expect(lotRows.map((r) => r.querySelector('[data-testid="lot-fifo-rank"]')!.textContent)).toEqual(['—', '1', '2']);
+    expect(container.querySelector('[data-testid="lot-order-label"]')!.textContent).toContain('FIFO order (entry order)');
+    expect(lotRows[2].textContent).toContain('Purchase');
+    expect(lotRows[2].textContent).toContain('Acme');
     expect(lotRows[1].textContent).toContain('Adjustment');
     expect(lotRows[1].textContent).toContain('—');
   });

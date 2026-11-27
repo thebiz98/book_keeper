@@ -8,6 +8,7 @@ import { NumericInput } from '../ui/NumericInput';
 import { Select } from '../ui/Select';
 import { CurrencyDisplay } from '../common/CurrencyDisplay';
 import { ItemSearchTypeahead } from './ItemSearchTypeahead';
+import { UndoWriteoffHint } from './UndoWriteoffHint';
 
 export interface AdjustmentItem {
   itemId: number;
@@ -22,6 +23,15 @@ export const ADJUSTMENT_REASONS: { value: AdjustmentReason; label: string }[] = 
   { value: 'COUNT_CORRECTION', label: 'Count correction' },
   { value: 'THEFT_LOST', label: 'Theft / lost' },
   { value: 'UNRECORDED_STOCK', label: 'Unrecorded stock (no purchase)' },
+];
+
+/**
+ * DD-92 (S3): the reasons offered for an Increase, found stock only. The backend enforces the rule
+ * (`allows_increase`); this list only keeps the picker from offering a reason it would refuse.
+ */
+const INCREASE_REASONS: { value: AdjustmentReason; label: string }[] = [
+  { value: 'UNRECORDED_STOCK', label: 'Unrecorded stock (no purchase)' },
+  { value: 'COUNT_CORRECTION', label: 'Count correction (found)' },
 ];
 
 export interface StockAdjustmentFormProps {
@@ -66,15 +76,18 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
             itemId: item.itemId,
             quantity: delta,
             reason,
-            unitCost: increase && typedCost !== null && typedCost > 0 ? typedCost : null,
+            // S4: a typed 0 is a real cost (free stock); only "not typed" lets the backend pick the default.
+            unitCost: increase && typedCost !== null ? typedCost : null,
             notes: notes.trim() || null,
           }
         : null,
     [item, quantity, date, delta, reason, increase, typedCost, notes]
   );
+  const [refreshKey, setRefreshKey] = useState(0);
   const preview = usePreview<StockAdjustmentPayload, StockAdjustmentPreview>({
     input: payload,
     fetcher: (p) => api.previewStockAdjustment(p),
+    refreshKey,
   });
   const view = preview.data;
 
@@ -141,7 +154,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
           <div>
             <div className="font-semibold">{item.name}</div>
             <div className="text-xs text-slate-500">
-              Current stock: {item.currentStock} {item.baseUnit}
+              Current stock: {view?.previousStock ?? item.currentStock} {item.baseUnit}
               {view != null && view.newStock !== view.previousStock && ` -> ${view.newStock}`}
             </div>
           </div>
@@ -186,6 +199,7 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
             const next = v === 'INCREASE' ? 'INCREASE' : 'DECREASE';
             setDirection(next);
             if (next === 'DECREASE' && reason === 'UNRECORDED_STOCK') setReason('COUNT_CORRECTION');
+            if (next === 'INCREASE' && !INCREASE_REASONS.some((r) => r.value === reason)) setReason('UNRECORDED_STOCK');
           }}
           options={[
             { value: 'DECREASE', label: 'Decrease (write-off)' },
@@ -206,9 +220,17 @@ export const StockAdjustmentForm: React.FC<StockAdjustmentFormProps> = ({ item: 
             setReason(v as AdjustmentReason);
             if (v === 'UNRECORDED_STOCK') setDirection('INCREASE');
           }}
-          options={increase ? ADJUSTMENT_REASONS : ADJUSTMENT_REASONS.filter((r) => r.value !== 'UNRECORDED_STOCK')}
+          options={increase ? INCREASE_REASONS : ADJUSTMENT_REASONS.filter((r) => r.value !== 'UNRECORDED_STOCK')}
         />
       </div>
+
+      {increase && item && (
+        <UndoWriteoffHint
+          writeoffs={view?.undoableWriteoffs}
+          baseUnit={item.baseUnit}
+          onUndone={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
 
       {increase && (
         <div>

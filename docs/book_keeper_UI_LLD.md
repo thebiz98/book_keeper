@@ -827,11 +827,16 @@ All rules stay in the backend (DD-56): the UI renders preview and guard fields a
 
 ### Undo hint in Set stock and Adjustment (FR-57, DD-92, H5)
 * `StockAdjustmentForm`: for Increase the reason list is Unrecorded stock and Count correction (found) only (display list; the backend enforces it). A typed cost of 0 is sent as `0`, never as `null` (S4); an empty field sends `null` (backend default).
-* `SetStockDialog` and `StockAdjustmentForm` (Increase): when the preview's `undoableWriteoffs` is non-empty, an info box: "This item has a write-off of 5 PCS on 12 Nov (₹200). Undo it instead?" with **Undo** opening the G7 undo confirm for that `adjustmentId`; after undo the preview reloads.
-* **Tests (Vitest).** cost 0 reaches the API as 0; hint from the mocked preview; Undo opens the G7 confirm.
+* `SetStockDialog` and `StockAdjustmentForm` (Increase): when the preview's `undoableWriteoffs` is non-empty, `UndoWriteoffHint` lists each write-off (`#id · date · −qty · loss ₹X`) with an **Undo** button. *(As built)* the button calls `undoStockAdjustment(adjustmentId)` directly (the listed rows already passed the G7 guard in the preview's dry run, so no second confirm); the preview then reloads (`refreshKey`) and `SetStockDialog` calls `onStockChanged` so the drawer / catalog refresh.
+* **Tests (Vitest).** cost 0 reaches the API as 0; hint from the mocked preview; Undo calls the G7 undo and re-runs the preview.
+
+### Set stock reason picker (FR-57 scope B, H5)
+* `SetStockDialog` ("Set counted stock") sends `mode` (the user's pick, `null` until picked; reset when the count or the dialog mode changes). When the preview's `options` has more than one entry, a radio group "Why is the stock different?" lists each option's `label` and `detail`; a disabled option is greyed with its `disabledReason`. Checked = the user's pick, else the backend's `mode` (the only enabled option is preselected). With `choiceRequired` no radio is checked, the preview line reads "Choose why the stock is different to see the effect." and Save stays disabled: there is no default to the loss. The unit cost field shows when the selected option `takesUnitCost` (Add quantity always). An opening correction previews "Opening stock corrected · No loss · Stock value ₹X" and the result says "No loss was booked."
+* The old grey hint (a UI read of `getItemLots` for an Opening lot) is removed; the options are the backend's.
+* **Tests (Vitest).** two enabled paths: nothing checked, Save disabled, the pick is sent; one disabled: its reason shown, the other preselected, the write-off listed; Undo.
 
 ### Lot Inspector order and label (FR-57, S7, H5)
-* `LotInspector` renders lots in the order `get_item_lots` returns (id order); no client sort. The header reads "Lots · FIFO order (entry order)"; open lots show `#fifoRank`.
+* `LotInspector` renders lots in the order `get_item_lots` returns (id order); no client sort. A caption reads "FIFO order (entry order): sales use the lot marked 1 first, whatever its date."; a FIFO column shows `fifoRank` (— for used-up lots).
 
 ### Reprice modal note (FR-57, S11, H5)
 * `LotPriceEditModal`: when the preview's `recostsHistory` is true, a note under the effect block: "Past COGS and losses that used this lot will change." The per-pack price shown is the backend's `perPackPrice` (H7).
