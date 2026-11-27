@@ -95,3 +95,30 @@ describe('DataTable - single scroll container (sticky pitfall)', () => {
     expect(el).toBe(box);
   });
 });
+
+describe('DataTable footer row (J1)', () => {
+  const cols = [
+    { key: 'a', header: 'A', render: (r: { id: number }) => r.id },
+    { key: 'b', header: 'B', align: 'right' as const, render: (r: { id: number }) => r.id },
+  ];
+
+  it('renders one sticky-bottom opaque cell per column, keyed by column key', () => {
+    const { container } = render(
+      <DataTable columns={cols} items={[{ id: 1 }]} rowKey={(r) => r.id} scroll="fill" footer={{ a: 'Total', b: '9' }} footerTestId="ft" />
+    );
+    const cells = Array.from(container.querySelectorAll('[data-testid="ft"] td')) as HTMLElement[];
+    expect(cells.map((c) => c.textContent)).toEqual(['Total', '9']);
+    for (const c of cells) {
+      expect(c.className).toMatch(/sticky bottom-0/);
+      expect(c.className).toMatch(/bg-slate-50/);
+    }
+    expect(cells[1].className).toMatch(/text-right/);
+  });
+
+  it('has no footer without the prop, and none while empty', () => {
+    const a = render(<DataTable columns={cols} items={[{ id: 1 }]} rowKey={(r) => r.id} />);
+    expect(a.container.querySelector('tfoot')).toBeNull();
+    const b = render(<DataTable columns={cols} items={[]} rowKey={(r: { id: number }) => r.id} footer={{ a: 'x' }} />);
+    expect(b.container.querySelector('tfoot')).toBeNull();
+  });
+});
