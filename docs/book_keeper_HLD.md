@@ -235,6 +235,7 @@ The system runs locally on a Windows laptop without requiring any standalone dat
   * **Bill profit** = bill total (items subtotal + charges − discounts) − the FIFO cost of the units sold. Linked returns and replacements recorded against the bill adjust it: the refund value comes off the revenue, restocked units give their cost back, and scrapped and issued replacement units add cost. Summed over bills, this agrees with the P&L lines for those bills (returns are dated on their own day in the P&L).
   * **Item-level profit:** while "Show profit" is on, the sale bill drawer's lines table adds **Cost** and **Profit** per line. Line revenue = line total less its share of the bill discount (the same net-rate rule as returns, FR-19). Line cost = its FIFO allocations net of returned units. A footer reconciles the lines with the bill: Σ line profit + charges − return / replacement effects = bill profit.
   * All profit figures come from the backend (DD-56). Opening-balance bills (FR-35) have no profit.
+  * **Totals row (sales only, DD-98):** a fixed row at the bottom of the table adds up every bill matching the filters, across all pages: bill count, Total, Paid, Balance Due, and Profit while "Show profit" is on. Paging does not change it; status, search and date filters do. Opening-balance bills are not counted. Its profit is the bill-based figure above, so with no status or search filter it equals "Bills dated in the period: profit" in Reports → Item profit for the same dates. It differs from the P&L Gross Profit, which dates returns by the return date. Purchase history has no totals row.
 * **FR-35: Party Opening Balance** *(added 2026-11-25, v1.3, DD-64; FR-11 "opening dues" brought forward)*
   * When adding (or editing) a customer or vendor in the Party dialog, the user may enter an **Opening balance**: "Customer owes you (₹)" for a customer and "You owe this vendor (₹)" for a vendor, plus an **As of** date (default today; FR-28).
   * Saving with an amount > 0 creates **one opening-balance bill** for that party: code `OB-####`, no lines, `total_amount` = the amount, `UNPAID`, no upfront payment. A customer's opening bill is on the sale side and a vendor's is on the purchase side, so dues, Credit & Dues, the party ledger, batch / single settlement and the oldest-first fill treat it like any open bill. It is labelled "Opening balance" wherever it appears.
@@ -1752,6 +1753,7 @@ interface CashFlowReport {                // all from PAYMENT_SETTLEMENT by sett
 
 // --- History profit (FR-34) — sale_api
 // get_sales_history { filter: HistoryFilter & { include_profit?: boolean } } -> rows gain profit: number | null
+// get_sales_history { filter: ... & { include_totals?: boolean } } -> page gains totals: { bill_count, total_amount, paid_amount, balance_due, profit: number | null } over all matching bills (profit null unless include_profit); totals absent without the flag
 // get_sale_details -> lines gain cost_amount, profit; header gains profit summary (lines, charges, discounts, returns, total)
 
 // --- Party opening balance (FR-35) — dues_api / party_api                (schema v11)

@@ -222,7 +222,17 @@ export class MockApiClient implements ApiClient {
   async getSalesHistory(filter: Parameters<ApiClient['getSalesHistory']>[0] = {}) {
     const p = paginate(this.sales, filter?.page, filter?.limit);
     // Thin stub (DD-27): the real profit is a backend calculation.
-    return { ...p, items: p.items.map((r) => ({ ...r, profit: filter?.includeProfit ? 0 : null })) };
+    const sum = (f: (r: SaleHistoryRow) => number) => this.sales.reduce((s, r) => s + f(r), 0);
+    const totals = filter?.includeTotals
+      ? {
+          billCount: this.sales.length,
+          totalAmount: sum((r) => r.totalAmount),
+          paidAmount: sum((r) => r.paidAmount),
+          balanceDue: sum((r) => r.balanceDue),
+          profit: filter.includeProfit ? 0 : null,
+        }
+      : undefined;
+    return { ...p, items: p.items.map((r) => ({ ...r, profit: filter?.includeProfit ? 0 : null })), ...(totals ? { totals } : {}) };
   }
   // FR-20 (thin stubs, DD-27: no business rules, no stock or ledger effects)
   async updateSale(saleId: number, payload: Parameters<ApiClient['createSale']>[0]) {

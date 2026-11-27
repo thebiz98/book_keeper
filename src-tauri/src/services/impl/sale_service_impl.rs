@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use crate::core::dtos::{
-    BillEditGuard, BillPaymentPreview, BillPreview, CreateSalePayload, DeleteBillResult, Paginated,
-    PreviewSaleLinePayload, PreviewSalePayload, RecordPaymentPayload, SaleLinePreview, SaleDetailView, SaleItemDetail, SaleHistoryRow,
-    SaleSummaryResponse, SalesHistoryFilter, ProfitSummary,
+    BillEditGuard, BillPaymentPreview, BillPreview, CreateSalePayload, DeleteBillResult,
+    PreviewSaleLinePayload, PreviewSalePayload, RecordPaymentPayload, SaleLinePreview, SaleDetailView, SaleItemDetail,
+    SaleSummaryResponse, SalesHistoryFilter, SalesHistoryPage, ProfitSummary,
 };
 use crate::core::entities::{Item, SaleItem, SaleTransaction};
 use crate::core::error::AppError;
@@ -900,11 +900,11 @@ impl<I: InventoryService, P: PaymentService, U: UnitOfWork> SaleService for Sale
     fn get_sales_history(
         &self,
         filter: SalesHistoryFilter,
-    ) -> Result<Paginated<SaleHistoryRow>, AppError> {
+    ) -> Result<SalesHistoryPage, AppError> {
         let page = filter.validate()?;
         let mut tx = self.uow.begin_read()?;
-        let (rows, total) = tx.sales().list_history(&filter, page.offset(), page.limit)?;
-        Ok(Paginated::new(rows, total, page.page, page.limit))
+        let (items, total, totals) = tx.sales().list_history(&filter, page.offset(), page.limit)?;
+        Ok(SalesHistoryPage { items, total, page: page.page, limit: page.limit, totals })
     }
 
     fn get_sale_details(&self, sale_id: i64) -> Result<SaleDetailView, AppError> {

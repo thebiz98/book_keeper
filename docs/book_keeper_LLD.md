@@ -693,6 +693,8 @@ pub trait SaleRepository {
     /// Open bills for FIFO settlement / credit: balance_due > 0, ORDER BY transaction_date, id.
     fn list_open_for_party(&self, party_id: i64) -> Result<Vec<SaleTransaction>, AppError>;
     fn list_sales(&self, filter: &SalesHistoryFilter, offset: usize, limit: usize) -> Result<(Vec<SaleHistoryRow>, usize), AppError>;
+    // J1: `SaleRepository::list_history` returns (rows, total, Option<SalesHistoryTotals>). With `filter.include_totals`
+    // the COUNT(*) becomes one aggregate over the same WHERE (count, Σ total/paid/balance_due, Σ profit_expr() only when include_profit).
     /// Σ quantity of customer Returned RETURN_ITEMs referencing this sale line.
     fn get_returned_quantity_for_line(&self, sale_item_id: i64) -> Result<f64, AppError>;
 }

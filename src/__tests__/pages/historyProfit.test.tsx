@@ -184,3 +184,42 @@ describe('Bill drawer profit (FR-34)', () => {
     expect(Array.from(document.querySelectorAll('th')).map((t) => t.textContent)).not.toContain('Cost');
   });
 });
+
+describe('Sales history totals row (J1)', () => {
+  const totals = { billCount: 7, totalAmount: 1234.5, paidAmount: 1000, balanceDue: 234.5, profit: 321 };
+  const withTotals = async (f: { includeProfit?: boolean }) => ({
+    ...page([row(1, { profit: f.includeProfit ? 12 : null })]),
+    totals: { ...totals, profit: f.includeProfit ? totals.profit : null },
+  });
+  const th = () => Array.from(document.querySelectorAll('th')).map((t) => t.textContent);
+
+  it('shows Total / Paid / Due and the bill count; no profit cell until Show profit is ticked', async () => {
+    const api = installApi({ getSalesHistory: withTotals });
+    render(<SalesHistoryPage />);
+    await waitFor(() => !!q('[data-testid="history-totals"]'));
+    const t = q('[data-testid="history-totals"]').textContent ?? '';
+    expect(t).toContain('Total (7 bills)');
+    expect(t).toContain('1,234.50');
+    expect(t).toContain('1,000.00');
+    expect(t).toContain('234.50');
+    expect(t).not.toContain('321');
+    expect(api.getSalesHistory.mock.calls[0][0]).toMatchObject({ includeTotals: true });
+    click(label('Columns')!);
+    click(label('Show profit')!);
+    await flush(50);
+    await waitFor(() => (q('[data-testid="history-totals"]').textContent ?? '').includes('321.00'));
+    expect(th()).toContain('Profit');
+    const cells = Array.from(q('[data-testid="history-totals"]').querySelectorAll('td'));
+    expect(cells.some((c) => c.querySelector('[title^="Bill profit of every bill"]'))).toBe(true);
+  });
+
+  it('purchase history has no totals row and sends no includeTotals', async () => {
+    const api = installApi({
+      getPurchasesHistory: page([{ ...row(1), transactionCode: 'PUR-1', supplierInvoiceRef: null } as never]),
+    });
+    render(<PurchaseHistoryPage />);
+    await waitFor(() => bodyText().includes('PUR-1'));
+    expect(q('[data-testid="history-totals"]')).toBeNull();
+    expect(api.getPurchasesHistory.mock.calls[0][0]).not.toHaveProperty('includeTotals');
+  });
+});

@@ -1,4 +1,4 @@
-use crate::core::dtos::{BillProfitParts, ItemBillRef, SaleHistoryRow, SalesHistoryFilter};
+use crate::core::dtos::{BillProfitParts, ItemBillRef, SaleHistoryRow, SalesHistoryFilter, SalesHistoryTotals};
 use crate::core::entities::{SaleItem, SaleTransaction};
 use crate::core::error::AppError;
 use crate::core::value_objects::PaymentStatus;
@@ -37,13 +37,14 @@ pub trait SaleRepository {
         limit: usize,
     ) -> Result<Vec<SaleTransaction>, AppError>;
     /// History page: filtered, newest first (`transaction_date DESC, id DESC`), paged in SQL, plus
-    /// the total matching count (same `WHERE`). Party name is the header snapshot.
+    /// the total matching count (same `WHERE`). Party name is the header snapshot. When
+    /// `include_totals` is set the count query becomes one aggregate over the same `WHERE`.
     fn list_history(
         &self,
         filter: &SalesHistoryFilter,
         offset: usize,
         limit: usize,
-    ) -> Result<(Vec<SaleHistoryRow>, usize), AppError>;
+    ) -> Result<(Vec<SaleHistoryRow>, usize, Option<SalesHistoryTotals>), AppError>;
     /// `(sale_item_id, returned base qty, Σ returned cost_amount)` for the bill's lines that have
     /// customer `RETURNED` lines, one query (DD-91: the cost a line's returns credit back).
     fn get_returned_quantities_for_sale(&self, sale_id: i64) -> Result<Vec<(i64, f64, f64)>, AppError>;

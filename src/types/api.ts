@@ -62,12 +62,27 @@ import type {
   TrendDataPoint,
 } from './index';
 
+/** Rust SalesHistoryTotals: sums over every bill matching the filter (all pages), computed in SQL. */
+export interface SalesHistoryTotals {
+  billCount: number;
+  totalAmount: number;
+  paidAmount: number;
+  balanceDue: number;
+  /** Bill-based profit; null unless the filter asked for profit. */
+  profit: number | null;
+}
+
 /** Rust Paginated<T>. Page count on the client is ceil(total / limit). */
 export interface Paginated<T> {
   items: T[];
   total: number;
   page: number;
   limit: number;
+}
+
+/** Rust SalesHistoryPage: a `Paginated<SaleHistoryRow>` plus optional totals. */
+export interface SalesHistoryPage extends Paginated<SaleHistoryRow> {
+  totals?: SalesHistoryTotals | null;
 }
 
 /** Payload for create_expense / update_expense. */
@@ -108,6 +123,8 @@ export interface HistoryFilter {
   includeProfit?: boolean | null;
   /** Dues paths only (FR-35): also list the party's opening-balance bill. */
   includeOpeningBalance?: boolean | null;
+  /** Sales history only (FR-34): the page also carries `totals` over every matching bill. */
+  includeTotals?: boolean | null;
 }
 
 export interface ReturnsFilter {
@@ -748,7 +765,7 @@ export interface ApiClient {
   // Sales
   getNextSaleCode(): Promise<string>;
   createSale(payload: CreateSalePayload): Promise<SaleSummaryResponse>;
-  getSalesHistory(filter?: HistoryFilter): Promise<Paginated<SaleHistoryRow>>;
+  getSalesHistory(filter?: HistoryFilter): Promise<SalesHistoryPage>;
   getSaleDetails(saleId: number): Promise<SaleDetailView>;
   /** FR-20: replaces the bill (same id and code). Rejects with `BillLocked` when guarded. */
   updateSale(saleId: number, payload: CreateSalePayload): Promise<SaleSummaryResponse>;

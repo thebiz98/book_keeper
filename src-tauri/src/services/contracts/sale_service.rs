@@ -1,6 +1,6 @@
 use crate::core::dtos::{
-    BillEditGuard, BillPreview, CreateSalePayload, DeleteBillResult, Paginated, PreviewSaleLinePayload,
-    PreviewSalePayload, SaleDetailView, SaleHistoryRow, SaleLinePreview, SaleSummaryResponse, SalesHistoryFilter,
+    BillEditGuard, BillPreview, CreateSalePayload, DeleteBillResult, PreviewSaleLinePayload,
+    PreviewSalePayload, SaleDetailView, SaleLinePreview, SaleSummaryResponse, SalesHistoryFilter, SalesHistoryPage,
 };
 use crate::core::error::AppError;
 
@@ -15,7 +15,7 @@ pub trait SaleService: Send + Sync {
     fn get_sales_history(
         &self,
         filter: SalesHistoryFilter,
-    ) -> Result<Paginated<SaleHistoryRow>, AppError>;
+    ) -> Result<SalesHistoryPage, AppError>;
 
     /// Retrieves detailed breakdown of a sale including lines, bundles, and FIFO cost breakdown.
     fn get_sale_details(&self, sale_id: i64) -> Result<SaleDetailView, AppError>;
@@ -50,7 +50,7 @@ impl<T: SaleService + ?Sized> SaleService for std::sync::Arc<T> {
     fn get_sales_history(
         &self,
         filter: SalesHistoryFilter,
-    ) -> Result<Paginated<SaleHistoryRow>, AppError> {
+    ) -> Result<SalesHistoryPage, AppError> {
         (**self).get_sales_history(filter)
     }
 

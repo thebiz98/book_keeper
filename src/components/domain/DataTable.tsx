@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Table, type TableScroll, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../ui/Table';
+import { Table, type TableScroll, TableHeader, TableBody, TableFooter, TableRow, TableHead, TableCell } from '../ui/Table';
 import { Pager } from './Pager';
 
 export interface DataTableColumn<T> {
@@ -35,6 +35,10 @@ export interface DataTableProps<T> {
   /** Scroll mode of the shared Table (default 'bounded'). Use 'fill' for full-page lists. */
   scroll?: TableScroll;
   className?: string;
+  /** Fixed totals row under the rows, keyed by column key (shown only while rows are shown). */
+  footer?: Partial<Record<string, React.ReactNode>>;
+  /** Test id of the footer row. */
+  footerTestId?: string;
   // Server-side paging
   total?: number;
   page?: number;
@@ -60,6 +64,8 @@ export function DataTable<T>({
   dense = true,
   scroll = 'bounded',
   className,
+  footer,
+  footerTestId,
   total,
   page = 1,
   limit = 50,
@@ -190,6 +196,25 @@ export function DataTable<T>({
                 </React.Fragment>
               ))}
           </TableBody>
+          {showRows && footer && (
+            <TableFooter data-testid={footerTestId}>
+              <TableRow className="hover:bg-transparent dark:hover:bg-transparent">
+                {columns.map((col) => (
+                  <TableCell
+                    key={col.key}
+                    align={col.align ?? 'left'}
+                    mono={col.mono}
+                    className={cn(
+                      col.className,
+                      'sticky bottom-0 z-10 bg-slate-50 dark:bg-slate-800 shadow-[inset_0_1px_0_#e2e8f0] dark:shadow-[inset_0_1px_0_#334155]'
+                    )}
+                  >
+                    {footer[col.key]}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
       </div>
       {total !== undefined && onPageChange && (

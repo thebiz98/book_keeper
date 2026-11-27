@@ -14,7 +14,7 @@ pub async fn create_sale(state: State<'_, AppState>, payload: CreateSalePayload)
     super::run_blocking(move || svc.create_sale(payload)).await
 }
 #[tauri::command]
-pub async fn get_sales_history(state: State<'_, AppState>, filter: SalesHistoryFilter) -> Result<Paginated<SaleHistoryRow>, AppError> {
+pub async fn get_sales_history(state: State<'_, AppState>, filter: SalesHistoryFilter) -> Result<SalesHistoryPage, AppError> {
     let svc = state.sale_service.clone();
     super::run_blocking(move || svc.get_sales_history(filter)).await
 }
