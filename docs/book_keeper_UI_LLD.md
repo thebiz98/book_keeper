@@ -105,7 +105,7 @@ src/
     ├── ReturnsAdjustmentsPage.tsx   # Customer/Vendor Returns & Corrections
     ├── ReportsPage.tsx              # P&L, Inventory Valuation, Cash Flow
     ├── PartiesPage.tsx              # Customer & Supplier Directory
-    └── SettingsPage.tsx             # Shop Profile, Backup to USB, Integrity
+    └── SettingsPage.tsx             # Shop Profile, Backup to USB, Restore from backup, Integrity
     # (Items import dialog lives on InventoryPage; MigrationPage / VedBill deferred to v2 and removed)
 ```
 
@@ -488,6 +488,10 @@ export interface ApiClient {
   getStockValuationReport(): Promise<StockValuationReport>;
   getCashFlowReport(fromDate: string, toDate: string): Promise<CashFlowReport>;
   backupDatabase(destinationPath: string): Promise<string>;
+  listBackups(): Promise<BackupFileInfo[]>;                    // FR-60: backup folder, newest first
+  previewRestore(path: string): Promise<RestorePreview>;       // backend dry run; the UI only prints it
+  stageRestore(path: string): Promise<void>;                   // the app then restarts and swaps at startup
+  dismissRestoreFailure(): Promise<void>;
   verifyDatabaseIntegrity(): Promise<boolean>;
   getShopSettings(): Promise<ShopSettings>;
   updateShopSettings(settings: ShopSettings): Promise<void>;
